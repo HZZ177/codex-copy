@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.api.dependencies import get_repositories
 from backend.app.core.config import AppSettings, get_settings
+from backend.app.core.logger import logger
 from backend.app.services import (
     GetHistoryRequest,
     ListSessionsRequest,
@@ -95,6 +96,11 @@ def list_sessions(
             page=page,
             page_size=page_size,
         )
+    )
+    logger.debug(
+        "[SessionsAPI] 查询会话列表 | "
+        f"user_id={user_id or ''} | scene_id={scene_id or ''} | "
+        f"page={page} | page_size={page_size} | total={result.get('total', 0)}"
     )
     return SessionListResponse(**result)
 
@@ -202,6 +208,12 @@ def _history_response(
         result = _service(repositories).get_history(request)
     except SessionNotFoundError as exc:
         raise _not_found(exc) from exc
+    logger.debug(
+        "[SessionsAPI] 查询会话历史 | "
+        f"session_id={request.session_id} | turn_index={request.turn_index} | "
+        f"page={request.page} | page_size={request.page_size} | "
+        f"events={result.get('event_total', 0)} | messages={result.get('total', 0)}"
+    )
     return SessionHistoryResponse(**result)
 
 

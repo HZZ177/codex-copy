@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from backend.app.api.dependencies import get_repositories
 from backend.app.api.settings import MODEL_SETTINGS_KEY, save_provider_model_settings
 from backend.app.core.ids import new_id
+from backend.app.core.logger import logger
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import (
     ModelProviderError,
@@ -85,7 +86,9 @@ class HealthResponse(BaseModel):
 async def list_providers(
     repositories: StorageRepositories = RepositoriesDep,
 ) -> ModelProvidersResponse:
-    return ModelProvidersResponse(providers=_list_public_providers(repositories))
+    providers = _list_public_providers(repositories)
+    logger.debug(f"[ModelProviderAPI] 列出供应商 | count={len(providers)}")
+    return ModelProvidersResponse(providers=providers)
 
 
 @router.post("", response_model=PublicModelProvider, status_code=status.HTTP_201_CREATED)
@@ -114,6 +117,12 @@ async def create_provider(
             model=request.default_model,
         )
         save_provider_model_settings(repositories, provider, request.default_model)
+    logger.info(
+        "[ModelProviderAPI] 创建供应商 | "
+        f"provider_id={provider.id} | name={provider.name} | "
+        f"base_url={provider.base_url} | enabled={provider.enabled} | "
+        f"models={len(provider.models)} | default_model={request.default_model or ''}"
+    )
     return _public_provider(provider, repositories.model_providers.get_default())
 
 
@@ -155,6 +164,12 @@ async def update_provider(
         save_provider_model_settings(repositories, updated, request.default_model)
     elif current_default is not None and current_default.provider_id == updated.id:
         save_provider_model_settings(repositories, updated, current_default.model)
+    logger.info(
+        "[ModelProviderAPI] 更新供应商 | "
+        f"provider_id={updated.id} | name={updated.name} | "
+        f"base_url={updated.base_url} | enabled={updated.enabled} | "
+        f"models={len(updated.models)} | default_model={request.default_model or ''}"
+    )
     return _public_provider(updated, repositories.model_providers.get_default())
 
 
@@ -165,6 +180,7 @@ async def delete_provider(
 ) -> Response:
     if not repositories.model_providers.delete(provider_id):
         raise _api_error(status.HTTP_404_NOT_FOUND, "provider_not_found", "供应商不存在")
+    logger.info(f"[ModelProviderAPI] 删除供应商 | provider_id={provider_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -187,6 +203,10 @@ async def set_default_provider(
     )
     if request.scope == "global":
         save_provider_model_settings(repositories, provider, request.model)
+    logger.info(
+        "[ModelProviderAPI] 设置默认模型 | "
+        f"provider_id={request.provider_id} | model={request.model} | scope={request.scope}"
+    )
     return ModelProvidersResponse(providers=_list_public_providers(repositories))
 
 
@@ -197,6 +217,11 @@ async def refresh_provider_models(
     repositories: StorageRepositories = RepositoriesDep,
 ) -> RefreshProviderResponse:
     provider = _require_provider(repositories, provider_id)
+    started_at = time.perf_counter()
+    logger.info(
+        "[ModelProviderAPI] 开始刷新供应商模型 | "
+        f"provider_id={provider.id} | base_url={provider.base_url}"
+    )
     provider_client = OpenAICompatibleProviderClient(
         ModelSettings(base_url=provider.base_url, api_key=provider.api_key, model=""),
         transport=getattr(request.app.state, "model_http_transport", None),
@@ -204,6 +229,11 @@ async def refresh_provider_models(
     try:
         models = await provider_client.list_models(force_refresh=True)
     except ModelProviderError as exc:
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.warning(
+            "[ModelProviderAPI] 刷新供应商模型失败 | "
+            f"provider_id={provider.id} | duration_ms={duration_ms} | error={exc}"
+        )
         raise _api_error(status.HTTP_502_BAD_GATEWAY, "provider_refresh_failed", str(exc)) from exc
 
     model_ids = _clean_models([model.id for model in models])
@@ -229,6 +259,12 @@ async def refresh_provider_models(
             model=selected_default_model,
         )
         save_provider_model_settings(repositories, updated, selected_default_model)
+    duration_ms = int((time.perf_counter() - started_at) * 1000)
+    logger.info(
+        "[ModelProviderAPI] 刷新供应商模型成功 | "
+        f"provider_id={provider.id} | models={len(model_ids)} | "
+        f"default_model={selected_default_model or ''} | duration_ms={duration_ms}"
+    )
     return RefreshProviderResponse(
         provider=_public_provider(updated, repositories.model_providers.get_default()),
         models=model_ids,
@@ -244,6 +280,10 @@ async def check_model_health(
 ) -> HealthResponse:
     provider = _require_provider(repositories, provider_id)
     started = time.perf_counter()
+    logger.info(
+        "[ModelProviderAPI] 开始模型健康检查 | "
+        f"provider_id={provider.id} | model={model}"
+    )
     health: dict[str, Any]
     try:
         await _call_health(
@@ -272,6 +312,11 @@ async def check_model_health(
         }
     )
     repositories.model_providers.upsert(updated)
+    logger.info(
+        "[ModelProviderAPI] 模型健康检查完成 | "
+        f"provider_id={provider.id} | model={model} | "
+        f"status={health.get('status')} | latency_ms={health.get('latency_ms')}"
+    )
     return HealthResponse(
         provider=_public_provider(updated, repositories.model_providers.get_default()),
         health=health,

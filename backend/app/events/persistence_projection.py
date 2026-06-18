@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from backend.app.core.ids import IdPrefix, new_id
+from backend.app.core.logger import logger
 from backend.app.events.actions import ReplayAction
 from backend.app.events.domain import DomainEvent
 from backend.app.events.event_types import DomainEventType
@@ -198,11 +199,16 @@ class PersistenceProjection:
     ) -> None:
         fallback_trace_id = event.trace_id if event else ""
         trace_record_id = str(payload.get("trace_record_id") or fallback_trace_id or "").strip()
-        self._repository.append(
+        record = self._repository.append(
             event_id=new_id(IdPrefix.EVENT),
             session_id=self._session_id,
             trace_record_id=trace_record_id or None,
             turn_index=self._turn_index,
             action=action,
             data=payload,
+        )
+        logger.debug(
+            f"[PersistenceProjection] 保存消息事件 | session_id={self._session_id} | "
+            f"turn_index={self._turn_index} | action={action} | event_id={record.id} | "
+            f"seq={getattr(record, 'seq', '-')}"
         )

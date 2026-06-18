@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import inspect
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from backend.app.core.logger import logger, redact_sensitive
 from backend.app.model import ToolSpec
 
 _TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_MAX_ARG_PREVIEW_CHARS = 160
 
 
 class ToolDefinitionError(ValueError):
@@ -94,6 +97,65 @@ ToolHandler = Callable[
 ]
 
 
+def _preview_text(value: str, *, max_chars: int = _MAX_ARG_PREVIEW_CHARS) -> str:
+    normalized = value.replace("\r", "\\r").replace("\n", "\\n")
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[:max_chars]}..."
+
+
+def _summarize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    safe_args = redact_sensitive(args)
+    if tool_name == "write_file":
+        content = args.get("content")
+        return {
+            "path": safe_args.get("path"),
+            "append": bool(args.get("append", False)),
+            "content_chars": len(content) if isinstance(content, str) else 0,
+        }
+    if tool_name == "apply_patch":
+        patch = args.get("patch")
+        return {"patch_chars": len(patch) if isinstance(patch, str) else 0}
+    if tool_name == "run_command":
+        command = args.get("command")
+        summary: dict[str, Any] = {
+            "cwd": safe_args.get("cwd"),
+            "timeout_seconds": safe_args.get("timeout_seconds"),
+        }
+        if isinstance(command, str):
+            summary["command_preview"] = _preview_text(command)
+            summary["command_chars"] = len(command)
+        return summary
+    if tool_name in {"read_file", "list_directory", "search_text", "search_files"}:
+        allowed_keys = {
+            "path",
+            "query",
+            "regex",
+            "case_sensitive",
+            "limit",
+            "start_line",
+            "max_lines",
+        }
+        return {
+            key: _summarize_arg_value(value)
+            for key, value in safe_args.items()
+            if key in allowed_keys
+        }
+    return {key: _summarize_arg_value(value) for key, value in safe_args.items()}
+
+
+def _summarize_arg_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if len(value) <= _MAX_ARG_PREVIEW_CHARS:
+            return value
+        return {"preview": _preview_text(value), "chars": len(value)}
+    if isinstance(value, list):
+        return {"type": "list", "items": len(value)}
+    if isinstance(value, dict):
+        return {"type": "dict", "keys": sorted(str(key) for key in value)}
+    return value
+
+
 @dataclass
 class FunctionTool:
     name: str
@@ -120,7 +182,18 @@ class FunctionTool:
         args: dict[str, Any],
         context: ToolExecutionContext,
     ) -> ToolExecutionResult:
+        started_at = time.perf_counter()
+        args_summary = _summarize_tool_args(self.name, args)
+        logger.info(
+            f"[Tool] 开始执行 | tool={self.name} | session_id={context.session_id} | "
+            f"turn_index={context.turn_index} | trace_id={context.trace_id or '-'} | "
+            f"args={args_summary}"
+        )
         if not self.enabled:
+            logger.warning(
+                f"[Tool] 工具已禁用 | tool={self.name} | session_id={context.session_id} | "
+                f"turn_index={context.turn_index}"
+            )
             return ToolExecutionResult.failed(
                 ToolExecutionError(
                     f"工具已禁用: {self.name}",
@@ -132,10 +205,28 @@ class FunctionTool:
             value = self.handler(args, context)
             if inspect.isawaitable(value):
                 value = await value
+            duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+            logger.info(
+                f"[Tool] 执行成功 | tool={self.name} | session_id={context.session_id} | "
+                f"turn_index={context.turn_index} | trace_id={context.trace_id or '-'} | "
+                f"duration_ms={duration_ms} | result_type={type(value).__name__}"
+            )
             return ToolExecutionResult.success(value)
         except ToolExecutionError as exc:
+            duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+            logger.warning(
+                f"[Tool] 执行失败 | tool={self.name} | session_id={context.session_id} | "
+                f"turn_index={context.turn_index} | trace_id={context.trace_id or '-'} | "
+                f"duration_ms={duration_ms} | code={exc.code} | error={exc}"
+            )
             return ToolExecutionResult.failed(exc)
         except Exception as exc:
+            duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+            logger.opt(exception=True).error(
+                f"[Tool] 执行异常 | tool={self.name} | session_id={context.session_id} | "
+                f"turn_index={context.turn_index} | trace_id={context.trace_id or '-'} | "
+                f"duration_ms={duration_ms} | error={exc}"
+            )
             return ToolExecutionResult.failed(
                 ToolExecutionError(
                     str(exc),

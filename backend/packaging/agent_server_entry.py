@@ -22,6 +22,8 @@ def main() -> None:
         host=args.host,
         port=args.port,
         log_level="info",
+        access_log=False,
+        log_config=None,
     )
 
 

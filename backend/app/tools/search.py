@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
@@ -80,7 +81,7 @@ async def search_text_tool(
 
     rg_path = shutil.which("rg")
     if rg_path:
-        return _search_text_with_rg(
+        result = _search_text_with_rg(
             rg_path,
             root,
             context,
@@ -89,14 +90,21 @@ async def search_text_tool(
             case_sensitive=case_sensitive,
             limit=limit,
         )
-    return _search_text_with_python(
-        root,
-        context,
-        query=query,
-        regex=regex,
-        case_sensitive=case_sensitive,
-        limit=limit,
+    else:
+        result = _search_text_with_python(
+            root,
+            context,
+            query=query,
+            regex=regex,
+            case_sensitive=case_sensitive,
+            limit=limit,
+        )
+    logger.info(
+        "[SearchTool] 文本搜索完成 | "
+        f"path={_relative(root, context)} | engine={result.get('engine')} | "
+        f"query_chars={len(query)} | results={len(result.get('results', []))} | limit={limit}"
     )
+    return result
 
 
 async def search_files_tool(
@@ -134,8 +142,20 @@ async def search_files_tool(
                 }
             )
             if len(results) >= limit:
-                return {"query": query, "results": results, "engine": "python"}
-    return {"query": query, "results": results, "engine": "python"}
+                result = {"query": query, "results": results, "engine": "python"}
+                logger.info(
+                    "[SearchTool] 文件搜索完成 | "
+                    f"path={_relative(root, context)} | query_chars={len(query)} | "
+                    f"results={len(results)} | limit={limit}"
+                )
+                return result
+    result = {"query": query, "results": results, "engine": "python"}
+    logger.info(
+        "[SearchTool] 文件搜索完成 | "
+        f"path={_relative(root, context)} | query_chars={len(query)} | "
+        f"results={len(results)} | limit={limit}"
+    )
+    return result
 
 
 def _search_text_with_rg(

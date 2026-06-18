@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.app.api.dependencies import get_repositories
+from backend.app.core.logger import logger
 from backend.app.model import ModelSettings
 from backend.app.storage import ModelProviderRecord, StorageRepositories
 
@@ -67,7 +68,12 @@ def save_provider_model_settings(
 async def get_settings(
     repositories: StorageRepositories = RepositoriesDep,
 ) -> SettingsResponse:
-    return SettingsResponse(model=load_effective_model_settings(repositories).public_dict())
+    settings = load_effective_model_settings(repositories).public_dict()
+    logger.debug(
+        "[SettingsAPI] 读取模型设置 | "
+        f"base_url={settings.get('base_url', '')} | model={settings.get('model', '')}"
+    )
+    return SettingsResponse(model=settings)
 
 
 @router.put("", response_model=SettingsResponse)
@@ -79,4 +85,10 @@ async def put_settings(
         current = load_model_settings(repositories)
         merged = merge_model_settings(current, request.model)
         repositories.settings.set(MODEL_SETTINGS_KEY, merged.model_dump(mode="json"))
-    return SettingsResponse(model=load_model_settings(repositories).public_dict())
+        logger.info(
+            "[SettingsAPI] 更新模型设置 | "
+            f"base_url={merged.base_url} | model={merged.model} | "
+            f"api_key_set={bool(merged.api_key)}"
+        )
+    settings = load_model_settings(repositories).public_dict()
+    return SettingsResponse(model=settings)

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
@@ -67,6 +68,10 @@ async def apply_patch_tool(
                 details={"operation": operation.kind},
             )
 
+    logger.info(
+        "[PatchTool] 应用补丁完成 | "
+        f"changes={len(changes)} | summary={_summarize_changes(changes)}"
+    )
     return {"changes": changes}
 
 
@@ -279,3 +284,16 @@ def _relative(path: Path, context: ToolExecutionContext) -> str:
 
 def _relative_missing(path: Path, context: ToolExecutionContext) -> str:
     return path.resolve().relative_to(context.workspace_root).as_posix()
+
+
+def _summarize_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "operation": change.get("operation"),
+            "path": change.get("path"),
+            "added_lines": change.get("added_lines"),
+            "removed_lines": change.get("removed_lines"),
+            "removed_bytes": change.get("removed_bytes"),
+        }
+        for change in changes
+    ]

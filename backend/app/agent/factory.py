@@ -12,6 +12,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 
+from backend.app.core.logger import logger
 from backend.app.model import ModelSettings
 
 _llm_gateway_trace_registry: dict[str, str] = {}
@@ -85,6 +86,10 @@ class PatchedChatOpenAI(ChatOpenAI):
                 **kwargs,
             )
         except Exception:
+            logger.opt(exception=True).error(
+                f"[LLM] agenerate_with_cache 失败 | run_id={run_id} | "
+                f"gateway_trace_id={gateway_trace_id}"
+            )
             pop_llm_gateway_trace_id(run_id)
             raise
 
@@ -105,6 +110,9 @@ class PatchedChatOpenAI(ChatOpenAI):
         try:
             return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
         except Exception:
+            logger.opt(exception=True).error(
+                f"[LLM] agenerate 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
+            )
             pop_llm_gateway_trace_id(run_id)
             raise
 
@@ -158,6 +166,9 @@ class PatchedChatOpenAI(ChatOpenAI):
                     )
                 yield chunk
         except Exception:
+            logger.opt(exception=True).error(
+                f"[LLM] astream 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
+            )
             pop_llm_gateway_trace_id(run_id)
             raise
 
@@ -249,12 +260,14 @@ class AgentFactory:
         )
         cached = self._llm_cache.get(cache_key)
         if cached is not None:
+            logger.debug(f"[LLM] 复用缓存实例 | model={request_model} | base_url={url}")
             return cached
 
         lock = self._get_llm_cache_lock(cache_key)
         with lock:
             cached = self._llm_cache.get(cache_key)
             if cached is not None:
+                logger.debug(f"[LLM] 复用缓存实例 | model={request_model} | base_url={url}")
                 return cached
             client_kwargs: dict[str, Any] = {}
             if http_transport is not None:
@@ -280,6 +293,10 @@ class AgentFactory:
                 **client_kwargs,
             )
             self._llm_cache[cache_key] = llm
+            logger.info(
+                f"[LLM] 创建模型实例 | model={request_model} | base_url={url} | "
+                f"streaming={streaming} | timeout={timeout}"
+            )
             return llm
 
     @staticmethod

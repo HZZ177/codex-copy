@@ -2,20 +2,32 @@ from __future__ import annotations
 
 import base64
 import json
+import warnings
 from collections.abc import AsyncIterator, Iterator, Sequence
+from inspect import signature
 from typing import Any
 
+from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import (
-    WRITES_IDX_MAP,
-    BaseCheckpointSaver,
-    ChannelVersions,
-    Checkpoint,
-    CheckpointMetadata,
-    CheckpointTuple,
-    get_checkpoint_id,
-    get_checkpoint_metadata,
-)
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", LangChainPendingDeprecationWarning)
+    warnings.filterwarnings(
+        "ignore",
+        message=r"The default value of .*allowed_objects.* will change.*",
+        category=LangChainPendingDeprecationWarning,
+    )
+    from langgraph.checkpoint.base import (
+        WRITES_IDX_MAP,
+        BaseCheckpointSaver,
+        ChannelVersions,
+        Checkpoint,
+        CheckpointMetadata,
+        CheckpointTuple,
+        get_checkpoint_id,
+        get_checkpoint_metadata,
+    )
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.storage.db import Database
@@ -38,6 +50,16 @@ def _metadata_load(raw: str | None) -> tuple[str, bytes]:
     return str(payload["type"]), base64.b64decode(str(payload["data"]).encode("ascii"))
 
 
+def _default_checkpoint_serde() -> Any:
+    parameters = signature(JsonPlusSerializer).parameters
+    kwargs: dict[str, Any] = {}
+    if "allowed_objects" in parameters:
+        kwargs["allowed_objects"] = "core"
+    elif "allowed_json_modules" in parameters:
+        kwargs["allowed_json_modules"] = True
+    return JsonPlusSerializer(**kwargs)
+
+
 class SQLiteCheckpointSaver(BaseCheckpointSaver):
     """LangGraph checkpointer backed by the project's SQLite database.
 
@@ -47,7 +69,7 @@ class SQLiteCheckpointSaver(BaseCheckpointSaver):
     """
 
     def __init__(self, db: Database, serde: Any | None = None) -> None:
-        super().__init__(serde=serde)
+        super().__init__(serde=serde or _default_checkpoint_serde())
         self.db = db
 
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:

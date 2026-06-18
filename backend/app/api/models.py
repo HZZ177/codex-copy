@@ -1,8 +1,11 @@
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from backend.app.api.dependencies import get_repositories
 from backend.app.api.settings import load_effective_model_settings, merge_model_settings
+from backend.app.core.logger import logger
 from backend.app.model import (
     ModelConfigError,
     ModelInfo,
@@ -46,10 +49,13 @@ async def get_models(
 ) -> ModelsResponse:
     provider_models = _models_from_providers(repositories)
     if provider_models:
+        logger.debug(f"[ModelsAPI] 返回供应商模型列表 | count={len(provider_models)}")
         return ModelsResponse(models=provider_models, cached=True)
     cached = repositories.settings.get(MODEL_LIST_CACHE_KEY, default=[])
     if cached:
+        logger.debug(f"[ModelsAPI] 返回缓存模型列表 | count={len(cached)}")
         return ModelsResponse(models=[ModelInfo(**item) for item in cached], cached=True)
+    logger.debug("[ModelsAPI] 模型列表为空")
     return ModelsResponse(models=[], cached=False)
 
 
@@ -60,15 +66,27 @@ async def refresh_models(
     repositories: StorageRepositories = RepositoriesDep,
 ) -> ModelsResponse:
     provider_client = _client_for_request(request, repositories, payload)
+    started_at = time.perf_counter()
+    logger.info("[ModelsAPI] 开始刷新模型列表")
     try:
         models = await provider_client.list_models(force_refresh=True)
     except ModelConfigError as exc:
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.warning(
+            "[ModelsAPI] 模型配置无效 | "
+            f"duration_ms={duration_ms} | error={exc}"
+        )
         raise _api_error(
             status.HTTP_400_BAD_REQUEST,
             "model_config_invalid",
             str(exc),
         ) from exc
     except ModelProviderError as exc:
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.warning(
+            "[ModelsAPI] 刷新模型列表失败 | "
+            f"duration_ms={duration_ms} | error={exc}"
+        )
         raise _api_error(
             status.HTTP_502_BAD_GATEWAY,
             "model_refresh_failed",
@@ -77,6 +95,11 @@ async def refresh_models(
     repositories.settings.set(
         MODEL_LIST_CACHE_KEY,
         [model.model_dump(mode="json") for model in models],
+    )
+    duration_ms = int((time.perf_counter() - started_at) * 1000)
+    logger.info(
+        "[ModelsAPI] 刷新模型列表成功 | "
+        f"count={len(models)} | duration_ms={duration_ms}"
     )
     return ModelsResponse(models=models, cached=False)
 

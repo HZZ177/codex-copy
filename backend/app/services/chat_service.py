@@ -8,6 +8,7 @@ from backend.app.agent import AgentRunner
 from backend.app.agent.event_processor import AgentEventResult, process_agent_events
 from backend.app.core.config import AppSettings
 from backend.app.core.ids import IdPrefix, new_id
+from backend.app.core.logger import logger, trace_id_var
 from backend.app.events import (
     ChatProjection,
     ChatProjectionAdapter,
@@ -94,6 +95,13 @@ class ChatService:
         trace_id = new_id("trace")
         root_node_id = f"{trace_id}-root"
         started_at = time.perf_counter()
+        trace_token = trace_id_var.set(trace_id)
+
+        logger.info(
+            f"[ChatTurn] 开始处理对话 | session_id={session.id} | turn_index={turn_index} | "
+            f"trace_id={trace_id} | model={request.model or '-'} | "
+            f"message_len={len(request.message)}"
+        )
 
         self.repositories.sessions.update(session.id, status="running")
         self.repositories.trace_records.create(
@@ -119,6 +127,10 @@ class ChatService:
 
         try:
             if not request.model.strip():
+                logger.warning(
+                    f"[ChatTurn] 模型为空，终止本轮 | session_id={session.id} | "
+                    f"turn_index={turn_index} | trace_id={trace_id}"
+                )
                 raise ValueError("模型不能为空")
 
             await self._emit_turn_started(
@@ -148,6 +160,10 @@ class ChatService:
 
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
             if token.is_cancelled():
+                logger.info(
+                    f"[ChatTurn] 用户取消本轮 | session_id={session.id} | "
+                    f"turn_index={turn_index} | trace_id={trace_id} | duration_ms={duration_ms}"
+                )
                 payload = aggregator.build_cancelled_data(
                     session_id=session.id,
                     trace_id=trace_id,
@@ -173,6 +189,10 @@ class ChatService:
                     output_checkpoint_ns=outcome.output_checkpoint_ns,
                 )
                 self.repositories.sessions.update(session.id, status="active")
+                logger.info(
+                    f"[ChatTurn] 取消处理完成 | session_id={session.id} | "
+                    f"turn_index={turn_index} | trace_id={trace_id}"
+                )
                 return ChatTurnResult(
                     session_id=session.id,
                     trace_id=trace_id,
@@ -209,6 +229,14 @@ class ChatService:
                 output_checkpoint_ns=outcome.output_checkpoint_ns,
             )
             self.repositories.sessions.update(session.id, status="active")
+            usage = outcome.event_result.latest_llm_token_usage
+            logger.info(
+                f"[ChatTurn] 对话完成 | session_id={session.id} | turn_index={turn_index} | "
+                f"trace_id={trace_id} | duration_ms={duration_ms} | "
+                f"input_tokens={usage.get('input_tokens', 0) or 0} | "
+                f"output_tokens={usage.get('output_tokens', 0) or 0} | "
+                f"final_content_len={len(completed_payload.get('final_content', ''))}"
+            )
             return ChatTurnResult(
                 session_id=session.id,
                 trace_id=trace_id,
@@ -219,6 +247,10 @@ class ChatService:
         except Exception as exc:
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
             error_message = str(exc)
+            logger.opt(exception=True).error(
+                f"[ChatTurn] 对话失败 | session_id={session.id} | turn_index={turn_index} | "
+                f"trace_id={trace_id} | duration_ms={duration_ms} | error={error_message}"
+            )
             try:
                 await dispatcher.emit_event(
                     event_type=DomainEventType.TURN_FAILED.value,
@@ -246,6 +278,8 @@ class ChatService:
                 status="failed",
                 error=error_message,
             )
+        finally:
+            trace_id_var.reset(trace_token)
 
     async def _run_agent_loop(
         self,
@@ -265,6 +299,11 @@ class ChatService:
             turn_index=turn_index,
             trace_id=trace_id,
         )
+        logger.info(
+            f"[AgentLoop] 创建 agent | session_id={session.id} | turn_index={turn_index} | "
+            f"trace_id={trace_id} | model={request.model.strip()} | "
+            f"workspace_root={self.settings.workspace_root}"
+        )
         agent = self.agent_runner.create_agent(
             model=request.model.strip(),
             system_prompt=request.system_prompt,
@@ -282,6 +321,10 @@ class ChatService:
             config=run_config,
             version="v2",
         )
+        logger.info(
+            f"[AgentLoop] 开始事件流 | session_id={session.id} | turn_index={turn_index} | "
+            f"trace_id={trace_id} | active_session_id={active_session_id}"
+        )
         event_result = await process_agent_events(
             event_stream,
             dispatcher=dispatcher,
@@ -295,6 +338,13 @@ class ChatService:
         checkpoint_config = await self.agent_runner.get_latest_checkpoint_config(
             thread_id=active_session_id,
             checkpoint_ns="",
+        )
+        logger.info(
+            f"[AgentLoop] 事件流完成 | session_id={session.id} | turn_index={turn_index} | "
+            f"trace_id={trace_id} | llm_call_count="
+            f"{event_result.chain_token_usage.get('llm_call_count', 0)} | "
+            f"final_content_len={len(event_result.final_content)} | "
+            f"checkpoint_id={checkpoint_config.get('checkpoint_id') or '-'}"
         )
         return AgentLoopOutcome(
             event_result=event_result,
@@ -386,14 +436,20 @@ class ChatService:
         if request.session_id:
             existing = self.repositories.sessions.get(request.session_id)
             if existing is not None:
+                logger.debug(f"[Session] 复用已有会话 | session_id={existing.id}")
                 return existing
-        return self.repositories.sessions.create(
+        created = self.repositories.sessions.create(
             session_id=request.session_id or new_id(IdPrefix.SESSION),
             user_id=request.user_id or self.settings.default_user_id,
             scene_id=request.scene_id or self.settings.default_scene_id,
             title=_title_from_message(request.message),
             session_tag="chat",
         )
+        logger.info(
+            f"[Session] 创建新会话 | session_id={created.id} | "
+            f"user_id={created.user_id} | scene_id={created.scene_id}"
+        )
+        return created
 
     def _finish_trace_from_usage(
         self,

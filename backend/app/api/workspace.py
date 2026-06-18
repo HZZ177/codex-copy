@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
+from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
@@ -77,6 +78,10 @@ async def list_tree(
         _entry_for_path(root, child)
         for child in sorted(target.iterdir(), key=_entry_sort_key)
     ]
+    logger.debug(
+        "[WorkspaceAPI] 列出目录 | "
+        f"root={root} | path={path or '.'} | entries={len(entries)}"
+    )
     return WorkspaceTreeResponse(root=str(Path(root).expanduser().resolve()), entries=entries)
 
 
@@ -104,8 +109,13 @@ async def read_file(
             "workspace_binary_file",
             "文件不是 UTF-8 文本",
         ) from exc
+    relative = _relative_path(root, target)
+    logger.debug(
+        "[WorkspaceAPI] 读取文件 | "
+        f"root={root} | path={relative} | size={target.stat().st_size}"
+    )
     return WorkspaceFileResponse(
-        path=_relative_path(root, target),
+        path=relative,
         content=content,
         encoding="utf-8",
     )
@@ -139,8 +149,13 @@ async def read_media(
         )
 
     encoded = base64.b64encode(target.read_bytes()).decode("ascii")
+    relative = _relative_path(root, target)
+    logger.debug(
+        "[WorkspaceAPI] 读取媒体 | "
+        f"root={root} | path={relative} | media_type={media_type} | size={size}"
+    )
     return WorkspaceMediaResponse(
-        path=_relative_path(root, target),
+        path=relative,
         media_type=media_type,
         size=size,
         data_url=f"data:{media_type};base64,{encoded}",
@@ -182,7 +197,15 @@ async def search_workspace(
                 )
             )
             if len(results) >= limit:
+                logger.debug(
+                    "[WorkspaceAPI] 搜索工作区 | "
+                    f"root={root} | query={q} | results={len(results)} | limit={limit}"
+                )
                 return results
+    logger.debug(
+        "[WorkspaceAPI] 搜索工作区 | "
+        f"root={root} | query={q} | results={len(results)} | limit={limit}"
+    )
     return results
 
 

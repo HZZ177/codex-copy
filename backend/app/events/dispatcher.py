@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, Protocol
 
+from backend.app.core.logger import logger
 from backend.app.events.domain import DomainEvent
 from backend.app.events.event_types import ensure_known_event_type
 
@@ -40,11 +41,20 @@ class EventDispatcher:
 
     async def emit(self, event: DomainEvent) -> None:
         ensure_known_event_type(event.event_type)
+        logger.debug(
+            f"[EventDispatcher] 分发事件 | event_type={event.event_type} | "
+            f"source={event.source} | trace_id={event.trace_id or '-'} | "
+            f"turn_index={event.turn_index} | consumers={len(self._consumers)}"
+        )
         errors: list[BaseException] = []
         for consumer in self._consumers:
             try:
                 await consumer(event)
             except BaseException as exc:
+                logger.opt(exception=True).error(
+                    f"[EventDispatcher] projection 处理失败 | event_type={event.event_type} | "
+                    f"source={event.source} | trace_id={event.trace_id or '-'} | error={exc}"
+                )
                 errors.append(exc)
         if errors:
             raise errors[0]
@@ -84,6 +94,9 @@ class EventDispatcher:
             try:
                 await flusher()
             except BaseException as exc:
+                logger.opt(exception=True).error(
+                    f"[EventDispatcher] projection flush 失败 | error={exc}"
+                )
                 errors.append(exc)
         if errors:
             raise errors[0]

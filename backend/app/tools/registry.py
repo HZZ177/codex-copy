@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.app.core.logger import logger
 from backend.app.model import ToolSpec
 from backend.app.tools.base import LocalTool
 
@@ -16,6 +17,7 @@ class ToolRegistry:
         if tool.name in self._tools:
             raise ToolRegistryError(f"工具已注册: {tool.name}")
         self._tools[tool.name] = tool
+        logger.debug(f"[ToolRegistry] 注册工具 | tool={tool.name} | enabled={tool.enabled}")
         return tool
 
     def get(self, name: str, *, include_disabled: bool = True) -> LocalTool | None:

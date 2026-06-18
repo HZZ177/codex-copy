@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.app.core.logger import logger
 from backend.app.tools.filesystem import register_filesystem_tools
 from backend.app.tools.patch import register_patch_tools
 from backend.app.tools.plan import register_plan_tools
@@ -15,4 +16,8 @@ def create_default_tool_registry() -> ToolRegistry:
     register_shell_tools(registry)
     register_patch_tools(registry)
     register_plan_tools(registry)
+    logger.info(
+        "[ToolRegistry] 默认工具注册完成 | "
+        f"tools={','.join(registry.names(include_disabled=True))}"
+    )
     return registry

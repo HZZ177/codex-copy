@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.app.core.ids import IdPrefix, new_id
+from backend.app.core.logger import logger, trace_id_var
 from backend.app.services import (
     ChatCancellationToken,
     ChatRequest,
@@ -36,6 +38,8 @@ class WebSocketChannelAdapter:
 @router.websocket("/chat")
 async def chat_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
+    connection_trace_id = websocket.headers.get("x-trace-id") or uuid.uuid4().hex
+    trace_token = trace_id_var.set(connection_trace_id)
     runtime = websocket.app.state.runtime
     settings = runtime.settings
     repositories = runtime.repositories
@@ -44,6 +48,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
     bound_session_id = str(websocket.query_params.get("session_id") or "").strip() or None
     current_task: asyncio.Task | None = None
     current_token: ChatCancellationToken | None = None
+    logger.info(
+        f"[WebSocket] 连接建立 | trace_id={connection_trace_id} | "
+        f"bound_session_id={bound_session_id or '-'}"
+    )
 
     async def send(action: str, data: dict[str, Any]) -> None:
         async with adapter._send_lock:
@@ -77,6 +85,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
             try:
                 raw = await websocket.receive_text()
             except WebSocketDisconnect:
+                logger.info(
+                    f"[WebSocket] 客户端断开 | trace_id={connection_trace_id} | "
+                    f"bound_session_id={bound_session_id or '-'}"
+                )
                 if current_token is not None:
                     current_token.cancel()
                 break
@@ -84,16 +96,25 @@ async def chat_websocket(websocket: WebSocket) -> None:
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError as exc:
+                logger.warning(
+                    "[WebSocket] 收到非法 JSON | "
+                    f"trace_id={connection_trace_id} | error={exc}"
+                )
                 await send_error("parse_error", f"消息不是合法 JSON：{exc}")
                 continue
 
             action = str(message.get("action") or "").strip()
             payload = _payload(message)
             if not action:
+                logger.warning(f"[WebSocket] 缺少 action | trace_id={connection_trace_id}")
                 await send_error("missing_action", "action 字段必填")
                 continue
 
             try:
+                logger.info(
+                    f"[WebSocket] 收到 action | trace_id={connection_trace_id} | "
+                    f"action={action} | bound_session_id={bound_session_id or '-'}"
+                )
                 if action == "create_session":
                     session = session_service.create_session(
                         session_id=str(payload.get("session_id") or new_id(IdPrefix.SESSION)),
@@ -102,6 +123,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         title=payload.get("title"),
                     )
                     bound_session_id = session["id"]
+                    logger.info(
+                        f"[WebSocket] 会话创建成功 | trace_id={connection_trace_id} | "
+                        f"session_id={bound_session_id}"
+                    )
                     await send(
                         "session_created",
                         {"session_id": session["id"], "session": session},
@@ -115,6 +140,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         continue
                     session_service.get_session_detail(session_id)
                     bound_session_id = session_id
+                    logger.info(
+                        f"[WebSocket] 会话绑定成功 | trace_id={connection_trace_id} | "
+                        f"session_id={session_id}"
+                    )
                     await send("bind_ok", {"session_id": session_id})
                     continue
 
@@ -137,6 +166,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 if action == "cancel":
                     if current_token is not None:
                         current_token.cancel()
+                    logger.info(
+                        f"[WebSocket] 收到取消请求 | trace_id={connection_trace_id} | "
+                        f"session_id={bound_session_id or '-'}"
+                    )
                     continue
 
                 if action == "ping":
@@ -157,12 +190,25 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
                 await send_error("unknown_action", f"未知的 action: {action}")
             except SessionNotFoundError as exc:
+                logger.warning(
+                    f"[WebSocket] session 不存在 | trace_id={connection_trace_id} | "
+                    f"action={action} | error={exc}"
+                )
                 await send_error("session_not_found", str(exc))
             except Exception as exc:
+                logger.opt(exception=True).error(
+                    f"[WebSocket] action 处理失败 | trace_id={connection_trace_id} | "
+                    f"action={action} | error={exc}"
+                )
                 await send_error("ws_action_error", str(exc))
     finally:
         if current_token is not None:
             current_token.cancel()
+        trace_id_var.reset(trace_token)
+        logger.info(
+            f"[WebSocket] 连接清理完成 | trace_id={connection_trace_id} | "
+            f"bound_session_id={bound_session_id or '-'}"
+        )
 
 
 def _payload(message: dict[str, Any]) -> dict[str, Any]:
@@ -176,6 +222,8 @@ def _log_task_exception(task: asyncio.Task) -> None:
     try:
         task.result()
     except asyncio.CancelledError:
+        logger.info("[WebSocket] 后台 chat task 已取消")
         return
-    except Exception:
+    except Exception as exc:
+        logger.opt(exception=True).error(f"[WebSocket] 后台 chat task 异常 | error={exc}")
         return

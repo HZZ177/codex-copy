@@ -3,6 +3,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from backend.app.core.logger import logger
+
 SCHEMA_SQL = """
 pragma foreign_keys = on;
 
@@ -205,6 +207,7 @@ class Database:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
+        logger.info(f"[Database] 初始化 schema 完成 | path={self.path}")
 
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
@@ -215,6 +218,7 @@ class Database:
             conn.commit()
         except Exception:
             conn.rollback()
+            logger.opt(exception=True).error(f"[Database] 事务回滚 | path={self.path}")
             raise
         finally:
             conn.close()
@@ -223,4 +227,5 @@ class Database:
 def init_database(path: Path | str) -> Database:
     db = Database(path)
     db.init_schema()
+    logger.info(f"[Database] 数据库已就绪 | path={db.path}")
     return db

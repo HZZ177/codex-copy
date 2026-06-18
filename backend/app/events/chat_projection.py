@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from backend.app.core.logger import logger
 from backend.app.events.actions import ChatAction
 from backend.app.events.domain import DomainEvent
 from backend.app.events.event_types import DomainEventType
@@ -50,7 +51,11 @@ class ChatProjection:
         payload = dict(event.payload or {})
         payload.setdefault("session_id", session_id)
         payload.setdefault("timestamp_ms", event.timestamp_ms)
-        await self.adapter.send(session_id=session_id, action=action.value, data=payload)
+        sent = await self.adapter.send(session_id=session_id, action=action.value, data=payload)
+        logger.debug(
+            f"[ChatProjection] 推送实时事件 | session_id={session_id} | "
+            f"action={action.value} | event_type={event.event_type} | sent={sent}"
+        )
 
     async def _send_reasoning_event(
         self,
@@ -73,7 +78,11 @@ class ChatProjection:
             chat_data["text"] = payload["text"]
         if "cancel_main" in payload:
             chat_data["cancel_main"] = payload["cancel_main"]
-        await self.adapter.send(session_id=session_id, action=action.value, data=chat_data)
+        sent = await self.adapter.send(session_id=session_id, action=action.value, data=chat_data)
+        logger.debug(
+            f"[ChatProjection] 推送 reasoning 事件 | session_id={session_id} | "
+            f"action={action.value} | done={chat_data.get('done')} | sent={sent}"
+        )
 
     async def flush(self) -> None:
         return None

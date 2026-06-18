@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
@@ -106,8 +107,15 @@ async def read_file_tool(
         next_line = start_index + len(selected_lines) + 1
         next_start_line = next_line if next_line <= len(lines) else None
 
+    relative = _relative(path, context)
+    logger.info(
+        "[FilesystemTool] 读取文件 | "
+        f"path={relative} | size={size} | start_line={start_line} | "
+        f"max_lines={max_lines} | returned_lines={len(selected_lines) if lines else 0} | "
+        f"truncated={next_start_line is not None}"
+    )
     return {
-        "path": _relative(path, context),
+        "path": relative,
         "content": selected,
         "encoding": "utf-8",
         "size": size,
@@ -138,9 +146,15 @@ async def write_file_tool(
     else:
         path.write_text(content, encoding="utf-8", newline="")
 
+    relative = _relative(path, context)
+    size = path.stat().st_size
+    logger.info(
+        "[FilesystemTool] 写入文件 | "
+        f"path={relative} | size={size} | append={append} | content_chars={len(content)}"
+    )
     return {
-        "path": _relative(path, context),
-        "size": path.stat().st_size,
+        "path": relative,
+        "size": size,
         "append": append,
         "created": True,
     }
@@ -170,7 +184,12 @@ async def list_directory_tool(
                 "size": None if child.is_dir() else stat.st_size,
             }
         )
-    return {"path": _relative(path, context), "entries": entries}
+    relative = _relative(path, context)
+    logger.info(
+        "[FilesystemTool] 列出目录 | "
+        f"path={relative} | entries={len(entries)}"
+    )
+    return {"path": relative, "entries": entries}
 
 
 def _resolve(raw_path: Any, context: ToolExecutionContext) -> Path:

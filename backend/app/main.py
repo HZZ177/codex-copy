@@ -20,7 +20,9 @@ from backend.app.api.settings import router as settings_router
 from backend.app.api.websocket import router as websocket_router
 from backend.app.api.workspace import router as workspace_router
 from backend.app.core.config import AppSettings, get_settings
-from backend.app.core.logging import configure_logging
+from backend.app.core.exception_handler import register_exception_handlers
+from backend.app.core.logger import configure_logging, logger
+from backend.app.core.middleware import RequestLoggingMiddleware
 from backend.app.model import OpenAICompatibleProviderClient
 from backend.app.model.e2e_transport import create_e2e_model_transport
 from backend.app.runtime import create_desktop_runtime
@@ -31,12 +33,14 @@ from backend.app.tools import create_default_tool_registry
 
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
-    configure_logging(resolved_settings.log_level)
+    configure_logging(resolved_settings.log_level, log_dir=resolved_settings.data_dir / "logs")
 
     app = FastAPI(
         title=resolved_settings.app_name,
         version=resolved_settings.version,
     )
+    register_exception_handlers(app)
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -82,6 +86,13 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         tool_registry=app.state.tool_registry,
         chat_service=app.state.chat_service,
     )
+    logger.info(
+        "[App] 后端应用创建完成 | "
+        f"host={resolved_settings.host} | port={resolved_settings.port} | "
+        f"data_dir={resolved_settings.data_dir} | "
+        f"workspace_root={resolved_settings.workspace_root} | "
+        f"protocol_version={resolved_settings.protocol_version}"
+    )
     app.include_router(health_router)
     app.include_router(settings_router)
     app.include_router(model_providers_router)
@@ -105,6 +116,8 @@ def main() -> None:
         port=settings.port,
         reload=settings.reload,
         log_level=settings.log_level.lower(),
+        access_log=False,
+        log_config=None,
     )
 
 

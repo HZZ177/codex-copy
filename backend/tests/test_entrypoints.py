@@ -37,6 +37,8 @@ def test_backend_main_uses_import_string_for_reload(monkeypatch, tmp_path) -> No
                 "port": 9876,
                 "reload": True,
                 "log_level": "info",
+                "access_log": False,
+                "log_config": None,
             },
         )
     ]
@@ -78,6 +80,8 @@ def test_sidecar_entry_sets_data_dir_and_runs_imported_app(monkeypatch, tmp_path
                 "host": "127.0.0.2",
                 "port": 9877,
                 "log_level": "info",
+                "access_log": False,
+                "log_config": None,
             },
         )
     ]

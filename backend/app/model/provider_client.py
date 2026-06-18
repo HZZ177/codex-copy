@@ -1,8 +1,10 @@
 import json
+import time
 from typing import Any
 
 import httpx
 
+from backend.app.core.logger import logger
 from backend.app.model.base import ModelInfo, ModelSettings
 
 
@@ -51,28 +53,56 @@ class OpenAICompatibleProviderClient:
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelInfo]:
         if self._model_cache is not None and not force_refresh:
+            logger.debug(
+                f"[ModelProvider] 使用模型列表缓存 | base_url={self.settings.base_url or '-'} | "
+                f"count={len(self._model_cache)}"
+            )
             return self._model_cache
         if not self.settings.base_url:
             raise ModelConfigError("模型服务地址未配置")
 
+        started_at = time.perf_counter()
+        logger.info(
+            f"[ModelProvider] 刷新模型列表开始 | base_url={self.settings.base_url} | "
+            f"force_refresh={force_refresh}"
+        )
         async with self._client() as client:
             try:
                 response = await client.get(f"{self._api_base_url()}/models")
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    f"[ModelProvider] 刷新模型列表 HTTP 失败 | "
+                    f"base_url={self.settings.base_url} | status_code={exc.response.status_code}"
+                )
                 raise ModelProviderError(
                     self._format_http_error("刷新模型列表失败", exc.response)
                 ) from exc
             except httpx.HTTPError as exc:
+                logger.warning(
+                    f"[ModelProvider] 刷新模型列表请求失败 | "
+                    f"base_url={self.settings.base_url} | error={exc}"
+                )
                 raise ModelProviderError(f"刷新模型列表失败：{exc}") from exc
             try:
                 payload = response.json()
             except ValueError as exc:
+                logger.warning(
+                    f"[ModelProvider] 刷新模型列表响应不是 JSON | base_url={self.settings.base_url}"
+                )
                 raise ModelProviderError("刷新模型列表失败：模型服务返回的不是合法 JSON") from exc
             models = parse_model_list(payload)
             if not models:
+                logger.warning(
+                    f"[ModelProvider] 刷新模型列表为空 | base_url={self.settings.base_url}"
+                )
                 raise ModelProviderError("刷新模型列表失败：模型服务未返回可用模型")
         self._model_cache = models
+        duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+        logger.info(
+            f"[ModelProvider] 刷新模型列表成功 | base_url={self.settings.base_url} | "
+            f"count={len(models)} | duration_ms={duration_ms}"
+        )
         return models
 
     async def check_chat_completion(self, *, model: str) -> None:
@@ -82,6 +112,11 @@ class OpenAICompatibleProviderClient:
         if not request_model:
             raise ModelProviderError("模型未配置")
 
+        started_at = time.perf_counter()
+        logger.info(
+            f"[ModelProvider] 健康检查开始 | base_url={self.settings.base_url} | "
+            f"model={request_model}"
+        )
         async with self._client(timeout=15) as client:
             try:
                 response = await client.post(
@@ -95,11 +130,24 @@ class OpenAICompatibleProviderClient:
                 )
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    f"[ModelProvider] 健康检查 HTTP 失败 | base_url={self.settings.base_url} | "
+                    f"model={request_model} | status_code={exc.response.status_code}"
+                )
                 raise ModelProviderError(
                     self._format_http_error("模型健康检查失败", exc.response)
                 ) from exc
             except httpx.HTTPError as exc:
+                logger.warning(
+                    f"[ModelProvider] 健康检查请求失败 | base_url={self.settings.base_url} | "
+                    f"model={request_model} | error={exc}"
+                )
                 raise ModelProviderError(f"模型健康检查失败：{exc}") from exc
+        duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+        logger.info(
+            f"[ModelProvider] 健康检查成功 | base_url={self.settings.base_url} | "
+            f"model={request_model} | duration_ms={duration_ms}"
+        )
 
     def _client(self, *, timeout: float | None = None) -> httpx.AsyncClient:
         headers = {}

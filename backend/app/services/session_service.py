@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.app.core.ids import IdPrefix, new_id
+from backend.app.core.logger import logger
 from backend.app.services.message_event_service import MessageEventService
 from backend.app.storage import MessageEventRecord, SessionRecord
 
@@ -72,6 +73,10 @@ class SessionService:
             title=title,
             session_tag=session_tag,
         )
+        logger.info(
+            f"[SessionService] 创建会话 | session_id={record.id} | "
+            f"user_id={user_id} | scene_id={scene_id} | session_tag={session_tag}"
+        )
         return self._serialize_session(record)
 
     def list_sessions(self, request: ListSessionsRequest) -> dict[str, Any]:
@@ -95,6 +100,11 @@ class SessionService:
         total = len(records)
         start = (page - 1) * page_size
         page_records = records[start : start + page_size]
+        logger.debug(
+            f"[SessionService] 查询会话列表 | total={total} | page={page} | "
+            f"page_size={page_size} | user_id={request.user_id or '-'} | "
+            f"scene_id={request.scene_id or '-'}"
+        )
         return {
             "list": [
                 self._serialize_session(record, current_session_id=request.current_session_id)
@@ -112,6 +122,7 @@ class SessionService:
         current_session_id: str | None = None,
     ) -> dict[str, Any]:
         record = self._require_session(session_id)
+        logger.debug(f"[SessionService] 获取会话详情 | session_id={session_id}")
         return self._serialize_session(record, current_session_id=current_session_id)
 
     def rename_session(self, session_id: str, title: str) -> dict[str, Any]:
@@ -122,6 +133,7 @@ class SessionService:
         record = self._sessions.update(session_id, title=cleaned)
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
+        logger.info(f"[SessionService] 重命名会话 | session_id={session_id} | title={cleaned}")
         return self._serialize_session(record)
 
     def delete_session(self, session_id: str) -> dict[str, Any]:
@@ -129,6 +141,7 @@ class SessionService:
         record = self._sessions.soft_delete(session_id)
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
+        logger.info(f"[SessionService] 删除会话 | session_id={session_id}")
         return self._serialize_session(record)
 
     def get_history(self, request: GetHistoryRequest) -> dict[str, Any]:
@@ -156,6 +169,11 @@ class SessionService:
 
         total = len(messages)
         start = (page - 1) * page_size
+        logger.debug(
+            f"[SessionService] 查询会话历史 | session_id={request.session_id} | "
+            f"turn_index={request.turn_index if request.turn_index is not None else '-'} | "
+            f"messages={total} | events={event_total} | page={page} | page_size={page_size}"
+        )
         return {
             "list": messages[start : start + page_size],
             "total": total,
@@ -171,6 +189,7 @@ class SessionService:
         record = self._sessions.close(session_id)
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
+        logger.info(f"[SessionService] 关闭会话 | session_id={session_id}")
         return self._serialize_session(record)
 
     def mark_session_failed(self, session_id: str) -> dict[str, Any]:
@@ -178,6 +197,7 @@ class SessionService:
         record = self._sessions.update(session_id, status="failed")
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
+        logger.warning(f"[SessionService] 标记会话失败 | session_id={session_id}")
         return self._serialize_session(record)
 
     def touch_session(self, session_id: str) -> dict[str, Any]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.app.core.logger import logger
 from backend.app.events.actions import CompletedEventItemAction
 from backend.app.events.domain import DomainEvent
 from backend.app.events.event_types import DomainEventType
@@ -219,6 +220,11 @@ class TurnCompletedAggregator:
         }
         if scene_version_seq is not None:
             payload["scene_version_seq"] = scene_version_seq
+        logger.debug(
+            "[TurnCompletedAggregator] 构建终局 payload | "
+            f"session_id={session_id} | trace_id={trace_id} | status={status} | "
+            f"events={len(payload['events'])} | final_content_len={len(payload['final_content'])}"
+        )
         return payload
 
     def _latest_ai_content(self) -> str:

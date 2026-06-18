@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.app.core.config import AppSettings
+from backend.app.core.logger import logger
 from backend.app.storage import Database, StorageRepositories
 from backend.app.tools import ToolRegistry
 
@@ -50,7 +51,7 @@ def create_desktop_runtime(
     tool_registry: ToolRegistry,
     chat_service: Any,
 ) -> DesktopAgentRuntime:
-    return DesktopAgentRuntime(
+    runtime = DesktopAgentRuntime(
         settings=settings,
         database=database,
         repositories=repositories,
@@ -58,3 +59,9 @@ def create_desktop_runtime(
         tool_registry=tool_registry,
         chat_service=chat_service,
     )
+    logger.info(
+        "[Runtime] 桌面运行时已创建 | "
+        f"data_dir={settings.data_dir} | tools={len(tool_registry.list())} | "
+        f"capabilities={','.join(runtime.capabilities)}"
+    )
+    return runtime

@@ -8,6 +8,8 @@ from langchain.agents.middleware import AgentMiddleware, ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from backend.app.core.logger import logger
+
 
 class DuplicateToolForceStopError(RuntimeError):
     def __init__(self, *, tool_name: str, repeat_count: int) -> None:
@@ -28,6 +30,10 @@ class ToolErrorHandlingMiddleware(AgentMiddleware):
             return await handler(request)
         except Exception as exc:
             tool_call = request.tool_call or {}
+            logger.opt(exception=True).error(
+                f"[AgentMiddleware] 工具调用异常已转换为 ToolMessage | "
+                f"tool={tool_call.get('name') or '-'} | error={exc}"
+            )
             return ToolMessage(
                 content=json.dumps(
                     {
@@ -64,6 +70,10 @@ class DuplicateToolCallGuardMiddleware(AgentMiddleware):
             self._repeat_count = 1
 
         if self._repeat_count > self.max_repeats:
+            logger.warning(
+                f"[AgentMiddleware] 检测到重复工具调用，强制终止 | "
+                f"tool={tool_name or 'unknown_tool'} | repeat_count={self._repeat_count}"
+            )
             raise DuplicateToolForceStopError(
                 tool_name=tool_name or "unknown_tool",
                 repeat_count=self._repeat_count,

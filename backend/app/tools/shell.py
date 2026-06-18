@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
@@ -83,6 +84,11 @@ async def run_command_tool(
         process.kill()
         await process.communicate()
         duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.warning(
+            "[ShellTool] 命令超时 | "
+            f"cwd={_relative(cwd, context)} | timeout_seconds={timeout_seconds} | "
+            f"duration_ms={duration_ms}"
+        )
         raise ToolExecutionError(
             "命令执行超时",
             code="command_timeout",
@@ -104,7 +110,20 @@ async def run_command_tool(
         "duration_ms": duration_ms,
     }
     if process.returncode != 0:
+        logger.warning(
+            "[ShellTool] 命令返回非零退出码 | "
+            f"cwd={result['cwd']} | exit_code={process.returncode} | "
+            f"duration_ms={duration_ms} | stdout_chars={len(result['stdout'])} | "
+            f"stderr_chars={len(result['stderr'])}"
+        )
+    if process.returncode != 0:
         raise ToolExecutionError("命令执行失败", code="command_failed", details=result)
+    logger.info(
+        "[ShellTool] 命令完成 | "
+        f"cwd={result['cwd']} | exit_code={process.returncode} | "
+        f"duration_ms={duration_ms} | stdout_chars={len(result['stdout'])} | "
+        f"stderr_chars={len(result['stderr'])}"
+    )
     return result
 
 
