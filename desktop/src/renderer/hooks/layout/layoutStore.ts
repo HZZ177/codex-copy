@@ -3,12 +3,15 @@ export interface LayoutState {
   sidebarWidth: number;
   rightSidebarOpen: boolean;
   rightSidebarRatio: number;
+  rightSidebarPlacement: RightSidebarPlacement;
   workspaceOpen: boolean;
   previewOpen: boolean;
   workspaceWidth: number;
   previewWidth: number;
   isMobileLike: boolean;
 }
+
+export type RightSidebarPlacement = "left" | "right";
 
 export type LayoutAction =
   | { type: "toggle-sidebar" }
@@ -17,6 +20,8 @@ export type LayoutAction =
   | { type: "toggle-right-sidebar" }
   | { type: "set-right-sidebar-open"; open: boolean }
   | { type: "set-right-sidebar-ratio"; ratio: number }
+  | { type: "toggle-right-sidebar-placement" }
+  | { type: "set-right-sidebar-placement"; placement: RightSidebarPlacement }
   | { type: "toggle-workspace" }
   | { type: "set-workspace-open"; open: boolean }
   | { type: "toggle-preview" }
@@ -41,6 +46,7 @@ export const defaultLayoutState: LayoutState = {
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   rightSidebarOpen: false,
   rightSidebarRatio: DEFAULT_RIGHT_SIDEBAR_RATIO,
+  rightSidebarPlacement: "right",
   workspaceOpen: false,
   previewOpen: false,
   workspaceWidth: 360,
@@ -52,6 +58,7 @@ export interface LayoutPreferences {
   sidebarCollapsed?: boolean;
   sidebarWidth?: number;
   rightSidebarRatio?: number;
+  rightSidebarPlacement?: RightSidebarPlacement;
   workspaceWidth?: number;
   previewWidth?: number;
 }
@@ -75,6 +82,10 @@ export function clampRightSidebarRatio(ratio: number) {
     return DEFAULT_RIGHT_SIDEBAR_RATIO;
   }
   return Math.min(MAX_RIGHT_SIDEBAR_RATIO, Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.round(ratio * 1000) / 1000));
+}
+
+function normalizeRightSidebarPlacement(value: unknown): RightSidebarPlacement | undefined {
+  return value === "left" || value === "right" ? value : undefined;
 }
 
 export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutState {
@@ -103,6 +114,13 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
         const rightSidebarRatio = clampRightSidebarRatio(action.ratio);
         return rightSidebarRatio === state.rightSidebarRatio ? state : { ...state, rightSidebarRatio };
       }
+    case "toggle-right-sidebar-placement":
+      return { ...state, rightSidebarPlacement: state.rightSidebarPlacement === "right" ? "left" : "right" };
+    case "set-right-sidebar-placement":
+      if (state.rightSidebarPlacement === action.placement) {
+        return state;
+      }
+      return { ...state, rightSidebarPlacement: action.placement };
     case "toggle-workspace":
       return { ...state, workspaceOpen: !state.workspaceOpen };
     case "set-workspace-open":
@@ -147,6 +165,7 @@ export function mergeLayoutPreferences(state: LayoutState, preferences: LayoutPr
       preferences.rightSidebarRatio === undefined
         ? state.rightSidebarRatio
         : clampRightSidebarRatio(preferences.rightSidebarRatio),
+    rightSidebarPlacement: preferences.rightSidebarPlacement ?? state.rightSidebarPlacement,
     workspaceWidth:
       preferences.workspaceWidth === undefined ? state.workspaceWidth : clampPanelWidth(preferences.workspaceWidth),
     previewWidth: preferences.previewWidth === undefined ? state.previewWidth : clampPanelWidth(preferences.previewWidth),
@@ -166,6 +185,7 @@ export function readLayoutPreferences(storage: Pick<Storage, "getItem">): Layout
         typeof parsed.sidebarCollapsed === "boolean" ? parsed.sidebarCollapsed : undefined,
       sidebarWidth: typeof parsed.sidebarWidth === "number" ? parsed.sidebarWidth : undefined,
       rightSidebarRatio: typeof parsed.rightSidebarRatio === "number" ? parsed.rightSidebarRatio : undefined,
+      rightSidebarPlacement: normalizeRightSidebarPlacement(parsed.rightSidebarPlacement),
       workspaceWidth: typeof parsed.workspaceWidth === "number" ? parsed.workspaceWidth : undefined,
       previewWidth: typeof parsed.previewWidth === "number" ? parsed.previewWidth : undefined,
     };
@@ -176,7 +196,10 @@ export function readLayoutPreferences(storage: Pick<Storage, "getItem">): Layout
 
 export function writeLayoutPreferences(
   storage: Pick<Storage, "setItem">,
-  state: Pick<LayoutState, "sidebarCollapsed" | "sidebarWidth" | "rightSidebarRatio" | "workspaceWidth" | "previewWidth">,
+  state: Pick<
+    LayoutState,
+    "sidebarCollapsed" | "sidebarWidth" | "rightSidebarRatio" | "rightSidebarPlacement" | "workspaceWidth" | "previewWidth"
+  >,
 ) {
   storage.setItem(
     LAYOUT_PREFERENCES_KEY,
@@ -184,6 +207,7 @@ export function writeLayoutPreferences(
       sidebarCollapsed: state.sidebarCollapsed,
       sidebarWidth: clampSidebarWidth(state.sidebarWidth),
       rightSidebarRatio: clampRightSidebarRatio(state.rightSidebarRatio),
+      rightSidebarPlacement: state.rightSidebarPlacement,
       workspaceWidth: clampPanelWidth(state.workspaceWidth),
       previewWidth: clampPanelWidth(state.previewWidth),
     }),

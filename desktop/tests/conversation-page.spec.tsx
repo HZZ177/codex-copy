@@ -98,6 +98,80 @@ describe("ConversationPage", () => {
     expect(screen.queryByTestId("conversation-empty")).toBeNull();
   });
 
+  it("restores injected follow context items with user history messages", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "please review", {
+          contextItems: [
+            {
+              id: "ctx-file",
+              type: "file",
+              label: "README.md",
+              content: "workspace file: README.md",
+              role: "HumanMessage",
+              source: "follow",
+              path: "README.md",
+              fileType: "file",
+            },
+          ],
+        }),
+      ],
+    });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const message = await screen.findByTestId("message-text");
+    expect(message.textContent).toContain("@README.md");
+    expect(message.textContent).toContain("please review");
+    expect(message.textContent).not.toContain("[[");
+  });
+
+  it("opens restored history file context chips in the right sidebar", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      history: [
+        historyMessage("user", "please review", {
+          contextItems: [
+            {
+              id: "ctx-file",
+              type: "file",
+              label: "README.md",
+              content: "workspace file: README.md",
+              role: "HumanMessage",
+              source: "follow",
+              path: "README.md",
+              fileType: "file",
+            },
+          ],
+        }),
+      ],
+      workspaceFilesByPath: {
+        "README.md": "# README\n\n历史文件引用内容",
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const chip = await screen.findByRole("button", { name: "打开文件引用 README.md" });
+    expect(screen.queryByText("workspace file: README.md")).toBeNull();
+
+    fireEvent.click(chip);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+    });
+    await waitFor(() => {
+      expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
+    });
+    expect(await screen.findByText("历史文件引用内容")).not.toBeNull();
+  });
+
   it("shows runtime typing speed above the bottom composer and scrolls to bottom from the dock button", async () => {
     const { runtime } = fakeRuntime({
       history: [historyMessage("assistant", "历史回答")],
@@ -446,7 +520,8 @@ describe("ConversationPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "添加选中文本到对话" }));
 
     const input = screen.getByLabelText("继续输入");
-    expect(input.textContent).toContain("引用片段");
+    expect(input.textContent).toBe("");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("引用片段");
     vi.useFakeTimers();
     try {
       fireEvent.mouseOver(screen.getByText("引用片段"));
@@ -486,6 +561,105 @@ describe("ConversationPage", () => {
       expect(workspaceSearch).toHaveBeenCalledWith({ sessionId: "ses-1" }, "READ");
     });
     expect(await screen.findByRole("option", { name: /README\.md/ })).not.toBeNull();
+  });
+
+  it("loads default project file candidates from the composer at trigger", async () => {
+    const { runtime, channel } = fakeRuntime({
+      workspaceEntriesByPath: {
+        "": [
+          workspaceEntry("README.md", "README.md", "file", 128),
+          workspaceEntry("src", "src", "directory"),
+        ],
+      },
+      session: agentSession({
+        session_type: "workspace",
+        workspace_id: "ws-1",
+        cwd: "D:/repo",
+        workspace_roots: ["D:/repo"],
+        workspace: workspace("ws-1", "repo", "D:/repo"),
+      }),
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    typeComposer("@");
+
+    expect(await screen.findByTestId("at-file-menu")).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "");
+    });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "选择文件 README.md" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("继续输入").textContent).toBe("");
+    });
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("README.md");
+
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    const chatMock = channel.chat as unknown as ReturnType<typeof vi.fn>;
+    const payload = chatMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      session_id: "ses-1",
+      message: "",
+      model: "qwen-coder",
+    });
+    const runtimeParams = payload.runtime_params as { message_injection?: Array<Record<string, unknown>> } | undefined;
+    expect(runtimeParams?.message_injection).toHaveLength(1);
+    expect(runtimeParams?.message_injection?.[0]).toMatchObject({
+      type: "follow",
+      role: "HumanMessage",
+      metadata: {
+        kind: "file",
+        path: "README.md",
+        fileType: "file",
+      },
+    });
+    expect(runtimeParams?.message_injection?.[0]?.content).toContain("README.md");
+    expect(screen.getAllByTestId("message-text")[0].textContent).toContain("@README.md");
+  });
+
+  it("opens a selected file reference chip in the right sidebar file preview", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 128)],
+      },
+      workspaceFilesByPath: {
+        "README.md": "# README\n\n来自文件引用胶囊",
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    typeComposer("@");
+
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "选择文件 README.md" }));
+    expect(await screen.findByRole("button", { name: "打开文件引用 README.md" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开文件引用 README.md" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+    });
+    expect(await screen.findByRole("tab", { name: "文件" })).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
+    });
+    expect(await screen.findByText("来自文件引用胶囊")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠右侧栏" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("closed");
+    });
   });
 
   it("hides workspace file search inside the pure chat composer", async () => {

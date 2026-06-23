@@ -96,6 +96,7 @@ describe("Layout", () => {
 
     expect(shell.dataset.rightSidebar).toBe("open");
     expect(shell.dataset.rightSidebarMode).toBe("split");
+    expect(shell.dataset.rightSidebarPlacement).toBe("right");
     expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.getByRole("complementary", { name: "右侧栏" })).not.toBeNull();
     expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
@@ -125,6 +126,49 @@ describe("Layout", () => {
     expect(shell.dataset.rightSidebarMode).toBe("split");
     expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
+  });
+
+  it("swaps the conversation area and side panel across the split handle", () => {
+    renderLayout(
+      <Layout>
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+
+    expect(shell.dataset.rightSidebarPlacement).toBe("right");
+    expect(screen.getByRole("complementary", { name: "右侧栏" })).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("交换对话区和侧边栏位置"));
+
+    expect(shell.dataset.rightSidebarPlacement).toBe("left");
+    expect(screen.getByRole("complementary", { name: "左侧栏" })).not.toBeNull();
+    expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
+    expect(screen.getByLabelText("展开左侧栏到对话区域")).not.toBeNull();
+    expect(screen.getByLabelText("折叠左侧栏")).not.toBeNull();
+
+    const leftHandle = screen.getByRole("separator", { name: "调整左侧栏宽度" });
+    fireEvent.keyDown(leftHandle, { key: "ArrowRight" });
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.46");
+
+    fireEvent.keyDown(leftHandle, { key: "ArrowLeft" });
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.45");
+
+    fireEvent.click(screen.getByLabelText("折叠左侧栏"));
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.getByLabelText("展开左侧栏")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("展开左侧栏"));
+    expect(shell.dataset.rightSidebar).toBe("open");
+    expect(shell.dataset.rightSidebarPlacement).toBe("left");
+
+    fireEvent.click(screen.getByLabelText("交换对话区和侧边栏位置"));
+
+    expect(shell.dataset.rightSidebarPlacement).toBe("right");
+    expect(screen.getByRole("complementary", { name: "右侧栏" })).not.toBeNull();
+    expect(screen.getByRole("separator", { name: "调整右侧栏宽度" })).not.toBeNull();
   });
 
   it("collapses the right sidebar from its panel controls", () => {
@@ -219,27 +263,43 @@ describe("Layout", () => {
     const shell = screen.getByTestId("app-shell");
     const codePreviewButton = screen.getByRole("button", { name: "在预览面板打开 Markdown 预览" });
 
+    expect(codePreviewButton.getAttribute("aria-pressed")).toBe("false");
+    expect(codePreviewButton.querySelector(".lucide-panel-right-open")).not.toBeNull();
     fireEvent.click(codePreviewButton);
     await waitFor(() => {
       expect(shell.dataset.rightSidebar).toBe("open");
+      expect(codePreviewButton.getAttribute("aria-pressed")).toBe("true");
+      expect(codePreviewButton.querySelector(".lucide-panel-right-close")).not.toBeNull();
     });
     expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
     expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => {
+      expect(codePreviewButton.getAttribute("aria-pressed")).toBe("false");
+      expect(codePreviewButton.querySelector(".lucide-panel-right-open")).not.toBeNull();
+    });
 
     fireEvent.click(codePreviewButton);
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => {
+      expect(codePreviewButton.getAttribute("aria-pressed")).toBe("true");
+      expect(codePreviewButton.querySelector(".lucide-panel-right-close")).not.toBeNull();
+    });
 
     fireEvent.click(codePreviewButton);
     await waitFor(() => {
       expect(shell.dataset.rightSidebar).toBe("closed");
+      expect(codePreviewButton.getAttribute("aria-pressed")).toBe("false");
+      expect(codePreviewButton.querySelector(".lucide-panel-right-open")).not.toBeNull();
     });
 
     fireEvent.click(codePreviewButton);
     await waitFor(() => {
       expect(shell.dataset.rightSidebar).toBe("open");
+      expect(codePreviewButton.getAttribute("aria-pressed")).toBe("true");
+      expect(codePreviewButton.querySelector(".lucide-panel-right-close")).not.toBeNull();
     });
     expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
   });

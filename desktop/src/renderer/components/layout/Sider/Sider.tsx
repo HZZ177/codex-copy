@@ -23,6 +23,7 @@ interface SiderGroup {
   kind: "workspace" | "chat";
   items: SiderEntry[];
   latestUpdatedAt?: string;
+  workspaceId?: string;
 }
 
 interface SessionIndicator {
@@ -220,6 +221,7 @@ export function Sider({
             confirmDeleteId={confirmDeleteId}
             canMutate={canMutateConversations}
             sessionIndicators={sessionIndicators}
+            workspaceId={group.workspaceId}
             key={group.id}
             onDelete={(id) => void deleteConversation(id)}
             onCancelDelete={() => setConfirmDeleteId(null)}
@@ -349,6 +351,7 @@ interface SiderSectionProps {
   confirmDeleteId?: string | null;
   canMutate?: boolean;
   sessionIndicators?: Record<string, SessionIndicator>;
+  workspaceId?: string;
   onDelete?: (id: string) => void;
   onCancelDelete?: () => void;
   onCancelRename?: () => void;
@@ -370,6 +373,7 @@ function SiderSection({
   confirmDeleteId,
   canMutate = false,
   sessionIndicators = {},
+  workspaceId,
   onDelete,
   onCancelDelete,
   onCancelRename,
@@ -380,6 +384,7 @@ function SiderSection({
   onUpdateRename,
 }: SiderSectionProps) {
   const [hoveredSession, setHoveredSession] = useState<CollapsedSessionCard | null>(null);
+  const [hoveredProject, setHoveredProject] = useState<CollapsedProjectCard | null>(null);
   const [sectionExpanded, setSectionExpanded] = useState(true);
   const sectionItemsId = useId();
   const previousActivePathRef = useRef(activePath);
@@ -398,6 +403,7 @@ function SiderSection({
 
   const showCollapsedCard = (item: SiderEntry, active: boolean, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
+    setHoveredProject(null);
     setHoveredSession({
       id: item.id,
       title: item.title,
@@ -408,32 +414,89 @@ function SiderSection({
     });
   };
 
+  const showCollapsedProjectCard = (active: boolean, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    setHoveredSession(null);
+    setHoveredProject({
+      title,
+      active,
+      expanded: sectionExpanded,
+      top: Math.round(rect.top + rect.height / 2),
+    });
+  };
+
   if (collapsed) {
+    const collapsedProjectActive =
+      canToggleSection && items.some((item) => isActivePath(activePath, conversationPath(item.id)));
     return (
-      <section className={styles.collapsedSection} aria-label={title}>
-        {items.map((item) => {
-          const path = conversationPath(item.id);
-          const active = isActivePath(activePath, path);
-          const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
-          return (
-            <button
-              aria-current={active ? "page" : undefined}
-              aria-label={`打开会话 ${item.title}`}
-              className={styles.collapsedSessionButton}
-              data-active={active ? "true" : "false"}
-              key={item.id}
-              onBlur={() => setHoveredSession(null)}
-              onClick={() => onNavigate?.(path)}
-              onFocus={(event) => showCollapsedCard(item, active, event.currentTarget)}
-              onMouseEnter={(event) => showCollapsedCard(item, active, event.currentTarget)}
-              onMouseLeave={() => setHoveredSession(null)}
-              type="button"
-            >
-              <span className={styles.collapsedSessionInitial}>{sessionInitial(item.title)}</span>
-              <SessionStatusIndicators indicator={indicator} collapsed />
-            </button>
-          );
-        })}
+      <section className={styles.collapsedSection} aria-label={title} data-kind={kind}>
+        {canToggleSection ? (
+          <button
+            className={styles.collapsedProjectButton}
+            type="button"
+            aria-controls={sectionItemsId}
+            aria-expanded={sectionExpanded}
+            aria-label={`${sectionExpanded ? "收起" : "展开"}项目 ${title}`}
+            data-active={collapsedProjectActive ? "true" : "false"}
+            onBlur={() => setHoveredProject(null)}
+            onClick={() => setSectionExpanded((expanded) => !expanded)}
+            onFocus={(event) => showCollapsedProjectCard(collapsedProjectActive, event.currentTarget)}
+            onMouseEnter={(event) => showCollapsedProjectCard(collapsedProjectActive, event.currentTarget)}
+            onMouseLeave={() => setHoveredProject(null)}
+          >
+            {sectionExpanded ? (
+              <FolderOpen className={styles.collapsedProjectFolder} size={16} strokeWidth={1.8} aria-hidden="true" />
+            ) : (
+              <Folder className={styles.collapsedProjectFolder} size={16} strokeWidth={1.8} aria-hidden="true" />
+            )}
+            <ChevronDown className={styles.collapsedProjectChevron} size={10} strokeWidth={2.15} aria-hidden="true" />
+          </button>
+        ) : null}
+        <div
+          className={styles.collapsedSectionItems}
+          aria-hidden={canToggleSection && !sectionExpanded}
+          data-expanded={!canToggleSection || sectionExpanded ? "true" : "false"}
+          id={sectionItemsId}
+        >
+          <div className={styles.collapsedSectionItemsInner}>
+            {items.map((item) => {
+              const path = conversationPath(item.id);
+              const active = isActivePath(activePath, path);
+              const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
+              return (
+                <button
+                  aria-current={active ? "page" : undefined}
+                  aria-label={`打开会话 ${item.title}`}
+                  className={styles.collapsedSessionButton}
+                  data-active={active ? "true" : "false"}
+                  key={item.id}
+                  onBlur={() => setHoveredSession(null)}
+                  onClick={() => onNavigate?.(path)}
+                  onFocus={(event) => showCollapsedCard(item, active, event.currentTarget)}
+                  onMouseEnter={(event) => showCollapsedCard(item, active, event.currentTarget)}
+                  onMouseLeave={() => setHoveredSession(null)}
+                  type="button"
+                >
+                  {indicator.isStreaming ? (
+                    <span
+                      className={styles.collapsedSessionLoading}
+                      data-collapsed-loading="true"
+                      aria-hidden="true"
+                    >
+                      <span className={styles.historyStreamingSpinner} />
+                    </span>
+                  ) : (
+                    <>
+                      <span className={styles.collapsedSessionInitial}>{sessionInitial(item.title)}</span>
+                      <SessionStatusIndicators indicator={indicator} collapsed />
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {hoveredProject ? <CollapsedProjectCardView project={hoveredProject} /> : null}
         {hoveredSession ? <CollapsedSessionCardView session={hoveredSession} /> : null}
       </section>
     );
@@ -442,23 +505,36 @@ function SiderSection({
   return (
     <section className={styles.section} aria-label={title} data-kind={kind}>
       {canToggleSection ? (
-        <button
-          className={styles.sectionTitle}
-          type="button"
-          aria-controls={sectionItemsId}
-          aria-expanded={sectionExpanded}
-          aria-label={`${sectionExpanded ? "收起" : "展开"}项目 ${title}`}
-          data-kind={kind}
-          onClick={() => setSectionExpanded((expanded) => !expanded)}
-        >
-          {sectionExpanded ? (
-            <FolderOpen size={15} strokeWidth={1.75} aria-hidden="true" />
-          ) : (
-            <Folder size={15} strokeWidth={1.75} aria-hidden="true" />
-          )}
-          <span>{title}</span>
-          <ChevronDown className={styles.sectionChevron} size={14} strokeWidth={1.9} aria-hidden="true" />
-        </button>
+        <div className={styles.sectionTitleRow} data-kind={kind}>
+          <button
+            className={styles.sectionTitle}
+            type="button"
+            aria-controls={sectionItemsId}
+            aria-expanded={sectionExpanded}
+            aria-label={`${sectionExpanded ? "收起" : "展开"}项目 ${title}`}
+            data-kind={kind}
+            onClick={() => setSectionExpanded((expanded) => !expanded)}
+          >
+            {sectionExpanded ? (
+              <FolderOpen size={15} strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              <Folder size={15} strokeWidth={1.75} aria-hidden="true" />
+            )}
+            <span>{title}</span>
+            <ChevronDown className={styles.sectionChevron} size={14} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+          {workspaceId ? (
+            <button
+              className={styles.sectionNewButton}
+              type="button"
+              aria-label={`在项目 ${title} 中新建对话`}
+              title={`在项目 ${title} 中新建对话`}
+              onClick={() => onNavigate?.(newWorkspaceConversationPath(workspaceId))}
+            >
+              <SquarePen size={14} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
       ) : (
         <div className={styles.sectionTitle} data-kind={kind}>
           <span>{title}</span>
@@ -588,6 +664,30 @@ interface CollapsedSessionCard {
   top: number;
 }
 
+interface CollapsedProjectCard {
+  title: string;
+  active: boolean;
+  expanded: boolean;
+  top: number;
+}
+
+function CollapsedProjectCardView({ project }: { project: CollapsedProjectCard }) {
+  return (
+    <div
+      className={styles.collapsedSessionCard}
+      role="tooltip"
+      style={{ "--session-card-top": `${project.top}px` } as CSSProperties}
+    >
+      <div className={styles.collapsedSessionCardTitle}>{project.title}</div>
+      <div className={styles.collapsedSessionCardMeta}>
+        <span>{project.active ? "当前项目" : "项目"}</span>
+        <span aria-hidden="true">·</span>
+        <span>{project.expanded ? "已展开" : "已收起"}</span>
+      </div>
+    </div>
+  );
+}
+
 function CollapsedSessionCardView({ session }: { session: CollapsedSessionCard }) {
   return (
     <div
@@ -639,6 +739,7 @@ function buildSessionGroups(sessions: AgentSession[]): SiderGroup[] {
           kind: meta.kind,
           items: [],
           latestUpdatedAt: session.updated_at,
+          workspaceId: meta.workspaceId,
         };
       group.title = meta.title;
       group.latestUpdatedAt = maxTime(group.latestUpdatedAt, session.updated_at);
@@ -661,6 +762,7 @@ function buildControlledGroups(projects: SiderEntry[], conversations: SiderEntry
       kind: "workspace" as const,
       items: [],
       latestUpdatedAt: project.updatedAt,
+      workspaceId: project.id,
     }));
   }
   const title = projects[0]?.title ?? "对话";
@@ -671,17 +773,19 @@ function buildControlledGroups(projects: SiderEntry[], conversations: SiderEntry
       kind: projects[0] ? "workspace" : "chat",
       items: conversations.map((item) => ({ ...item, groupTitle: title })),
       latestUpdatedAt: conversations[0]?.updatedAt,
+      workspaceId: projects[0]?.id,
     },
   ];
 }
 
-function sessionGroupMeta(session: AgentSession): Pick<SiderGroup, "id" | "title" | "kind"> {
+function sessionGroupMeta(session: AgentSession): Pick<SiderGroup, "id" | "title" | "kind" | "workspaceId"> {
   if (session.session_type === "workspace") {
     if (session.workspace) {
       return {
         id: `workspace:${session.workspace.id}`,
         title: session.workspace.name || session.workspace.root_path,
         kind: "workspace",
+        workspaceId: session.workspace.id,
       };
     }
     return {
@@ -719,6 +823,10 @@ function maxTime(left: string | undefined, right: string | undefined): string | 
 
 function conversationPath(id: string): string {
   return `/conversation/${encodeURIComponent(id)}`;
+}
+
+function newWorkspaceConversationPath(workspaceId: string): string {
+  return `/guid?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 
 function formatRelativeTime(value: string): string {

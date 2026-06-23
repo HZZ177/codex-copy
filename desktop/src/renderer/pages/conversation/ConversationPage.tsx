@@ -3,12 +3,14 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 
 import {
   runtimeBridge,
+  type ChatPayload,
   type ChatChannel,
   type RuntimeBridge,
+  type WorkspaceEntry,
   type WorkspaceSearchResult,
   type WsConnectionStatus,
 } from "@/runtime";
-import { SendBox } from "@/renderer/components/chat/SendBox";
+import { SendBox, type SelectedFile } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, type RuntimeModelSelection, useRuntimeModelSelection } from "@/renderer/components/model";
 import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
 import { usePreview } from "@/renderer/providers/PreviewProvider";
@@ -25,6 +27,7 @@ import {
 } from "@/renderer/stores/agentSessionStore";
 import type { ConversationMessage, ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
+import { prepareComposerMessage } from "@/renderer/utils/messageInjection";
 import type { AgentActionEnvelope, AgentChatMessage } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
@@ -61,7 +64,7 @@ export function ConversationPage({
   const channelRef = useRef<ChatChannel | null>(null);
   const quickSendConsumedRef = useRef<string | null>(null);
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null);
-  const { openPreview: openPreviewRequest, setPreviewHostContext } = usePreview();
+  const { openFilePanel, openPreview: openPreviewRequest, setPreviewHostContext } = usePreview();
   const modelSelection = useRuntimeModelSelection(runtime, initialModel);
   const state = sharedRuntimeContext?.state ?? localState;
   const dispatch = sharedRuntimeContext?.dispatch ?? localDispatch;
@@ -84,6 +87,13 @@ export function ConversationPage({
   const searchWorkspace =
     session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
       ? (query: string) => runtime.workspace.search({ sessionId: threadId }, query)
+      : undefined;
+  const listWorkspaceDirectory =
+    session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
+      ? (path: string) =>
+          runtime.workspace
+            .listDirectory({ sessionId: threadId }, path)
+            .then((response) => workspaceEntriesToSearchResults(response.entries))
       : undefined;
   const connectionReady = wsStatus === "open";
   const canSend = draft.trim().length > 0 && !isBusy(runtimeState) && connectionReady;
@@ -131,6 +141,22 @@ export function ConversationPage({
       });
     },
     [openPreviewRequest, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+  );
+
+  const openFileReference = useCallback(
+    (file: SelectedFile) => {
+      if (!workspaceAvailable || !file.path) {
+        return;
+      }
+      openFilePanel(file.path, {
+        sessionId: threadId,
+        workspaceAvailable,
+        workspaceLabel,
+        runtime,
+        onQuoteSelection: quoteSelection,
+      });
+    },
+    [openFilePanel, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
   );
 
   useEffect(() => {
@@ -275,10 +301,19 @@ export function ConversationPage({
   ]);
 
   const sendText = useCallback(
-    (text: string, model: string, options: { clearDraft?: boolean } = {}) => {
+    (
+      text: string,
+      model: string,
+      options: {
+        clearDraft?: boolean;
+        contextItems?: ChatPayload["contextItems"];
+        runtimeParams?: ChatPayload["runtime_params"];
+      } = {},
+    ) => {
       const trimmedText = text.trim();
       const trimmedModel = model.trim();
-      if (!trimmedText || !threadId || isBusy(runtimeState)) {
+      const contextItems = options.contextItems ?? [];
+      if ((!trimmedText && !contextItems.length) || !threadId || isBusy(runtimeState)) {
         return false;
       }
       if (!trimmedModel) {
@@ -295,16 +330,27 @@ export function ConversationPage({
 
       setRuntimeDetail(null);
       try {
-        dispatch({ type: "message/addUser", sessionId: threadId, content: trimmedText });
+        dispatch({
+          type: "message/addUser",
+          sessionId: threadId,
+          content: trimmedText,
+          contextItems,
+        });
         dispatch({ type: "runtime/setState", sessionId: threadId, runtimeState: "running" });
+        const payload: ChatPayload = {
+          session_id: threadId,
+          message: trimmedText,
+          model: trimmedModel,
+          ...(options.runtimeParams ? { runtime_params: options.runtimeParams } : {}),
+        };
         if (sharedRuntimeContext) {
-          sharedRuntimeContext.chat({ session_id: threadId, message: trimmedText, model: trimmedModel });
+          sharedRuntimeContext.chat(payload);
         } else {
           const channel = channelRef.current;
           if (!channel) {
             throw new Error("对话连接尚未就绪");
           }
-          channel.chat({ session_id: threadId, message: trimmedText, model: trimmedModel });
+          channel.chat(payload);
         }
         if (options.clearDraft) {
           setDraft("");
@@ -320,13 +366,17 @@ export function ConversationPage({
     [dispatch, onOpenModelSettings, runtimeState, setRuntimeDetail, sharedRuntimeContext, threadId, wsStatus],
   );
 
-  const send = () => {
-    const text = draft.trim();
-    if (!text) {
-      return;
+  const send = (files: SelectedFile[] = []) => {
+    const prepared = prepareComposerMessage(draft, files);
+    if (!prepared.message && !prepared.contextItems.length) {
+      return false;
     }
     const model = modelSelection.selectedModel.trim();
-    sendText(text, model, { clearDraft: true });
+    return sendText(prepared.message, model, {
+      clearDraft: true,
+      contextItems: prepared.contextItems,
+      runtimeParams: prepared.runtimeParams,
+    });
   };
 
   useEffect(() => {
@@ -349,7 +399,10 @@ export function ConversationPage({
     if (!pending) {
       return;
     }
-    const sent = sendText(pending.message, pending.model || modelSelection.selectedModel);
+    const sent = sendText(pending.message, pending.model || modelSelection.selectedModel, {
+      contextItems: pending.contextItems,
+      runtimeParams: pending.runtimeParams,
+    });
     if (!sent) {
       setDraft((current) => (current.trim() ? current : pending.message));
     }
@@ -413,11 +466,13 @@ export function ConversationPage({
           canStop={canStop}
           connectionReady={connectionReady}
           modelSelection={modelSelection}
+          onListWorkspaceDirectory={listWorkspaceDirectory}
           onSearchWorkspace={searchWorkspace}
           onOpenModelSettings={onOpenModelSettings}
           onChange={setDraft}
           onSend={send}
           onStop={stop}
+          onOpenFileReference={openFileReference}
         />
       }
     >
@@ -478,10 +533,12 @@ function ConversationComposer({
   connectionReady,
   modelSelection,
   onSearchWorkspace,
+  onListWorkspaceDirectory,
   onOpenModelSettings,
   onChange,
   onSend,
   onStop,
+  onOpenFileReference,
 }: {
   value: string;
   runtimeState: ConversationRuntimeState;
@@ -490,10 +547,12 @@ function ConversationComposer({
   connectionReady: boolean;
   modelSelection: RuntimeModelSelection;
   onSearchWorkspace?: (query: string) => Promise<WorkspaceSearchResult[]>;
+  onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenModelSettings?: () => void;
   onChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (files?: SelectedFile[]) => boolean;
   onStop: () => void;
+  onOpenFileReference?: (file: SelectedFile) => void;
 }) {
   return (
     <SendBox
@@ -518,10 +577,20 @@ function ConversationComposer({
       onChange={onChange}
       onSend={onSend}
       onStop={onStop}
-      allowFileSelection={Boolean(onSearchWorkspace)}
+      onOpenFileReference={onOpenFileReference}
+      allowFileSelection={Boolean(onSearchWorkspace || onListWorkspaceDirectory)}
+      onListWorkspaceDirectory={onListWorkspaceDirectory}
       onSearchWorkspace={onSearchWorkspace}
     />
   );
+}
+
+function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSearchResult[] {
+  return entries.map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    type: entry.type,
+  }));
 }
 
 function appendLocalError(
@@ -610,6 +679,7 @@ function payloadFromAgentMessage(message: AgentChatMessage): Record<string, unkn
     traceId: message.traceId,
     traceQueryContext: message.traceQueryContext,
     cancelled: message.cancelled,
+    contextItems: message.contextItems,
   };
 
   if (message.role === "tool") {

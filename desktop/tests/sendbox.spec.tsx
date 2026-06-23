@@ -173,7 +173,51 @@ describe("SendBox", () => {
     expect(onChange).toHaveBeenCalledWith("普通输入");
   });
 
-  it("renders quoted draft markers as removable inline chips", async () => {
+  it("restores the placeholder state after contenteditable content is cleared", () => {
+    const onChange = vi.fn();
+    render(
+      <SendBox
+        value="已输入"
+        runtimeState="idle"
+        canSend
+        canStop={false}
+        onChange={onChange}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("继续输入");
+    input.replaceChildren(document.createElement("br"));
+    fireEvent.input(input);
+
+    expect(onChange).toHaveBeenCalledWith("");
+    expect(input.getAttribute("data-empty")).toBe("true");
+  });
+
+  it("keeps whitespace-only content as non-empty input", () => {
+    const onChange = vi.fn();
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        onChange={onChange}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("继续输入");
+    input.textContent = "   ";
+    fireEvent.input(input);
+
+    expect(onChange).toHaveBeenCalledWith("   ");
+    expect(input.getAttribute("data-empty")).toBe("false");
+  });
+
+  it("renders quoted draft markers as removable top context chips", async () => {
     const onChange = vi.fn();
     vi.stubGlobal("navigator", {
       clipboard: {
@@ -195,7 +239,8 @@ describe("SendBox", () => {
       );
 
       const input = screen.getByLabelText("继续输入");
-      expect(input.textContent).toContain("引用片段");
+      expect(input.textContent).toBe("");
+      expect(screen.getByLabelText("已添加上下文").textContent).toContain("引用片段");
       fireEvent.mouseOver(screen.getByText("引用片段"));
       act(() => {
         vi.advanceTimersByTime(199);
@@ -219,7 +264,7 @@ describe("SendBox", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("hides the quote card when the pointer leaves a chip inside the editor", () => {
+  it("hides the quote card when the pointer leaves a top context chip", () => {
     vi.useFakeTimers();
     try {
       render(
@@ -242,9 +287,9 @@ describe("SendBox", () => {
 
       expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
 
-      const remove = input.querySelector("[data-quote-remove]");
-      expect(remove).not.toBeNull();
-      fireEvent.mouseOut(remove as HTMLElement, { relatedTarget: input });
+      const chipWrapper = screen.getByLabelText("已添加上下文").firstElementChild;
+      expect(chipWrapper).not.toBeNull();
+      fireEvent.mouseLeave(chipWrapper as HTMLElement, { relatedTarget: input });
 
       act(() => {
         vi.advanceTimersByTime(120);
@@ -254,5 +299,30 @@ describe("SendBox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps top quote context when editing the visible composer text", () => {
+    const marker = createQuoteMarker("这是一段选中的历史内容");
+    const onChange = vi.fn();
+    render(
+      <SendBox
+        value={`原文${marker}`}
+        runtimeState="idle"
+        canSend
+        canStop={false}
+        onChange={onChange}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("继续输入");
+    expect(input.textContent).toBe("原文");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("引用片段");
+
+    input.textContent = "更新后正文";
+    fireEvent.input(input);
+
+    expect(onChange).toHaveBeenCalledWith(`更新后正文${marker}`);
   });
 });

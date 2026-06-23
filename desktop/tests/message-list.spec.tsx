@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
 import { MessageList } from "@/renderer/pages/conversation/messages";
+import { MessageGroupBlock } from "@/renderer/pages/conversation/messages/MessageGroupBlock";
 import { useVirtuosoAutoScroll } from "@/renderer/pages/conversation/messages/useVirtuosoAutoScroll";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
@@ -366,6 +367,32 @@ describe("MessageList", () => {
     expect(updatedButton.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId("tool-call-block")).not.toBeNull();
     expect(screen.getByText("已中断")).not.toBeNull();
+  });
+
+  it("keeps the grouped tool header anchored while details expand near the top", () => {
+    render(
+      <div data-testid="message-list-scroll">
+        <MessageGroupBlock
+          count={2}
+          groupKind="tool_activity"
+          messages={[toolMessage("t1"), commandMessage("c1")]}
+          sourceMessageIds={["t1", "c1"]}
+        >
+          <div>工具明细</div>
+        </MessageGroupBlock>
+      </div>,
+    );
+
+    const scroller = screen.getByTestId("message-list-scroll") as HTMLDivElement;
+    const toggle = screen.getByRole("button", { name: "读取了 1 个文件，已运行 1 条命令详情" });
+    mockScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 360, scrollTop: 160 });
+    mockElementTop(scroller, 0);
+    mockElementTopSequence(toggle, [90, 42]);
+
+    fireEvent.click(toggle);
+
+    expect(scroller.scrollTop).toBe(112);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("uses failure wording for grouped tools with error results", () => {
@@ -769,6 +796,32 @@ function mockScrollMetrics(
   Object.defineProperty(element, "scrollHeight", { configurable: true, value: metrics.scrollHeight });
   Object.defineProperty(element, "clientHeight", { configurable: true, value: metrics.clientHeight });
   Object.defineProperty(element, "scrollTop", { configurable: true, writable: true, value: metrics.scrollTop });
+}
+
+function mockElementTop(element: HTMLElement, top: number) {
+  mockElementTopSequence(element, [top]);
+}
+
+function mockElementTopSequence(element: HTMLElement, tops: number[]) {
+  let index = 0;
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => {
+      const top = tops[Math.min(index, tops.length - 1)] ?? 0;
+      index += 1;
+      return {
+        top,
+        bottom: top + 28,
+        left: 0,
+        right: 320,
+        width: 320,
+        height: 28,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    },
+  });
 }
 
 function fakeRuntime(readMedia: ReturnType<typeof vi.fn>): RuntimeBridge {

@@ -19,6 +19,8 @@ export interface WorkspaceFileBrowserProps {
   sessionId?: string;
   label?: string;
   runtime: RuntimeBridge;
+  previewPath?: string | null;
+  previewRequestId?: number;
 }
 
 const DEFAULT_TREE_WIDTH = 260;
@@ -35,11 +37,19 @@ interface ResizeState {
   pendingWidth: number;
 }
 
-export function WorkspaceFileBrowser({ workspaceId, sessionId, label, runtime }: WorkspaceFileBrowserProps) {
+export function WorkspaceFileBrowser({
+  workspaceId,
+  sessionId,
+  label,
+  runtime,
+  previewPath = null,
+  previewRequestId = 0,
+}: WorkspaceFileBrowserProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeState | null>(null);
   const previewUnmountTimerRef = useRef<number | null>(null);
   const previewOpenFrameRef = useRef<number | null>(null);
+  const handledPreviewRequestIdRef = useRef(0);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [mountedPreviewPath, setMountedPreviewPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -147,6 +157,14 @@ export function WorkspaceFileBrowser({ workspaceId, sessionId, label, runtime }:
       setMountedPreviewPath(null);
     }, FILE_PREVIEW_CLOSE_MS);
   }, [clearPreviewOpenFrame, clearPreviewUnmountTimer]);
+
+  useEffect(() => {
+    if (!previewPath || !previewRequestId || handledPreviewRequestIdRef.current === previewRequestId) {
+      return;
+    }
+    handledPreviewRequestIdRef.current = previewRequestId;
+    openPreview(previewPath);
+  }, [openPreview, previewPath, previewRequestId]);
 
   useEffect(
     () => () => {

@@ -28,18 +28,20 @@
 
 .scrollBottomButton {
   display: inline-grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--composer-bg) 94%, var(--surface-muted));
-  box-shadow: 0 6px 18px rgb(15 23 42 / 8%);
+  background: color-mix(in srgb, var(--composer-bg) 92%, var(--surface-muted));
+  box-shadow: 0 6px 18px rgb(15 23 42 / 6%);
   color: var(--color-text-primary);
   pointer-events: auto;
   transition:
     background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
     color var(--motion-fast) ease,
     opacity var(--motion-fast) ease,
     transform var(--motion-fast) ease;
@@ -47,13 +49,15 @@
 
 .scrollBottomButton:not(:disabled):hover {
   background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--color-border-subtle) 72%, var(--color-text-tertiary));
+  box-shadow: 0 8px 20px rgb(15 23 42 / 8%);
   color: var(--color-text-primary);
   transform: translateY(-1px);
 }
 
 .scrollBottomButton:disabled {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.68;
 }
 
 .composer {

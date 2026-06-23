@@ -1,4 +1,5 @@
 import type {
+  AgentContextItem,
   AgentActionEnvelope,
   AgentChatMessagePayload,
   AgentHistoryResponse,
@@ -63,6 +64,9 @@ export interface ChatPayload {
   scene_id?: string;
   model?: string;
   system_prompt?: string | null;
+  runtime_params?: Record<string, unknown> | null;
+  runtimeParams?: Record<string, unknown> | null;
+  contextItems?: AgentContextItem[];
   files?: unknown[];
   [key: string]: unknown;
 }

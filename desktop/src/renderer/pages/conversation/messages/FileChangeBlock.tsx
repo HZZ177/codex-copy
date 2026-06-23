@@ -5,6 +5,7 @@ import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
 import styles from "./FileChangeBlock.module.css";
 import { useDeferredUnmount } from "./useDeferredUnmount";
+import { useExpansionScrollAnchor } from "./useExpansionScrollAnchor";
 
 export interface FileChangeBlockProps {
   message: ConversationMessage;
@@ -25,6 +26,7 @@ export function FileChangeBlock({ message, onPreviewFile }: FileChangeBlockProps
   const statusKind = failed ? "failed" : change.status === "running" ? "running" : "done";
   const title = change.files.length ? `编辑了 ${change.files.length} 个文件` : "文件变更";
   const detailsMotion = useDeferredUnmount<HTMLDivElement>(detailsOpen);
+  const captureExpansionAnchor = useExpansionScrollAnchor();
 
   return (
     <article className={styles.block} data-status={failed ? "failed" : change.status} data-testid="file-change-block">
@@ -33,7 +35,10 @@ export function FileChangeBlock({ message, onPreviewFile }: FileChangeBlockProps
         type="button"
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? "收起文件变更详情" : "展开文件变更详情"}
-        onClick={() => setDetailsOpen((open) => !open)}
+        onClick={(event) => {
+          captureExpansionAnchor(event.currentTarget);
+          setDetailsOpen((open) => !open);
+        }}
       >
         <span className={styles.icon} aria-hidden="true">
           {failed ? <XCircle size={16} /> : change.status === "running" ? <LoaderCircle size={16} /> : <FileDiff size={16} />}

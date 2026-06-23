@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import mimetypes
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,14 +23,71 @@ RepositoriesDep = Depends(get_repositories)
 MAX_READ_BYTES = 512 * 1024
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
 DEFAULT_SEARCH_LIMIT = 30
+MAX_SEARCH_VISITED_PATHS = 50_000
+MAX_SEARCH_SECONDS = 1.2
 IGNORED_DIRS = {
     ".git",
+    ".hg",
+    ".svn",
     ".venv",
+    "venv",
+    "env",
     "node_modules",
     "__pycache__",
+    ".cache",
+    ".parcel-cache",
+    ".ruff_cache",
     ".mypy_cache",
     ".pytest_cache",
     ".npm-cache",
+    ".pnpm-store",
+    ".yarn",
+    ".turbo",
+    ".next",
+    ".nuxt",
+    ".vite",
+    "coverage",
+    "dist",
+    "build",
+    "out",
+    "target",
+    ".gradle",
+    ".idea",
+}
+IGNORED_FILE_NAMES = {
+    ".env",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+}
+IGNORED_FILE_SUFFIXES = {
+    ".pyc",
+    ".pyo",
+    ".class",
+    ".o",
+    ".obj",
+    ".dll",
+    ".exe",
+    ".so",
+    ".dylib",
+    ".jar",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".rar",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".pdf",
+    ".map",
 }
 
 
@@ -97,12 +156,12 @@ async def read_workspace_media(
 @router.get("/api/workspaces/{workspace_id}/search", response_model=list[WorkspaceSearchResult])
 async def search_workspace(
     workspace_id: str,
-    q: str = Query(..., min_length=1),
+    q: str = Query("", min_length=0),
     limit: int = Query(DEFAULT_SEARCH_LIMIT, ge=1, le=100),
     repositories: StorageRepositories = RepositoriesDep,
 ) -> list[WorkspaceSearchResult]:
     scope = _workspace_scope(repositories, workspace_id)
-    return _search(scope, q, limit)
+    return await asyncio.to_thread(_search, scope, q, limit)
 
 
 @router.get("/api/sessions/{session_id}/workspace/tree", response_model=WorkspaceTreeResponse)
@@ -141,12 +200,12 @@ async def read_session_workspace_media(
 )
 async def search_session_workspace(
     session_id: str,
-    q: str = Query(..., min_length=1),
+    q: str = Query("", min_length=0),
     limit: int = Query(DEFAULT_SEARCH_LIMIT, ge=1, le=100),
     repositories: StorageRepositories = RepositoriesDep,
 ) -> list[WorkspaceSearchResult]:
     scope = _session_workspace_scope(repositories, session_id)
-    return _search(scope, q, limit)
+    return await asyncio.to_thread(_search, scope, q, limit)
 
 
 def _workspace_scope(
@@ -283,14 +342,25 @@ def _search(scope: WorkspaceRuntimeContext, q: str, limit: int) -> list[Workspac
 
     query = q.lower()
     results: list[WorkspaceSearchResult] = []
+    visited = 0
+    started_at = time.perf_counter()
     for current_text, dir_names, file_names in os.walk(base):
         current = Path(current_text)
-        dir_names[:] = [name for name in dir_names if name not in IGNORED_DIRS]
+        dir_names[:] = [name for name in dir_names if not _should_skip_search_dir(name)]
+        file_names = [name for name in file_names if not _should_skip_search_file(name)]
         candidates = [
             *(current / name for name in dir_names),
             *(current / name for name in file_names),
         ]
         for candidate in sorted(candidates, key=_entry_sort_key):
+            visited += 1
+            if visited > MAX_SEARCH_VISITED_PATHS or time.perf_counter() - started_at > MAX_SEARCH_SECONDS:
+                logger.info(
+                    "[WorkspaceAPI] 搜索达到预算提前返回 | "
+                    f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | "
+                    f"visited={visited} | limit={limit}"
+                )
+                return results
             rel = _relative_path(scope, candidate)
             if query not in candidate.name.lower() and query not in rel.lower():
                 continue
@@ -313,6 +383,17 @@ def _search(scope: WorkspaceRuntimeContext, q: str, limit: int) -> list[Workspac
         f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | limit={limit}"
     )
     return results
+
+
+def _should_skip_search_dir(name: str) -> bool:
+    return name.lower() in IGNORED_DIRS
+
+
+def _should_skip_search_file(name: str) -> bool:
+    lower = name.lower()
+    if lower in IGNORED_FILE_NAMES or lower.startswith(".env."):
+        return True
+    return any(lower.endswith(suffix) for suffix in IGNORED_FILE_SUFFIXES)
 
 
 def _resolve(scope: WorkspaceRuntimeContext, path: str) -> Path:

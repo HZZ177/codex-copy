@@ -5,6 +5,7 @@
   display: grid;
   height: 100%;
   min-height: 0;
+  overflow-anchor: none;
 }
 
 .virtualScroller {
@@ -14,6 +15,7 @@
 .scroller {
   height: 100%;
   min-height: 0;
+  overflow-anchor: none;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -55,6 +57,7 @@
   margin: 0 auto;
   padding: 22px 0 var(--message-list-bottom-buffer);
   list-style: none;
+  overflow-anchor: none;
 }
 
 .virtualList {
@@ -88,6 +91,7 @@
   min-width: 0;
   padding-bottom: 20px;
   contain: layout paint style;
+  overflow-anchor: none;
 }
 
 .item:last-child {
@@ -97,6 +101,7 @@
 .turnGroup {
   display: grid;
   min-width: 0;
+  overflow-anchor: none;
 }
 
 .turnGroup:not(:last-child) {

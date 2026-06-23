@@ -6,6 +6,7 @@ import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import { copyText } from "./markdown";
 import styles from "./CommandExecutionBlock.module.css";
 import { useDeferredUnmount } from "./useDeferredUnmount";
+import { useExpansionScrollAnchor } from "./useExpansionScrollAnchor";
 
 const TITLE_INPUT_MAX_CHARS = 96;
 
@@ -22,6 +23,7 @@ export function CommandExecutionBlock({ message }: CommandExecutionBlockProps) {
   const statusKind = failed ? "failed" : running ? "running" : "done";
   const combinedOutput = [command.stdout, command.stderr].filter(Boolean).join(command.stdout && command.stderr ? "\n" : "");
   const outputMotion = useDeferredUnmount<HTMLElement>(detailsOpen);
+  const captureExpansionAnchor = useExpansionScrollAnchor();
 
   const handleCopy = async () => {
     try {
@@ -44,7 +46,10 @@ export function CommandExecutionBlock({ message }: CommandExecutionBlockProps) {
         type="button"
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? "收起命令详情" : "展开命令详情"}
-        onClick={() => setDetailsOpen((open) => !open)}
+        onClick={(event) => {
+          captureExpansionAnchor(event.currentTarget);
+          setDetailsOpen((open) => !open);
+        }}
       >
         <span className={styles.icon} aria-hidden="true">
           {failed ? <XCircle size={16} /> : running ? <LoaderCircle size={16} /> : <SquareTerminal size={16} />}

@@ -161,6 +161,7 @@
 }
 
 .content {
+  order: 3;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
@@ -171,6 +172,14 @@
   overflow-y: auto;
   background: var(--surface-bg);
   scrollbar-gutter: stable;
+}
+
+.shell[data-right-sidebar-placement="left"] .content {
+  order: 5;
+}
+
+.shell[data-right-sidebar-placement="left"][data-right-sidebar="open"] .content {
+  border-radius: 0;
 }
 
 .shell[data-right-sidebar-motion="true"] .content {
@@ -238,8 +247,14 @@
   transform: scale(0.94);
 }
 
+.shell[data-right-sidebar-placement="left"] .contentRightSidebarToggle {
+  right: auto;
+  left: calc(var(--active-sidebar-width) + 10px);
+}
+
 .rightSidebar {
   position: relative;
+  order: 5;
   width: var(--right-sidebar-width);
   flex-grow: 0;
   flex-shrink: 0;
@@ -254,6 +269,17 @@
   border-left: 0;
   background: var(--surface-bg);
   opacity: 1;
+}
+
+.shell[data-right-sidebar-placement="left"] .rightSidebar {
+  order: 3;
+  border-right: 0;
+  border-left: 1px solid var(--color-border-2);
+  border-radius: 12px 0 0 12px;
+}
+
+.shell[data-right-sidebar-placement="right"] .rightSidebar {
+  order: 5;
 }
 
 .rightSidebarTopbar {
@@ -390,6 +416,16 @@
   flex-basis: var(--right-sidebar-width);
   border-left: 1px solid var(--color-border-2);
   border-radius: 12px 0 0 12px;
+}
+
+@supports (view-transition-name: none) {
+  .content {
+    view-transition-name: keydex-conversation-content;
+  }
+
+  .rightSidebar {
+    view-transition-name: keydex-side-panel;
+  }
 }
 
 .rightSidebarBody {

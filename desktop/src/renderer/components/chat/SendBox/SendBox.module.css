@@ -56,6 +56,7 @@
 }
 
 .richInput {
+  position: relative;
   cursor: text;
   overflow-y: auto;
   caret-color: var(--color-text-primary);
@@ -65,9 +66,17 @@
 
 .richInput:empty::before,
 .richInput[data-empty="true"]::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--color-text-tertiary);
   content: attr(data-placeholder);
   pointer-events: none;
+  text-overflow: ellipsis;
+  user-select: none;
+  white-space: nowrap;
 }
 
 .root[data-variant="codex"] .richInput:empty::before,
@@ -75,28 +84,34 @@
   color: color-mix(in srgb, var(--color-text-tertiary) 68%, transparent);
 }
 
+.quoteChipWrapper {
+  position: relative;
+  display: inline-flex;
+  max-width: min(220px, 100%);
+}
+
 .quoteInputChip {
   position: relative;
   display: inline-flex;
-  max-width: min(132px, 100%);
+  max-width: 100%;
   box-sizing: border-box;
-  height: 20px;
+  min-height: 30px;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   margin: 0;
   vertical-align: middle;
-  border: 1px solid color-mix(in srgb, var(--composer-border) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 74%, var(--composer-border));
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--composer-bg) 91%, var(--surface-muted));
+  background: color-mix(in srgb, var(--surface-muted) 66%, var(--color-bg-elevated));
   box-shadow:
-    0 4px 12px rgb(15 23 42 / 5%),
+    0 7px 18px rgb(15 23 42 / 7%),
     inset 0 0 0 1px color-mix(in srgb, #fff 72%, transparent);
-  color: var(--color-text-secondary);
+  color: color-mix(in srgb, var(--color-text-primary) 82%, var(--color-text-tertiary));
   cursor: default;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 450;
   line-height: 1;
-  padding: 0 5px 0 8px;
+  padding: 0 5px 0 12px;
   user-select: none;
   white-space: nowrap;
   transition:
@@ -113,16 +128,18 @@
 
 .quoteInputChipRemove {
   display: inline-grid;
-  width: 12px;
-  height: 12px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   place-items: center;
+  border: 0;
   border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--color-text-tertiary);
   cursor: pointer;
-  font-size: 11px;
   line-height: 1;
-  opacity: 0.62;
+  padding: 0;
+  opacity: 0.72;
   transition:
     background var(--motion-fast) ease,
     color var(--motion-fast) ease,
@@ -130,11 +147,11 @@
 }
 
 .quoteInputChip:hover {
-  border-color: color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  background: color-mix(in srgb, var(--composer-bg) 84%, var(--surface-hover));
+  border-color: color-mix(in srgb, var(--color-border-default) 86%, var(--color-text-tertiary));
+  background: color-mix(in srgb, var(--surface-hover) 70%, var(--color-bg-elevated));
   color: var(--color-text-primary);
   box-shadow:
-    0 7px 18px rgb(15 23 42 / 7%),
+    0 9px 24px rgb(15 23 42 / 9%),
     inset 0 0 0 1px color-mix(in srgb, #fff 80%, transparent);
 }
 
@@ -151,9 +168,11 @@
 .quoteHoverCard {
   position: absolute;
   z-index: 24;
+  top: -8px;
+  left: 50%;
   width: max-content;
   min-width: 164px;
-  max-width: min(280px, calc(100% - 24px));
+  max-width: min(280px, calc(100vw - 32px));
   border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
@@ -183,6 +202,7 @@
 }
 
 .quoteHoverBody {
+  display: block;
   max-height: 112px;
   overflow: auto;
   color: var(--color-text-primary);
@@ -211,6 +231,7 @@
   font-size: 11px;
   line-height: 1;
   padding: 0 9px;
+  cursor: pointer;
 }
 
 .quoteHoverActions button:hover {
@@ -242,32 +263,99 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: -4px;
+  align-items: center;
+  margin: -2px 0 8px;
 }
 
 .fileChip {
   display: inline-flex;
-  max-width: min(280px, 100%);
-  height: 24px;
+  max-width: min(320px, 100%);
+  min-height: 30px;
   align-items: center;
-  border: 1px solid var(--inline-block-border);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 76%, var(--composer-border));
   border-radius: var(--radius-pill);
-  background: var(--surface-muted);
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 0 9px;
+  background: color-mix(in srgb, var(--surface-muted) 68%, var(--color-bg-elevated));
+  box-shadow:
+    0 7px 18px rgb(15 23 42 / 7%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 72%, transparent);
+  color: color-mix(in srgb, var(--color-text-primary) 82%, var(--color-text-tertiary));
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 0 5px 0 0;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 
 .fileChip:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-hover) 72%, var(--color-bg-elevated));
+  border-color: color-mix(in srgb, var(--color-border-default) 86%, var(--color-text-tertiary));
+  box-shadow:
+    0 9px 24px rgb(15 23 42 / 9%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 80%, transparent);
   color: var(--color-text-primary);
 }
 
-.fileChip span {
+.fileChipMain {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 28px;
+  flex: 1 1 auto;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.4;
+  padding: 3px 0 3px 12px;
+}
+
+.fileChipMain:disabled {
+  cursor: default;
+}
+
+.fileChipMain:focus-visible {
+  outline: none;
+}
+
+.fileChipText {
   overflow: hidden;
+  min-width: 0;
+  padding-bottom: 1px;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.fileChipRemove {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-left: 4px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.fileChipRemove:hover {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+}
+
+.fileChipRemove:focus-visible {
+  outline: none;
 }
 
 .fileError {

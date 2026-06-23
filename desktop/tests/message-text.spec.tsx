@@ -9,6 +9,7 @@ import { MessageText } from "@/renderer/pages/conversation/messages";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
+import type { RuntimeBridge } from "@/runtime";
 
 const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
 const mermaidRenderResult: RenderResult = {
@@ -70,6 +71,38 @@ describe("MessageText", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("这是一段选中的历史内容");
     });
     expect(screen.queryByText("[[这是一段选中的历史内容]]")).toBeNull();
+  });
+
+  it("opens restored file context chips without a quote hover card", () => {
+    render(
+      <PreviewProvider>
+        <MessageText
+          message={message("user", "请看这个文件", "completed", {
+            contextItems: [
+              {
+                id: "ctx-file",
+                type: "file",
+                label: "README.md",
+                content: "workspace file: README.md",
+                source: "follow",
+                path: "README.md",
+                fileType: "file",
+              },
+            ],
+          })}
+          workspaceRuntime={{} as RuntimeBridge}
+          workspaceScope={{ sessionId: "ses-1" }}
+        />
+        <FilePanelProbe />
+      </PreviewProvider>,
+    );
+
+    expect(screen.queryByText("workspace file: README.md")).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开文件引用 README.md" }));
+
+    expect(screen.getByTestId("file-panel-request").textContent).toBe("session:ses-1:README.md");
   });
 
   it("renders Chinese headings, ordered lists and code blocks without widening the message", () => {
@@ -192,6 +225,7 @@ describe("MessageText", () => {
 
   it("rolls every digit in the line change ticker when the count changes", () => {
     vi.useFakeTimers();
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValueOnce(0.8).mockReturnValueOnce(0.2);
     const { rerender } = render(<LineChangeTicker label="正在生成内容" added={9} />);
 
     expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 9 行");
@@ -199,21 +233,62 @@ describe("MessageText", () => {
 
     expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 9 行");
     act(() => {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(800);
     });
 
     expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 10 行");
     const digits = screen.getAllByTestId("line-change-digit");
     expect(digits).toHaveLength(2);
     expect(digits.every((digit) => digit.getAttribute("data-changed") === "true")).toBe(true);
-
-    act(() => {
-      vi.advanceTimersByTime(16);
-    });
+    expect(digits.map((digit) => digit.getAttribute("data-direction"))).toEqual(["down", "up"]);
     expect(digits.every((digit) => digit.getAttribute("data-phase") === "rolling")).toBe(true);
+    randomSpy.mockRestore();
   });
 
-  it("coalesces rapid line ticker changes to at most one update per half second", () => {
+  it("rolls changed line ticker digits in independently random directions", () => {
+    vi.useFakeTimers();
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValueOnce(0.2).mockReturnValueOnce(0.8).mockReturnValueOnce(0.4);
+    const { rerender } = render(<LineChangeTicker label="正在生成内容" added={99} />);
+
+    rerender(<LineChangeTicker label="正在生成内容" added={100} />);
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getAllByTestId("line-change-digit").map((digit) => digit.getAttribute("data-direction"))).toEqual([
+      "up",
+      "down",
+      "up",
+    ]);
+    randomSpy.mockRestore();
+  });
+
+  it("renders real digit sequences for rolling line ticker changes", () => {
+    vi.useFakeTimers();
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValueOnce(0.2).mockReturnValueOnce(0.8);
+    const first = render(<LineChangeTicker label="正在生成内容" added={2} />);
+
+    first.rerender(<LineChangeTicker label="正在生成内容" added={6} />);
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId("line-change-digit").getAttribute("data-direction")).toBe("up");
+    expect(screen.getByTestId("line-change-digit-track").textContent).toBe("23456");
+
+    first.unmount();
+    const second = render(<LineChangeTicker label="正在生成内容" added={2} />);
+    second.rerender(<LineChangeTicker label="正在生成内容" added={6} />);
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId("line-change-digit").getAttribute("data-direction")).toBe("down");
+    expect(screen.getByTestId("line-change-digit-track").textContent).toBe("6789012");
+    randomSpy.mockRestore();
+  });
+
+  it("coalesces rapid line ticker changes to at most one update per 0.8 seconds", () => {
     vi.useFakeTimers();
     const { rerender } = render(<LineChangeTicker label="正在生成内容" added={1} />);
 
@@ -223,7 +298,7 @@ describe("MessageText", () => {
 
     expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
     act(() => {
-      vi.advanceTimersByTime(499);
+      vi.advanceTimersByTime(799);
     });
     expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
 
@@ -267,13 +342,22 @@ describe("MessageText", () => {
       expect(screen.getByTestId("line-change-ticker")).toBe(initialTicker);
       expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
 
-      for (let index = 0; index < 8 && frames.length; index += 1) {
-        act(() => {
-          now += 500;
-          frames.shift()?.(now);
-          vi.advanceTimersByTime(500);
-        });
-      }
+      act(() => {
+        now += 1000;
+        frames.shift()?.(now);
+      });
+
+      expect(screen.getByTestId("line-change-ticker")).toBe(initialTicker);
+      expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
+
+      act(() => {
+        vi.advanceTimersByTime(799);
+      });
+      expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
       expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 2 行");
     } finally {
       requestFrame.mockRestore();
@@ -287,7 +371,7 @@ describe("MessageText", () => {
 
     rerender(<LineChangeTicker label="正在生成内容" added={12} />);
     act(() => {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(800);
     });
     act(() => {
       vi.advanceTimersByTime(16);
@@ -834,18 +918,18 @@ describe("MessageText", () => {
     expect(small.effectiveCharsPerSecond).toBe(10);
     expect(large.chars).toBeGreaterThan(10);
     expect(large.effectiveCharsPerSecond).toBeGreaterThan(small.effectiveCharsPerSecond);
-    expect(large.effectiveCharsPerSecond).toBeLessThanOrEqual(640);
+    expect(large.effectiveCharsPerSecond).toBeLessThanOrEqual(1200);
   });
 
   it("targets clearing medium and heavy stream backlogs within one to two seconds", () => {
     const medium = calculateDynamicStreamStep(1000, 400, 0);
     const heavy = calculateDynamicStreamStep(1000, 800, 0);
 
-    expect(medium.effectiveCharsPerSecond).toBeGreaterThanOrEqual(280);
-    expect(medium.chars).toBeGreaterThanOrEqual(280);
-    expect(heavy.effectiveCharsPerSecond).toBeGreaterThanOrEqual(560);
-    expect(heavy.effectiveCharsPerSecond).toBeLessThanOrEqual(640);
-    expect(heavy.chars).toBeGreaterThanOrEqual(560);
+    expect(medium.effectiveCharsPerSecond).toBeGreaterThanOrEqual(440);
+    expect(medium.chars).toBe(400);
+    expect(heavy.effectiveCharsPerSecond).toBeGreaterThanOrEqual(880);
+    expect(heavy.effectiveCharsPerSecond).toBeLessThanOrEqual(1200);
+    expect(heavy.chars).toBe(800);
   });
 
   it("accelerates streaming assistant text when backlog grows", () => {
@@ -882,12 +966,10 @@ describe("MessageText", () => {
 
     rerender(<MessageText message={message("assistant", largeAppend, "completed")} />);
     expect(screen.getByTestId("message-text").textContent).not.toContain(largeAppend);
-    for (let index = 0; index < 4; index += 1) {
-      act(() => {
-        now += 1000;
-        frames.shift()?.(now);
-      });
-    }
+    act(() => {
+      now += 1000;
+      frames.shift()?.(now);
+    });
     expect(screen.getByTestId("message-text").textContent).toContain(largeAppend);
 
     requestFrame.mockRestore();
@@ -965,7 +1047,7 @@ describe("MessageText", () => {
     const [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
       .split("/")
       .map(Number);
-    expect(reportedSpeed).toBe(300);
+    expect(reportedSpeed).toBe(467);
     expect(reportedBacklog).toBeGreaterThan(0);
     expect(reportedBacklog).toBeLessThan(420);
 
@@ -1192,6 +1274,12 @@ function PreviewProbe() {
       {request?.type === "content" ? `${request.contentType}:${request.title}` : ""}
     </output>
   );
+}
+
+function FilePanelProbe() {
+  const preview = usePreview();
+  const request = preview.filePanelRequest;
+  return <output data-testid="file-panel-request">{request ? `${request.scopeKey}:${request.path}` : ""}</output>;
 }
 
 function mockSelection(container: Element, text: string) {

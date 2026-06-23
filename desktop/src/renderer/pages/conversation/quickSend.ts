@@ -1,8 +1,13 @@
+import type { ChatPayload } from "@/runtime";
+import type { AgentContextItem } from "@/types/protocol";
+
 export interface QueuedQuickChatSend {
   id: string;
   sessionId: string;
   model: string;
   message: string;
+  runtimeParams?: ChatPayload["runtime_params"];
+  contextItems?: AgentContextItem[];
 }
 
 const quickChatSends = new Map<string, QueuedQuickChatSend>();

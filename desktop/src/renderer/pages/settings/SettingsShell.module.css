@@ -30,7 +30,7 @@
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 14px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--sidebar-bg) 94%, var(--shell-bg));
+  background: var(--sidebar-bg);
   padding: 12px 7px 10px;
 }
 

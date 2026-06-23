@@ -60,6 +60,7 @@ export type AgentConversationAction =
       sessionId: string;
       content: string;
       attachments?: AgentChatMessage["attachments"];
+      contextItems?: AgentChatMessage["contextItems"];
       id?: string;
       timestamp?: number;
     }
@@ -343,6 +344,7 @@ function addUserMessage(
     role: "user",
     content: action.content,
     attachments: action.attachments,
+    contextItems: action.contextItems,
     timestamp: action.timestamp ?? Date.now(),
   });
   next.selectedSessionId = action.sessionId;

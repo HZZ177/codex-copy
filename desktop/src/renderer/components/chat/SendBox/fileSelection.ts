@@ -17,7 +17,8 @@ export type FileSelectionAction =
   | { type: "add"; file: SelectedFile }
   | { type: "remove"; path: string }
   | { type: "dragging"; dragging: boolean }
-  | { type: "error"; error: string | null };
+  | { type: "error"; error: string | null }
+  | { type: "clear" };
 
 export const initialFileSelectionState: FileSelectionState = {
   files: [],
@@ -44,6 +45,8 @@ export function fileSelectionReducer(
       return { ...state, dragging: action.dragging };
     case "error":
       return { ...state, error: action.error };
+    case "clear":
+      return initialFileSelectionState;
   }
 }
 
@@ -68,4 +71,8 @@ export function selectedFileFromFile(file: File, source: "dropped" | "pasted"): 
     type: "file",
     source,
   };
+}
+
+export function composeMessageWithSelectedFiles(message: string, files: SelectedFile[]): string {
+  return message.trim();
 }

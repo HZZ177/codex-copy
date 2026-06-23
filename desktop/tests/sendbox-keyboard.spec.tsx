@@ -24,12 +24,33 @@ describe("SendBox keyboard and IME", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the editable viewport pinned to the bottom after Shift+Enter", () => {
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    try {
+      render(<KeyboardSendBox onSend={vi.fn()} />);
+
+      const input = screen.getByLabelText("继续输入") as HTMLDivElement;
+      Object.defineProperty(input, "scrollHeight", { configurable: true, value: 180 });
+      Object.defineProperty(input, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+      fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+
+      expect(input.scrollTop).toBe(180);
+    } finally {
+      requestAnimationFrame.mockRestore();
+    }
+  });
+
   it("keeps keyboard submit disabled while the runtime is busy", () => {
     const onSend = vi.fn();
     render(<KeyboardSendBox runtimeState="running" onSend={onSend} />);
 
-    const input = screen.getByLabelText("继续输入") as HTMLTextAreaElement;
-    expect(input.disabled).toBe(true);
+    const input = screen.getByLabelText("继续输入");
+    expect(input.getAttribute("aria-disabled")).toBe("true");
+    expect(input.getAttribute("contenteditable")).toBe("false");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
   });

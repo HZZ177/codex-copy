@@ -11,3 +11,7 @@ export function replaceAtQuery(value: string, result: WorkspaceSearchResult): st
     return `${prefix}@${result.path} `;
   });
 }
+
+export function removeAtQuery(value: string): string {
+  return value.replace(/(?:^|\s)@[^\s@]*$/, "");
+}

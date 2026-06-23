@@ -1,8 +1,20 @@
-import { FileText, Folder, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import {
+  FileText,
+  Folder,
+  Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PropsWithChildren } from "react";
+import { flushSync } from "react-dom";
 
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
+import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import { FilePreview, WorkspaceFileBrowser } from "@/renderer/components/workspace";
@@ -16,6 +28,10 @@ import styles from "./Layout.module.css";
 import type { SiderEntry } from "./Sider";
 
 const FILES_PANEL_ID = "right-sidebar:files";
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (callback: () => void) => unknown;
+};
 
 export interface LayoutProps extends PropsWithChildren {
   title?: string;
@@ -40,6 +56,7 @@ export function Layout({
   const shellRef = useRef<HTMLDivElement>(null);
   const lastPreviewOpenStampRef = useRef<string | null>(null);
   const lastPreviewCollapseRequestRef = useRef(0);
+  const lastFilePanelOpenRequestRef = useRef(0);
   const lastRightSidebarResetKeyRef = useRef<string | null>(null);
   const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
   const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
@@ -138,6 +155,30 @@ export function Layout({
     actions.setRightSidebarOpen(false);
   }, [actions, previewContext?.collapseRequestId, startRightSidebarMotion, state.rightSidebarOpen]);
 
+  useEffect(() => {
+    const filePanelRequest = previewContext?.filePanelRequest ?? null;
+    if (
+      !filePanelRequest?.requestId ||
+      filePanelRequest.requestId === lastFilePanelOpenRequestRef.current ||
+      filePanelRequest.scopeKey !== previewContext?.activeScopeKey
+    ) {
+      return;
+    }
+    lastFilePanelOpenRequestRef.current = filePanelRequest.requestId;
+    setRightSidebarMode("split");
+    if (!state.rightSidebarOpen) {
+      startRightSidebarMotion();
+    }
+    actions.setRightSidebarOpen(true);
+  }, [
+    actions,
+    previewContext?.activeScopeKey,
+    previewContext?.filePanelRequest?.requestId,
+    previewContext?.filePanelRequest?.scopeKey,
+    startRightSidebarMotion,
+    state.rightSidebarOpen,
+  ]);
+
   const closeRightSidebar = useCallback(() => {
     setRightSidebarMode("split");
     if (state.rightSidebarOpen) {
@@ -167,9 +208,30 @@ export function Layout({
     setRightSidebarMode("split");
   }, [startRightSidebarMotion]);
 
+  const swapRightSidebarPlacement = useCallback(() => {
+    setRightSidebarMode("split");
+    startRightSidebarMotion();
+
+    const applyPlacementSwap = () => actions.toggleRightSidebarPlacement();
+    const viewTransitionDocument = typeof document === "undefined" ? null : (document as ViewTransitionDocument);
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!prefersReducedMotion && typeof viewTransitionDocument?.startViewTransition === "function") {
+      viewTransitionDocument.startViewTransition(() => {
+        flushSync(applyPlacementSwap);
+      });
+      return;
+    }
+
+    applyPlacementSwap();
+  }, [actions, startRightSidebarMotion]);
+
   const navigateFromShell = useCallback(
     (path: string) => {
-      if (path === "/guid") {
+      if (path === "/guid" || path.startsWith("/guid?")) {
         closeRightSidebar();
       }
       onNavigate?.(path);
@@ -186,6 +248,9 @@ export function Layout({
   }, [closeRightSidebar, resetRightSidebarKey]);
 
   const rightSidebarMaximized = state.rightSidebarOpen && rightSidebarMode === "maximized";
+  const rightSidebarOnLeft = state.rightSidebarPlacement === "left";
+  const openRightSidebarLabel = rightSidebarOnLeft ? "展开左侧栏" : "展开右侧栏";
+  const OpenRightSidebarIcon = rightSidebarOnLeft ? PanelLeftOpen : PanelRightOpen;
 
   return (
     <div
@@ -197,6 +262,7 @@ export function Layout({
       data-right-sidebar={state.rightSidebarOpen ? "open" : "closed"}
       data-right-sidebar-mode={rightSidebarMaximized ? "maximized" : "split"}
       data-right-sidebar-motion={rightSidebarMotion ? "true" : "false"}
+      data-right-sidebar-placement={state.rightSidebarPlacement}
       data-workspace={state.workspaceOpen ? "open" : "closed"}
       data-preview={state.previewOpen ? "open" : "closed"}
       style={
@@ -238,26 +304,29 @@ export function Layout({
         {!state.rightSidebarOpen ? (
           <button
             className={styles.contentRightSidebarToggle}
-            data-icon="panel-right-open"
+            data-icon={rightSidebarOnLeft ? "panel-left-open" : "panel-right-open"}
             type="button"
-            aria-label="展开右侧栏"
-            title="展开右侧栏"
+            aria-label={openRightSidebarLabel}
+            title={openRightSidebarLabel}
             onClick={openRightSidebar}
           >
-            <PanelRightOpen size={17} strokeWidth={2.1} />
+            <OpenRightSidebarIcon size={17} strokeWidth={2.1} />
           </button>
         ) : null}
 
         <RightSidebarResizeHandle
           disabled={!state.rightSidebarOpen || rightSidebarMaximized}
           ratio={state.rightSidebarRatio}
+          placement={state.rightSidebarPlacement}
           getAvailableWidth={getRightSidebarAvailableWidth}
           onResizePreview={previewRightSidebarRatio}
           onResize={actions.setRightSidebarRatio}
+          onSwapPlacement={swapRightSidebarPlacement}
         />
         <RightSidebarPanel
           open={state.rightSidebarOpen}
           maximized={rightSidebarMaximized}
+          placement={state.rightSidebarPlacement}
           onClose={closeRightSidebar}
           onMaximize={maximizeRightSidebar}
           onRestore={restoreRightSidebar}
@@ -270,12 +339,14 @@ export function Layout({
 function RightSidebarPanel({
   open,
   maximized,
+  placement,
   onClose,
   onMaximize,
   onRestore,
 }: {
   open: boolean;
   maximized: boolean;
+  placement: RightSidebarPlacement;
   onClose: () => void;
   onMaximize: () => void;
   onRestore: () => void;
@@ -283,11 +354,21 @@ function RightSidebarPanel({
   const previewContext = useOptionalPreview();
   const request = previewContext?.open ? previewContext.request : null;
   const renderContext = previewContext?.activeRenderContext;
+  const rawFilePanelRequest = previewContext?.filePanelRequest ?? null;
+  const filePanelRequest =
+    rawFilePanelRequest && rawFilePanelRequest.scopeKey === previewContext?.activeScopeKey
+      ? rawFilePanelRequest
+      : null;
+  const filePanelRenderContext = filePanelRequest?.renderContext ?? renderContext;
   const entries = previewContext?.entries ?? [];
   const activeEntryId = previewContext?.activeEntryId ?? null;
   const [filesOpen, setFilesOpen] = useState(false);
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
-  const canOpenFiles = Boolean(renderContext?.workspaceAvailable && renderContext?.runtime && renderContext?.sessionId);
+  const canOpenFiles = Boolean(
+    filePanelRenderContext?.workspaceAvailable &&
+      filePanelRenderContext?.runtime &&
+      (filePanelRenderContext?.sessionId || filePanelRenderContext?.workspaceId),
+  );
   const resolvedActivePanelId = activePanelId ?? activeEntryId ?? (filesOpen ? FILES_PANEL_ID : null);
   const activePreviewEntry =
     resolvedActivePanelId && resolvedActivePanelId !== FILES_PANEL_ID
@@ -323,6 +404,15 @@ function RightSidebarPanel({
     setFilesOpen(false);
     setActivePanelId(activeEntryId ?? null);
   }, [activeEntryId, canOpenFiles, filesOpen]);
+
+  useEffect(() => {
+    const filePanelRequestId = filePanelRequest?.requestId ?? 0;
+    if (!filePanelRequestId || !canOpenFiles) {
+      return;
+    }
+    setFilesOpen(true);
+    setActivePanelId(FILES_PANEL_ID);
+  }, [canOpenFiles, filePanelRequest?.requestId]);
 
   const openFilesPanel = useCallback(() => {
     if (!canOpenFiles) {
@@ -365,14 +455,16 @@ function RightSidebarPanel({
   const controls = (
     <RightSidebarControls
       maximized={maximized}
+      placement={placement}
       onClose={onClose}
       onMaximize={onMaximize}
       onRestore={onRestore}
     />
   );
+  const panelLabel = placement === "left" ? "左侧栏" : "右侧栏";
 
   return (
-    <aside className={styles.rightSidebar} aria-label="右侧栏" aria-hidden={!open}>
+    <aside className={styles.rightSidebar} aria-label={panelLabel} aria-hidden={!open}>
       {open ? (
         <>
           <div className={styles.rightSidebarTopbar}>
@@ -442,13 +534,15 @@ function RightSidebarPanel({
               {controls}
             </div>
           </div>
-          {showFilesPanel && activeRenderContext?.runtime && activeRenderContext.sessionId ? (
+          {showFilesPanel && filePanelRenderContext?.runtime && (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
             <div className={styles.rightSidebarBody} data-content="files">
               <WorkspaceFileBrowser
-                label={activeRenderContext.workspaceLabel}
-                runtime={activeRenderContext.runtime}
-                workspaceId={activeRenderContext.workspaceId}
-                sessionId={activeRenderContext.sessionId}
+                label={filePanelRenderContext.workspaceLabel}
+                runtime={filePanelRenderContext.runtime}
+                workspaceId={filePanelRenderContext.workspaceId}
+                sessionId={filePanelRenderContext.sessionId}
+                previewPath={filePanelRequest?.path ?? null}
+                previewRequestId={filePanelRequest?.requestId ?? 0}
               />
             </div>
           ) : activeRequest ? (
@@ -480,36 +574,42 @@ function RightSidebarPanel({
 
 function RightSidebarControls({
   maximized,
+  placement,
   onClose,
   onMaximize,
   onRestore,
 }: {
   maximized: boolean;
+  placement: RightSidebarPlacement;
   onClose: () => void;
   onMaximize: () => void;
   onRestore: () => void;
 }) {
+  const onLeft = placement === "left";
+  const placementLabel = onLeft ? "左侧栏" : "右侧栏";
+  const CloseIcon = onLeft ? PanelLeftClose : PanelRightClose;
+
   return (
     <>
       <button
         className={styles.rightSidebarIconButton}
         data-icon={maximized ? "minimize-2" : "maximize-2"}
         type="button"
-        aria-label={maximized ? "缩小右侧栏" : "展开右侧栏到对话区域"}
-        title={maximized ? "缩小右侧栏" : "展开右侧栏到对话区域"}
+        aria-label={maximized ? `缩小${placementLabel}` : `展开${placementLabel}到对话区域`}
+        title={maximized ? `缩小${placementLabel}` : `展开${placementLabel}到对话区域`}
         onClick={maximized ? onRestore : onMaximize}
       >
         {maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
       </button>
       <button
         className={styles.rightSidebarIconButton}
-        data-icon="panel-right-close"
+        data-icon={onLeft ? "panel-left-close" : "panel-right-close"}
         type="button"
-        aria-label="折叠右侧栏"
-        title="折叠右侧栏"
+        aria-label={`折叠${placementLabel}`}
+        title={`折叠${placementLabel}`}
         onClick={onClose}
       >
-        <PanelRightClose size={17} strokeWidth={2.1} />
+        <CloseIcon size={17} strokeWidth={2.1} />
       </button>
     </>
   );

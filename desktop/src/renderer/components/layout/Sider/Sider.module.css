@@ -8,7 +8,7 @@
   gap: 14px;
   padding: 12px 7px 10px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--sidebar-bg) 94%, var(--shell-bg));
+  background: var(--sidebar-bg);
 }
 
 :global([data-sidebar-motion="true"]) .sider {
@@ -20,6 +20,8 @@
 .sider[data-collapsed="true"] {
   width: var(--sidebar-collapsed-width);
   flex-basis: var(--sidebar-collapsed-width);
+  padding-right: 0;
+  padding-left: 10px;
 }
 
 .nav,
@@ -108,13 +110,21 @@
   text-align: left;
 }
 
+.sectionTitleRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
 button.sectionTitle {
   cursor: pointer;
 }
 
 .sectionTitle[data-kind="workspace"] {
   min-height: 30px;
-  margin-bottom: 2px;
   padding: 0 9px;
   color: var(--color-text-2);
   font-size: 13px;
@@ -122,15 +132,37 @@ button.sectionTitle {
 }
 
 button.sectionTitle[data-kind="workspace"]:hover,
-button.sectionTitle[data-kind="workspace"]:focus-visible {
+button.sectionTitle[data-kind="workspace"]:focus-visible,
+.sectionNewButton:hover,
+.sectionNewButton:focus-visible {
   outline: none;
   background: color-mix(in srgb, var(--surface-hover) 86%, transparent);
   color: var(--color-text-1);
 }
 
+.sectionNewButton {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
+}
+
 .sectionTitle svg {
   flex: 0 0 auto;
   color: color-mix(in srgb, currentColor 86%, transparent);
+}
+
+.sectionNewButton svg {
+  color: currentColor;
 }
 
 .sectionTitle span {
@@ -310,7 +342,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
   border: 2.25px solid color-mix(in srgb, var(--color-text-4) 44%, transparent);
   border-top-color: color-mix(in srgb, var(--color-text-2) 84%, transparent);
   border-radius: var(--radius-pill);
-  animation: historySpinner 780ms linear infinite;
+  animation: historySpinner 1100ms linear infinite;
 }
 
 .historyActions {
@@ -560,8 +592,15 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
 .sider[data-collapsed="true"] .navItem,
 .sider[data-collapsed="true"] .historyItem,
 .sider[data-collapsed="true"] .projectItem {
+  width: 30px;
   justify-content: center;
   padding: 0;
+}
+
+.sider[data-collapsed="true"] .nav,
+.sider[data-collapsed="true"] .footer {
+  width: 30px;
+  justify-self: start;
 }
 
 .sider[data-collapsed="true"] .navItem span,
@@ -572,7 +611,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
 .sider[data-collapsed="true"] .history {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   padding-top: 7px;
   overflow-x: visible;
 }
@@ -580,19 +619,97 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
 .collapsedSection {
   position: relative;
   display: grid;
-  width: 100%;
+  width: 30px;
   justify-items: center;
   gap: 6px;
+}
+
+.collapsedProjectButton {
+  position: relative;
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.collapsedProjectButton:hover,
+.collapsedProjectButton:focus-visible,
+.collapsedProjectButton[data-active="true"] {
+  outline: 0;
+  background: color-mix(in srgb, var(--surface-active) 86%, var(--surface-hover));
+  color: var(--color-text-1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-1) 7%, transparent);
+}
+
+.collapsedProjectButton:hover {
+  transform: translateY(-1px);
+}
+
+.collapsedProjectButton svg {
+  color: currentColor;
+}
+
+.collapsedProjectFolder {
+  transform: translateY(-2px);
+}
+
+.collapsedProjectChevron {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  opacity: 0.58;
+  transition: transform 160ms var(--motion-ease-standard);
+  transform: translateX(-50%) rotate(0deg);
+  transform-origin: center;
+}
+
+.collapsedProjectButton[aria-expanded="false"] .collapsedProjectChevron {
+  transform: translateX(-50%) rotate(-90deg);
+}
+
+.collapsedSectionItems {
+  display: grid;
+  width: 30px;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    grid-template-rows 180ms var(--motion-ease-standard),
+    opacity 140ms ease;
+}
+
+.collapsedSectionItems[data-expanded="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.collapsedSectionItemsInner {
+  display: grid;
+  min-height: 0;
+  gap: 6px;
+  overflow: hidden;
 }
 
 .collapsedSessionButton {
   position: relative;
   display: inline-grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: var(--color-text-3);
   transition:
@@ -625,6 +742,14 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
+}
+
+.collapsedSessionLoading {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  color: currentColor;
 }
 
 .collapsedSessionCard {
@@ -716,7 +841,9 @@ button.sectionTitle[data-kind="workspace"]:focus-visible {
     animation: none;
   }
 
-  .collapsedSessionButton {
+  .collapsedProjectButton,
+  .collapsedSessionButton,
+  .collapsedSectionItems {
     transition: none;
   }
 

@@ -27,6 +27,13 @@ export interface PreviewEntry {
   renderContext: PreviewRenderContext | null;
 }
 
+export interface FilePanelRequest {
+  requestId: number;
+  scopeKey: string;
+  path: string | null;
+  renderContext: PreviewRenderContext | null;
+}
+
 export interface PreviewState {
   open: boolean;
   panelOpen: boolean;
@@ -37,6 +44,7 @@ export interface PreviewState {
   entries: PreviewEntry[];
   activeEntryId: string | null;
   hostContext: PreviewRenderContext | null;
+  filePanelRequest: FilePanelRequest | null;
 }
 
 export interface PreviewContextValue extends PreviewState {
@@ -44,6 +52,7 @@ export interface PreviewContextValue extends PreviewState {
   activeRenderContext: PreviewRenderContext | null;
   activeScopeKey: string;
   openPreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
+  openFilePanel(path?: string | null, renderContext?: PreviewRenderContext): void;
   togglePreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
   switchPreview(entryId: string): void;
   closePreviewEntry(entryId: string): void;
@@ -64,6 +73,7 @@ interface PreviewStoreState {
   panelOpen: boolean;
   panelActiveEntryId: string | null;
   collapseRequestId: number;
+  filePanelRequest: FilePanelRequest | null;
 }
 
 const PreviewContext = createContext<PreviewContextValue | null>(null);
@@ -76,11 +86,27 @@ export function PreviewProvider({ children }: PropsWithChildren) {
     panelOpen: false,
     panelActiveEntryId: null,
     collapseRequestId: 0,
+    filePanelRequest: null,
   });
 
   const openPreview = useCallback((request: PreviewRequest | string, renderContext?: PreviewRenderContext) => {
     setState((current) => {
       return openPreviewInStore(current, request, renderContext, "append");
+    });
+  }, []);
+
+  const openFilePanel = useCallback((path: string | null = null, renderContext?: PreviewRenderContext) => {
+    setState((current) => {
+      const context = renderContext ?? current.hostContext;
+      return {
+        ...current,
+        filePanelRequest: {
+          requestId: (current.filePanelRequest?.requestId ?? 0) + 1,
+          scopeKey: previewScopeKey(context),
+          path: path || null,
+          renderContext: context,
+        },
+      };
     });
   }, []);
 
@@ -224,10 +250,12 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       entries,
       activeEntryId,
       hostContext: state.hostContext,
+      filePanelRequest: state.filePanelRequest,
       activeEntry,
       activeRenderContext,
       activeScopeKey,
       openPreview,
+      openFilePanel,
       togglePreview,
       switchPreview,
       closePreviewEntry,
@@ -245,12 +273,14 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       entries,
       open,
       openPreview,
+      openFilePanel,
       togglePreview,
       request,
       setPreviewPanelOpen,
       setPreviewHostContext,
       state.collapseRequestId,
       state.hostContext,
+      state.filePanelRequest,
       state.panelActiveEntryId,
       state.panelOpen,
       switchPreview,

@@ -10,6 +10,7 @@ export interface UseTypingAnimationOptions {
   content: string;
   enabled?: boolean;
   completeImmediately?: boolean;
+  fastDrain?: boolean;
   resetKey?: string;
 }
 
@@ -17,6 +18,7 @@ export function useTypingAnimation({
   content,
   enabled = true,
   completeImmediately = false,
+  fastDrain = false,
   resetKey = "",
 }: UseTypingAnimationOptions) {
   const initialContent = initialDisplayedContent(content, enabled, completeImmediately, resetKey);
@@ -28,6 +30,7 @@ export function useTypingAnimation({
   const lastTimestampRef = useRef<number | null>(null);
   const speedSourceIdRef = useRef(createRuntimeTypingSpeedSourceId());
   const carryRef = useRef(0);
+  const fastDrainRef = useRef(fastDrain);
   const resetKeyRef = useRef(resetKey);
 
   const commitDisplayedContent = (nextContent: string) => {
@@ -48,6 +51,11 @@ export function useTypingAnimation({
 
   useEffect(() => {
     contentRef.current = content;
+    if (fastDrainRef.current !== fastDrain) {
+      fastDrainRef.current = fastDrain;
+      carryRef.current = 0;
+    }
+
     if (resetKeyRef.current !== resetKey) {
       resetKeyRef.current = resetKey;
       cancelFrame();
@@ -97,7 +105,12 @@ export function useTypingAnimation({
       const lastTimestamp = lastTimestampRef.current ?? timestamp;
       const elapsed = timestamp - lastTimestamp;
       if (elapsed > 0) {
-        const step = calculateDynamicStreamStep(elapsed, backlog, carryRef.current);
+        const step = calculateDynamicStreamStep(
+          elapsed,
+          backlog,
+          carryRef.current,
+          fastDrainRef.current ? FAST_DRAIN_STREAM_STEP_OPTIONS : undefined,
+        );
         reportRuntimeTypingSpeed(
           speedSourceIdRef.current,
           step.effectiveCharsPerSecond,
@@ -125,7 +138,7 @@ export function useTypingAnimation({
       lastTimestampRef.current = performance.now();
       frameRef.current = window.requestAnimationFrame(animate);
     }
-  }, [completeImmediately, content, enabled, resetKey]);
+  }, [completeImmediately, content, enabled, fastDrain, resetKey]);
 
   useEffect(() => cancelFrame, []);
 
@@ -135,6 +148,12 @@ export function useTypingAnimation({
 const INITIAL_STREAM_BACKLOG_CHARS = 420;
 const INITIAL_STREAM_PREFIX_CHARS = 24;
 const MAX_DISPLAY_CACHE_SIZE = 80;
+const FAST_DRAIN_STREAM_STEP_OPTIONS = {
+  minCharsPerSecond: 800,
+  maxCharsPerSecond: 12000,
+  comfortableBacklog: 1,
+  drainTargetSeconds: 0.7,
+};
 const displayedContentByKey = new Map<string, string>();
 
 function initialDisplayedContent(

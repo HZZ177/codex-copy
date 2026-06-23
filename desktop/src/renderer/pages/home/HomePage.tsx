@@ -1,21 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 
-import { runtimeBridge, type RuntimeBridge } from "@/runtime";
-import { SendBox } from "@/renderer/components/chat/SendBox";
+import { runtimeBridge, type RuntimeBridge, type WorkspaceEntry, type WorkspaceSearchResult } from "@/runtime";
+import { SendBox, type SelectedFile } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
 import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
-import type { Workspace } from "@/types/protocol";
+import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
+import type { AgentContextItem, Workspace } from "@/types/protocol";
 import styles from "./HomePage.module.css";
 
 export interface HomePageProps {
   runtime?: RuntimeBridge;
-  onNavigateToConversation: (sessionId: string, initialModel: string, initialMessage: string) => void;
+  initialWorkspaceId?: string;
+  onNavigateToConversation: (
+    sessionId: string,
+    initialModel: string,
+    initialMessage: string,
+    options?: { runtimeParams?: RuntimeParamsWithInjection; contextItems?: AgentContextItem[] },
+  ) => void;
   onOpenModelSettings: () => void;
 }
 
 export function HomePage({
   runtime = runtimeBridge,
+  initialWorkspaceId,
   onNavigateToConversation,
   onOpenModelSettings,
 }: HomePageProps) {
@@ -27,6 +36,7 @@ export function HomePage({
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const selectionTouchedRef = useRef(false);
   const modelSelection = useRuntimeModelSelection(runtime);
+  const previewContext = useOptionalPreview();
 
   useEffect(() => {
     let active = true;
@@ -39,7 +49,10 @@ export function HomePage({
         }
         setWorkspaces(response.list);
         if (!selectionTouchedRef.current && response.list.length) {
-          setWorkspaceSelection({ type: "workspace", workspace: response.list[0] });
+          const initialWorkspace = initialWorkspaceId
+            ? response.list.find((workspace) => workspace.id === initialWorkspaceId)
+            : null;
+          setWorkspaceSelection({ type: "workspace", workspace: initialWorkspace ?? response.list[0] });
         }
       })
       .catch((reason: unknown) => {
@@ -55,7 +68,7 @@ export function HomePage({
     return () => {
       active = false;
     };
-  }, [runtime]);
+  }, [initialWorkspaceId, runtime]);
 
   const canSubmit =
     draft.trim().length > 0 && !submitting && !workspaceLoading && modelSelection.modelLoadState !== "loading";
@@ -67,6 +80,13 @@ export function HomePage({
     workspaceSelection.type === "workspace"
       ? (query: string) => runtime.workspace.search({ workspaceId: workspaceSelection.workspace.id }, query)
       : undefined;
+  const listWorkspaceDirectory =
+    workspaceSelection.type === "workspace"
+      ? (path: string) =>
+          runtime.workspace
+            .listDirectory({ workspaceId: workspaceSelection.workspace.id }, path)
+            .then((response) => workspaceEntriesToSearchResults(response.entries))
+      : undefined;
   const pickWorkspacePath = async () => {
     const selectedPath = await runtime.desktopPicker.pickDirectory();
     if (selectedPath) {
@@ -77,11 +97,26 @@ export function HomePage({
     }
     return null;
   };
+  const openFileReference =
+    workspaceSelection.type === "workspace" && previewContext
+      ? (file: SelectedFile) => {
+          if (!file.path) {
+            return;
+          }
+          previewContext.openFilePanel(file.path, {
+            workspaceId: workspaceSelection.workspace.id,
+            workspaceAvailable: true,
+            workspaceLabel: workspaceSelection.workspace.root_path ?? workspaceSelection.workspace.name,
+            runtime,
+          });
+        }
+      : undefined;
 
-  const submit = async () => {
-    const text = draft.trim();
-    if (!text || submitting) {
-      return;
+  const submit = async (files: SelectedFile[] = []) => {
+    const prepared = prepareComposerMessage(draft, files);
+    const text = prepared.message;
+    if ((!text && !prepared.contextItems.length) || submitting) {
+      return false;
     }
 
     setSubmitting(true);
@@ -91,19 +126,19 @@ export function HomePage({
       if (!model) {
         setError("请先在设置中选择模型");
         onOpenModelSettings();
-        return;
+        return false;
       }
 
       const sessionPayload =
         workspaceSelection.type === "workspace"
           ? {
-              title: text.slice(0, 32),
+              title: sessionTitleFromPreparedMessage(text, prepared.contextItems),
               session_tag: "chat",
               sessionType: "workspace" as const,
               workspaceId: workspaceSelection.workspace.id,
             }
           : {
-              title: text.slice(0, 32),
+              title: sessionTitleFromPreparedMessage(text, prepared.contextItems),
               session_tag: "chat",
               sessionType: "chat" as const,
             };
@@ -111,9 +146,21 @@ export function HomePage({
       const session = await runtime.conversation.createSession(sessionPayload);
       emitSessionCreated(session);
       setDraft("");
-      onNavigateToConversation(session.id, model, text);
+      const injectionOptions = prepared.runtimeParams || prepared.contextItems.length
+        ? {
+            runtimeParams: prepared.runtimeParams,
+            contextItems: prepared.contextItems,
+          }
+        : undefined;
+      if (injectionOptions) {
+        onNavigateToConversation(session.id, model, text, injectionOptions);
+      } else {
+        onNavigateToConversation(session.id, model, text);
+      }
+      return true;
     } catch (reason) {
       setError(errorMessage(reason));
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -135,6 +182,7 @@ export function HomePage({
           disabled={submitting}
           variant="codex"
           allowFileSelection={workspaceSelection.type === "workspace"}
+          onListWorkspaceDirectory={listWorkspaceDirectory}
           onSearchWorkspace={searchWorkspace}
           contextBar={
             <WorkspaceSelector
@@ -171,8 +219,9 @@ export function HomePage({
             />
           }
           onChange={setDraft}
-          onSend={() => void submit()}
+          onSend={submit}
           onStop={() => undefined}
+          onOpenFileReference={openFileReference}
         />
 
         {error ? (
@@ -183,6 +232,19 @@ export function HomePage({
       </section>
     </main>
   );
+}
+
+function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSearchResult[] {
+  return entries.map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    type: entry.type,
+  }));
+}
+
+function sessionTitleFromPreparedMessage(text: string, contextItems: AgentContextItem[]): string {
+  const title = text.trim() || contextItems[0]?.label || "新对话";
+  return title.slice(0, 32);
 }
 
 function errorMessage(reason: unknown): string {

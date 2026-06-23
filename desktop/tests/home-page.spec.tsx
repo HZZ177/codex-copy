@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeBridge } from "@/runtime";
+import type { RuntimeBridge, WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
 import { HomePage } from "@/renderer/pages/home";
 import type { AgentSession, ModelInfo, Workspace } from "@/types/protocol";
 
@@ -22,7 +22,7 @@ describe("HomePage", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("选择模型").textContent).toContain("qwen-coder");
     });
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "实现一个新功能" } });
+    enterPrompt("实现一个新功能");
     fireEvent.click(screen.getByLabelText("发送"));
 
     await waitFor(() => {
@@ -74,7 +74,7 @@ describe("HomePage", () => {
     expect(screen.queryByRole("option", { name: "qwen-coder" })).toBeNull();
     expect(screen.queryByRole("option", { name: "kimi-k2" })).toBeNull();
     fireEvent.click(screen.getByRole("option", { name: "deepseek-coder" }));
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "读取仓库结构" } });
+    enterPrompt("读取仓库结构");
     fireEvent.click(screen.getByLabelText("发送"));
 
     await waitFor(() => {
@@ -108,13 +108,62 @@ describe("HomePage", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
     });
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "@READ" } });
+    enterPrompt("@READ");
 
     expect(await screen.findByTestId("at-file-menu")).not.toBeNull();
     await waitFor(() => {
       expect(workspaceSearch).toHaveBeenCalledWith({ workspaceId: "ws-1" }, "READ");
     });
     expect(await screen.findByRole("option", { name: /README\.md/ })).not.toBeNull();
+  });
+
+  it("starts a new chat with selected files as follow injections", async () => {
+    const workspaceSearch = vi.fn().mockResolvedValue([
+      { path: "README.md", name: "README.md", type: "file" },
+    ]);
+    const runtime = fakeRuntime({ model: "qwen-coder", workspaceSearch });
+    const onNavigateToConversation = vi.fn();
+
+    render(
+      <HomePage
+        runtime={runtime}
+        onNavigateToConversation={onNavigateToConversation}
+        onOpenModelSettings={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
+    });
+    enterPrompt("@READ");
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "选择文件 README.md" }));
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() => {
+      expect(runtime.conversation.createSession).toHaveBeenCalledWith({
+        title: "README.md",
+        session_tag: "chat",
+        sessionType: "workspace",
+        workspaceId: "ws-1",
+      });
+    });
+    expect(onNavigateToConversation).toHaveBeenCalledWith(
+      "ses-1",
+      "qwen-coder",
+      "",
+      expect.objectContaining({
+        contextItems: [expect.objectContaining({ type: "file", path: "README.md", source: "follow" })],
+        runtimeParams: expect.objectContaining({
+          message_injection: [
+            expect.objectContaining({
+              type: "follow",
+              role: "HumanMessage",
+              metadata: expect.objectContaining({ kind: "file", path: "README.md" }),
+            }),
+          ],
+        }),
+      }),
+    );
   });
 
   it("defaults new chat to the most recently opened workspace from runtime", async () => {
@@ -139,7 +188,7 @@ describe("HomePage", () => {
     });
     expect(screen.getByRole("heading", { name: "我们应该在 recent-project 中构建什么？" })).not.toBeNull();
 
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "继续开发" } });
+    enterPrompt("继续开发");
     fireEvent.click(screen.getByLabelText("发送"));
 
     await waitFor(() => {
@@ -148,6 +197,42 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-recent",
+      });
+    });
+  });
+
+  it("selects the workspace requested by the route before creating a session", async () => {
+    const runtime = fakeRuntime({
+      model: "qwen-coder",
+      workspaces: [
+        workspace("ws-recent", "recent-project", "D:\\Projects\\recent-project", "2026-06-21T10:00:00Z"),
+        workspace("ws-target", "target-project", "D:\\Projects\\target-project", "2026-06-20T10:00:00Z"),
+      ],
+    });
+
+    render(
+      <HomePage
+        runtime={runtime}
+        initialWorkspaceId="ws-target"
+        onNavigateToConversation={vi.fn()}
+        onOpenModelSettings={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("选择工作区").textContent).toContain("target-project");
+    });
+    expect(screen.getByRole("heading", { name: "我们应该在 target-project 中构建什么？" })).not.toBeNull();
+
+    enterPrompt("继续开发");
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() => {
+      expect(runtime.conversation.createSession).toHaveBeenCalledWith({
+        title: "继续开发",
+        session_tag: "chat",
+        sessionType: "workspace",
+        workspaceId: "ws-target",
       });
     });
   });
@@ -168,7 +253,7 @@ describe("HomePage", () => {
     });
     expect(screen.getByRole("heading", { name: "我们应该聊些什么？" })).not.toBeNull();
 
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "先聊一下方案" } });
+    enterPrompt("先聊一下方案");
     fireEvent.click(screen.getByLabelText("发送"));
 
     await waitFor(() => {
@@ -265,7 +350,7 @@ describe("HomePage", () => {
     );
 
     await screen.findByRole("button", { name: "打开模型设置" });
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "开始对话" } });
+    enterPrompt("开始对话");
     fireEvent.click(screen.getByLabelText("发送"));
 
     expect((await screen.findByRole("alert")).textContent).toBe("请先在设置中选择模型");
@@ -292,10 +377,10 @@ describe("HomePage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
     fireEvent.click(screen.getByRole("button", { name: /无项目聊天/ }));
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "@README" } });
+    enterPrompt("@README");
     expect(screen.queryByTestId("at-file-menu")).toBeNull();
     expect(workspaceSearch).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("输入需求"), { target: { value: "只聊思路" } });
+    enterPrompt("只聊思路");
     fireEvent.click(screen.getByLabelText("发送"));
 
     await waitFor(() => {
@@ -311,11 +396,18 @@ describe("HomePage", () => {
   });
 });
 
+function enterPrompt(value: string) {
+  const input = screen.getByLabelText("输入需求");
+  input.textContent = value;
+  fireEvent.input(input);
+}
+
 function fakeRuntime({
   model,
   models = model ? [{ id: model }] : [],
   workspaces = [workspace("ws-1", "keydex")],
   workspaceSearch = vi.fn().mockResolvedValue([]),
+  workspaceEntriesByPath = { "": [] },
   canPickDirectory = false,
   pickDirectory = vi.fn().mockResolvedValue(null),
 }: {
@@ -323,6 +415,7 @@ function fakeRuntime({
   models?: ModelInfo[];
   workspaces?: Workspace[];
   workspaceSearch?: ReturnType<typeof vi.fn>;
+  workspaceEntriesByPath?: Record<string, WorkspaceEntry[]>;
   canPickDirectory?: boolean;
   pickDirectory?: ReturnType<typeof vi.fn>;
 }): RuntimeBridge {
@@ -371,6 +464,13 @@ function fakeRuntime({
       ),
     },
     workspace: {
+      listDirectory: vi.fn((_scope: unknown, path = ""): Promise<WorkspaceTreeResponse> => {
+        const entries = workspaceEntriesByPath[path];
+        if (!entries) {
+          return Promise.reject(new Error(`目录不存在：${path}`));
+        }
+        return Promise.resolve({ root: "D:/repo", entries });
+      }),
       search: workspaceSearch,
     },
     desktopPicker: {

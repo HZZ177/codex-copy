@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SendBox } from "@/renderer/components/chat/SendBox";
 import {
+  composeMessageWithSelectedFiles,
   fileSelectionReducer,
   initialFileSelectionState,
   selectedFileFromFile,
@@ -22,6 +23,14 @@ describe("SendBox file selection", () => {
         path: "src/main.ts",
       }).files,
     ).toEqual([]);
+  });
+
+  it("keeps selected files out of the visible user message text", () => {
+    expect(
+      composeMessageWithSelectedFiles("analyze this", [
+        { path: "src/main.ts", name: "main.ts", type: "file", source: "workspace" },
+      ]),
+    ).toBe("analyze this");
   });
 
   it("extracts file references without reading file content", () => {
@@ -46,9 +55,9 @@ describe("SendBox file selection", () => {
     expect(form.getAttribute("data-dragging")).toBe("true");
     fireEvent.drop(form, { dataTransfer: { types: ["Files"], files: [file] } });
 
-    expect(screen.getByRole("button", { name: "移除文件 src/main.ts" })).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "移除文件 src/main.ts" }));
-    expect(screen.queryByRole("button", { name: "移除文件 src/main.ts" })).toBeNull();
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("src/main.ts");
+    fireEvent.click(screen.getByRole("button", { name: "移除文件引用 src/main.ts" }));
+    expect(screen.queryByLabelText("移除文件引用 src/main.ts")).toBeNull();
   });
 
   it("shows an error for pasted files without a usable path", () => {

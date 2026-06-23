@@ -70,7 +70,7 @@
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before,
 .browser[data-resizing="true"] .resizeHandle::before {
-  background: color-mix(in srgb, var(--color-accent) 72%, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-text-3) 34%, transparent);
 }
 
 .resizeHandle:focus-visible {
@@ -86,7 +86,6 @@
 .previewPane {
   grid-column: 3;
   background: var(--color-bg-elevated);
-  box-shadow: -1px 0 0 color-mix(in srgb, var(--color-border-subtle) 78%, transparent);
 }
 
 .browser:not([data-preview-open="true"]) .previewPane {

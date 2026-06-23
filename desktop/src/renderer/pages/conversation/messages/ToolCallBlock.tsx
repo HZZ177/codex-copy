@@ -17,6 +17,7 @@ import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import { copyText } from "./markdown";
 import styles from "./ToolCallBlock.module.css";
 import { useDeferredUnmount } from "./useDeferredUnmount";
+import { useExpansionScrollAnchor } from "./useExpansionScrollAnchor";
 
 export interface ToolCallBlockProps {
   message: ConversationMessage;
@@ -30,6 +31,7 @@ export function ToolCallBlock({ message }: ToolCallBlockProps) {
   const failed = message.status === "failed" || tool.resultStatus === "error";
   const resultLabel = failed ? "错误" : "结果";
   const detailsMotion = useDeferredUnmount<HTMLDivElement>(detailsOpen);
+  const captureExpansionAnchor = useExpansionScrollAnchor();
 
   const handleCopyResult = async () => {
     try {
@@ -52,7 +54,10 @@ export function ToolCallBlock({ message }: ToolCallBlockProps) {
         type="button"
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? "收起工具详情" : "展开工具详情"}
-        onClick={() => setDetailsOpen((open) => !open)}
+        onClick={(event) => {
+          captureExpansionAnchor(event.currentTarget);
+          setDetailsOpen((open) => !open);
+        }}
       >
         <span className={styles.icon} aria-hidden="true">
           {toolIcon(tool.name)}

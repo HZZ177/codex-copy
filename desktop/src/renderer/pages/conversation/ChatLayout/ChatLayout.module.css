@@ -44,6 +44,10 @@
   margin: 0;
 }
 
+:global([data-right-sidebar-placement="left"]) .topBarInner {
+  justify-content: flex-end;
+}
+
 .titleMenuAnchor {
   position: relative;
   display: inline-flex;
@@ -97,6 +101,11 @@
   box-shadow: var(--shadow-popover);
   padding: 7px;
   animation: menuFadeIn 120ms ease both;
+}
+
+:global([data-right-sidebar-placement="left"]) .menu {
+  right: 0;
+  left: auto;
 }
 
 .menuStatus {

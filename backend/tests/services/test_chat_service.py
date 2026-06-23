@@ -163,6 +163,65 @@ async def test_chat_service_uses_checkpoint_as_model_context(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_service_injects_follow_messages_and_restores_context_items(tmp_path) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="已参考")])
+    service, _repositories, checkpointer, _factory = _service(tmp_path, model)
+
+    result = await service.handle_chat(
+        ChatRequest(
+            message="总结一下",
+            model="qwen-coder",
+            runtime_params={
+                "message_injection": [
+                    {
+                        "type": "follow",
+                        "role": "HumanMessage",
+                        "content": "用户通过 @ 引用了工作区文件：README.md",
+                        "metadata": {
+                            "id": "file:readme",
+                            "kind": "file",
+                            "label": "README.md",
+                            "path": "README.md",
+                            "name": "README.md",
+                            "fileType": "file",
+                        },
+                    },
+                    {
+                        "type": "follow",
+                        "role": "HumanMessage",
+                        "content": "用户添加了以下引用片段作为上下文：\n关键片段",
+                        "metadata": {
+                            "id": "quote:1",
+                            "kind": "quote",
+                            "label": "引用片段",
+                            "preview": "关键片段",
+                        },
+                    },
+                ]
+            },
+        )
+    )
+
+    history = service.message_event_service.get_display_messages(result.session_id)
+    assert [message["role"] for message in history] == ["user", "assistant"]
+    assert history[0]["content"] == "总结一下"
+    assert history[0]["contextItems"][0]["type"] == "file"
+    assert history[0]["contextItems"][0]["path"] == "README.md"
+    assert history[0]["contextItems"][1]["type"] == "quote"
+    assert "关键片段" in history[0]["contextItems"][1]["content"]
+
+    checkpoint = await checkpointer.aget_tuple(
+        {"configurable": {"thread_id": result.session_id, "checkpoint_ns": ""}}
+    )
+    messages = checkpoint.checkpoint["channel_values"]["messages"]
+    assert [message.content for message in messages[:3]] == [
+        "用户通过 @ 引用了工作区文件：README.md",
+        "用户添加了以下引用片段作为上下文：\n关键片段",
+        "总结一下",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_chat_service_routes_langchain_tool_events(tmp_path) -> None:
     project = tmp_path / "project"
     project.mkdir()

@@ -1,11 +1,10 @@
-import { ArrowUp, SendHorizontal, Square } from "lucide-react";
+import { ArrowUp, SendHorizontal, Square, X } from "lucide-react";
 import {
   type ClipboardEvent,
   type CompositionEvent,
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
-  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -18,7 +17,7 @@ import {
 
 import type { WorkspaceSearchResult } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
-import { AtFileMenu, getAtQuery, replaceAtQuery } from "@/renderer/components/chat/AtFileMenu";
+import { AtFileMenu, getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu";
 import {
   defaultSlashCommands,
   filterSlashCommands,
@@ -31,16 +30,21 @@ import {
   parseQuoteMarkers,
   quoteMarkerPreview,
   removeQuoteMarkerAtIndex,
+  type QuoteMarkerQuoteSegment,
 } from "@/renderer/utils/quoteMarkers";
 
 import styles from "./SendBox.module.css";
 import {
   fileSelectionReducer,
   initialFileSelectionState,
+  type SelectedFile,
   selectedFileFromFile,
   selectedFileFromWorkspace,
 } from "./fileSelection";
 import { useCompositionInput } from "./useCompositionInput";
+
+const AT_SEARCH_MIN_QUERY_LENGTH = 2;
+const AT_SEARCH_DEBOUNCE_MS = 180;
 
 export interface SendBoxProps {
   value: string;
@@ -59,9 +63,11 @@ export interface SendBoxProps {
   allowFileSelection?: boolean;
   leftHint?: ReactNode;
   onChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (files: SelectedFile[]) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
+  onOpenFileReference?: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
+  onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onSearchWorkspace?: (query: string) => Promise<WorkspaceSearchResult[]>;
 }
 
@@ -84,7 +90,9 @@ export function SendBox({
   onChange,
   onSend,
   onStop,
+  onOpenFileReference,
   onSlashCommand,
+  onListWorkspaceDirectory,
   onSearchWorkspace,
 }: SendBoxProps) {
   const inputRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +101,7 @@ export function SendBox({
   const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(null);
   const [atActiveIndex, setAtActiveIndex] = useState(0);
   const [dismissedAtValue, setDismissedAtValue] = useState<string | null>(null);
+  const [atBrowseState, setAtBrowseState] = useState<{ path: string; value: string } | null>(null);
   const [atResults, setAtResults] = useState<WorkspaceSearchResult[]>([]);
   const [atLoading, setAtLoading] = useState(false);
   const [atError, setAtError] = useState<string | null>(null);
@@ -100,21 +109,49 @@ export function SendBox({
     fileSelectionReducer,
     initialFileSelectionState,
   );
+  const editorValue = useMemo(() => editorTextFromComposerValue(value), [value]);
+  const quoteChips = useMemo(() => quoteChipsFromComposerValue(value), [value]);
   const busy = isBusy(runtimeState);
   const inputDisabled = disabled || busy;
+  const canSubmit = canSend || fileSelection.files.length > 0;
+  const requestSend = useCallback(() => {
+    const result = onSend(fileSelection.files);
+    void Promise.resolve(result).then((sent) => {
+      if (sent !== false) {
+        dispatchFileSelection({ type: "clear" });
+      }
+    });
+  }, [fileSelection.files, onSend]);
   const SendIcon = variant === "codex" ? ArrowUp : SendHorizontal;
-  const slashQuery = getSlashQuery(value);
+  const slashQuery = getSlashQuery(editorValue);
   const slashCommands = useMemo(
     () => (slashQuery === null ? [] : filterSlashCommands(defaultSlashCommands, slashQuery)),
     [slashQuery],
   );
-  const slashOpen = slashQuery !== null && dismissedSlashValue !== value && !busy;
-  const atQuery = getAtQuery(value);
+  const slashOpen = slashQuery !== null && dismissedSlashValue !== editorValue && !busy;
+  const atQuery = getAtQuery(editorValue);
+  const atBrowsePath = atBrowseState && atBrowseState.value === editorValue ? atBrowseState.path : null;
   const atOpen =
-    allowFileSelection && Boolean(onSearchWorkspace) && atQuery !== null && dismissedAtValue !== value && !busy && !slashOpen;
+    allowFileSelection &&
+    Boolean(onSearchWorkspace || onListWorkspaceDirectory) &&
+    atQuery !== null &&
+    dismissedAtValue !== editorValue &&
+    !busy &&
+    !slashOpen;
+  const atDirectoryPath =
+    atOpen && onListWorkspaceDirectory && (atBrowsePath !== null || !atQuery) ? atBrowsePath ?? "" : null;
+  const atSearchQuery = atDirectoryPath === null ? atQuery ?? "" : "";
+  const atSearchHint =
+    atOpen &&
+    atDirectoryPath === null &&
+    Boolean(onListWorkspaceDirectory) &&
+    atSearchQuery.trim().length > 0 &&
+    atSearchQuery.trim().length < AT_SEARCH_MIN_QUERY_LENGTH
+      ? `继续输入至少 ${AT_SEARCH_MIN_QUERY_LENGTH} 个字符搜索工作区`
+      : null;
   const composition = useCompositionInput({
-    disabled: inputDisabled || !canSend,
-    onSubmit: onSend,
+    disabled: inputDisabled || !canSubmit,
+    onSubmit: requestSend,
   });
 
   useEffect(() => {
@@ -123,7 +160,19 @@ export function SendBox({
 
   useEffect(() => {
     setAtActiveIndex(0);
-  }, [atQuery]);
+  }, [atDirectoryPath, atQuery]);
+
+  useEffect(() => {
+    if (!atOpen) {
+      setAtBrowseState(null);
+    }
+  }, [atOpen]);
+
+  useEffect(() => {
+    if (atBrowseState && atBrowseState.value !== editorValue && atQuery !== "") {
+      setAtBrowseState(null);
+    }
+  }, [atBrowseState, atQuery, editorValue]);
 
   useEffect(() => {
     let active = true;
@@ -133,53 +182,70 @@ export function SendBox({
       setAtError(null);
       return;
     }
-    if (!atQuery) {
+    if (atSearchHint) {
       setAtResults([]);
       setAtLoading(false);
       setAtError(null);
       return;
     }
-    if (!onSearchWorkspace) {
-      setAtResults([]);
-      setAtLoading(false);
-      setAtError(null);
-      return;
-    }
-    setAtLoading(true);
-    setAtError(null);
-    void onSearchWorkspace(atQuery)
-      .then((results) => {
-        if (!active) {
-          return;
-        }
-        setAtResults(results);
-      })
-      .catch((reason: unknown) => {
-        if (!active) {
-          return;
-        }
+    const query = atQuery ?? "";
+
+    const runRequest = () => {
+      const request =
+        atDirectoryPath !== null && onListWorkspaceDirectory
+          ? onListWorkspaceDirectory(atDirectoryPath)
+          : onSearchWorkspace?.(query);
+      if (!request) {
         setAtResults([]);
-        setAtError(errorMessage(reason));
-      })
-      .finally(() => {
-        if (active) {
-          setAtLoading(false);
-        }
-      });
+        setAtLoading(false);
+        setAtError(null);
+        return;
+      }
+      setAtLoading(true);
+      setAtError(null);
+      setAtResults([]);
+      void request
+        .then((results) => {
+          if (!active) {
+            return;
+          }
+          setAtResults(results);
+        })
+        .catch((reason: unknown) => {
+          if (!active) {
+            return;
+          }
+          setAtResults([]);
+          setAtError(errorMessage(reason));
+        })
+        .finally(() => {
+          if (active) {
+            setAtLoading(false);
+          }
+        });
+    };
+
+    const shouldDebounce = atDirectoryPath === null && query.trim().length >= AT_SEARCH_MIN_QUERY_LENGTH;
+    const timer = shouldDebounce ? window.setTimeout(runRequest, AT_SEARCH_DEBOUNCE_MS) : null;
+    if (!timer) {
+      runRequest();
+    }
 
     return () => {
       active = false;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
     };
-  }, [atOpen, atQuery, onSearchWorkspace]);
+  }, [atDirectoryPath, atOpen, atQuery, atSearchHint, onListWorkspaceDirectory, onSearchWorkspace]);
 
   useLayoutEffect(() => {
     const input = inputRef.current;
     if (!input) {
       return;
     }
-    input.style.height = "0px";
-    input.style.height = `${Math.min(Math.max(input.scrollHeight, 44), 188)}px`;
-  }, [value]);
+    resizeEditableInput(input);
+  }, [editorValue]);
 
   const selectSlashCommand = (command: SlashCommand) => {
     onSlashCommand?.(command);
@@ -187,17 +253,27 @@ export function SendBox({
       onChange("");
       return;
     }
-    onChange(replaceSlashQuery(value, `${command.label} `));
+    onChange(composerValueFromEditorText(replaceSlashQuery(editorValue, `${command.label} `), value));
   };
 
   const selectFile = (result: WorkspaceSearchResult) => {
+    if (result.type === "directory" && onListWorkspaceDirectory) {
+      setAtBrowseState({ path: result.path, value: editorValue });
+      return;
+    }
     dispatchFileSelection({ type: "add", file: selectedFileFromWorkspace(result) });
-    onChange(replaceAtQuery(value, result));
+    const nextValue = removeAtQuery(editorValue);
+    setAtBrowseState(null);
+    setDismissedAtValue(nextValue);
+    onChange(composerValueFromEditorText(nextValue, value));
+  };
+
+  const navigateAtDirectory = (path: string) => {
+    setAtBrowseState({ path, value: editorValue });
   };
 
   const removeFile = (path: string) => {
     dispatchFileSelection({ type: "remove", path });
-    onChange(value.replace(`@${path} `, "").replace(`@${path}`, ""));
   };
 
   const addFiles = (files: FileList | null, source: "dropped" | "pasted") => {
@@ -251,7 +327,9 @@ export function SendBox({
       return;
     }
     pastePlainText(event);
-    syncEditableChange(event.currentTarget, onChange);
+    syncEditableChange(event.currentTarget, (nextValue) => {
+      onChange(composerValueFromEditorText(nextValue, value));
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -268,7 +346,7 @@ export function SendBox({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setDismissedSlashValue(value);
+        setDismissedSlashValue(editorValue);
         return;
       }
       if (event.key === "Enter") {
@@ -293,7 +371,7 @@ export function SendBox({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setDismissedAtValue(value);
+        setDismissedAtValue(editorValue);
         return;
       }
       if (event.key === "Enter") {
@@ -308,7 +386,11 @@ export function SendBox({
     if (event.key === "Enter" && event.shiftKey) {
       event.preventDefault();
       insertPlainText("\n");
-      syncEditableChange(event.currentTarget, onChange);
+      syncEditableChange(event.currentTarget, (nextValue) => {
+        onChange(composerValueFromEditorText(nextValue, value));
+      });
+      resizeEditableInput(event.currentTarget);
+      scrollEditableToBottom(event.currentTarget);
       return;
     }
     composition.handleKeyDown(event);
@@ -316,9 +398,11 @@ export function SendBox({
 
   const handleEditorInput = useCallback(
     (event: FormEvent<HTMLDivElement>) => {
-      syncEditableChange(event.currentTarget, onChange);
+      syncEditableChange(event.currentTarget, (nextValue) => {
+        onChange(composerValueFromEditorText(nextValue, value));
+      });
     },
-    [onChange],
+    [onChange, value],
   );
 
   const handleQuoteRemove = useCallback(
@@ -341,16 +425,49 @@ export function SendBox({
       onDrop={handleDrop}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!busy) {
-          onSend();
+        if (!busy && canSubmit) {
+          requestSend();
         }
       }}
     >
+      {quoteChips.length || fileSelection.files.length ? (
+        <div className={styles.fileChips} aria-label="已添加上下文">
+          {quoteChips.map((quote) => (
+            <QuoteContextChip
+              key={`${quote.index}:${quote.marker}`}
+              quote={quote}
+              onRemove={() => handleQuoteRemove(quote.index)}
+            />
+          ))}
+          {fileSelection.files.map((file) => (
+            <span className={styles.fileChip} key={file.path}>
+              <button
+                className={styles.fileChipMain}
+                type="button"
+                aria-label={`打开文件引用 ${file.path}`}
+                disabled={!onOpenFileReference}
+                onClick={() => onOpenFileReference?.(file)}
+              >
+                <span className={styles.fileChipText}>{file.path}</span>
+              </button>
+              <button
+                className={styles.fileChipRemove}
+                type="button"
+                aria-label={`移除文件引用 ${file.path}`}
+                onClick={() => removeFile(file.path)}
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <ContentEditableInput
         refSetter={(node) => {
           inputRef.current = node;
         }}
-        value={value}
+        value={editorValue}
         inputLabel={inputLabel}
         placeholder={placeholder}
         disabled={inputDisabled}
@@ -362,7 +479,6 @@ export function SendBox({
         onFocus={() => setFocused(true)}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
-        onQuoteRemove={handleQuoteRemove}
       />
 
       {slashOpen ? (
@@ -374,26 +490,14 @@ export function SendBox({
           activeIndex={atActiveIndex}
           loading={atLoading}
           error={atError}
+          directoryPath={atDirectoryPath}
+          hint={atSearchHint}
           query={atQuery ?? ""}
+          onNavigateDirectory={navigateAtDirectory}
           onSelect={selectFile}
         />
       ) : null}
 
-      {fileSelection.files.length ? (
-        <div className={styles.fileChips} aria-label="已选择文件">
-          {fileSelection.files.map((file) => (
-            <button
-              className={styles.fileChip}
-              type="button"
-              aria-label={`移除文件 ${file.path}`}
-              key={file.path}
-              onClick={() => removeFile(file.path)}
-            >
-              <span>{file.path}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       {fileSelection.error ? <div className={styles.fileError}>{fileSelection.error}</div> : null}
 
       <div className={styles.toolbar}>
@@ -410,7 +514,7 @@ export function SendBox({
               <Square size={13} />
             </button>
           ) : (
-            <button className={styles.sendButton} type="submit" aria-label="发送" disabled={!canSend}>
+            <button className={styles.sendButton} type="submit" aria-label="发送" disabled={!canSubmit}>
               <SendIcon size={variant === "codex" ? 19 : 17} />
             </button>
           )}
@@ -426,6 +530,150 @@ function isBusy(state: ConversationRuntimeState): boolean {
   return state === "starting" || state === "running" || state === "waiting_approval" || state === "cancelling";
 }
 
+function editorTextFromComposerValue(value: string): string {
+  return parseQuoteMarkers(value)
+    .map((segment) => (segment.type === "text" ? segment.value : ""))
+    .join("");
+}
+
+function composerValueFromEditorText(editorText: string, currentValue: string): string {
+  const quoteMarkers = quoteSegmentsFromComposerValue(currentValue)
+    .map((segment) => segment.marker)
+    .join("");
+  return `${editorText}${quoteMarkers}`;
+}
+
+function quoteChipsFromComposerValue(value: string): QuoteChipItem[] {
+  return quoteSegmentsFromComposerValue(value).map((segment, index) => ({
+    index,
+    marker: segment.marker,
+    preview: quoteMarkerPreview(segment.value),
+    text: segment.value,
+  }));
+}
+
+function quoteSegmentsFromComposerValue(value: string): QuoteMarkerQuoteSegment[] {
+  return parseQuoteMarkers(value).filter((segment): segment is QuoteMarkerQuoteSegment => segment.type === "quote");
+}
+
+interface QuoteChipItem {
+  index: number;
+  marker: string;
+  preview: string;
+  text: string;
+}
+
+function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove: () => void }) {
+  const showTimerRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const clearShowTimer = useCallback(() => {
+    if (showTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(showTimerRef.current);
+    showTimerRef.current = null;
+  }, []);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = null;
+  }, []);
+
+  const scheduleOpen = useCallback(() => {
+    clearShowTimer();
+    clearHideTimer();
+    showTimerRef.current = window.setTimeout(() => {
+      showTimerRef.current = null;
+      setOpen(true);
+    }, QUOTE_CARD_SHOW_DELAY_MS);
+  }, [clearHideTimer, clearShowTimer]);
+
+  const scheduleClose = useCallback(() => {
+    clearShowTimer();
+    clearHideTimer();
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null;
+      setOpen(false);
+      setCopied(false);
+    }, 120);
+  }, [clearHideTimer, clearShowTimer]);
+
+  useEffect(
+    () => () => {
+      clearShowTimer();
+      clearHideTimer();
+    },
+    [clearHideTimer, clearShowTimer],
+  );
+
+  const handleCopyQuote = async () => {
+    await copyToClipboard(quote.text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <span
+      className={styles.quoteChipWrapper}
+      onBlur={(event) => {
+        const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+        if (!event.currentTarget.contains(relatedTarget)) {
+          scheduleClose();
+        }
+      }}
+      onFocus={scheduleOpen}
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={scheduleClose}
+    >
+      <span
+        className={styles.quoteInputChip}
+        tabIndex={0}
+        aria-label={`引用片段：${quote.preview}`}
+        data-quote-index={quote.index}
+      >
+        <span className={styles.quoteInputChipLabel}>引用片段</span>
+        <button
+          className={styles.quoteInputChipRemove}
+          type="button"
+          aria-label={`删除引用片段 ${quote.preview}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove();
+          }}
+        >
+          <X size={11} strokeWidth={2} />
+        </button>
+      </span>
+      {open ? (
+        <span
+          className={styles.quoteHoverCard}
+          data-quote-hover-card="true"
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={clearHideTimer}
+          onMouseLeave={scheduleClose}
+        >
+          <span className={styles.quoteHoverBody}>{quote.text}</span>
+          <span className={styles.quoteHoverActions}>
+            <button type="button" onClick={handleCopyQuote}>
+              {copied ? "已复制" : "复制"}
+            </button>
+            <button type="button" data-danger="true" onClick={onRemove}>
+              删除
+            </button>
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 interface ContentEditableInputProps {
   value: string;
   inputLabel: string;
@@ -439,8 +687,7 @@ interface ContentEditableInputProps {
   onCompositionStart: (event: CompositionEvent<HTMLElement>) => void;
   onFocus: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
-  onPaste: (event: ClipboardEvent<HTMLElement>) => void;
-  onQuoteRemove: (quoteIndex: number) => void;
+  onPaste: (event: ClipboardEvent<HTMLDivElement>) => void;
 }
 
 function ContentEditableInput({
@@ -457,18 +704,8 @@ function ContentEditableInput({
   onFocus,
   onKeyDown,
   onPaste,
-  onQuoteRemove,
 }: ContentEditableInputProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
-  const showCardTimerRef = useRef<number | null>(null);
-  const hideCardTimerRef = useRef<number | null>(null);
-  const [activeCard, setActiveCard] = useState<{
-    index: number;
-    text: string;
-    left: number;
-    top: number;
-  } | null>(null);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const setEditorRef = useCallback(
     (node: HTMLDivElement | null) => {
       editorRef.current = node;
@@ -477,274 +714,110 @@ function ContentEditableInput({
     [refSetter],
   );
 
-  useEffect(
-    () => () => {
-      if (showCardTimerRef.current !== null) {
-        window.clearTimeout(showCardTimerRef.current);
-      }
-      if (hideCardTimerRef.current !== null) {
-        window.clearTimeout(hideCardTimerRef.current);
-      }
-    },
-    [],
-  );
-
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
       return;
     }
-    if (readQuoteEditorValue(editor) !== value) {
-      renderQuoteEditorValue(editor, value);
+    if (readEditorValue(editor) !== value) {
+      renderEditorValue(editor, value);
     }
     editor.dataset.empty = value ? "false" : "true";
   }, [value]);
 
-  const clearShowCardTimer = useCallback(() => {
-    if (showCardTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(showCardTimerRef.current);
-    showCardTimerRef.current = null;
-  }, []);
-
-  const clearHideCardTimer = useCallback(() => {
-    if (hideCardTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(hideCardTimerRef.current);
-    hideCardTimerRef.current = null;
-  }, []);
-
-  const scheduleHideCard = useCallback(() => {
-    clearShowCardTimer();
-    clearHideCardTimer();
-    hideCardTimerRef.current = window.setTimeout(() => {
-      hideCardTimerRef.current = null;
-      setActiveCard(null);
-      setCopiedIndex(null);
-    }, 120);
-  }, [clearHideCardTimer, clearShowCardTimer]);
-
-  const showQuoteCard = useCallback(
-    (target: Element | null) => {
-      const chip = target?.closest("[data-quote-index]");
-      const editor = editorRef.current;
-      if (!(chip instanceof HTMLElement) || !editor) {
-        return;
-      }
-      const quoteIndex = Number(chip.dataset.quoteIndex);
-      const quoteText = chip.dataset.quoteText ?? "";
-      const root = editor.closest("form");
-      if (!Number.isFinite(quoteIndex) || !quoteText || !(root instanceof HTMLElement)) {
-        return;
-      }
-      clearHideCardTimer();
-      const chipRect = chip.getBoundingClientRect();
-      const rootRect = root.getBoundingClientRect();
-      setActiveCard({
-        index: quoteIndex,
-        text: quoteText,
-        left: chipRect.left + chipRect.width / 2 - rootRect.left,
-        top: chipRect.top - rootRect.top - 8,
-      });
-    },
-    [clearHideCardTimer],
-  );
-
-  const scheduleShowQuoteCard = useCallback(
-    (target: Element | null) => {
-      clearShowCardTimer();
-      clearHideCardTimer();
-      showCardTimerRef.current = window.setTimeout(() => {
-        showCardTimerRef.current = null;
-        showQuoteCard(target);
-      }, QUOTE_CARD_SHOW_DELAY_MS);
-    },
-    [clearHideCardTimer, clearShowCardTimer, showQuoteCard],
-  );
-
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const remove = target?.closest("[data-quote-remove]");
-    if (!remove) {
-      return;
-    }
-    const chip = remove.closest("[data-quote-index]");
-    if (!(chip instanceof HTMLElement)) {
-      return;
-    }
-    const quoteIndex = Number(chip.dataset.quoteIndex);
-    if (!Number.isFinite(quoteIndex)) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    onQuoteRemove(quoteIndex);
-    setActiveCard(null);
-    editorRef.current?.focus();
-  };
-
-  const handleMouseOver = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target.closest("[data-quote-index]") : null;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const relatedTarget = event.relatedTarget instanceof Element ? event.relatedTarget : null;
-    if (relatedTarget?.closest("[data-quote-index]") === target) {
-      return;
-    }
-    scheduleShowQuoteCard(target);
-  };
-
-  const handleMouseOut = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target.closest("[data-quote-index]") : null;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const relatedTarget = event.relatedTarget instanceof Element ? event.relatedTarget : null;
-    if (relatedTarget?.closest("[data-quote-index]") === target || relatedTarget?.closest("[data-quote-hover-card]")) {
-      return;
-    }
-    clearShowCardTimer();
-    scheduleHideCard();
-  };
-
-  const handleCopyQuote = async () => {
-    if (!activeCard) {
-      return;
-    }
-    await copyToClipboard(activeCard.text);
-    setCopiedIndex(activeCard.index);
-    window.setTimeout(() => setCopiedIndex((index) => (index === activeCard.index ? null : index)), 1200);
-  };
-
-  const handleDeleteActiveQuote = () => {
-    if (!activeCard) {
-      return;
-    }
-    onQuoteRemove(activeCard.index);
-    setActiveCard(null);
-    editorRef.current?.focus();
-  };
-
   return (
-    <>
-      <div
-        ref={setEditorRef}
-        className={`${className} ${styles.richInput}`}
-        role="textbox"
-        aria-label={inputLabel}
-        aria-multiline="true"
-        aria-disabled={disabled}
-        aria-placeholder={placeholder}
-        contentEditable={!disabled}
-        data-empty={value ? "false" : "true"}
-        data-placeholder={placeholder}
-        suppressContentEditableWarning
-        tabIndex={disabled ? -1 : 0}
-        onBlur={onBlur}
-        onClick={handleClick}
-        onCompositionEnd={onCompositionEnd}
-        onCompositionStart={onCompositionStart}
-        onFocus={onFocus}
-        onInput={onChange}
-        onKeyDown={onKeyDown}
-        onMouseLeave={scheduleHideCard}
-        onMouseOut={handleMouseOut}
-        onMouseOver={handleMouseOver}
-        onPaste={onPaste}
-      />
-      {activeCard ? (
-        <div
-          className={styles.quoteHoverCard}
-          data-quote-hover-card="true"
-          style={{ left: activeCard.left, top: activeCard.top }}
-          onMouseDown={(event) => event.preventDefault()}
-          onMouseEnter={clearHideCardTimer}
-          onMouseLeave={scheduleHideCard}
-        >
-          <div className={styles.quoteHoverBody}>{activeCard.text}</div>
-          <div className={styles.quoteHoverActions}>
-            <button type="button" onClick={handleCopyQuote}>
-              {copiedIndex === activeCard.index ? "已复制" : "复制"}
-            </button>
-            <button type="button" data-danger="true" onClick={handleDeleteActiveQuote}>
-              删除
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </>
+    <div
+      ref={setEditorRef}
+      className={`${className} ${styles.richInput}`}
+      role="textbox"
+      aria-label={inputLabel}
+      aria-multiline="true"
+      aria-disabled={disabled}
+      aria-placeholder={placeholder}
+      contentEditable={!disabled}
+      data-empty={value ? "false" : "true"}
+      data-placeholder={placeholder}
+      suppressContentEditableWarning
+      tabIndex={disabled ? -1 : 0}
+      onBlur={onBlur}
+      onCompositionEnd={onCompositionEnd}
+      onCompositionStart={onCompositionStart}
+      onFocus={onFocus}
+      onInput={onChange}
+      onKeyDown={onKeyDown}
+      onPaste={onPaste}
+    />
   );
 }
 
 const QUOTE_CARD_SHOW_DELAY_MS = 200;
-const QUOTE_CARET_GUARD = "\u200b";
 
-function renderQuoteEditorValue(editor: HTMLDivElement, value: string) {
-  let quoteIndex = 0;
-  const nodes: Node[] = [];
-  parseQuoteMarkers(value).forEach((segment) => {
-    if (segment.type === "text") {
-      nodes.push(document.createTextNode(segment.value));
-      return;
-    }
-    const chip = document.createElement("span");
-    const label = document.createElement("span");
-    const remove = document.createElement("span");
-    const preview = quoteMarkerPreview(segment.value);
-    chip.className = styles.quoteInputChip;
-    chip.contentEditable = "false";
-    chip.dataset.quoteIndex = String(quoteIndex);
-    chip.dataset.quoteMarker = segment.marker;
-    chip.dataset.quoteText = segment.value;
-    chip.setAttribute("aria-label", `引用片段：${preview}`);
-    label.className = styles.quoteInputChipLabel;
-    label.textContent = "引用片段";
-    remove.className = styles.quoteInputChipRemove;
-    remove.dataset.quoteRemove = "true";
-    remove.setAttribute("aria-label", "删除引用片段");
-    remove.setAttribute("role", "button");
-    remove.textContent = "×";
-    chip.append(label, remove);
-    quoteIndex += 1;
-    nodes.push(chip, document.createTextNode(QUOTE_CARET_GUARD));
-  });
-  editor.replaceChildren(...nodes);
+function renderEditorValue(editor: HTMLDivElement, value: string) {
+  editor.replaceChildren(...(value ? [document.createTextNode(value)] : []));
 }
 
 function syncEditableChange(editor: HTMLElement, onChange: (value: string) => void) {
-  onChange(readQuoteEditorValue(editor));
+  const nextValue = readEditorValue(editor);
+  editor.dataset.empty = nextValue ? "false" : "true";
+  onChange(nextValue);
 }
 
-function readQuoteEditorValue(root: Node): string {
+function readEditorValue(root: Node): string {
+  if (!hasMeaningfulEditorContent(root)) {
+    return "";
+  }
   let value = "";
   root.childNodes.forEach((node) => {
-    value += readQuoteEditorNodeValue(node);
+    value += readEditorNodeValue(node);
   });
-  return value.replace(/\u00a0/g, " ").split(QUOTE_CARET_GUARD).join("");
+  return normalizeEditorText(value);
 }
 
-function readQuoteEditorNodeValue(node: Node): string {
+function readEditorNodeValue(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) {
     return node.textContent ?? "";
   }
   if (!(node instanceof HTMLElement)) {
     return "";
   }
-  if (node.dataset.quoteMarker) {
-    return node.dataset.quoteMarker;
-  }
   if (node.tagName === "BR") {
     return "\n";
   }
-  const childValue = readQuoteEditorValue(node);
+  const childValue = readEditorValue(node);
   return isBlockEditorNode(node) && childValue ? `${childValue}\n` : childValue;
 }
 
 function isBlockEditorNode(node: HTMLElement): boolean {
   return node.tagName === "DIV" || node.tagName === "P";
+}
+
+function hasMeaningfulEditorContent(node: Node): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return normalizeEditorText(node.textContent ?? "").length > 0;
+  }
+  if (!(node instanceof HTMLElement)) {
+    return false;
+  }
+  if (node.tagName === "BR") {
+    return false;
+  }
+  return Array.from(node.childNodes).some((child) => hasMeaningfulEditorContent(child));
+}
+
+function normalizeEditorText(text: string): string {
+  return text.replace(/\u00a0/g, " ");
+}
+
+function resizeEditableInput(input: HTMLElement) {
+  input.style.height = "0px";
+  input.style.height = `${Math.min(Math.max(input.scrollHeight, 44), 188)}px`;
+}
+
+function scrollEditableToBottom(input: HTMLElement) {
+  input.scrollTop = input.scrollHeight;
+  window.requestAnimationFrame(() => {
+    input.scrollTop = input.scrollHeight;
+  });
 }
 
 function pastePlainText(event: ClipboardEvent<HTMLElement>) {

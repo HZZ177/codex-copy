@@ -452,6 +452,20 @@ export type AgentSubagentToolItem = AgentToolCall & {
 
 export type AgentSubagentItem = AgentSubagentTextItem | AgentSubagentToolItem;
 
+export interface AgentContextItem {
+  id: string;
+  type: "file" | "quote" | "slot" | "follow" | string;
+  label: string;
+  content: string;
+  role?: "SystemMessage" | "HumanMessage" | "AIMessage" | string;
+  source?: "slot" | "follow" | string;
+  path?: string;
+  name?: string;
+  fileType?: "file" | "directory" | string;
+  timestamp?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AgentChatMessage {
   id: string;
   sessionId: string;
@@ -459,6 +473,7 @@ export interface AgentChatMessage {
   role: AgentChatRole;
   content: string;
   timestamp: number;
+  contextItems?: AgentContextItem[];
   reasoningKind?: AgentReasoningKind;
   attachments?: AgentFileAttachment[];
   ghostStats?: AgentGhostStats;

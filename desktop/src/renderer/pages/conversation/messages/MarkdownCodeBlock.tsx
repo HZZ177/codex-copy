@@ -1,4 +1,16 @@
-import { Check, ChevronDown, ChevronUp, Copy, Maximize2, PanelRightDashed, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Maximize2,
+  PanelRightClose,
+  PanelRightOpen,
+  RotateCcw,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import katex from "katex";
 import {
   memo,
@@ -26,6 +38,7 @@ import { LineChangeTicker } from "./LineChangeTicker";
 import { MarkdownTable } from "./MarkdownTable";
 import { copyText, markdownRehypePlugins, markdownRemarkPlugins, normalizeMarkdownContent } from "./markdown";
 import styles from "./MessageText.module.css";
+import { useExpansionScrollAnchor } from "./useExpansionScrollAnchor";
 
 const PREVIEW_LINES = 10;
 const VIEW_SWITCH_DELAY_MS = 180;
@@ -33,7 +46,7 @@ const COLLAPSED_CODE_HEIGHT = 198;
 const CODE_COLLAPSE_ANIMATION_MS = 220;
 const CODE_HIGHLIGHTER_STYLE: CSSProperties = {
   margin: 0,
-  padding: "0 12px 10px",
+  padding: "10px 14px 12px",
   border: "none",
   background: "transparent",
   color: "var(--color-text-1)",
@@ -74,6 +87,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
   const sourceAnimationRef = useRef<Animation | null>(null);
   const switchTimerRef = useRef<number | null>(null);
   const previewContext = useOptionalPreview();
+  const captureExpansionAnchor = useExpansionScrollAnchor();
   const codeChild = getCodeChild(children);
   const className = codeChild?.props?.className;
   const language = getLanguage(className);
@@ -98,6 +112,16 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
   const canOpenFullscreen = Boolean(previewLabel || panelPreview);
   const fullscreenLabel = previewLabel ?? panelPreview?.title ?? language;
   const fullscreenTitle = previewLabel ? `${previewLabel} 预览` : panelPreview?.title ?? `${language} 预览`;
+  const panelPreviewEntryId = useMemo(
+    () =>
+      panelPreview && previewContext
+        ? previewEntryIdForRequest(panelPreview, previewContext.activeScopeKey)
+        : null,
+    [panelPreview, previewContext],
+  );
+  const panelPreviewActive = Boolean(
+    panelPreviewEntryId && previewContext?.panelOpen && previewContext.panelActiveEntryId === panelPreviewEntryId,
+  );
   const preferredViewMode = defaultViewMode;
   const viewMode = viewModeOverride ?? preferredViewMode;
   const isSwitchingView = pendingViewMode !== null;
@@ -147,14 +171,10 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
   const toggleExpanded = () => {
     const nextExpanded = !expanded;
     const viewport = sourceViewportRef.current;
+    captureExpansionAnchor(containerRef.current);
 
     if (!viewport || prefersReducedMotion() || typeof viewport.animate !== "function") {
       setExpanded(nextExpanded);
-      if (!nextExpanded) {
-        window.requestAnimationFrame(() => {
-          containerRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
-        });
-      }
       return;
     }
 
@@ -196,9 +216,6 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
           return;
         }
         clearSourceAnimation(sourceAnimationRef, viewport);
-        if (!nextExpanded) {
-          containerRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
-        }
       };
       animation.oncancel = () => {
         if (sourceAnimationRef.current === animation) {
@@ -278,11 +295,12 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
             <button
               className={styles.codeIconButton}
               type="button"
-              aria-label={`在预览面板打开 ${panelPreview.title}`}
-              title={`在预览面板打开 ${panelPreview.title}`}
+              aria-label={panelPreviewActive ? `收起预览面板 ${panelPreview.title}` : `在预览面板打开 ${panelPreview.title}`}
+              aria-pressed={panelPreviewActive}
+              title={panelPreviewActive ? `收起预览面板 ${panelPreview.title}` : `在预览面板打开 ${panelPreview.title}`}
               onClick={openInPanel}
             >
-              <PanelRightDashed size={14} />
+              {panelPreviewActive ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
             </button>
           ) : null}
           {showCollapseControls ? (
@@ -568,6 +586,24 @@ function buildPanelPreviewRequest(language: string, content: string): ContentPre
     };
   }
   return null;
+}
+
+function previewEntryIdForRequest(request: PreviewRequest, scopeKey: string): string {
+  if (request.type === "file") {
+    return `${scopeKey}:file:${request.path}`;
+  }
+  if (request.type === "diff") {
+    return `${scopeKey}:diff:${request.path}:${hashPreviewText(request.diff)}`;
+  }
+  return `${scopeKey}:content:${request.contentType}:${request.title}:${hashPreviewText(request.content)}`;
+}
+
+function hashPreviewText(text: string): string {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 function isMathLanguage(language: string): boolean {

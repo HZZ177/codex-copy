@@ -9,6 +9,8 @@ import {
   type WheelEvent,
 } from "react";
 
+import { EXPANSION_SCROLL_LOCK_ATTR } from "./useExpansionScrollAnchor";
+
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150;
 const AT_BOTTOM_THRESHOLD_PX = 100;
 const FOLLOW_BOTTOM_THRESHOLD_PX = 4;
@@ -124,7 +126,7 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
 
   const scheduleAutoFollow = useCallback(() => {
     const scrollElement = getScrollElement();
-    if (!scrollElement || userPinnedRef.current) {
+    if (!scrollElement || userPinnedRef.current || isExpansionScrollLocked(scrollElement)) {
       return;
     }
     if (frameRef.current !== null) {
@@ -134,7 +136,7 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
       const nextScrollElement = getScrollElement();
-      if (!nextScrollElement || userPinnedRef.current) {
+      if (!nextScrollElement || userPinnedRef.current || isExpansionScrollLocked(nextScrollElement)) {
         return;
       }
       if (getBottomGap(nextScrollElement) > FOLLOW_BOTTOM_THRESHOLD_PX) {
@@ -313,6 +315,10 @@ function findScrollParent(element: HTMLElement): HTMLElement | null {
     parent = parent.parentElement;
   }
   return null;
+}
+
+function isExpansionScrollLocked(element: HTMLElement): boolean {
+  return element.hasAttribute(EXPANSION_SCROLL_LOCK_ATTR);
 }
 
 function animateScrollToBottom({

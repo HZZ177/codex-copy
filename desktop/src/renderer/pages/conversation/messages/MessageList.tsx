@@ -235,12 +235,15 @@ export function MessageList({
     () => ({
       ...messageVirtuosoComponents,
       Scroller: forwardRef<HTMLDivElement, ScrollerProps>(function MessageScroller(
-        { children, style, onScroll, ...props },
+        { children, style, ...props },
         ref,
       ) {
+        const { onScroll, ...scrollerProps } = props as typeof props & {
+          onScroll?: (event: UIEvent<HTMLDivElement>) => void;
+        };
         return (
           <div
-            {...props}
+            {...scrollerProps}
             ref={ref}
             className={styles.scroller}
             data-testid="message-list-scroll"

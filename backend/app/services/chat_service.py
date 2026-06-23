@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
+
+from langchain_core.messages import RemoveMessage, SystemMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from backend.app.agent import AgentRunner
 from backend.app.agent.event_processor import AgentEventResult, process_agent_events
@@ -41,6 +45,26 @@ class NullChatProjectionAdapter:
         return False
 
 
+class MessageInjectionType(str, Enum):
+    SLOT = "slot"
+    FOLLOW = "follow"
+
+
+class MessageInjectionRole(str, Enum):
+    SYSTEM = "SystemMessage"
+    HUMAN = "HumanMessage"
+    AI = "AIMessage"
+
+
+@dataclass(frozen=True)
+class InjectedMessage:
+    type: MessageInjectionType
+    role: MessageInjectionRole
+    content: str
+    message_time: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
 @dataclass(frozen=True)
 class ChatRequest:
     message: str
@@ -49,6 +73,7 @@ class ChatRequest:
     scene_id: str | None = None
     model: str = ""
     system_prompt: str | None = None
+    runtime_params: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +91,121 @@ class AgentLoopOutcome:
     event_result: AgentEventResult
     output_checkpoint_id: str | None
     output_checkpoint_ns: str
+
+
+_SLOT_MESSAGE_ID = "keydex_slot_system_fixed"
+
+
+def _build_message_injection_items(runtime_params: dict[str, Any] | None) -> list[InjectedMessage]:
+    if not runtime_params:
+        return []
+    if not isinstance(runtime_params, dict):
+        raise ValueError("runtime_params 必须是对象")
+    raw_items = runtime_params.get("message_injection")
+    if raw_items is None:
+        raw_items = runtime_params.get("messageInjection")
+    if raw_items is None:
+        return []
+    if not isinstance(raw_items, list):
+        raise ValueError("runtime_params.message_injection 必须是数组")
+
+    items: list[InjectedMessage] = []
+    for index, raw_item in enumerate(raw_items):
+        if not isinstance(raw_item, dict):
+            raise ValueError(f"message_injection[{index}] 必须是对象")
+        raw_type = str(raw_item.get("type") or "").strip()
+        raw_role = str(raw_item.get("role") or "").strip()
+        content = str(raw_item.get("content") or "").strip()
+        if not content:
+            raise ValueError(f"message_injection[{index}].content 不能为空")
+        try:
+            injection_type = MessageInjectionType(raw_type)
+        except ValueError as exc:
+            raise ValueError(f"message_injection[{index}].type 不支持: {raw_type}") from exc
+        try:
+            role = MessageInjectionRole(raw_role)
+        except ValueError as exc:
+            raise ValueError(f"message_injection[{index}].role 不支持: {raw_role}") from exc
+        metadata = raw_item.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError(f"message_injection[{index}].metadata 必须是对象")
+        message_time = raw_item.get("message_time")
+        if message_time is None:
+            message_time = raw_item.get("messageTime")
+        items.append(
+            InjectedMessage(
+                type=injection_type,
+                role=role,
+                content=content,
+                message_time=str(message_time).strip() if message_time else None,
+                metadata=dict(metadata or {}),
+            )
+        )
+
+    slot_items = [item for item in items if item.type == MessageInjectionType.SLOT]
+    if len(slot_items) > 1:
+        raise ValueError("同一请求中 type=slot 至多一条")
+    if slot_items and slot_items[0].role != MessageInjectionRole.SYSTEM:
+        raise ValueError("type=slot 时 role 必须为 SystemMessage")
+    return items
+
+
+def _runtime_role_for_injection(role: MessageInjectionRole) -> str:
+    if role == MessageInjectionRole.SYSTEM:
+        return "system"
+    if role == MessageInjectionRole.HUMAN:
+        return "user"
+    return "assistant"
+
+
+def _to_runtime_message(item: InjectedMessage) -> dict[str, Any]:
+    return {
+        "role": _runtime_role_for_injection(item.role),
+        "content": item.content,
+        "_injected": True,
+    }
+
+
+def _message_created_event_type_for_role(role: str) -> DomainEventType:
+    if role == "system":
+        return DomainEventType.MESSAGE_SYSTEM_CREATED
+    if role == "assistant":
+        return DomainEventType.MESSAGE_AI_CREATED
+    return DomainEventType.MESSAGE_USER_CREATED
+
+
+async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: str) -> bool:
+    if not content.strip():
+        return False
+    if not hasattr(graph, "aget_state") or not hasattr(graph, "aupdate_state"):
+        logger.debug("[MessageInjection] graph 不支持 checkpoint slot patch，跳过 slot 同步")
+        return False
+
+    snapshot = await graph.aget_state(config)
+    values = snapshot.values or {}
+    state_messages = list((values.get("messages") or [])) if isinstance(values, dict) else []
+    existing_slot = next(
+        (
+            message
+            for message in state_messages
+            if isinstance(message, SystemMessage) and getattr(message, "id", None) == _SLOT_MESSAGE_ID
+        ),
+        None,
+    )
+    if existing_slot is not None and str(existing_slot.content or "") == content:
+        return False
+
+    rebuilt = [
+        message
+        for message in state_messages
+        if not (isinstance(message, SystemMessage) and getattr(message, "id", None) == _SLOT_MESSAGE_ID)
+    ]
+    rebuilt.insert(0, SystemMessage(content=content, id=_SLOT_MESSAGE_ID))
+    await graph.aupdate_state(
+        config,
+        {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *rebuilt]},
+    )
+    return True
 
 
 class ChatService:
@@ -89,7 +229,8 @@ class ChatService:
         chat_adapter: ChatProjectionAdapter | None = None,
         cancellation: ChatCancellationToken | None = None,
     ) -> ChatTurnResult:
-        if not request.message.strip():
+        message_injection_items = _build_message_injection_items(request.runtime_params)
+        if not request.message.strip() and not message_injection_items:
             raise ValueError("用户消息不能为空")
 
         token = cancellation or ChatCancellationToken()
@@ -106,6 +247,9 @@ class ChatService:
             active_session_id=active_session_id,
             user_id=request.user_id or session.user_id,
         )
+        runtime_metadata = {"runtime": "desktop", "agent_runtime": "langchain"}
+        if request.runtime_params:
+            runtime_metadata["runtime_params"] = request.runtime_params
 
         logger.info(
             f"[ChatTurn] 开始处理对话 | session_id={session.id} | turn_index={turn_index} | "
@@ -124,7 +268,7 @@ class ChatService:
             turn_index=turn_index,
             root_node_id=root_node_id,
             user_message_preview=request.message[:200],
-            metadata={"runtime": "desktop", "agent_runtime": "langchain"},
+            metadata=runtime_metadata,
         )
 
         aggregator = TurnCompletedAggregator()
@@ -151,6 +295,15 @@ class ChatService:
                 root_node_id=root_node_id,
                 turn_index=turn_index,
             )
+            injected_runtime_messages, _slot_updated = await self._apply_message_injection(
+                dispatcher=dispatcher,
+                request=request,
+                session=session,
+                trace_id=trace_id,
+                root_node_id=root_node_id,
+                turn_index=turn_index,
+                message_injection=message_injection_items,
+            )
             await self._emit_user_message(
                 dispatcher=dispatcher,
                 request=request,
@@ -166,6 +319,7 @@ class ChatService:
                 turn_index=turn_index,
                 dispatcher=dispatcher,
                 cancellation=token,
+                injected_runtime_messages=injected_runtime_messages,
             )
 
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
@@ -335,6 +489,7 @@ class ChatService:
         turn_index: int,
         dispatcher: EventDispatcher,
         cancellation: ChatCancellationToken,
+        injected_runtime_messages: list[dict[str, Any]] | None = None,
     ) -> AgentLoopOutcome:
         active_session_id = session.active_session_id or session.id
         tool_context, enable_tools = self._build_tool_context(
@@ -363,8 +518,24 @@ class ChatService:
             },
             "recursion_limit": max(4, self.settings.max_tool_calls * 2 + 4),
         }
+        slot_items = [
+            item
+            for item in _build_message_injection_items(request.runtime_params)
+            if item.type == MessageInjectionType.SLOT
+        ]
+        if slot_items:
+            await _sync_slot_to_checkpoint(
+                agent,
+                {"configurable": {"thread_id": active_session_id, "checkpoint_ns": ""}},
+                slot_items[0].content,
+            )
+        messages_to_send = list(injected_runtime_messages or [])
+        if request.message.strip():
+            messages_to_send.append({"role": "user", "content": request.message})
+        if not messages_to_send:
+            messages_to_send.append({"role": "user", "content": "请根据已附加的上下文继续处理。"})
         event_stream = agent.astream_events(
-            {"messages": [{"role": "user", "content": request.message}]},
+            {"messages": messages_to_send},
             config=run_config,
             version="v2",
         )
@@ -484,6 +655,7 @@ class ChatService:
                 "turn_index": turn_index,
                 "user_id": request.user_id or session.user_id,
                 "user_message": request.message,
+                "runtime_params": request.runtime_params,
                 "agent_name": "desktop_agent",
                 "model": request.model.strip(),
                 "start_time": int(time.time() * 1000),
@@ -493,6 +665,90 @@ class ChatService:
             original_session_id=session.id,
             active_session_id=session.active_session_id or session.id,
             turn_index=turn_index,
+        )
+
+    async def _apply_message_injection(
+        self,
+        *,
+        dispatcher: EventDispatcher,
+        request: ChatRequest,
+        session: SessionRecord,
+        trace_id: str,
+        root_node_id: str,
+        turn_index: int,
+        message_injection: list[InjectedMessage],
+    ) -> tuple[list[dict[str, Any]], bool]:
+        follow_messages = [item for item in message_injection if item.type == MessageInjectionType.FOLLOW]
+        slot_messages = [item for item in message_injection if item.type == MessageInjectionType.SLOT]
+        if not follow_messages and not slot_messages:
+            return [], False
+
+        injected_runtime_messages: list[dict[str, Any]] = []
+        for slot_item in slot_messages:
+            await self._emit_injected_message(
+                dispatcher=dispatcher,
+                request=request,
+                session=session,
+                trace_id=trace_id,
+                root_node_id=root_node_id,
+                turn_index=turn_index,
+                item=slot_item,
+            )
+
+        for follow_item in follow_messages:
+            runtime_message = _to_runtime_message(follow_item)
+            injected_runtime_messages.append(runtime_message)
+            await self._emit_injected_message(
+                dispatcher=dispatcher,
+                request=request,
+                session=session,
+                trace_id=trace_id,
+                root_node_id=root_node_id,
+                turn_index=turn_index,
+                item=follow_item,
+            )
+
+        logger.info(
+            f"[MessageInjection] 注入消息完成 | session_id={session.id} | turn_index={turn_index} | "
+            f"slot_count={len(slot_messages)} | follow_count={len(follow_messages)}"
+        )
+        return injected_runtime_messages, bool(slot_messages)
+
+    async def _emit_injected_message(
+        self,
+        *,
+        dispatcher: EventDispatcher,
+        request: ChatRequest,
+        session: SessionRecord,
+        trace_id: str,
+        root_node_id: str,
+        turn_index: int,
+        item: InjectedMessage,
+    ) -> None:
+        role = _runtime_role_for_injection(item.role)
+        await dispatcher.emit_event(
+            event_type=_message_created_event_type_for_role(role),
+            source="message_injection",
+            payload={
+                "content": item.content,
+                "session_id": session.id,
+                "trace_id": trace_id,
+                "trace_record_id": trace_id,
+                "root_node_id": root_node_id,
+                "messageTimeMs": int(time.time() * 1000),
+                "source": "message_injection",
+                "injectionSource": item.type.value,
+                "injectionRole": item.role.value,
+                "slotMessageId": _SLOT_MESSAGE_ID if item.type == MessageInjectionType.SLOT else None,
+                "metadata": item.metadata or {},
+                "fallbackUserMessage": request.message,
+            },
+            trace_id=trace_id,
+            user_id=request.user_id or session.user_id,
+            original_session_id=session.id,
+            active_session_id=session.active_session_id or session.id,
+            turn_index=turn_index,
+            tags={"messageTimeMs": int(time.time() * 1000)},
         )
 
     async def _emit_user_message(

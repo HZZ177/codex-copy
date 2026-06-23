@@ -20,6 +20,7 @@ import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { MessageGroupKind } from "./processMessages";
 import styles from "./MessageGroupBlock.module.css";
 import { useDeferredUnmount } from "./useDeferredUnmount";
+import { useExpansionScrollAnchor } from "./useExpansionScrollAnchor";
 
 export interface MessageGroupBlockProps {
   groupKind: MessageGroupKind;
@@ -37,6 +38,7 @@ export function MessageGroupBlock({ groupKind, count, messages = [], sourceMessa
   const label = groupLabel(groupKind, count, messages, state);
   const iconKind = groupIconKind(groupKind, messages, state);
   const childrenMotion = useDeferredUnmount<HTMLDivElement>(expanded);
+  const captureExpansionAnchor = useExpansionScrollAnchor();
 
   return (
     <article className={styles.block} data-testid="message-group-block" data-kind={groupKind} data-state={state}>
@@ -45,7 +47,10 @@ export function MessageGroupBlock({ groupKind, count, messages = [], sourceMessa
         type="button"
         aria-expanded={expanded}
         aria-label={`${label}详情`}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={(event) => {
+          captureExpansionAnchor(event.currentTarget);
+          setExpanded((value) => !value);
+        }}
       >
         <span className={styles.icon} data-icon-kind={iconKind} aria-hidden="true">
           {groupIcon(iconKind)}

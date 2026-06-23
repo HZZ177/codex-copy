@@ -50,6 +50,10 @@ def test_workspace_bound_tree_read_and_search(tmp_path) -> None:
             f"/api/workspaces/{workspace['id']}/search",
             params={"q": "main"},
         )
+        default_search_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": ""},
+        )
 
     assert tree_response.status_code == 200
     assert [entry["path"] for entry in tree_response.json()["entries"]] == [
@@ -68,6 +72,39 @@ def test_workspace_bound_tree_read_and_search(tmp_path) -> None:
         "name": "main.py",
         "type": "file",
     }
+    assert default_search_response.status_code == 200
+    assert [entry["path"] for entry in default_search_response.json()[:2]] == [
+        "src",
+        "README.md",
+    ]
+
+
+def test_workspace_search_skips_generated_and_secret_paths(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "src").mkdir()
+    (root / "src" / "env_reader.py").write_text("print('safe')\n", encoding="utf-8")
+    (root / "node_modules").mkdir()
+    (root / "node_modules" / "env-package.js").write_text("ignored", encoding="utf-8")
+    (root / ".venv").mkdir()
+    (root / ".venv" / "env_tool.py").write_text("ignored", encoding="utf-8")
+    (root / ".env").write_text("SECRET=ignored\n", encoding="utf-8")
+    (root / ".env.local").write_text("SECRET=ignored\n", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "env", "limit": 20},
+        )
+
+    assert response.status_code == 200
+    paths = [entry["path"] for entry in response.json()]
+    assert "src/env_reader.py" in paths
+    assert "node_modules/env-package.js" not in paths
+    assert ".venv/env_tool.py" not in paths
+    assert ".env" not in paths
+    assert ".env.local" not in paths
 
 
 def test_session_bound_workspace_tree_read_and_search(tmp_path) -> None:

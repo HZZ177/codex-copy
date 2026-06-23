@@ -137,6 +137,41 @@ def test_message_event_service_appends_cancelled_marker_after_tool_only_turn(tmp
     assert messages[1]["traceId"] == "trace_tool"
 
 
+def test_message_event_service_restores_message_injection_as_user_context_items(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    service = MessageEventService(repositories.message_events)
+
+    _append(
+        repositories,
+        "evt_injected_file",
+        "user_message",
+        {
+            "content": "用户通过 @ 引用了工作区文件：README.md",
+            "source": "message_injection",
+            "injectionSource": "follow",
+            "injectionRole": "HumanMessage",
+            "metadata": {
+                "id": "file:readme",
+                "kind": "file",
+                "label": "README.md",
+                "path": "README.md",
+                "name": "README.md",
+                "fileType": "file",
+            },
+        },
+    )
+    _append(repositories, "evt_user", "user_message", {"content": "总结"})
+    _append(repositories, "evt_ai", "stream_batch", {"content": "好的"})
+
+    messages = service.get_display_messages("ses_history")
+
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["content"] == "总结"
+    assert messages[0]["contextItems"][0]["type"] == "file"
+    assert messages[0]["contextItems"][0]["path"] == "README.md"
+    assert messages[1]["content"] == "好的"
+
+
 def test_message_event_service_pairs_subagent_tools(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     service = MessageEventService(repositories.message_events)

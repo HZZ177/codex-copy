@@ -1,6 +1,6 @@
 .menu {
   position: absolute;
-  right: 14px;
+  left: 50%;
   bottom: calc(100% + 10px);
   z-index: 5;
   display: grid;
@@ -12,7 +12,8 @@
   background: var(--color-bg-elevated);
   box-shadow: var(--shadow-soft);
   padding: 6px;
-  transform-origin: right bottom;
+  transform: translateX(-50%);
+  transform-origin: center bottom;
   animation: menuEnter var(--motion-panel) var(--motion-ease-out) both;
 }
 
@@ -76,11 +77,11 @@
 @keyframes menuEnter {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.985);
+    transform: translate(-50%, 6px) scale(0.985);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate(-50%, 0) scale(1);
   }
 }
 

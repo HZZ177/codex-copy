@@ -173,6 +173,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                             scene_id=str(payload.get("scene_id") or settings.default_scene_id),
                             model=str(payload.get("model") or ""),
                             system_prompt=payload.get("system_prompt"),
+                            runtime_params=_runtime_params(payload),
                         )
                     )
                     continue
@@ -239,3 +240,10 @@ def _payload(message: dict[str, Any]) -> dict[str, Any]:
     if isinstance(nested, dict):
         return nested
     return {key: value for key, value in message.items() if key != "action"}
+
+
+def _runtime_params(payload: dict[str, Any]) -> dict[str, Any] | None:
+    value = payload.get("runtime_params")
+    if value is None:
+        value = payload.get("runtimeParams")
+    return value if isinstance(value, dict) else None

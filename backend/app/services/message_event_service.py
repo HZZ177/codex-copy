@@ -22,20 +22,33 @@ class MessageEventService:
         messages: list[dict[str, Any]] = []
         active_subagents: dict[str, int] = {}
         tool_run_map: dict[str, tuple[int, int | None]] = {}
+        pending_context_items: list[dict[str, Any]] = []
 
         for event in events:
             action = self._canonical_action(event)
             data = self._visible_data(event)
 
-            if action == ReplayAction.USER_MESSAGE.value:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": data.get("content", ""),
-                        "attachments": data.get("attachments", []),
-                        "timestamp": self._event_timestamp_ms(event),
-                    }
+            if action in {
+                ReplayAction.USER_MESSAGE.value,
+                ReplayAction.SYSTEM_MESSAGE.value,
+                ReplayAction.AI_MESSAGE.value,
+            } and self._is_message_injection_event(event, data):
+                pending_context_items.append(
+                    self._context_item_from_injected_message(event, data, action)
                 )
+                continue
+
+            if action == ReplayAction.USER_MESSAGE.value:
+                message = {
+                    "role": "user",
+                    "content": data.get("content", ""),
+                    "attachments": data.get("attachments", []),
+                    "timestamp": self._event_timestamp_ms(event),
+                }
+                if pending_context_items:
+                    message["contextItems"] = pending_context_items
+                    pending_context_items = []
+                messages.append(message)
                 continue
 
             if action == ReplayAction.SYSTEM_MESSAGE.value:
@@ -213,6 +226,44 @@ class MessageEventService:
         data = dict(event.data or {})
         data.pop("_canonical", None)
         return data
+
+    @staticmethod
+    def _canonical_source(event: MessageEventRecord) -> str:
+        canonical = event.data.get("_canonical")
+        if isinstance(canonical, dict) and canonical.get("source"):
+            return str(canonical["source"])
+        return str((event.data or {}).get("source") or "")
+
+    @staticmethod
+    def _is_message_injection_event(event: MessageEventRecord, data: dict[str, Any]) -> bool:
+        return (
+            data.get("source") == "message_injection"
+            or MessageEventService._canonical_source(event) == "message_injection"
+        )
+
+    @staticmethod
+    def _context_item_from_injected_message(
+        event: MessageEventRecord,
+        data: dict[str, Any],
+        action: str,
+    ) -> dict[str, Any]:
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        item_type = str(metadata.get("kind") or metadata.get("type") or data.get("injectionSource") or "follow")
+        content = str(data.get("content") or "")
+        item: dict[str, Any] = {
+            "id": str(metadata.get("id") or f"injection:{event.id}"),
+            "type": item_type,
+            "label": str(metadata.get("label") or _default_context_label(item_type, content)),
+            "content": content,
+            "role": str(data.get("injectionRole") or _role_from_replay_action(action)),
+            "source": str(data.get("injectionSource") or "follow"),
+            "timestamp": MessageEventService._event_timestamp_ms(event),
+            "metadata": dict(metadata),
+        }
+        for key in ("path", "name", "fileType", "file_type"):
+            if metadata.get(key) is not None:
+                item[key] = metadata.get(key)
+        return item
 
     @staticmethod
     def _is_hidden_internal_system_message(data: dict[str, Any]) -> bool:
@@ -403,3 +454,22 @@ class MessageEventService:
         if isinstance(value, int | float) and value > 1_000_000_000_000:
             return int(value)
         return None
+
+
+def _role_from_replay_action(action: str) -> str:
+    if action == ReplayAction.SYSTEM_MESSAGE.value:
+        return "SystemMessage"
+    if action == ReplayAction.AI_MESSAGE.value:
+        return "AIMessage"
+    return "HumanMessage"
+
+
+def _default_context_label(item_type: str, content: str) -> str:
+    if item_type == "file":
+        return "文件"
+    if item_type == "quote":
+        return "引用片段"
+    if item_type == "slot":
+        return "会话上下文"
+    cleaned = " ".join(content.split())
+    return cleaned[:16] if cleaned else "上下文"

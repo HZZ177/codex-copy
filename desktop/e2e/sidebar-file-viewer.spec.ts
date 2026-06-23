@@ -17,9 +17,9 @@ test("right sidebar files tab opens and resizes a read-only file preview", async
   await expect(page.getByTestId("workspace-file-browser")).toBeVisible();
   await expect(page.getByTestId("workspace-file-browser-tree")).toBeVisible();
   await expect(page.getByRole("tree", { name: "工作区目录" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "选择文件 package.json" }).locator("svg")).toHaveAttribute(
-    "data-kind",
-    "config",
+  await expect(page.getByRole("button", { name: "选择文件 package.json" }).locator("[data-icon-id]")).toHaveAttribute(
+    "data-icon-id",
+    "nodejs",
   );
 
   await page.getByRole("button", { name: "选择文件 huge.log" }).click();
@@ -29,7 +29,7 @@ test("right sidebar files tab opens and resizes a read-only file preview", async
   await page.getByRole("button", { name: "选择文件 README.md" }).click();
 
   await expect(page.getByRole("heading", { name: "E2E File" })).toBeVisible();
-  await expect(page.getByText("Markdown 预览")).toBeVisible();
+  await expect(page.getByText("This file is rendered from Playwright.")).toBeVisible();
   await expect(page.getByTestId("workspace-file-browser-tree")).toBeVisible();
 
   await page.getByRole("button", { name: /源码/ }).click();
@@ -58,8 +58,61 @@ test("right sidebar files tab opens and resizes a read-only file preview", async
   }
 });
 
+test("selected at-file reference sends as a hidden follow injection", async ({ page }) => {
+  await installWebSocketMock(page);
+  await mockBackend(page);
+
+  await page.goto(`${APP_BASE}/#/conversation/${SESSION_ID}`);
+
+  const input = page.getByLabel("继续输入");
+  await expect(input).toBeVisible();
+  await input.click();
+  await page.keyboard.type("@");
+
+  await expect(page.getByTestId("at-file-menu")).toBeVisible();
+  await page.getByRole("option", { name: /README\.md/ }).click();
+  await expect(input).toHaveText("");
+  await expect(page.getByLabel("已选择文件引用")).toContainText("README.md");
+
+  await page.getByLabel("发送").click();
+
+  const chatHandle = await page.waitForFunction(() => {
+    const sentMessages = (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages ?? [];
+    return sentMessages.find((message) => {
+      return Boolean(message && typeof message === "object" && (message as { action?: unknown }).action === "chat");
+    }) ?? null;
+  });
+  const chatFrame = (await chatHandle.jsonValue()) as {
+    data?: {
+      message?: string;
+      runtime_params?: {
+        message_injection?: Array<{
+          type?: string;
+          role?: string;
+          content?: string;
+          metadata?: Record<string, unknown>;
+        }>;
+      };
+    };
+  };
+  const injection = chatFrame.data?.runtime_params?.message_injection?.[0];
+  expect(chatFrame.data?.message).toBe("");
+  expect(injection).toMatchObject({
+    type: "follow",
+    role: "HumanMessage",
+    metadata: {
+      kind: "file",
+      path: "README.md",
+      fileType: "file",
+    },
+  });
+  expect(injection?.content).toContain("README.md");
+  await expect(page.getByTestId("message-text").first()).toContainText("@README.md");
+});
+
 async function installWebSocketMock(page: Page) {
   await page.addInitScript(() => {
+    (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages = [];
     const NativeWebSocket = window.WebSocket;
     const MockWebSocket = function MockWebSocket(this: Record<string, unknown>, url: string) {
       if (!String(url).includes("/agent-base/ws/chat")) {
@@ -90,7 +143,15 @@ async function installWebSocketMock(page: Page) {
     MockWebSocket.OPEN = 1;
     MockWebSocket.CLOSING = 2;
     MockWebSocket.CLOSED = 3;
-    MockWebSocket.prototype.send = function send() {};
+    MockWebSocket.prototype.send = function send(data: string) {
+      const sentMessages = (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages ?? [];
+      try {
+        sentMessages.push(JSON.parse(data));
+      } catch {
+        sentMessages.push(data);
+      }
+      (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages = sentMessages;
+    };
     MockWebSocket.prototype.close = function close(this: Record<string, unknown>) {
       this.readyState = MockWebSocket.CLOSED;
       if (typeof this.onclose === "function") {

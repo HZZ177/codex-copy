@@ -1,6 +1,8 @@
 .ticker {
   --line-change-added: #00a152;
   --line-change-added-glow: rgb(0 161 82 / 10%);
+  --line-change-digit-duration: 680ms;
+  --line-change-digit-window: 1.28em;
   --line-change-removed: #d1242f;
   --line-change-removed-glow: rgb(209 36 47 / 10%);
 
@@ -30,7 +32,7 @@
 
 .delta {
   display: inline-flex;
-  height: 1em;
+  height: var(--line-change-digit-window);
   align-items: center;
   gap: 1px;
   font-variant-numeric: tabular-nums;
@@ -51,7 +53,7 @@
 .sign,
 .unit {
   display: inline-flex;
-  height: 1em;
+  height: var(--line-change-digit-window);
   align-items: center;
   flex: 0 0 auto;
   line-height: 1;
@@ -59,7 +61,7 @@
 
 .number {
   display: inline-flex;
-  height: 1em;
+  height: var(--line-change-digit-window);
   align-items: center;
   font-weight: 400;
   line-height: 1;
@@ -69,7 +71,7 @@
   display: inline-block;
   position: relative;
   width: 0.64em;
-  height: 1em;
+  height: var(--line-change-digit-window);
   overflow: hidden;
   line-height: 1;
   text-align: center;
@@ -89,7 +91,6 @@
   display: grid;
   place-items: center;
   font-weight: 400;
-  will-change: transform, opacity;
 }
 
 .digitGlyph[data-position="static"] {
@@ -97,63 +98,60 @@
   display: grid;
 }
 
-.digit[data-phase="prepare"] .digitGlyph[data-position="previous"] {
-  opacity: 1;
-  transform: translateY(0);
+.digitTrack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
 }
 
-.digit[data-phase="prepare"] .digitGlyph[data-position="current"] {
-  opacity: 0.8;
-  transform: translateY(-125%);
+.digitTrackGlyph {
+  display: grid;
+  height: var(--line-change-digit-window);
+  flex: 0 0 var(--line-change-digit-window);
+  place-items: center;
+  font-weight: 400;
 }
 
-.digit[data-phase="rolling"] .digitGlyph[data-position="previous"] {
-  animation: lineChangeDigitExitDown 520ms cubic-bezier(0.18, 0.7, 0.14, 1) both;
+.digit[data-direction="up"][data-phase="rolling"] .digitTrack {
+  animation: lineChangeDigitRollUp var(--line-change-digit-duration) cubic-bezier(0.18, 0.7, 0.14, 1) both;
 }
 
-.digit[data-phase="rolling"] .digitGlyph[data-position="current"] {
-  animation: lineChangeDigitEnterDown 520ms cubic-bezier(0.18, 0.7, 0.14, 1) both;
+.digit[data-direction="down"][data-phase="rolling"] .digitTrack {
+  animation: lineChangeDigitRollDown var(--line-change-digit-duration) cubic-bezier(0.18, 0.7, 0.14, 1) both;
 }
 
-@keyframes lineChangeDigitEnterDown {
+@keyframes lineChangeDigitRollUp {
   from {
-    opacity: 0.8;
-    transform: translateY(-125%);
-  }
-
-  72% {
-    opacity: 1;
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes lineChangeDigitExitDown {
-  from {
-    opacity: 1;
     transform: translateY(0);
   }
 
   to {
-    opacity: 0.55;
-    transform: translateY(125%);
+    transform: translateY(calc(-1 * var(--line-change-roll-steps) * var(--line-change-digit-window)));
+  }
+}
+
+@keyframes lineChangeDigitRollDown {
+  from {
+    transform: translateY(calc(-1 * var(--line-change-roll-steps) * var(--line-change-digit-window)));
+  }
+
+  to {
+    transform: translateY(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .digit[data-phase="prepare"] .digitGlyph[data-position="previous"],
-  .digit[data-phase="prepare"] .digitGlyph[data-position="current"],
-  .digit[data-phase="rolling"] .digitGlyph[data-position="previous"],
-  .digit[data-phase="rolling"] .digitGlyph[data-position="current"] {
+  .digit[data-phase="rolling"] .digitTrack {
     animation: none;
-    transform: none;
   }
 
-  .digit[data-phase="prepare"] .digitGlyph[data-position="previous"],
-  .digit[data-phase="rolling"] .digitGlyph[data-position="previous"] {
-    opacity: 0;
+  .digit[data-direction="up"][data-phase="rolling"] .digitTrack {
+    transform: translateY(calc(-1 * var(--line-change-roll-steps) * var(--line-change-digit-window)));
+  }
+
+  .digit[data-direction="down"][data-phase="rolling"] .digitTrack {
+    transform: none;
   }
 }

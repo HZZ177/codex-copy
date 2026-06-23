@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { FollowOutput, VirtuosoHandle } from "react-virtuoso";
 
+import { EXPANSION_SCROLL_LOCK_ATTR } from "./useExpansionScrollAnchor";
+
 const AT_BOTTOM_THRESHOLD_PX = 100;
 const FOLLOW_BOTTOM_THRESHOLD_PX = 4;
 type VirtuosoScrollBehavior = "auto" | "smooth";
@@ -98,6 +100,10 @@ export function useVirtuosoAutoScroll(itemCount: number): UseVirtuosoAutoScrollR
   }, []);
 
   const handleTotalListHeightChanged = useCallback(() => {
+    if (scrollerRef.current && isExpansionScrollLocked(scrollerRef.current)) {
+      updateBottomState();
+      return;
+    }
     if (!userPinnedRef.current && atBottomRef.current) {
       scrollToBottom("auto");
       return;
@@ -168,6 +174,10 @@ function bottomScrollTop(scroller: HTMLElement): number {
 
 function toVirtuosoScrollBehavior(behavior: ScrollBehavior): VirtuosoScrollBehavior {
   return behavior === "smooth" && !prefersReducedMotion() ? "smooth" : "auto";
+}
+
+function isExpansionScrollLocked(element: HTMLElement): boolean {
+  return element.hasAttribute(EXPANSION_SCROLL_LOCK_ATTR);
 }
 
 function prefersReducedMotion(): boolean {

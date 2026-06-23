@@ -24,6 +24,7 @@ describe("layout store", () => {
   it("toggles layout panels and clamps persisted widths", () => {
     let state = layoutReducer(defaultLayoutState, { type: "toggle-sidebar" });
     state = layoutReducer(state, { type: "toggle-right-sidebar" });
+    state = layoutReducer(state, { type: "toggle-right-sidebar-placement" });
     state = layoutReducer(state, { type: "toggle-workspace" });
     state = layoutReducer(state, { type: "toggle-preview" });
     state = layoutReducer(state, { type: "set-sidebar-width", width: 9999 });
@@ -33,6 +34,7 @@ describe("layout store", () => {
 
     expect(state.sidebarCollapsed).toBe(true);
     expect(state.rightSidebarOpen).toBe(true);
+    expect(state.rightSidebarPlacement).toBe("left");
     expect(state.sidebarWidth).toBe(MAX_SIDEBAR_WIDTH);
     expect(state.rightSidebarRatio).toBe(DEFAULT_RIGHT_SIDEBAR_RATIO);
     expect(state.workspaceOpen).toBe(true);
@@ -54,6 +56,7 @@ describe("layout store", () => {
       sidebarCollapsed: true,
       sidebarWidth: 240,
       rightSidebarRatio: 0.42,
+      rightSidebarPlacement: "left",
       workspaceWidth: 320,
       previewWidth: 480,
     });
@@ -63,6 +66,7 @@ describe("layout store", () => {
       sidebarCollapsed: true,
       sidebarWidth: 240,
       rightSidebarRatio: 0.42,
+      rightSidebarPlacement: "left",
       workspaceWidth: 320,
       previewWidth: 480,
     });
@@ -84,6 +88,7 @@ describe("LayoutStateProvider", () => {
       result.current.actions.setPreviewOpen(true);
       result.current.actions.setSidebarWidth(340);
       result.current.actions.setRightSidebarRatio(0.42);
+      result.current.actions.toggleRightSidebarPlacement();
       result.current.actions.setWorkspaceWidth(500);
     });
 
@@ -92,6 +97,7 @@ describe("LayoutStateProvider", () => {
     expect(result.current.state.previewOpen).toBe(true);
     expect(result.current.state.sidebarWidth).toBe(340);
     expect(result.current.state.rightSidebarRatio).toBe(0.42);
+    expect(result.current.state.rightSidebarPlacement).toBe("left");
     expect(result.current.state.workspaceWidth).toBe(500);
   });
 });

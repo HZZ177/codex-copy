@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChatChannel, RuntimeBridge } from "@/runtime";
+import type { ChatChannel, RuntimeBridge, WsConnectionStatus } from "@/runtime";
 import { Sider } from "@/renderer/components/layout/Sider";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
@@ -54,6 +54,22 @@ describe("Sider", () => {
     expect(onNavigate).toHaveBeenNthCalledWith(3, "/settings/model");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(screen.getByRole("button", { name: "会话 A" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("opens a new chat page scoped to a project from the project header", () => {
+    const onNavigate = vi.fn();
+    renderSider(
+      <Sider
+        projects={[{ id: "project-1", title: "keydex" }]}
+        conversations={[{ id: "thread-1", title: "会话 A" }]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "在项目 keydex 中新建对话" }));
+
+    expect(onNavigate).toHaveBeenCalledWith("/guid?workspaceId=project-1");
+    expect(screen.getByRole("button", { name: "收起项目 keydex" }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("highlights route-aware shell entries without turning projects into fake routes", () => {
@@ -200,6 +216,16 @@ describe("Sider", () => {
 
     renderSider(<Sider runtime={runtime} collapsed activePath="/conversation/workspace-a" />);
 
+    const projectToggle = await screen.findByRole("button", { name: "收起项目 keydex" });
+    expect(projectToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(projectToggle.getAttribute("title")).toBeNull();
+    expect(projectToggle.querySelector(".lucide-folder-open")).not.toBeNull();
+    fireEvent.mouseEnter(projectToggle);
+    expect(screen.getByRole("tooltip").textContent).toContain("keydex");
+    expect(screen.getByRole("tooltip").textContent).toContain("当前项目");
+    expect(screen.getByRole("tooltip").textContent).toContain("已展开");
+    fireEvent.mouseLeave(projectToggle);
+
     const button = await screen.findByRole("button", { name: "打开会话 项目会话 A" });
     fireEvent.mouseEnter(button);
 
@@ -207,6 +233,19 @@ describe("Sider", () => {
     expect(card.textContent).toContain("项目会话 A");
     expect(card.textContent).toContain("keydex");
     expect(card.textContent).toContain("当前会话");
+
+    fireEvent.click(projectToggle);
+    const collapsedProjectToggle = screen.getByRole("button", { name: "展开项目 keydex" });
+    expect(collapsedProjectToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(collapsedProjectToggle.querySelector(".lucide-folder")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "打开会话 项目会话 A" })).toBeNull();
+    fireEvent.mouseEnter(collapsedProjectToggle);
+    expect(screen.getByRole("tooltip").textContent).toContain("已收起");
+    fireEvent.mouseLeave(collapsedProjectToggle);
+
+    fireEvent.click(collapsedProjectToggle);
+    expect(screen.getByRole("button", { name: "收起项目 keydex" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "打开会话 项目会话 A" })).not.toBeNull();
   });
 
   it("shows background streaming and unread indicators from the shared agent runtime", async () => {
@@ -218,7 +257,7 @@ describe("Sider", () => {
     ]);
     const channel: ChatChannel = {
       close: vi.fn(),
-      getStatus: vi.fn(() => "open"),
+      getStatus: vi.fn<() => WsConnectionStatus>(() => "open"),
       getSessionId: vi.fn(() => null),
       createSession: vi.fn(),
       bindSession: vi.fn(),
@@ -268,6 +307,62 @@ describe("Sider", () => {
     expect(completedIndicator?.getAttribute("data-streaming")).toBe("false");
     expect(completedIndicator?.getAttribute("data-unread")).toBe("true");
     expect(screen.getByRole("button", { name: "当前会话" }).querySelector('[data-unread="true"]')).toBeNull();
+  });
+
+  it("renders collapsed background loading in the session button center", async () => {
+    let emit: (event: AgentActionEnvelope) => void = () => undefined;
+    const runtime = fakeRuntime([
+      thread({ id: "thread-a", title: "当前会话" }),
+      thread({ id: "thread-b", title: "后台会话" }),
+    ]);
+    const channel: ChatChannel = {
+      close: vi.fn(),
+      getStatus: vi.fn<() => WsConnectionStatus>(() => "open"),
+      getSessionId: vi.fn(() => null),
+      createSession: vi.fn(),
+      bindSession: vi.fn(),
+      unbindSession: vi.fn(),
+      chat: vi.fn(),
+      cancel: vi.fn(),
+      requestStatus: vi.fn(),
+      ping: vi.fn(),
+    };
+    runtime.conversation.openChatChannel = vi.fn((onEvent, options?: { onStatus?: (status: "open") => void }) => {
+      emit = onEvent;
+      options?.onStatus?.("open");
+      return channel;
+    });
+
+    renderSider(
+      <AgentSessionProvider runtime={runtime}>
+        <Sider runtime={runtime} collapsed activePath="/conversation/thread-a" />
+      </AgentSessionProvider>,
+    );
+
+    await screen.findByRole("button", { name: "打开会话 后台会话" });
+
+    act(() => {
+      emit({
+        action: "status",
+        data: {
+          status: "idle",
+          running_sessions: [{ session_id: "thread-b" }],
+        },
+      });
+      emit({ action: "stream", data: { session_id: "thread-b", content: "后台输出" } });
+    });
+
+    const backgroundButton = screen.getByRole("button", { name: "打开会话 后台会话" });
+    expect(backgroundButton.querySelector('[data-collapsed-loading="true"]')).not.toBeNull();
+    expect(backgroundButton.querySelector('[data-session-indicators="true"]')).toBeNull();
+    expect(backgroundButton.textContent).not.toContain("后");
+
+    act(() => {
+      emit({ action: "completed", data: { session_id: "thread-b", status: "completed", events: [] } });
+    });
+
+    expect(backgroundButton.querySelector('[data-collapsed-loading="true"]')).toBeNull();
+    expect(backgroundButton.querySelector('[data-unread="true"]')).not.toBeNull();
   });
 
   it("renames conversations through updateSession", async () => {

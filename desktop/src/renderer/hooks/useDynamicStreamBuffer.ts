@@ -11,10 +11,10 @@ export interface DynamicStreamStep {
   effectiveCharsPerSecond: number;
 }
 
-export const DEFAULT_MIN_STREAM_CHARS_PER_SECOND = 120;
-export const DEFAULT_MAX_STREAM_CHARS_PER_SECOND = 640;
-export const DEFAULT_COMFORTABLE_STREAM_BACKLOG = 120;
-export const DEFAULT_STREAM_DRAIN_TARGET_SECONDS = 1.4;
+export const DEFAULT_MIN_STREAM_CHARS_PER_SECOND = 160;
+export const DEFAULT_MAX_STREAM_CHARS_PER_SECOND = 1200;
+export const DEFAULT_COMFORTABLE_STREAM_BACKLOG = 80;
+export const DEFAULT_STREAM_DRAIN_TARGET_SECONDS = 0.9;
 
 export function calculateDynamicStreamStep(
   elapsedMs: number,

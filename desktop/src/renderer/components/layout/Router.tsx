@@ -67,15 +67,20 @@ function RoutedLayout({
 function HomeRoute() {
   const navigate = useNavigate();
   const location = useLocation();
+  const initialWorkspaceId = new URLSearchParams(location.search).get("workspaceId") ?? undefined;
 
   return (
     <RoutedLayout title="新对话" contentMode="full" resetRightSidebarOnEnter>
       <HomePage
-        onNavigateToConversation={(threadId, initialModel, initialMessage) => {
+        key={initialWorkspaceId ?? "default"}
+        initialWorkspaceId={initialWorkspaceId}
+        onNavigateToConversation={(threadId, initialModel, initialMessage, options) => {
           const quickSend = queueQuickChatSend({
             sessionId: threadId,
             model: initialModel,
             message: initialMessage,
+            runtimeParams: options?.runtimeParams,
+            contextItems: options?.contextItems,
           });
           void navigate(`/conversation/${encodeURIComponent(threadId)}`, {
             state: { initialModel, quickSendId: quickSend.id },

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./LineChangeTicker.module.css";
 
-const LINE_CHANGE_UPDATE_INTERVAL_MS = 500;
-const LINE_CHANGE_DIGIT_ANIMATION_MS = 560;
+const LINE_CHANGE_UPDATE_INTERVAL_MS = 800;
+const LINE_CHANGE_DIGIT_ANIMATION_MS = 680;
 
 export interface LineChangeTickerProps {
   className?: string;
@@ -119,7 +119,7 @@ function LineDelta({
 function RollingNumber({ value }: { value: number }) {
   const valueText = String(Math.max(0, value));
   const activeValueRef = useRef(valueText);
-  const frameRef = useRef<number | null>(null);
+  const animationKeyRef = useRef(0);
   const timeoutRef = useRef<number | null>(null);
   const [digits, setDigits] = useState<RollingDigitState[]>(() => idleDigits(valueText));
 
@@ -130,59 +130,64 @@ function RollingNumber({ value }: { value: number }) {
 
     const previousText = activeValueRef.current.padStart(valueText.length, " ").slice(-valueText.length);
     activeValueRef.current = valueText;
-    clearRollingDigitTimers(frameRef, timeoutRef);
-    setDigits(prepareDigits(previousText, valueText));
-
-    frameRef.current = window.requestAnimationFrame(() => {
-      frameRef.current = null;
-      setDigits((currentDigits) =>
-        currentDigits.map((digit) => (digit.phase === "prepare" ? { ...digit, phase: "rolling" } : digit)),
-      );
-      timeoutRef.current = window.setTimeout(() => {
-        timeoutRef.current = null;
-        setDigits(idleDigits(valueText));
-      }, LINE_CHANGE_DIGIT_ANIMATION_MS);
-    });
+    animationKeyRef.current += 1;
+    clearRollingDigitTimer(timeoutRef);
+    setDigits(rollingDigits(previousText, valueText, animationKeyRef.current));
+    timeoutRef.current = window.setTimeout(() => {
+      timeoutRef.current = null;
+      setDigits(idleDigits(valueText));
+    }, LINE_CHANGE_DIGIT_ANIMATION_MS);
 
     return () => {
-      clearRollingDigitTimers(frameRef, timeoutRef);
+      clearRollingDigitTimer(timeoutRef);
     };
   }, [valueText]);
 
   return (
     <span className={styles.number}>
       {digits.map((digit, index) => (
-        <RollingDigit digit={digit} key={index} />
+        <RollingDigit digit={digit} key={`${index}:${digit.animationKey}`} />
       ))}
     </span>
   );
 }
 
 interface RollingDigitState {
+  animationKey: string;
   current: string;
-  phase: "idle" | "prepare" | "rolling";
+  direction: RollingDirection;
+  phase: "idle" | "rolling";
   previous: string;
+  sequence: string[];
+  steps: number;
 }
+
+type RollingDirection = "down" | "up";
 
 function RollingDigit({ digit }: { digit: RollingDigitState }) {
   const changed = digit.phase !== "idle";
+  const digitStyle = {
+    "--line-change-roll-steps": digit.steps,
+  } as CSSProperties;
+
   return (
     <span
       className={styles.digit}
       data-changed={changed ? "true" : "false"}
+      data-direction={digit.direction}
       data-phase={digit.phase}
       data-testid="line-change-digit"
+      style={digitStyle}
     >
       <span className={styles.digitWindow}>
         {changed ? (
-          <>
-            <span className={styles.digitGlyph} data-position="previous">
-              {digit.previous}
-            </span>
-            <span className={styles.digitGlyph} data-position="current">
-              {digit.current}
-            </span>
-          </>
+          <span className={styles.digitTrack} data-testid="line-change-digit-track">
+            {digit.sequence.map((glyph, index) => (
+              <span className={styles.digitTrackGlyph} key={`${index}:${glyph}`}>
+                {glyph}
+              </span>
+            ))}
+          </span>
         ) : (
           <span className={styles.digitGlyph} data-position="static">
             {digit.current}
@@ -193,34 +198,80 @@ function RollingDigit({ digit }: { digit: RollingDigitState }) {
   );
 }
 
-function prepareDigits(previousText: string, currentText: string): RollingDigitState[] {
-  return currentText.split("").map((current, index) => {
+function rollingDigits(previousText: string, currentText: string, animationKey: number): RollingDigitState[] {
+  const currentDigits = currentText.split("");
+  return currentDigits.map((current, index) => {
     const previous = previousText[index] ?? current;
     const previousGlyph = previous.trim() ? previous : "\u00a0";
+    const changed = current !== previous;
+    const direction = changed ? digitDirection() : "down";
+    const roll = changed ? rollingDigitSequence(previousGlyph, current, direction) : idleDigitSequence(current);
+
     return {
+      animationKey: changed ? `${animationKey}:${previousGlyph}:${current}` : `idle:${index}:${current}`,
       current,
+      direction,
       previous: previousGlyph,
-      phase: current === previous ? "idle" : "prepare",
+      phase: changed ? "rolling" : "idle",
+      sequence: roll.sequence,
+      steps: roll.steps,
     };
   });
 }
 
 function idleDigits(valueText: string): RollingDigitState[] {
-  return valueText.split("").map((current) => ({
+  const currentDigits = valueText.split("");
+  return currentDigits.map((current, index) => ({
+    animationKey: `idle:${index}:${current}`,
     current,
+    direction: "down",
     previous: current,
     phase: "idle",
+    sequence: [current],
+    steps: 0,
   }));
 }
 
-function clearRollingDigitTimers(
-  frameRef: { current: number | null },
-  timeoutRef: { current: number | null },
-) {
-  if (frameRef.current !== null) {
-    window.cancelAnimationFrame(frameRef.current);
-    frameRef.current = null;
+function digitDirection(): RollingDirection {
+  return Math.random() < 0.5 ? "up" : "down";
+}
+
+function idleDigitSequence(current: string): { sequence: string[]; steps: number } {
+  return {
+    sequence: [current],
+    steps: 0,
+  };
+}
+
+function rollingDigitSequence(
+  previous: string,
+  current: string,
+  direction: RollingDirection,
+): { sequence: string[]; steps: number } {
+  if (!isDecimalDigit(previous) || !isDecimalDigit(current)) {
+    return direction === "up"
+      ? { sequence: [previous, current], steps: 1 }
+      : { sequence: [current, previous], steps: 1 };
   }
+
+  const values = [previous];
+  const target = Number(current);
+  let cursor = Number(previous);
+  while (cursor !== target) {
+    cursor = direction === "up" ? (cursor + 1) % 10 : (cursor + 9) % 10;
+    values.push(String(cursor));
+  }
+
+  return direction === "up"
+    ? { sequence: values, steps: values.length - 1 }
+    : { sequence: values.slice().reverse(), steps: values.length - 1 };
+}
+
+function isDecimalDigit(value: string): boolean {
+  return value.length === 1 && value >= "0" && value <= "9";
+}
+
+function clearRollingDigitTimer(timeoutRef: { current: number | null }) {
   if (timeoutRef.current !== null) {
     window.clearTimeout(timeoutRef.current);
     timeoutRef.current = null;
