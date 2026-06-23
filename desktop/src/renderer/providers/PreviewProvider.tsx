@@ -1,131 +1,358 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
+
+import type { RuntimeBridge } from "@/runtime";
 
 import type { PreviewRequest } from "./previewTypes";
 
 const MAX_PREVIEW_ENTRIES = 8;
+const GLOBAL_PREVIEW_SCOPE = "global";
+
+export interface PreviewRenderContext {
+  workspaceId?: string;
+  sessionId?: string;
+  workspaceAvailable?: boolean;
+  workspaceLabel?: string;
+  runtime?: RuntimeBridge;
+  onQuoteSelection?: (text: string) => void;
+}
 
 export interface PreviewEntry {
   id: string;
+  scopeKey: string;
   request: PreviewRequest;
   title: string;
   sourceLabel: string;
   openedAt: number;
+  renderContext: PreviewRenderContext | null;
 }
 
 export interface PreviewState {
   open: boolean;
+  panelOpen: boolean;
+  panelActiveEntryId: string | null;
+  collapseRequestId: number;
   request: PreviewRequest | null;
   targetPath: string | null;
   entries: PreviewEntry[];
   activeEntryId: string | null;
+  hostContext: PreviewRenderContext | null;
 }
 
 export interface PreviewContextValue extends PreviewState {
   activeEntry: PreviewEntry | null;
-  openPreview(request: PreviewRequest | string): void;
+  activeRenderContext: PreviewRenderContext | null;
+  activeScopeKey: string;
+  openPreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
+  togglePreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
   switchPreview(entryId: string): void;
   closePreviewEntry(entryId: string): void;
   closePreview(): void;
+  setPreviewPanelOpen(open: boolean, activeEntryId?: string | null): void;
+  setPreviewHostContext(context: PreviewRenderContext | null): void;
+}
+
+interface PreviewScopeState {
+  open: boolean;
+  activeEntryId: string | null;
+}
+
+interface PreviewStoreState {
+  entries: PreviewEntry[];
+  scopes: Record<string, PreviewScopeState>;
+  hostContext: PreviewRenderContext | null;
+  panelOpen: boolean;
+  panelActiveEntryId: string | null;
+  collapseRequestId: number;
 }
 
 const PreviewContext = createContext<PreviewContextValue | null>(null);
 
 export function PreviewProvider({ children }: PropsWithChildren) {
-  const [state, setState] = useState<PreviewState>({
-    open: false,
-    request: null,
-    targetPath: null,
+  const [state, setState] = useState<PreviewStoreState>({
     entries: [],
-    activeEntryId: null,
+    scopes: {},
+    hostContext: null,
+    panelOpen: false,
+    panelActiveEntryId: null,
+    collapseRequestId: 0,
   });
+
+  const openPreview = useCallback((request: PreviewRequest | string, renderContext?: PreviewRenderContext) => {
+    setState((current) => {
+      return openPreviewInStore(current, request, renderContext, "append");
+    });
+  }, []);
+
+  const togglePreview = useCallback((request: PreviewRequest | string, renderContext?: PreviewRenderContext) => {
+    setState((current) => {
+      const normalizedRequest = normalizePreviewRequest(request);
+      const context = renderContext ?? current.hostContext;
+      const scopeKey = previewScopeKey(context);
+      const entry = createPreviewEntry(normalizedRequest, context, scopeKey);
+      const scopeState = current.scopes[scopeKey] ?? { open: false, activeEntryId: null };
+
+      if (current.panelOpen && scopeState.open && current.panelActiveEntryId === entry.id) {
+        return {
+          ...current,
+          collapseRequestId: current.collapseRequestId + 1,
+        };
+      }
+
+      return openPreviewInStore(current, normalizedRequest, context, "preserve-order");
+    });
+  }, []);
+
+  const switchPreview = useCallback((entryId: string) => {
+    setState((current) => {
+      const entry = current.entries.find((item) => item.id === entryId);
+      if (!entry) {
+        return current;
+      }
+      return {
+        ...current,
+        scopes: {
+          ...current.scopes,
+          [entry.scopeKey]: {
+            open: true,
+            activeEntryId: entry.id,
+          },
+        },
+      };
+    });
+  }, []);
+
+  const closePreviewEntry = useCallback((entryId: string) => {
+    setState((current) => {
+      const closedEntry = current.entries.find((entry) => entry.id === entryId);
+      if (!closedEntry) {
+        return current;
+      }
+      const scopeKey = closedEntry.scopeKey;
+      const scopeState = current.scopes[scopeKey] ?? { open: false, activeEntryId: null };
+      const scopeEntries = current.entries.filter((entry) => entry.scopeKey === scopeKey);
+      const closedIndex = scopeEntries.findIndex((entry) => entry.id === entryId);
+      const entries = current.entries.filter((entry) => entry.id !== entryId);
+      const remainingScopeEntries = scopeEntries.filter((entry) => entry.id !== entryId);
+      if (remainingScopeEntries.length === 0) {
+        return {
+          ...current,
+          entries,
+          scopes: {
+            ...current.scopes,
+            [scopeKey]: {
+              open: false,
+              activeEntryId: null,
+            },
+          },
+        };
+      }
+      if (scopeState.activeEntryId !== entryId) {
+        return { ...current, entries };
+      }
+      const nextEntry = remainingScopeEntries[Math.max(0, Math.min(closedIndex - 1, remainingScopeEntries.length - 1))];
+      return {
+        ...current,
+        entries,
+        scopes: {
+          ...current.scopes,
+          [scopeKey]: {
+            open: true,
+            activeEntryId: nextEntry.id,
+          },
+        },
+      };
+    });
+  }, []);
+
+  const closePreview = useCallback(() => {
+    setState((current) => {
+      const scopeKey = previewScopeKey(current.hostContext);
+      return {
+        ...current,
+        scopes: {
+          ...current.scopes,
+          [scopeKey]: {
+            open: false,
+            activeEntryId: null,
+          },
+        },
+      };
+    });
+  }, []);
+
+  const setPreviewPanelOpen = useCallback((open: boolean, activeEntryId: string | null = null) => {
+    setState((current) => {
+      const panelActiveEntryId = open ? activeEntryId : null;
+      if (current.panelOpen === open && current.panelActiveEntryId === panelActiveEntryId) {
+        return current;
+      }
+      return { ...current, panelOpen: open, panelActiveEntryId };
+    });
+  }, []);
+
+  const setPreviewHostContext = useCallback((context: PreviewRenderContext | null) => {
+    setState((current) => {
+      if (samePreviewRenderContext(current.hostContext, context)) {
+        return current;
+      }
+      return { ...current, hostContext: context };
+    });
+  }, []);
+
+  const activeScopeKey = previewScopeKey(state.hostContext);
+  const entries = useMemo(
+    () => state.entries.filter((entry) => entry.scopeKey === activeScopeKey),
+    [activeScopeKey, state.entries],
+  );
+  const scopeState = state.scopes[activeScopeKey] ?? { open: false, activeEntryId: null };
+  const activeEntry = scopeState.open ? (entries.find((entry) => entry.id === scopeState.activeEntryId) ?? null) : null;
+  const activeRenderContext = activeEntry?.renderContext ?? state.hostContext;
+  const request = activeEntry?.request ?? null;
+  const activeEntryId = activeEntry?.id ?? null;
+  const targetPath = request ? targetPathForRequest(request) : null;
+  const open = Boolean(activeEntry && scopeState.open);
 
   const value = useMemo<PreviewContextValue>(
     () => ({
-      ...state,
-      activeEntry: state.entries.find((entry) => entry.id === state.activeEntryId) ?? null,
-      openPreview(request) {
-        const normalizedRequest = typeof request === "string" ? { type: "file" as const, path: request } : request;
-        const entry = createPreviewEntry(normalizedRequest);
-        setState((current) => {
-          const entries = [...current.entries.filter((item) => item.id !== entry.id), entry].slice(-MAX_PREVIEW_ENTRIES);
-          return {
-            open: true,
-            request: normalizedRequest,
-            targetPath: targetPathForRequest(normalizedRequest),
-            entries,
-            activeEntryId: entry.id,
-          };
-        });
-      },
-      switchPreview(entryId) {
-        setState((current) => {
-          const entry = current.entries.find((item) => item.id === entryId);
-          if (!entry) {
-            return current;
-          }
-          return {
-            ...current,
-            open: true,
-            request: entry.request,
-            targetPath: targetPathForRequest(entry.request),
-            activeEntryId: entry.id,
-          };
-        });
-      },
-      closePreviewEntry(entryId) {
-        setState((current) => {
-          const closedIndex = current.entries.findIndex((entry) => entry.id === entryId);
-          if (closedIndex < 0) {
-            return current;
-          }
-          const entries = current.entries.filter((entry) => entry.id !== entryId);
-          if (entries.length === 0) {
-            return {
-              open: false,
-              request: null,
-              targetPath: null,
-              entries: [],
-              activeEntryId: null,
-            };
-          }
-          if (current.activeEntryId !== entryId) {
-            return { ...current, entries };
-          }
-          const nextEntry = entries[Math.max(0, Math.min(closedIndex - 1, entries.length - 1))];
-          return {
-            open: true,
-            request: nextEntry.request,
-            targetPath: targetPathForRequest(nextEntry.request),
-            entries,
-            activeEntryId: nextEntry.id,
-          };
-        });
-      },
-      closePreview() {
-        setState((current) => ({
-          ...current,
-          open: false,
-          request: null,
-          targetPath: null,
-          activeEntryId: null,
-        }));
-      },
+      open,
+      panelOpen: state.panelOpen,
+      panelActiveEntryId: state.panelActiveEntryId,
+      collapseRequestId: state.collapseRequestId,
+      request,
+      targetPath,
+      entries,
+      activeEntryId,
+      hostContext: state.hostContext,
+      activeEntry,
+      activeRenderContext,
+      activeScopeKey,
+      openPreview,
+      togglePreview,
+      switchPreview,
+      closePreviewEntry,
+      closePreview,
+      setPreviewPanelOpen,
+      setPreviewHostContext,
     }),
-    [state],
+    [
+      activeEntryId,
+      activeEntry,
+      activeRenderContext,
+      activeScopeKey,
+      closePreview,
+      closePreviewEntry,
+      entries,
+      open,
+      openPreview,
+      togglePreview,
+      request,
+      setPreviewPanelOpen,
+      setPreviewHostContext,
+      state.collapseRequestId,
+      state.hostContext,
+      state.panelActiveEntryId,
+      state.panelOpen,
+      switchPreview,
+      targetPath,
+    ],
   );
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>;
 }
 
-function createPreviewEntry(request: PreviewRequest): PreviewEntry {
+type PreviewEntryPlacement = "append" | "preserve-order";
+
+function openPreviewInStore(
+  current: PreviewStoreState,
+  request: PreviewRequest | string,
+  renderContext: PreviewRenderContext | null | undefined,
+  placement: PreviewEntryPlacement,
+): PreviewStoreState {
+  const normalizedRequest = normalizePreviewRequest(request);
+  const context = renderContext ?? current.hostContext;
+  const scopeKey = previewScopeKey(context);
+  const entry = createPreviewEntry(normalizedRequest, context, scopeKey);
+  const existingEntry = current.entries.find((item) => item.id === entry.id);
+
+  if (existingEntry && placement === "preserve-order") {
+    return {
+      ...current,
+      entries: current.entries.map((item) => (item.id === entry.id ? entry : item)),
+      scopes: {
+        ...current.scopes,
+        [scopeKey]: {
+          open: true,
+          activeEntryId: entry.id,
+        },
+      },
+    };
+  }
+
+  const retainedEntries = current.entries.filter((item) => item.id !== entry.id);
+  const scopeEntries = [...retainedEntries.filter((item) => item.scopeKey === scopeKey), entry].slice(
+    -MAX_PREVIEW_ENTRIES,
+  );
+  const entries = [...retainedEntries.filter((item) => item.scopeKey !== scopeKey), ...scopeEntries];
+
   return {
-    id: previewEntryId(request),
+    ...current,
+    entries,
+    scopes: {
+      ...current.scopes,
+      [scopeKey]: {
+        open: true,
+        activeEntryId: entry.id,
+      },
+    },
+  };
+}
+
+function normalizePreviewRequest(request: PreviewRequest | string): PreviewRequest {
+  return typeof request === "string" ? { type: "file", path: request } : request;
+}
+
+function createPreviewEntry(
+  request: PreviewRequest,
+  renderContext: PreviewRenderContext | null,
+  scopeKey: string,
+): PreviewEntry {
+  return {
+    id: `${scopeKey}:${previewEntryId(request)}`,
+    scopeKey,
     request,
     title: previewTitle(request),
     sourceLabel: previewSourceLabel(request),
     openedAt: Date.now(),
+    renderContext,
   };
+}
+
+function previewScopeKey(context: PreviewRenderContext | null | undefined): string {
+  if (context?.sessionId) {
+    return `session:${context.sessionId}`;
+  }
+  if (context?.workspaceId) {
+    return `workspace:${context.workspaceId}`;
+  }
+  return GLOBAL_PREVIEW_SCOPE;
+}
+
+function samePreviewRenderContext(left: PreviewRenderContext | null, right: PreviewRenderContext | null): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left?.workspaceId === right?.workspaceId &&
+    left?.sessionId === right?.sessionId &&
+    left?.workspaceAvailable === right?.workspaceAvailable &&
+    left?.workspaceLabel === right?.workspaceLabel &&
+    left?.runtime === right?.runtime &&
+    left?.onQuoteSelection === right?.onQuoteSelection
+  );
 }
 
 function previewEntryId(request: PreviewRequest): string {

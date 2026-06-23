@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,8 +45,10 @@ class GetHistoryRequest:
     session_id: str
     turn_index: int | None = None
     page: int = 1
-    page_size: int = 50
-    order: str = "asc"
+    page_size: int = 5
+    order: str = "desc"
+    cursor: str | None = None
+    direction: str = "older"
 
 
 class SessionService:
@@ -220,41 +224,67 @@ class SessionService:
     def get_history(self, request: GetHistoryRequest) -> dict[str, Any]:
         session = self._require_session(request.session_id)
         page = max(1, int(request.page or 1))
-        page_size = min(max(1, int(request.page_size or 50)), 100)
-        order = request.order if request.order in {"asc", "desc"} else "asc"
+        page_size = min(max(1, int(request.page_size or 5)), 100)
+        direction = request.direction if request.direction in {"older", "newer"} else "older"
+        cursor_turn_index = decode_turn_cursor(request.cursor)
 
         if request.turn_index is None:
-            messages = self._message_event_service.get_display_messages(request.session_id)
-            event_total = len(self._message_events.list_by_session(request.session_id))
-            turn_indexes = self._turn_indexes(request.session_id)
+            offset = 0 if request.cursor else (page - 1) * page_size
+            page_turn_indexes = self._message_events.list_turn_indexes(
+                request.session_id,
+                cursor_turn_index=cursor_turn_index,
+                direction=direction,
+                limit=page_size + 1,
+                offset=offset,
+            )
+            has_more = len(page_turn_indexes) > page_size
+            selected_turn_indexes = page_turn_indexes[:page_size]
+            turn_indexes = sorted(selected_turn_indexes)
+            messages = self._messages_for_turns(request.session_id, turn_indexes)
+            event_total = self._message_events.count_by_session(request.session_id)
+            total = self._message_events.count_turns(request.session_id)
+            next_cursor = (
+                encode_turn_cursor(min(selected_turn_indexes))
+                if has_more and selected_turn_indexes and direction == "older"
+                else None
+            )
+            prev_cursor = (
+                encode_turn_cursor(max(selected_turn_indexes))
+                if has_more and selected_turn_indexes and direction == "newer"
+                else None
+            )
+            has_more_older = has_more if direction == "older" else bool(next_cursor)
         else:
             messages = self._message_event_service.get_turn_messages(
                 request.session_id,
                 request.turn_index,
             )
+            for message in messages:
+                message.setdefault("turnIndex", request.turn_index)
             event_total = len(
                 self._message_events.list_by_turn(request.session_id, request.turn_index)
             )
             turn_indexes = [request.turn_index] if event_total else []
-
-        if order == "desc":
-            messages = list(reversed(messages))
-
-        total = len(messages)
-        start = (page - 1) * page_size
+            total = 1 if event_total else 0
+            next_cursor = None
+            prev_cursor = None
+            has_more_older = False
         logger.debug(
             f"[SessionService] 查询会话历史 | session_id={request.session_id} | "
             f"turn_index={request.turn_index if request.turn_index is not None else '-'} | "
             f"messages={total} | events={event_total} | page={page} | page_size={page_size}"
         )
         return {
-            "list": messages[start : start + page_size],
+            "list": messages,
             "total": total,
             "page": page,
             "page_size": page_size,
             "session": self._serialize_session(session),
             "event_total": event_total,
             "turn_indexes": turn_indexes,
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+            "has_more_older": has_more_older,
         }
 
     def close_session(self, session_id: str) -> dict[str, Any]:
@@ -345,6 +375,15 @@ class SessionService:
         events = self._message_events.list_by_session(session_id)
         return sorted({event.turn_index for event in events})
 
+    def _messages_for_turns(self, session_id: str, turn_indexes: list[int]) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        for turn_index in turn_indexes:
+            turn_messages = self._message_event_service.get_turn_messages(session_id, turn_index)
+            for message in turn_messages:
+                message.setdefault("turnIndex", turn_index)
+            messages.extend(turn_messages)
+        return messages
+
     def _serialize_session(
         self,
         record: SessionRecord,
@@ -389,3 +428,21 @@ class SessionService:
 def terminal_turn_indexes(events: list[MessageEventRecord]) -> list[int]:
     terminal_actions = {"completed", "cancelled", "error", "scheduled_task_result"}
     return sorted({event.turn_index for event in events if event.action in terminal_actions})
+
+
+def encode_turn_cursor(turn_index: int) -> str:
+    return base64.urlsafe_b64encode(str(int(turn_index)).encode("utf-8")).decode("ascii")
+
+
+def decode_turn_cursor(cursor: str | None) -> int | None:
+    if not cursor:
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        return int(decoded.split(":", 1)[0])
+    except (ValueError, UnicodeDecodeError, binascii.Error):
+        try:
+            return int(cursor)
+        except ValueError:
+            logger.warning(f"[SessionService] invalid turn cursor | cursor={cursor}")
+            return None

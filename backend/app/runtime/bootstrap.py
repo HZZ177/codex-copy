@@ -25,6 +25,7 @@ class DesktopAgentRuntime:
     model_provider_client_provider: Callable[[], Any]
     tool_registry: ToolRegistry
     chat_service: Any
+    chat_stream_manager: Any
     protocol: str = "kt-agentloop"
 
     @property
@@ -50,6 +51,7 @@ def create_desktop_runtime(
     model_provider_client_provider: Callable[[], Any],
     tool_registry: ToolRegistry,
     chat_service: Any,
+    chat_stream_manager: Any,
 ) -> DesktopAgentRuntime:
     runtime = DesktopAgentRuntime(
         settings=settings,
@@ -58,6 +60,7 @@ def create_desktop_runtime(
         model_provider_client_provider=model_provider_client_provider,
         tool_registry=tool_registry,
         chat_service=chat_service,
+        chat_stream_manager=chat_stream_manager,
     )
     logger.info(
         "[Runtime] 桌面运行时已创建 | "

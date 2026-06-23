@@ -383,6 +383,9 @@ export interface AgentHistoryResponse {
   session: AgentSession;
   event_total: number;
   turn_indexes: number[];
+  next_cursor?: string | null;
+  prev_cursor?: string | null;
+  has_more_older?: boolean;
 }
 
 export interface AgentFileAttachment {

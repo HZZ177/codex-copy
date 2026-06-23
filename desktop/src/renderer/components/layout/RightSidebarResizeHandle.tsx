@@ -1,150 +1,91 @@
 import {
-  useEffect,
-  useRef,
-  useState,
+  useCallback,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import {
-  DEFAULT_RIGHT_SIDEBAR_WIDTH,
-  MAX_PANEL_WIDTH,
-  MIN_PANEL_WIDTH,
-  clampRightSidebarWidth,
+  DEFAULT_RIGHT_SIDEBAR_RATIO,
+  MAX_RIGHT_SIDEBAR_RATIO,
+  MIN_RIGHT_SIDEBAR_RATIO,
+  clampRightSidebarRatio,
 } from "@/renderer/hooks/layout/layoutStore";
 
 import styles from "./RightSidebarResizeHandle.module.css";
+import { useRafPanelResize } from "./useRafPanelResize";
 
 interface RightSidebarResizeHandleProps {
   disabled?: boolean;
-  width: number;
-  onResize: (width: number) => void;
+  ratio: number;
+  getAvailableWidth: () => number;
+  onResizePreview?: (ratio: number) => void;
+  onResize: (ratio: number) => void;
 }
 
-const KEYBOARD_STEP = 12;
+const KEYBOARD_STEP = 0.01;
 
-export function RightSidebarResizeHandle({ disabled = false, width, onResize }: RightSidebarResizeHandleProps) {
-  const dragRef = useRef<{ pointerId: number; startWidth: number; startX: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging) {
-      return;
-    }
-    const handlePointerMove = (event: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) {
-        return;
-      }
-      onResize(clampRightSidebarWidth(drag.startWidth - (event.clientX - drag.startX)));
-    };
-    const handlePointerEnd = () => {
-      dragRef.current = null;
-      setDragging(false);
-    };
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerEnd);
-    window.addEventListener("pointercancel", handlePointerEnd);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerEnd);
-      window.removeEventListener("pointercancel", handlePointerEnd);
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-    };
-  }, [dragging, onResize]);
-
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (disabled) {
-      return;
-    }
-    event.preventDefault();
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Window-level pointer listeners below keep resizing available without capture.
-    }
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startWidth: width,
-      startX: event.clientX,
-    };
-    setDragging(true);
-  };
-
-  const updateDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) {
-      return;
-    }
-    event.preventDefault();
-    onResize(clampRightSidebarWidth(drag.startWidth - (event.clientX - drag.startX)));
-  };
-
-  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) {
-      return;
-    }
-    try {
-      event.currentTarget.releasePointerCapture?.(drag.pointerId);
-    } catch {
-      // Some test and WebView runtimes do not expose active pointer capture.
-    }
-    dragRef.current = null;
-    setDragging(false);
-  };
+export function RightSidebarResizeHandle({
+  disabled = false,
+  ratio,
+  getAvailableWidth,
+  onResizePreview,
+  onResize,
+}: RightSidebarResizeHandleProps) {
+  const getDragRatio = useCallback(
+    (startRatio: number, startX: number, clientX: number) =>
+      clampRightSidebarRatio(startRatio - (clientX - startX) / Math.max(1, getAvailableWidth())),
+    [getAvailableWidth],
+  );
+  const { dragging, startDrag, finishDrag } = useRafPanelResize({
+    disabled,
+    width: ratio,
+    getWidth: getDragRatio,
+    onPreview: onResizePreview,
+    onCommit: onResize,
+  });
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (disabled) {
       return;
     }
-    let nextWidth: number | null = null;
+    let nextRatio: number | null = null;
     if (event.key === "ArrowLeft") {
-      nextWidth = width + KEYBOARD_STEP;
+      nextRatio = ratio + KEYBOARD_STEP;
     } else if (event.key === "ArrowRight") {
-      nextWidth = width - KEYBOARD_STEP;
+      nextRatio = ratio - KEYBOARD_STEP;
     } else if (event.key === "Home") {
-      nextWidth = MIN_PANEL_WIDTH;
+      nextRatio = MIN_RIGHT_SIDEBAR_RATIO;
     } else if (event.key === "End") {
-      nextWidth = MAX_PANEL_WIDTH;
+      nextRatio = MAX_RIGHT_SIDEBAR_RATIO;
     }
-    if (nextWidth === null) {
+    if (nextRatio === null) {
       return;
     }
     event.preventDefault();
-    onResize(clampRightSidebarWidth(nextWidth));
+    onResize(clampRightSidebarRatio(nextRatio));
   };
 
   const resetWidth = () => {
     if (disabled) {
       return;
     }
-    dragRef.current = null;
-    setDragging(false);
-    onResize(DEFAULT_RIGHT_SIDEBAR_WIDTH);
+    finishDrag();
+    onResizePreview?.(DEFAULT_RIGHT_SIDEBAR_RATIO);
+    onResize(DEFAULT_RIGHT_SIDEBAR_RATIO);
   };
 
   return (
     <div
       aria-label="调整右侧栏宽度"
       aria-orientation="vertical"
-      aria-valuemax={MAX_PANEL_WIDTH}
-      aria-valuemin={MIN_PANEL_WIDTH}
-      aria-valuenow={width}
+      aria-valuemax={Math.round(MAX_RIGHT_SIDEBAR_RATIO * 100)}
+      aria-valuemin={Math.round(MIN_RIGHT_SIDEBAR_RATIO * 100)}
+      aria-valuenow={Math.round(ratio * 100)}
       className={styles.handle}
       data-disabled={disabled ? "true" : "false"}
       data-dragging={dragging ? "true" : "false"}
       onDoubleClick={resetWidth}
       onKeyDown={handleKeyDown}
-      onPointerCancel={stopDrag}
       onPointerDown={startDrag}
-      onPointerMove={updateDrag}
-      onPointerUp={stopDrag}
       role="separator"
       tabIndex={disabled ? -1 : 0}
       title="拖动调整宽度，双击恢复默认宽度"

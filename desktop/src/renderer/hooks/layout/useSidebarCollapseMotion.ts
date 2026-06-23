@@ -14,9 +14,8 @@ export function useSidebarCollapseMotion(onToggleSidebar: () => void) {
     };
   }, []);
 
-  const toggleSidebar = useCallback(() => {
+  const startSidebarMotion = useCallback(() => {
     setSidebarMotion(true);
-    onToggleSidebar();
 
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -25,7 +24,12 @@ export function useSidebarCollapseMotion(onToggleSidebar: () => void) {
       setSidebarMotion(false);
       timerRef.current = null;
     }, SIDEBAR_COLLAPSE_MOTION_MS);
-  }, [onToggleSidebar]);
+  }, []);
 
-  return { sidebarMotion, toggleSidebar };
+  const toggleSidebar = useCallback(() => {
+    startSidebarMotion();
+    onToggleSidebar();
+  }, [onToggleSidebar, startSidebarMotion]);
+
+  return { sidebarMotion, toggleSidebar, startSidebarMotion };
 }

@@ -34,7 +34,7 @@ export function processMessages(messages: ConversationMessage[]): ProcessedMessa
     } else {
       items.push({
         type: "group",
-        id: `${groupKind}:${group.map((message) => message.id).join(",")}`,
+        id: `${groupKind}:${group[0].id}`,
         groupKind,
         messages: group,
         sourceMessageIds: group.map((message) => message.id),

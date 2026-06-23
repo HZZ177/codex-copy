@@ -1,10 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatChannel, RuntimeBridge, WsConnectionStatus } from "@/runtime";
+import type { WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
+import { Layout } from "@/renderer/components/layout/Layout";
+import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { ConversationPage } from "@/renderer/pages/conversation";
 import { clearQuickChatSendQueue, queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
 import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
+import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import type {
   AgentActionEnvelope,
   AgentChatMessagePayload,
@@ -21,10 +26,13 @@ describe("ConversationPage", () => {
   it("restores an empty session history with a clear empty state", async () => {
     const { runtime } = fakeRuntime({ history: [] });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     expect((await screen.findByTestId("conversation-empty")).textContent).toBe("还没有消息，输入需求开始对话。");
-    expect(runtime.conversation.loadHistory).toHaveBeenCalledWith("ses-1", { order: "asc" });
+    expect(runtime.conversation.loadHistory).toHaveBeenCalledWith("ses-1", {
+      direction: "older",
+      pageSize: 5,
+    });
     expect(runtime.conversation.openChatChannel).toHaveBeenCalled();
   });
 
@@ -39,7 +47,7 @@ describe("ConversationPage", () => {
       }),
     });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
     expect(screen.queryByLabelText("选择工作区")).toBeNull();
@@ -48,7 +56,7 @@ describe("ConversationPage", () => {
   it("does not show project-free workspace picker in the bottom composer for a pure chat session", async () => {
     const { runtime } = fakeRuntime();
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
     expect(screen.queryByLabelText("选择工作区")).toBeNull();
@@ -65,12 +73,12 @@ describe("ConversationPage", () => {
       }),
     });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
     expect(screen.queryByLabelText("选择工作区")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "@README" } });
+    typeComposer("@README");
     expect(screen.queryByTestId("at-file-menu")).toBeNull();
     expect(runtime.workspace.search).not.toHaveBeenCalled();
   });
@@ -83,7 +91,7 @@ describe("ConversationPage", () => {
       ],
     });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     expect(await screen.findByText("历史问题")).not.toBeNull();
     expect(await screen.findByText("历史回答")).not.toBeNull();
@@ -94,7 +102,7 @@ describe("ConversationPage", () => {
     const { runtime } = fakeRuntime({
       history: [historyMessage("assistant", "历史回答")],
     });
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     expect((await screen.findByTestId("typing-speed-pill")).textContent).toBe("打字机 0 字符/s - 待输出 0 字");
     const scrollButton = screen.getByLabelText("滚动到底") as HTMLButtonElement;
@@ -127,7 +135,7 @@ describe("ConversationPage", () => {
       ],
     });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     expect((await screen.findByTestId("tool-call-block")).getAttribute("data-collapsed")).toBe("true");
     expect(screen.getByText("已读取文件 README.md")).not.toBeNull();
@@ -152,7 +160,7 @@ describe("ConversationPage", () => {
       ],
     });
 
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     expect(await screen.findByText("完成")).not.toBeNull();
     expect(screen.queryByText("trace-history")).toBeNull();
@@ -165,7 +173,7 @@ describe("ConversationPage", () => {
     const { runtime, emit } = fakeRuntime();
     const eventTime = new Date("2026-06-18T12:34:00+08:00").getTime();
     const expectedTime = new Date(eventTime).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
 
@@ -191,7 +199,7 @@ describe("ConversationPage", () => {
 
   it("keeps the pending cursor visible after a tool result until completion", async () => {
     const { runtime, emit } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
 
@@ -234,7 +242,7 @@ describe("ConversationPage", () => {
 
   it("sends the composer text through the bound chat channel", async () => {
     const { runtime, channel } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
     expect(screen.getByRole("form", { name: "继续对话输入" }).getAttribute("data-variant")).toBe("codex");
@@ -242,7 +250,7 @@ describe("ConversationPage", () => {
     fireEvent.click(screen.getByLabelText("选择模型"));
     expect(screen.getByRole("listbox", { name: "模型" }).closest("[data-placement]")?.getAttribute("data-placement")).toBe("top");
     fireEvent.click(screen.getByLabelText("选择模型"));
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "继续修改" } });
+    typeComposer("继续修改");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
 
@@ -254,11 +262,11 @@ describe("ConversationPage", () => {
 
   it("uses the initial runtime model passed from quick chat", async () => {
     const { runtime, channel } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} initialModel="deepseek-coder" />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} initialModel="deepseek-coder" />);
 
     await readyComposer();
     expect(screen.getByLabelText("选择模型").textContent).toContain("deepseek-coder");
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "使用首页模型" } });
+    typeComposer("使用首页模型");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
 
@@ -277,7 +285,7 @@ describe("ConversationPage", () => {
       message: "从快速对话发送",
     });
     const onQuickSendConsumed = vi.fn();
-    render(
+    renderConversation(
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
@@ -309,7 +317,7 @@ describe("ConversationPage", () => {
     });
     const onQuickSendConsumed = vi.fn();
 
-    render(
+    renderConversation(
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
@@ -330,7 +338,7 @@ describe("ConversationPage", () => {
     const { runtime, channel } = fakeRuntime();
     const onQuickSendConsumed = vi.fn();
 
-    render(
+    renderConversation(
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
@@ -344,7 +352,7 @@ describe("ConversationPage", () => {
       expect(onQuickSendConsumed).toHaveBeenCalledTimes(1);
     });
     expect(channel.chat).not.toHaveBeenCalled();
-    expect((screen.getByLabelText("继续输入") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByLabelText("继续输入").textContent).toBe("");
   });
 
   it("allows sending another message after a channel error", async () => {
@@ -352,15 +360,15 @@ describe("ConversationPage", () => {
       throw new Error("模型 400");
     });
     const { runtime } = fakeRuntime({ chat });
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "第一次" } });
+    typeComposer("第一次");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
     expect((await screen.findAllByText("模型 400")).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "修正后继续" } });
+    typeComposer("修正后继续");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
 
@@ -379,10 +387,10 @@ describe("ConversationPage", () => {
         throw new Error(stack);
       }),
     });
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "触发错误" } });
+    typeComposer("触发错误");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
 
@@ -392,7 +400,7 @@ describe("ConversationPage", () => {
 
   it("cancels the active websocket turn and returns to send mode after a cancelled event", async () => {
     const { runtime, channel, emit } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
     await act(async () => {
@@ -418,7 +426,7 @@ describe("ConversationPage", () => {
 
   it("quotes selected assistant text into the composer", async () => {
     const { runtime, emit } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
     await act(async () => {
@@ -437,7 +445,19 @@ describe("ConversationPage", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "添加选中文本到对话" }));
 
-    expect((screen.getByLabelText("继续输入") as HTMLTextAreaElement).value).toBe("> 可以引用的回答");
+    const input = screen.getByLabelText("继续输入");
+    expect(input.textContent).toContain("引用片段");
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseOver(screen.getByText("引用片段"));
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.getByRole("button", { name: "复制" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: "删除" })).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
     expect(selection.removeAllRanges).toHaveBeenCalled();
     selection.restore();
   });
@@ -456,10 +476,10 @@ describe("ConversationPage", () => {
         workspace: workspace("ws-1", "repo", "D:/repo"),
       }),
     });
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "@READ" } });
+    typeComposer("@READ");
 
     expect(await screen.findByTestId("at-file-menu")).not.toBeNull();
     await waitFor(() => {
@@ -470,10 +490,10 @@ describe("ConversationPage", () => {
 
   it("hides workspace file search inside the pure chat composer", async () => {
     const { runtime } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
-    fireEvent.change(screen.getByLabelText("继续输入"), { target: { value: "@README" } });
+    typeComposer("@README");
 
     expect(screen.queryByTestId("at-file-menu")).toBeNull();
     expect(runtime.workspace.search).not.toHaveBeenCalled();
@@ -481,45 +501,152 @@ describe("ConversationPage", () => {
 
   it("does not expose a fake workspace or empty preview entry when no panel content exists", async () => {
     const { runtime } = fakeRuntime();
-    render(<ConversationPage threadId="ses-1" runtime={runtime} />);
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
 
-    expect(screen.queryByLabelText("打开工作区")).toBeNull();
-    expect(screen.queryByLabelText("打开预览")).toBeNull();
-    expect(screen.queryByText("工作区尚未加载")).toBeNull();
-    expect(screen.queryByText("文件预览和 diff 会按需显示在这里。")).toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
     expect(runtime.workspace.listDirectory).not.toHaveBeenCalled();
   });
 
   it("opens rich message code blocks in the preview drawer", async () => {
     const { runtime, emit } = fakeRuntime();
-    render(
-      <PreviewProvider>
-        <ConversationPage threadId="ses-1" runtime={runtime} />
-      </PreviewProvider>,
-    );
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await screen.findByLabelText("继续输入");
     await act(async () => {
       emit(agentEvent("stream", {
         id: "evt-html",
         session_id: "ses-1",
-        content: "```html\n<main><h1>面板预览</h1></main>\n```",
+        content: "```html\n<style>h1 { color: rgb(220, 38, 38); }</style><main><h1>面板预览</h1></main>\n```",
       }));
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "在预览面板打开 HTML 预览" }));
 
-    expect(await screen.findByRole("complementary", { name: "预览" })).not.toBeNull();
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.dataset.rightSidebar).toBe("open");
+    expect(shell.dataset.rightSidebarMotion).toBe("true");
+    expect(await screen.findByRole("complementary", { name: "右侧栏" })).not.toBeNull();
     const frame = (await screen.findByTitle("HTML 文件预览")) as HTMLIFrameElement;
     expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("<style>h1 { color: rgb(220, 38, 38); }</style>");
     expect(frame.getAttribute("srcdoc")).toContain("面板预览");
+  });
+
+  it("does not carry preview drawer content into another session", async () => {
+    const { runtime, emit } = fakeRuntime();
+    const view = renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    await act(async () => {
+      emit(agentEvent("stream", {
+        id: "evt-html-session-a",
+        session_id: "ses-1",
+        content: "```html\n<main><h1>会话 A 面板</h1></main>\n```",
+      }));
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "在预览面板打开 HTML 预览" }));
+    expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+    expect(((await screen.findByTitle("HTML 文件预览")) as HTMLIFrameElement).getAttribute("srcdoc")).toContain(
+      "会话 A 面板",
+    );
+
+    const { runtime: nextRuntime } = fakeRuntime({ session: agentSession({ id: "ses-2", title: "会话 B" }) });
+    view.rerender(conversationInLayout(<ConversationPage threadId="ses-2" runtime={nextRuntime} />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+      expect(screen.queryByTitle("HTML 文件预览")).toBeNull();
+      expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+    });
+  });
+
+  it("opens the current project file tree from the right sidebar initial page", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      workspaceEntriesByPath: {
+        "": [
+          workspaceEntry("desktop", "desktop", "directory"),
+          workspaceEntry("package.json", "package.json", "file", 128),
+        ],
+        desktop: [workspaceEntry("README.md", "desktop/README.md", "file", 64)],
+      },
+      workspaceFilesByPath: {
+        "desktop/README.md": "# 文件预览\n\n侧边栏 Markdown 内容",
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+
+    expect(await screen.findByTestId("right-sidebar-initial-page")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "文件" }));
+
+    expect(screen.getByRole("tab", { name: "文件" }).getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    expect(await screen.findByText("desktop")).not.toBeNull();
+    expect(screen.getByText("package.json")).not.toBeNull();
+    expect(screen.queryByTestId("workspace-file-browser-preview")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "调整文件树宽度" })).toBeNull();
+    expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开 desktop" }));
+    expect(await screen.findByText("README.md")).not.toBeNull();
+    expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "desktop");
+
+    fireEvent.click(await screen.findByRole("button", { name: "选择文件 desktop/README.md" }));
+    expect(await screen.findByRole("heading", { name: "文件预览" })).not.toBeNull();
+    expect(screen.getByTestId("workspace-file-browser-tree")).not.toBeNull();
+    expect(screen.getByTestId("workspace-file-browser-preview")).not.toBeNull();
+    expect(screen.getByRole("separator", { name: "调整文件树宽度" })).not.toBeNull();
+    expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "desktop/README.md");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 文件" }));
+    expect(screen.queryByRole("tab", { name: "文件" })).toBeNull();
+    expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
   });
 });
 
+function renderConversation(ui: ReactElement) {
+  return render(<PreviewProvider>{ui}</PreviewProvider>);
+}
+
+function renderConversationInLayout(ui: ReactElement) {
+  return render(conversationInLayout(ui));
+}
+
+function conversationInLayout(ui: ReactElement) {
+  return (
+    <ThemeProvider>
+      <LayoutStateProvider>
+        <PreviewProvider>
+          <Layout contentMode="full">{ui}</Layout>
+        </PreviewProvider>
+      </LayoutStateProvider>
+    </ThemeProvider>
+  );
+}
+
 async function readyComposer() {
   return screen.findByLabelText("继续输入");
+}
+
+function typeComposer(value: string) {
+  const input = screen.getByLabelText("继续输入");
+  input.textContent = value;
+  fireEvent.input(input);
+  return input;
 }
 
 async function waitSendEnabled() {
@@ -534,6 +661,8 @@ function fakeRuntime({
   chat = vi.fn(),
   cancel = vi.fn(),
   workspaceSearch = vi.fn().mockResolvedValue([]),
+  workspaceEntriesByPath = { "": [] },
+  workspaceFilesByPath = {},
   wsStatus = "open",
   model = "qwen-coder",
 }: {
@@ -542,6 +671,8 @@ function fakeRuntime({
   chat?: ReturnType<typeof vi.fn>;
   cancel?: ReturnType<typeof vi.fn>;
   workspaceSearch?: ReturnType<typeof vi.fn>;
+  workspaceEntriesByPath?: Record<string, WorkspaceEntry[]>;
+  workspaceFilesByPath?: Record<string, string>;
   wsStatus?: WsConnectionStatus;
   model?: string;
 } = {}) {
@@ -555,6 +686,7 @@ function fakeRuntime({
     unbindSession: vi.fn(),
     chat,
     cancel,
+    requestStatus: vi.fn(),
     ping: vi.fn(),
   };
   const runtime = {
@@ -581,8 +713,16 @@ function fakeRuntime({
       listModels: vi.fn().mockResolvedValue({ models: model ? [{ id: model }] : [], cached: true }),
     },
     workspace: {
-      listDirectory: vi.fn().mockResolvedValue({ root: "D:/repo", entries: [] }),
-      readFile: vi.fn(),
+      listDirectory: vi.fn((_scope: unknown, path = ""): Promise<WorkspaceTreeResponse> => {
+        const entries = workspaceEntriesByPath[path];
+        if (!entries) {
+          return Promise.reject(new Error(`目录不存在：${path}`));
+        }
+        return Promise.resolve({ root: "D:/repo", entries });
+      }),
+      readFile: vi.fn((_scope: unknown, path: string) =>
+        Promise.resolve({ path, content: workspaceFilesByPath[path] ?? "", encoding: "utf-8" }),
+      ),
       readMedia: vi.fn(),
       search: workspaceSearch,
     },
@@ -657,6 +797,21 @@ function workspace(id: string, name: string, rootPath: string): Workspace {
     updated_at: "2026-06-21T00:00:00Z",
     last_opened_at: null,
     is_deleted: false,
+  };
+}
+
+function workspaceEntry(
+  name: string,
+  path: string,
+  type: WorkspaceEntry["type"],
+  size: number | null = null,
+): WorkspaceEntry {
+  return {
+    name,
+    path,
+    type,
+    size,
+    modified_at: null,
   };
 }
 

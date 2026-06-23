@@ -34,6 +34,9 @@ export interface AgentSessionViewState {
   chatBound: boolean;
   hydrated: boolean;
   historyLoading: boolean;
+  historyCursor: string | null;
+  historyHasMoreOlder: boolean;
+  hasUnread: boolean;
   stale: boolean;
 }
 
@@ -51,6 +54,7 @@ export type AgentConversationAction =
   | { type: "session/upsert"; session: AgentSession }
   | { type: "session/select"; sessionId: string | null }
   | { type: "history/loaded"; sessionId: string; history: AgentHistoryResponse }
+  | { type: "history/olderLoaded"; sessionId: string; history: AgentHistoryResponse }
   | {
       type: "message/addUser";
       sessionId: string;
@@ -83,9 +87,11 @@ export function agentConversationReducer(
     case "session/upsert":
       return upsertSession(state, action.session, { select: false });
     case "session/select":
-      return { ...state, selectedSessionId: action.sessionId };
+      return selectSession(state, action.sessionId);
     case "history/loaded":
       return loadHistory(state, action.sessionId, action.history);
+    case "history/olderLoaded":
+      return prependHistory(state, action.sessionId, action.history);
     case "message/addUser":
       return addUserMessage(state, action);
     case "runtime/setState":
@@ -140,7 +146,7 @@ export function reduceAgentWsEvent(
       next = handleCompleted(state, event.data as unknown as AgentCompletedPayload);
       break;
     case "cancelled":
-      next = handleCancelled(state, sessionIdFromData(event.data));
+      next = handleCancelled(state, event.data);
       break;
     case "error":
       next = handleError(state, event.data as AgentErrorData);
@@ -157,6 +163,7 @@ export function reduceAgentWsEvent(
       break;
   }
 
+  next = markUnreadFromEvent(next, event);
   if (!eventKey) {
     return next;
   }
@@ -196,6 +203,60 @@ export function selectAgentRuntimeState(
   sessionId = state.selectedSessionId ?? "",
 ): AgentSessionRuntimeState {
   return selectAgentSessionState(state, sessionId)?.runtimeState ?? "idle";
+}
+
+function selectSession(state: AgentConversationState, sessionId: string | null): AgentConversationState {
+  const next = cloneState(state);
+  next.selectedSessionId = sessionId;
+  if (sessionId) {
+    ensureSessionState(next, sessionId).hasUnread = false;
+  }
+  return next;
+}
+
+const TERMINAL_UNREAD_SESSION_ACTIONS = new Set([
+  "completed",
+  "cancelled",
+  "error",
+  "task_result",
+]);
+
+function markUnreadFromEvent(
+  state: AgentConversationState,
+  event: AgentActionEnvelope,
+): AgentConversationState {
+  if (!TERMINAL_UNREAD_SESSION_ACTIONS.has(event.action)) {
+    return state;
+  }
+  const sessionId = sessionIdFromData(event.data);
+  if (!sessionId || sessionId === state.selectedSessionId) {
+    return state;
+  }
+  const currentView = state.sessionStateById[sessionId];
+  if (currentView?.isStreaming || currentView?.runtimeState === "running" || currentView?.runtimeState === "cancelling") {
+    return state;
+  }
+  const next = cloneState(state);
+  ensureSessionState(next, sessionId).hasUnread = true;
+  return next;
+}
+
+function runningSessionIdsFromStatus(data: Record<string, unknown>): string[] {
+  const value = data.running_sessions;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      if (typeof item === "string") {
+        return item;
+      }
+      if (item && typeof item === "object") {
+        return stringValue((item as { session_id?: unknown }).session_id);
+      }
+      return "";
+    })
+    .filter(Boolean);
 }
 
 function setSessions(state: AgentConversationState, sessions: AgentSession[]): AgentConversationState {
@@ -239,6 +300,31 @@ function loadHistory(
   view.messages = history.list.map((payload, index) => historyMessageFromPayload(sessionId, payload, index));
   view.hydrated = true;
   view.historyLoading = false;
+  view.historyCursor = history.next_cursor ?? null;
+  view.historyHasMoreOlder = Boolean(history.has_more_older && history.next_cursor);
+  view.hasUnread = false;
+  view.stale = false;
+  view.isStreaming = view.messages.some((message) => Boolean(message.streaming));
+  view.runtimeState = view.isStreaming ? "running" : runtimeStateFromSessionStatus(view.status);
+  return next;
+}
+
+function prependHistory(
+  state: AgentConversationState,
+  sessionId: string,
+  history: AgentHistoryResponse,
+): AgentConversationState {
+  let next = upsertSession(state, history.session, { select: true });
+  next = cloneState(next);
+  const view = ensureSessionState(next, sessionId, metaFromSession(history.session));
+  const incoming = history.list.map((payload, index) => historyMessageFromPayload(sessionId, payload, index));
+  const incomingIds = new Set(incoming.map((message) => message.id));
+  view.messages = [...incoming, ...view.messages.filter((message) => !incomingIds.has(message.id))];
+  view.historyCursor = history.next_cursor ?? null;
+  view.historyHasMoreOlder = Boolean(history.has_more_older && history.next_cursor);
+  view.hasUnread = false;
+  view.historyLoading = false;
+  view.hydrated = true;
   view.stale = false;
   view.isStreaming = view.messages.some((message) => Boolean(message.streaming));
   view.runtimeState = view.isStreaming ? "running" : runtimeStateFromSessionStatus(view.status);
@@ -260,6 +346,7 @@ function addUserMessage(
     timestamp: action.timestamp ?? Date.now(),
   });
   next.selectedSessionId = action.sessionId;
+  view.hasUnread = false;
   return next;
 }
 
@@ -341,7 +428,6 @@ function handleStream(state: AgentConversationState, data: AgentStreamActionData
   }
   view.isStreaming = true;
   markTurnInProgress(view);
-  next.selectedSessionId = sessionId;
   return next;
 }
 
@@ -570,10 +656,21 @@ function handleCompleted(state: AgentConversationState, payload: AgentCompletedP
   const target =
     [...view.messages]
       .reverse()
-      .find((message) => (message.role === "assistant" || message.role === "reasoning") && message.content.trim()) ??
+      .find(
+        (message) =>
+          (message.role === "assistant" || message.role === "reasoning") &&
+          !message.cancelled &&
+          message.status !== "cancelled" &&
+          message.content.trim(),
+      ) ??
     [...view.messages]
       .reverse()
-      .find((message) => message.role === "assistant" || message.role === "reasoning");
+      .find(
+        (message) =>
+          (message.role === "assistant" || message.role === "reasoning") &&
+          !message.cancelled &&
+          message.status !== "cancelled",
+      );
 
   let completedTarget = target;
   if (!completedTarget && finalContent) {
@@ -612,7 +709,8 @@ function handleCompleted(state: AgentConversationState, payload: AgentCompletedP
   return next;
 }
 
-function handleCancelled(state: AgentConversationState, sessionId: string): AgentConversationState {
+function handleCancelled(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
+  const sessionId = sessionIdFromData(data);
   if (!sessionId) {
     return state;
   }
@@ -622,15 +720,39 @@ function handleCancelled(state: AgentConversationState, sessionId: string): Agen
     if (message.streaming) {
       message.streaming = false;
     }
+    if (message.status === "streaming") {
+      message.status = undefined;
+    }
+    if (message.role === "tool" && message.status === "running") {
+      message.status = "cancelled";
+    }
     if (message.role === "subagent") {
       closeSubagentTextStreams(message);
+      for (const tool of message.subagentToolCalls ?? []) {
+        if (tool.status === "running") {
+          tool.status = "cancelled";
+        }
+      }
+      for (const item of message.subagentItems ?? []) {
+        if (item.type === "tool" && item.status === "running") {
+          item.status = "cancelled";
+        }
+      }
     }
   }
-  const last = [...view.messages]
-    .reverse()
-    .find((message) => message.role === "assistant" || message.role === "subagent" || message.role === "reasoning");
-  if (last) {
-    last.cancelled = true;
+  const last = view.messages.at(-1);
+  if (!(last?.role === "assistant" && last.cancelled && last.status === "cancelled")) {
+    const traceId = stringValue(data.trace_id);
+    view.messages.push({
+      id: nextMessageId(next, "cancelled", sessionId),
+      sessionId,
+      role: "assistant",
+      content: "",
+      timestamp: timestampFromData(data),
+      status: "cancelled",
+      cancelled: true,
+      ...(traceId ? { traceId } : {}),
+    });
   }
   view.isStreaming = false;
   view.isCancelling = false;
@@ -668,10 +790,17 @@ function handleError(state: AgentConversationState, data: AgentErrorData): Agent
 
 function handleStatus(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
   const sessionId = sessionIdFromData(data) || state.selectedSessionId || "";
-  if (!sessionId) {
-    return state;
-  }
   const next = cloneState(state);
+  const runningSessionIds = runningSessionIdsFromStatus(data);
+  for (const runningSessionId of runningSessionIds) {
+    const runningView = ensureSessionState(next, runningSessionId);
+    runningView.runtimeState = "running";
+    runningView.isStreaming = true;
+    runningView.isCancelling = false;
+  }
+  if (!sessionId) {
+    return next;
+  }
   const view = ensureSessionState(next, sessionId);
   const status = stringValue(data.status);
   if (isAgentSessionStatus(status)) {
@@ -679,6 +808,9 @@ function handleStatus(state: AgentConversationState, data: Record<string, unknow
     view.runtimeState = runtimeStateFromSessionStatus(status);
   } else if (isRuntimeState(status)) {
     view.runtimeState = status;
+  }
+  if (view.runtimeState !== "running") {
+    view.isStreaming = false;
   }
   return next;
 }
@@ -723,7 +855,7 @@ function historyMessageFromPayload(
 
   return {
     ...payload,
-    id: payload.id ?? `hist:${sessionId}:${index + 1}`,
+    id: payload.id ?? historyMessageId(sessionId, payload, index),
     sessionId: payload.sessionId ?? sessionId,
     timestamp: payload.timestamp ?? Date.now() + index,
     content: payload.content ?? "",
@@ -733,6 +865,25 @@ function historyMessageFromPayload(
     subagentItems: payload.subagentItems?.map(normalizeSubagentHistoryItem),
     subagentToolCalls: payload.subagentToolCalls?.map(normalizeToolHistoryCall),
   };
+}
+
+function historyMessageId(sessionId: string, payload: AgentChatMessagePayload, index: number): string {
+  if (payload.turnIndex === undefined && payload.timestamp === undefined) {
+    return `hist:${sessionId}:${index + 1}`;
+  }
+  const turn = payload.turnIndex ?? "turnless";
+  const timestamp = payload.timestamp ?? "notime";
+  const run = payload.runId ?? payload.subagentRunId ?? payload.toolName ?? "";
+  const contentHash = hashHistoryText(payload.content ?? "");
+  return `hist:${sessionId}:${turn}:${payload.role}:${timestamp}:${run}:${index}:${contentHash}`;
+}
+
+function hashHistoryText(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
 }
 
 function normalizeHistoryStatus(payload: AgentChatMessagePayload): AgentChatMessage["status"] {
@@ -815,6 +966,9 @@ function ensureSessionState(
     chatBound: meta.chatBound ?? false,
     hydrated: meta.hydrated ?? false,
     historyLoading: meta.historyLoading ?? false,
+    historyCursor: meta.historyCursor ?? null,
+    historyHasMoreOlder: meta.historyHasMoreOlder ?? false,
+    hasUnread: meta.hasUnread ?? false,
     stale: meta.stale ?? false,
   };
   state.sessionStateById[sessionId] = created;

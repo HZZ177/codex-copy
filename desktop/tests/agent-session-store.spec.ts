@@ -92,9 +92,8 @@ describe("agentSessionStore reducer", () => {
     expect(selectAgentMessages(state, "ses-1")).toMatchObject([
       { id: "hist:ses-1:1", role: "user", content: "你好", streaming: false },
       { id: "hist:ses-1:2", role: "reasoning", content: "正在分析", reasoningKind: "progress_fact" },
-      { id: "hist:ses-1:3", role: "tool", runId: "run-1", status: "completed" },
+      { role: "tool", runId: "run-1", status: "completed" },
       {
-        id: "hist:ses-1:4",
         role: "assistant",
         content: "完成",
         ghostStats: { traceId: "trace-1", inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 },
@@ -102,6 +101,45 @@ describe("agentSessionStore reducer", () => {
     ]);
     expect(selectAgentSessionState(state, "ses-1")?.hydrated).toBe(true);
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
+  });
+
+  it("prepends older history pages without replacing the latest page", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "history/loaded",
+      sessionId: "ses-1",
+      history: {
+        ...history([
+          { role: "user", content: "user 5", turnIndex: 5 },
+          { role: "assistant", content: "answer 5", turnIndex: 5 },
+        ]),
+        next_cursor: "cursor-5",
+        has_more_older: true,
+      },
+    });
+
+    state = agentConversationReducer(state, {
+      type: "history/olderLoaded",
+      sessionId: "ses-1",
+      history: {
+        ...history([
+          { role: "user", content: "user 4", turnIndex: 4 },
+          { role: "assistant", content: "answer 4", turnIndex: 4 },
+        ]),
+        next_cursor: "cursor-4",
+        has_more_older: true,
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1").map((message) => message.content)).toEqual([
+      "user 4",
+      "answer 4",
+      "user 5",
+      "answer 5",
+    ]);
+    expect(selectAgentSessionState(state, "ses-1")).toMatchObject({
+      historyCursor: "cursor-4",
+      historyHasMoreOlder: true,
+    });
   });
 
   it("keeps realtime stream/tool/completed messages aligned with loaded history", () => {
@@ -195,6 +233,56 @@ describe("agentSessionStore reducer", () => {
     state = reduceAgentWsEvent(state, { action: "session_closed", data: { session_id: "ses-1" } });
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("closed");
     expect(selectAgentSessionState(state, "ses-1")?.status).toBe("closed");
+  });
+
+  it("marks background sessions unread only after the turn reaches a terminal event", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "sessions/set",
+      sessions: [session("ses-a", "2026-06-18T09:00:00Z"), session("ses-b", "2026-06-18T10:00:00Z")],
+    });
+    state = agentConversationReducer(state, { type: "session/select", sessionId: "ses-a" });
+
+    state = reduceAgentWsEvent(state, {
+      action: "stream",
+      data: { session_id: "ses-b", content: "后台输出" },
+    });
+
+    expect(state.selectedSessionId).toBe("ses-a");
+    expect(selectAgentSessionState(state, "ses-b")?.hasUnread).toBe(false);
+    expect(selectAgentRuntimeState(state, "ses-b")).toBe("running");
+
+    state = reduceAgentWsEvent(state, {
+      action: "completed",
+      data: { session_id: "ses-b", status: "completed", events: [] },
+    });
+    expect(selectAgentSessionState(state, "ses-b")?.hasUnread).toBe(true);
+
+    state = agentConversationReducer(state, { type: "session/select", sessionId: "ses-b" });
+    expect(selectAgentSessionState(state, "ses-b")?.hasUnread).toBe(false);
+  });
+
+  it("marks every session reported by running_sessions as streaming", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "sessions/set",
+      sessions: [
+        session("ses-a", "2026-06-18T08:00:00Z"),
+        session("ses-b", "2026-06-18T09:00:00Z"),
+        session("ses-c", "2026-06-18T10:00:00Z"),
+      ],
+    });
+    state = agentConversationReducer(state, { type: "session/select", sessionId: "ses-a" });
+
+    state = reduceAgentWsEvent(state, {
+      action: "status",
+      data: {
+        status: "idle",
+        running_sessions: [{ session_id: "ses-b" }, { session_id: "ses-c" }],
+      },
+    });
+
+    expect(selectAgentRuntimeState(state, "ses-a")).toBe("idle");
+    expect(selectAgentSessionState(state, "ses-b")).toMatchObject({ runtimeState: "running", isStreaming: true });
+    expect(selectAgentSessionState(state, "ses-c")).toMatchObject({ runtimeState: "running", isStreaming: true });
   });
 
   it("keeps reasoning panels in event order when tools interleave", () => {
@@ -482,9 +570,39 @@ describe("agentSessionStore reducer", () => {
 
     state = reduceAgentWsEvent(state, { action: "stream", data: { session_id: "ses-2", content: "处理中" } });
     state = reduceAgentWsEvent(state, { action: "cancelled", data: { session_id: "ses-2" } });
+    expect(selectAgentMessages(state, "ses-2")).toMatchObject([
+      {
+        role: "assistant",
+        content: "处理中",
+        streaming: false,
+      },
+      {
+        role: "assistant",
+        content: "",
+        status: "cancelled",
+        cancelled: true,
+      },
+    ]);
+
+    state = reduceAgentWsEvent(state, toolStart("ses-tool-only", "run-1", "read_file"));
+    state = reduceAgentWsEvent(state, { action: "cancelled", data: { session_id: "ses-tool-only" } });
+    expect(selectAgentMessages(state, "ses-tool-only")).toMatchObject([
+      {
+        role: "tool",
+        status: "cancelled",
+      },
+      {
+        role: "assistant",
+        content: "",
+        status: "cancelled",
+        cancelled: true,
+      },
+    ]);
+
+    state = reduceAgentWsEvent(state, { action: "cancelled", data: { session_id: "ses-tool-only" } });
+    expect(selectAgentMessages(state, "ses-tool-only").filter((message) => message.cancelled)).toHaveLength(1);
     expect(selectAgentMessages(state, "ses-2")[0]).toMatchObject({
       streaming: false,
-      cancelled: true,
     });
 
     state = reduceAgentWsEvent(state, {

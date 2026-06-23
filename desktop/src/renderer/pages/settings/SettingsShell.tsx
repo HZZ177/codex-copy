@@ -1,6 +1,6 @@
 import { ArrowLeft, BarChart3, Moon, Search, Settings2, Sun, type LucideIcon } from "lucide-react";
 import type { CSSProperties, PropsWithChildren } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { SidebarResizeHandle } from "@/renderer/components/layout/SidebarResizeHandle";
@@ -22,6 +22,7 @@ export function SettingsShell({
   activeSection,
   children,
 }: PropsWithChildren<{ activeSection: SettingsSection }>) {
+  const shellRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { state, actions } = useLayoutState();
@@ -38,6 +39,9 @@ export function SettingsShell({
     return settingsItems.filter((item) => item.label.toLowerCase().includes(keyword));
   }, [query]);
   const { sidebarMotion, toggleSidebar } = useSidebarCollapseMotion(actions.toggleSidebar);
+  const previewSidebarWidth = useCallback((width: number) => {
+    shellRef.current?.style.setProperty("--sidebar-width", `${width}px`);
+  }, []);
 
   const navigateSettings = (path: string) => {
     void navigate(path, { state: { from } });
@@ -45,6 +49,7 @@ export function SettingsShell({
 
   return (
     <div
+      ref={shellRef}
       className={styles.shell}
       data-testid="settings-shell"
       data-sidebar={state.sidebarCollapsed ? "collapsed" : "expanded"}
@@ -107,6 +112,7 @@ export function SettingsShell({
         <SidebarResizeHandle
           disabled={state.sidebarCollapsed}
           width={state.sidebarWidth}
+          onResizePreview={previewSidebarWidth}
           onResize={actions.setSidebarWidth}
         />
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -252,6 +253,41 @@ class ChatService:
                 turn_index=turn_index,
                 status="completed",
                 final_content=completed_payload.get("final_content", ""),
+            )
+        except asyncio.CancelledError:
+            duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+            token.cancel()
+            logger.info(
+                f"[ChatTurn] 对话任务被强制取消 | session_id={session.id} | "
+                f"turn_index={turn_index} | trace_id={trace_id} | duration_ms={duration_ms}"
+            )
+            payload = aggregator.build_cancelled_data(
+                session_id=session.id,
+                trace_id=trace_id,
+                user_id=request.user_id or session.user_id,
+                scene_id=request.scene_id or session.scene_id,
+                reason="user",
+            )
+            try:
+                await dispatcher.emit_event(
+                    event_type=DomainEventType.TURN_CANCELLED.value,
+                    source="chat_service",
+                    payload=payload,
+                    trace_id=trace_id,
+                    user_id=request.user_id or session.user_id,
+                    original_session_id=session.id,
+                    active_session_id=session.active_session_id or session.id,
+                    turn_index=turn_index,
+                )
+            finally:
+                self._finish_trace(trace_id, status="cancelled", duration_ms=duration_ms)
+                self.repositories.sessions.update(session.id, status="active")
+            return ChatTurnResult(
+                session_id=session.id,
+                trace_id=trace_id,
+                turn_index=turn_index,
+                status="cancelled",
+                final_content=payload.get("final_content", ""),
             )
         except Exception as exc:
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))

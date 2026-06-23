@@ -9,7 +9,7 @@
   background: transparent;
   color: var(--color-text-tertiary);
   font-size: 13px;
-  line-height: 1;
+  line-height: 1.28;
   transition:
     background var(--motion-fast) ease,
     color var(--motion-fast) ease;
@@ -60,6 +60,7 @@
   max-width: 154px;
   overflow: hidden;
   color: var(--color-text-primary);
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -154,7 +155,7 @@
   color: var(--color-text-primary);
   font: inherit;
   font-size: 12px;
-  line-height: 1;
+  line-height: 1.28;
   padding: 0 7px;
   text-align: left;
 }
@@ -169,6 +170,7 @@
 .option span {
   min-width: 0;
   overflow: hidden;
+  line-height: 1.28;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

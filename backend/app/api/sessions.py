@@ -64,6 +64,9 @@ class SessionHistoryResponse(BaseModel):
     session: dict[str, Any]
     event_total: int
     turn_indexes: list[int] = Field(default_factory=list)
+    next_cursor: str | None = None
+    prev_cursor: str | None = None
+    has_more_older: bool = False
 
 
 @router.post("", response_model=SessionResponse)
@@ -213,8 +216,10 @@ def get_session_messages(
     session_id: str,
     turn_index: int | None = None,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=100),
-    order: str = "asc",
+    page_size: int = Query(default=5, ge=1, le=100),
+    order: str = "desc",
+    cursor: str | None = None,
+    direction: str = "older",
     repositories: StorageRepositories = RepositoriesDep,
 ) -> SessionHistoryResponse:
     return _history_response(
@@ -225,6 +230,8 @@ def get_session_messages(
             page=page,
             page_size=page_size,
             order=order,
+            cursor=cursor,
+            direction=direction,
         ),
     )
 
@@ -234,8 +241,10 @@ def get_session_history(
     session_id: str,
     turn_index: int | None = None,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=100),
-    order: str = "asc",
+    page_size: int = Query(default=5, ge=1, le=100),
+    order: str = "desc",
+    cursor: str | None = None,
+    direction: str = "older",
     repositories: StorageRepositories = RepositoriesDep,
 ) -> SessionHistoryResponse:
     return _history_response(
@@ -246,6 +255,8 @@ def get_session_history(
             page=page,
             page_size=page_size,
             order=order,
+            cursor=cursor,
+            direction=direction,
         ),
     )
 

@@ -98,12 +98,14 @@ describe("RuntimeWsClient", () => {
     socket.message({ action: "session_created", data: { session_id: "ses-2" } });
     client.chat({ message: "你好" });
     client.cancel();
+    client.requestStatus();
     client.ping();
 
     expect(socket.sent.map((item) => JSON.parse(item))).toEqual([
       { action: "create_session", data: { title: "新会话" } },
       { action: "chat", data: { message: "你好", session_id: "ses-2" } },
       { action: "cancel", data: { session_id: "ses-2" } },
+      { action: "get_status", data: { session_id: "ses-2" } },
       { action: "ping", data: {} },
     ]);
   });

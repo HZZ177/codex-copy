@@ -1,9 +1,35 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import mermaid, { type ParseResult, type RenderResult } from "mermaid";
 
 import type { RuntimeBridge } from "@/runtime";
 import { FilePreview } from "@/renderer/components/workspace";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
+
+const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
+const mermaidRenderResult: RenderResult = {
+  diagramType: "flowchart-v2",
+  svg: '<svg role="img" aria-label="测试图表" width="100%" style="max-width: 320px;" viewBox="0 0 2400 1200"></svg>',
+};
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: vi.fn().mockResolvedValue({ diagramType: "flowchart-v2", config: {} }),
+    render: vi.fn().mockResolvedValue({
+      diagramType: "flowchart-v2",
+      svg: '<svg role="img" aria-label="测试图表" width="100%" style="max-width: 320px;" viewBox="0 0 2400 1200"></svg>',
+    }),
+  },
+}));
+
+let restoreElementMetrics: (() => void) | null = null;
+
+afterEach(() => {
+  restoreElementMetrics?.();
+  restoreElementMetrics = null;
+});
 
 describe("FilePreview", () => {
   beforeEach(() => {
@@ -12,6 +38,8 @@ describe("FilePreview", () => {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
     });
+    vi.mocked(mermaid.parse).mockResolvedValue(mermaidParseResult);
+    vi.mocked(mermaid.render).mockResolvedValue(mermaidRenderResult);
   });
 
   it("reads text file content through workspace runtime", async () => {
@@ -28,6 +56,63 @@ describe("FilePreview", () => {
     expect(await screen.findByLabelText("预览内容")).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Hello" })).not.toBeNull();
     expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
+  });
+
+  it("renders code files with CodeMirror source viewer and line numbers", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "src/App.tsx",
+        content: "const value = 1;\nexport default value;\n",
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "src/App.tsx" }} sessionId="ses-1" runtime={runtime} />);
+
+    const sourceViewer = await screen.findByTestId("file-source-viewer");
+    expect(sourceViewer.getAttribute("data-renderer")).toBe("codemirror");
+    await waitFor(() => {
+      expect(sourceViewer.textContent).toContain("const");
+      expect(sourceViewer.textContent).toContain("1");
+      expect(sourceViewer.textContent).toContain("2");
+    });
+  });
+
+  it("renders enlarged centered fold controls in CodeMirror source viewer", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "src/App.tsx",
+        content: "function run() {\n  const value = 1;\n  return value;\n}\n",
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "src/App.tsx" }} sessionId="ses-1" runtime={runtime} />);
+
+    const sourceViewer = await screen.findByTestId("file-source-viewer");
+    await waitFor(() => {
+      const foldButton = sourceViewer.querySelector(".cm-fileFoldMarker[data-open='true']");
+      expect(foldButton).not.toBeNull();
+      expect(foldButton?.getAttribute("title")).toBe("折叠代码块");
+    });
+  });
+
+  it("uses the low-cost plain source renderer for very large files", async () => {
+    const content = Array.from({ length: 2101 }, (_, index) => `line ${index + 1}`).join("\n");
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "logs/huge.log",
+        content,
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "logs/huge.log" }} sessionId="ses-1" runtime={runtime} />);
+
+    const sourceViewer = await screen.findByTestId("file-source-viewer");
+    expect(sourceViewer.getAttribute("data-renderer")).toBe("plain");
+    expect(sourceViewer.textContent).toContain("2101");
+    expect(sourceViewer.textContent).toContain("line 2101");
   });
 
   it("switches markdown preview back to source", async () => {
@@ -59,12 +144,12 @@ describe("FilePreview", () => {
     render(<FilePreview request={{ type: "file", path: "guide.md" }} sessionId="ses-1" runtime={runtime} />);
 
     expect(await screen.findByRole("heading", { name: "Guide" })).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "打开分屏预览" }));
+    fireEvent.click(screen.getByRole("button", { name: "分屏" }));
 
     expect(screen.getByTestId("preview-split-pane")).not.toBeNull();
     expect(screen.getByLabelText("源码内容").textContent).toContain("# Guide");
     expect(screen.getByLabelText("渲染预览").textContent).toContain("正文");
-    expect(screen.getByRole("button", { name: "关闭分屏预览" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "分屏" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("renders html files in a sandboxed preview frame", async () => {
@@ -83,6 +168,28 @@ describe("FilePreview", () => {
     expect(frame.getAttribute("srcdoc")).toContain("页面预览");
   });
 
+  it("renders direct html content into the sandboxed frame without an empty first document", () => {
+    const html = "<style>h1 { color: rgb(220, 38, 38); }</style><main><h1>面板样式</h1></main>";
+
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "HTML 预览",
+          content: html,
+          contentType: "html",
+        }}
+      />,
+    );
+
+    const frame = screen.getByTitle("HTML 文件预览") as HTMLIFrameElement;
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("<style>h1 { color: rgb(220, 38, 38); }</style>");
+    expect(frame.getAttribute("srcdoc")).toContain("面板样式");
+    expect(frame.getAttribute("srcdoc")).not.toContain("文件为空");
+  });
+
   it("shows html source and sandboxed preview in split mode", async () => {
     const runtime = fakeRuntime({
       readFile: vi.fn().mockResolvedValue({
@@ -95,7 +202,7 @@ describe("FilePreview", () => {
     render(<FilePreview request={{ type: "file", path: "index.html" }} sessionId="ses-1" runtime={runtime} />);
 
     expect(await screen.findByTitle("HTML 文件预览")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "打开分屏预览" }));
+    fireEvent.click(screen.getByRole("button", { name: "分屏" }));
 
     const frame = screen.getByTitle("HTML 文件预览") as HTMLIFrameElement;
     expect(screen.getByLabelText("源码内容").textContent).toContain("<main>");
@@ -131,7 +238,266 @@ describe("FilePreview", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "片段标题" })).not.toBeNull();
-    expect(screen.getByText(/Markdown 预览/)).not.toBeNull();
+    expect(screen.getByTitle("消息内容")).not.toBeNull();
+    expect(screen.queryByText(/Markdown 预览/)).toBeNull();
+  });
+
+  it("renders long breadcrumb paths as separate visible segments", () => {
+    render(
+      <FilePreview
+        breadcrumbRootLabel="D:/repo/keydex"
+        request={{
+          type: "content",
+          title: "长路径源码",
+          content: "export const value = 1;",
+          contentType: "code",
+          sourcePath:
+            "backend/services/really-long-directory-name-that-can-ellipsis/tests/test_entrypoints_with_long_name.ts",
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByTitle(
+        "keydex / backend / services / really-long-directory-name-that-can-ellipsis / tests / test_entrypoints_with_long_name.ts",
+      ),
+    ).not.toBeNull();
+    expect(screen.getByText("keydex")).not.toBeNull();
+    expect(screen.getByText("backend")).not.toBeNull();
+    expect(screen.getByText("services")).not.toBeNull();
+    expect(screen.getByText("really-long-directory-name-that-can-ellipsis")).not.toBeNull();
+    expect(screen.getByText("tests")).not.toBeNull();
+    expect(screen.getByText("test_entrypoints_with_long_name.ts")).not.toBeNull();
+  });
+
+  it("renders json content as a formatted source viewer", async () => {
+    const json = '{"users":[{"name":"Ada","role":"admin"}],"enabled":true}';
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{ type: "content", title: "JSON 预览", content: json, contentType: "json" }}
+      />,
+    );
+
+    expect(screen.getByTitle("消息内容")).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "JSON 预览" })).toBeNull();
+    expect(screen.queryByText("JSON 查看")).toBeNull();
+    expect(screen.queryByTestId("json-tree-viewer")).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "查找 JSON" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
+
+    const sourceViewer = screen.getByTestId("file-source-viewer");
+    expect(sourceViewer.getAttribute("data-renderer")).toBe("codemirror");
+    expect(sourceViewer.textContent).toContain("users");
+    expect(sourceViewer.textContent).toContain("Ada");
+    expect(sourceViewer.textContent).toContain("enabled");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制预览内容" }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(json);
+    });
+  });
+
+  it("renders mermaid content as native panel chrome", async () => {
+    mockElementMetrics({ clientWidth: 1200, clientHeight: 600 });
+
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Mermaid 图表预览",
+          content: "graph TD\nA[开始] --> B[结束]",
+          contentType: "mermaid",
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("正在渲染 Mermaid...")).toBeNull();
+    expect(screen.getByTitle("消息内容")).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Mermaid 图表预览" })).toBeNull();
+    expect(screen.queryByText(/Mermaid 预览/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "分屏" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "全屏显示 Mermaid" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /在预览面板打开/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭右侧栏" })).toBeNull();
+
+    const pane = await screen.findByTestId("preview-mermaid-pane");
+    await waitFor(() => {
+      expect(pane.innerHTML).toContain("测试图表");
+    });
+    const chart = screen.getByLabelText("Mermaid 图表") as HTMLDivElement;
+    const svg = chart.querySelector("svg");
+    expect(svg?.getAttribute("width")).toBe("2400");
+    expect(svg?.getAttribute("height")).toBe("1200");
+    expect(svg?.getAttribute("style")).toBeNull();
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+    });
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("1128px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("564px");
+    expect(vi.mocked(mermaid.initialize)).toHaveBeenCalledWith(expect.objectContaining({
+      flowchart: {
+        useMaxWidth: false,
+      },
+    }));
+    const controls = screen.getByLabelText("Mermaid 视图控制");
+    const [zoomOutButton, zoomInButton, resetButton] = within(controls).getAllByRole("button");
+    expect(controls).not.toBeNull();
+    expect(within(controls).getByText("47%")).not.toBeNull();
+
+    fireEvent.click(zoomInButton);
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.57");
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("1368px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("684px");
+    expect(within(controls).getByText("57%")).not.toBeNull();
+
+    fireEvent.click(zoomOutButton);
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+    expect(within(controls).getByText("47%")).not.toBeNull();
+
+    fireEvent.click(resetButton);
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+    expect(within(controls).getByText("47%")).not.toBeNull();
+
+    for (let index = 0; index < 80; index += 1) {
+      fireEvent.click(zoomInButton);
+    }
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("3");
+    expect(within(controls).getByText("300%")).not.toBeNull();
+
+    for (let index = 0; index < 80; index += 1) {
+      fireEvent.click(zoomOutButton);
+    }
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.05");
+    expect(within(controls).getByText("5%")).not.toBeNull();
+  });
+
+  it("fits mermaid previews after the side panel reports its real size", async () => {
+    const metrics = { clientWidth: 0, clientHeight: 0 };
+    mockElementMetrics(metrics);
+
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Mermaid 图表预览",
+          content: "graph TD\nA[开始] --> B[结束]",
+          contentType: "mermaid",
+        }}
+      />,
+    );
+
+    const pane = await screen.findByTestId("preview-mermaid-pane");
+    await waitFor(() => {
+      expect(pane.innerHTML).toContain("测试图表");
+    });
+    const chart = screen.getByLabelText("Mermaid 图表") as HTMLDivElement;
+    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("1");
+
+    metrics.clientWidth = 1200;
+    metrics.clientHeight = 600;
+
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+    });
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("1128px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("564px");
+    expect(within(screen.getByLabelText("Mermaid 视图控制")).getByText("47%")).not.toBeNull();
+  });
+
+  it("keeps mermaid auto-fit when complex svg content is not valid XML", async () => {
+    mockElementMetrics({ clientWidth: 1200, clientHeight: 600 });
+    vi.mocked(mermaid.render).mockResolvedValueOnce({
+      diagramType: "flowchart-v2",
+      svg: '<svg role="img" aria-label="复杂图表" width="100%" style="max-width: 2400px;" viewBox="0 0 2400 1200"><text>&notAnXmlEntity;</text></svg>',
+    });
+
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Mermaid 图表预览",
+          content: "graph TD\nA[开始] --> B[结束]",
+          contentType: "mermaid",
+        }}
+      />,
+    );
+
+    const pane = await screen.findByTestId("preview-mermaid-pane");
+    await waitFor(() => {
+      expect(pane.innerHTML).toContain("复杂图表");
+    });
+    const chart = screen.getByLabelText("Mermaid 图表") as HTMLDivElement;
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+    });
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("1128px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("564px");
+    expect(within(screen.getByLabelText("Mermaid 视图控制")).getByText("47%")).not.toBeNull();
+  });
+
+  it("supports wheel zoom and drag panning for mermaid panel previews", async () => {
+    const addEventListener = vi.spyOn(HTMLDivElement.prototype, "addEventListener");
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Mermaid 图表预览",
+          content: "graph TD\nA[开始] --> B[结束]",
+          contentType: "mermaid",
+        }}
+      />,
+    );
+
+    const chart = (await screen.findByLabelText("Mermaid 图表")) as HTMLDivElement;
+    await waitFor(() => {
+      expect(addEventListener).toHaveBeenCalledWith("wheel", expect.any(Function), { passive: false });
+    });
+
+    fireEvent.wheel(chart, { clientX: 120, clientY: 140, deltaY: -120 });
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("1.1");
+    });
+    expect(within(screen.getByLabelText("Mermaid 视图控制")).getByText("110%")).not.toBeNull();
+
+    chart.scrollLeft = 40;
+    chart.scrollTop = 50;
+    fireEvent(chart, pointerEvent("pointerdown", { button: 0, clientX: 120, clientY: 140, pointerId: 7 }));
+    fireEvent(chart, pointerEvent("pointermove", { clientX: 90, clientY: 100, pointerId: 7 }));
+
+    expect(chart.scrollLeft).toBe(70);
+    expect(chart.scrollTop).toBe(90);
+    expect(chart.dataset.dragging).toBe("true");
+
+    fireEvent(chart, pointerEvent("pointerup", { pointerId: 7 }));
+    expect(chart.dataset.dragging).toBeUndefined();
+
+    addEventListener.mockRestore();
+  });
+
+  it("renders markdown code fences in panel chrome without message code-block controls", async () => {
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Markdown 片段",
+          content: "```ts\nconsole.log('panel')\n```",
+          contentType: "markdown",
+        }}
+      />,
+    );
+
+    expect(screen.getByTitle("消息内容")).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Markdown 片段" })).toBeNull();
+    expect(await screen.findByText("console.log('panel')")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "复制预览内容" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "复制代码" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /在预览面板打开/ })).toBeNull();
   });
 
   it("quotes selected preview text through the floating selection toolbar", async () => {
@@ -226,6 +592,31 @@ describe("FilePreview", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Markdown 片段" })).not.toBeNull();
   });
 
+  it("keeps preview requests scoped to the active host session", () => {
+    render(
+      <PreviewProvider>
+        <PreviewScopeHarness />
+      </PreviewProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开当前会话预览" }));
+    expect(screen.getByTestId("preview-request").textContent).toBe("ses-a:ses-a 预览");
+    expect(screen.getByTestId("preview-entry-count").textContent).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "切到 ses-b" }));
+
+    expect(screen.getByTestId("preview-request").textContent).toBe("empty");
+    expect(screen.getByTestId("preview-entry-count").textContent).toBe("0");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开当前会话预览" }));
+    expect(screen.getByTestId("preview-request").textContent).toBe("ses-b:ses-b 预览");
+
+    fireEvent.click(screen.getByRole("button", { name: "切到 ses-a" }));
+
+    expect(screen.getByTestId("preview-request").textContent).toBe("ses-a:ses-a 预览");
+    expect(screen.getByTestId("preview-entry-count").textContent).toBe("1");
+  });
+
   it("shows backend errors for oversized or binary files", async () => {
     const runtime = fakeRuntime({
       readFile: vi.fn().mockRejectedValue(new Error("文件过大，暂不预览")),
@@ -247,7 +638,8 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(screen.getByText(/Diff 预览/)).not.toBeNull();
+    expect(screen.getByTitle("src / main.py")).not.toBeNull();
+    expect(screen.queryByText(/Diff 预览/)).toBeNull();
     expect(screen.getByLabelText("预览内容").textContent).toContain("+print('new')");
     expect(screen.getByLabelText("Diff 渲染内容")).not.toBeNull();
     expect(runtime.workspace.readFile).not.toHaveBeenCalled();
@@ -320,6 +712,41 @@ function PreviewTabsHarness() {
   );
 }
 
+function PreviewScopeHarness() {
+  const [sessionId, setSessionId] = useState("ses-a");
+  const preview = usePreview();
+
+  useEffect(() => {
+    preview.setPreviewHostContext({ sessionId });
+    return () => preview.setPreviewHostContext(null);
+  }, [preview.setPreviewHostContext, sessionId]);
+
+  return (
+    <>
+      <button type="button" onClick={() => setSessionId((current) => (current === "ses-a" ? "ses-b" : "ses-a"))}>
+        切到 {sessionId === "ses-a" ? "ses-b" : "ses-a"}
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          preview.openPreview({
+            type: "content",
+            title: `${sessionId} 预览`,
+            content: `# ${sessionId}`,
+            contentType: "markdown",
+          })
+        }
+      >
+        打开当前会话预览
+      </button>
+      <div data-testid="preview-request">
+        {preview.request?.type === "content" ? `${sessionId}:${preview.request.title}` : "empty"}
+      </div>
+      <div data-testid="preview-entry-count">{preview.entries.length}</div>
+    </>
+  );
+}
+
 function mockSelection(container: Element, text: string) {
   const removeAllRanges = vi.fn();
   const range = {
@@ -347,4 +774,48 @@ function mockSelection(container: Element, text: string) {
     removeAllRanges,
     restore: () => spy.mockRestore(),
   };
+}
+
+function mockElementMetrics(metrics: { clientWidth: number; clientHeight: number }) {
+  restoreElementMetrics?.();
+
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => metrics.clientWidth,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => metrics.clientHeight,
+  });
+
+  restoreElementMetrics = () => {
+    if (clientWidth) {
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth);
+    } else {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+    }
+
+    if (clientHeight) {
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
+    } else {
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  };
+}
+
+function pointerEvent(
+  type: string,
+  properties: { button?: number; clientX?: number; clientY?: number; pointerId?: number },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    button: { value: properties.button ?? 0 },
+    clientX: { value: properties.clientX ?? 0 },
+    clientY: { value: properties.clientY ?? 0 },
+    pointerId: { value: properties.pointerId ?? 1 },
+  });
+  return event;
 }

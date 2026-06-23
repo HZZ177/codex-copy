@@ -1,8 +1,9 @@
-import { ChevronRight, FileText, Folder, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronRight, RefreshCw, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceScope } from "@/runtime";
 
+import { resolveMaterialFileIcon, resolveMaterialFolderIcon } from "./materialIconTheme";
 import styles from "./WorkspacePanel.module.css";
 
 export interface WorkspacePanelProps {
@@ -10,18 +11,30 @@ export interface WorkspacePanelProps {
   sessionId?: string;
   label?: string;
   runtime: RuntimeBridge;
+  chrome?: "default" | "panel";
+  selectedPath?: string | null;
   onSelectFile?: (path: string) => void;
 }
 
 type EntryMap = Record<string, WorkspaceEntry[]>;
 type ErrorMap = Record<string, string>;
+const TREE_GROUP_TRANSITION_MS = 340;
 
-export function WorkspacePanel({ workspaceId, sessionId, label, runtime, onSelectFile }: WorkspacePanelProps) {
+export function WorkspacePanel({
+  workspaceId,
+  sessionId,
+  label,
+  runtime,
+  chrome = "default",
+  selectedPath: controlledSelectedPath,
+  onSelectFile,
+}: WorkspacePanelProps) {
   const [entriesByPath, setEntriesByPath] = useState<EntryMap>({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([""]));
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
   const [errorsByPath, setErrorsByPath] = useState<ErrorMap>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [filterQuery, setFilterQuery] = useState("");
   const scope = useMemo(() => workspaceScope({ workspaceId, sessionId }), [workspaceId, sessionId]);
   const scopeLabel = label ?? workspaceId ?? sessionId ?? "未绑定工作区";
 
@@ -31,6 +44,7 @@ export function WorkspacePanel({ workspaceId, sessionId, label, runtime, onSelec
     setErrorsByPath({});
     setExpandedPaths(new Set([""]));
     setSelectedPath(null);
+    setFilterQuery("");
     setLoadingPaths(new Set([""]));
     if (!scope) {
       setErrorsByPath({ "": "工作区未绑定" });
@@ -63,9 +77,15 @@ export function WorkspacePanel({ workspaceId, sessionId, label, runtime, onSelec
   }, [runtime, scope]);
 
   const rootEntries = entriesByPath[""] ?? [];
+  const normalizedFilter = filterQuery.trim().toLowerCase();
+  const visibleRootEntries = useMemo(
+    () => filterEntries(rootEntries, entriesByPath, normalizedFilter),
+    [entriesByPath, normalizedFilter, rootEntries],
+  );
   const rootLoading = loadingPaths.has("");
   const rootError = errorsByPath[""];
-  const selectedLabel = selectedPath ?? "未选择文件";
+  const effectiveSelectedPath = controlledSelectedPath ?? selectedPath;
+  const selectedLabel = effectiveSelectedPath ?? "未选择文件";
 
   async function loadDirectory(path: string, force = false) {
     if (!force && entriesByPath[path]) {
@@ -102,42 +122,61 @@ export function WorkspacePanel({ workspaceId, sessionId, label, runtime, onSelec
   }
 
   return (
-    <section className={styles.panel} aria-label="工作区文件树">
-      <header className={styles.header}>
-        <div className={styles.rootInfo}>
-          <span>当前工作区</span>
-          <strong title={scopeLabel}>{scopeLabel}</strong>
-        </div>
-        <button disabled={rootLoading} onClick={() => void loadDirectory("", true)} type="button">
-          <RefreshCw className={rootLoading ? styles.spinning : undefined} size={14} />
-          <span>刷新</span>
-        </button>
-      </header>
+    <section className={styles.panel} data-chrome={chrome} aria-label="工作区文件树">
+      {chrome === "default" ? (
+        <header className={styles.header}>
+          <div className={styles.rootInfo}>
+            <span>当前工作区</span>
+            <strong title={scopeLabel}>{scopeLabel}</strong>
+          </div>
+          <button disabled={rootLoading} onClick={() => void loadDirectory("", true)} type="button">
+            <RefreshCw className={rootLoading ? styles.spinning : undefined} size={14} />
+            <span>刷新</span>
+          </button>
+        </header>
+      ) : null}
 
-      <div className={styles.pathBar} title={selectedLabel}>
-        {selectedLabel}
-      </div>
+      {chrome === "default" ? (
+        <div className={styles.pathBar} title={selectedLabel}>
+          {selectedLabel}
+        </div>
+      ) : null}
+
+      <label className={styles.searchBox}>
+        <Search size={16} />
+        <input
+          aria-label="筛选文件"
+          placeholder="筛选文件..."
+          type="search"
+          value={filterQuery}
+          onChange={(event) => setFilterQuery(event.target.value)}
+        />
+      </label>
 
       {rootError ? <div className={styles.error} role="alert">{rootError}</div> : null}
       {rootLoading && !rootEntries.length ? <p className={styles.muted}>正在读取工作区</p> : null}
 
       <div className={styles.tree} role="tree" aria-label="工作区目录">
-        {rootEntries.map((entry) => (
+        {visibleRootEntries.map((entry) => (
           <TreeNode
             entriesByPath={entriesByPath}
             entry={entry}
             errorsByPath={errorsByPath}
             expandedPaths={expandedPaths}
+            filterQuery={normalizedFilter}
             key={entry.path}
             loadingPaths={loadingPaths}
             onSelectFile={selectFile}
             onToggleDirectory={(path) => void toggleDirectory(path)}
-            selectedPath={selectedPath}
+            selectedPath={effectiveSelectedPath}
           />
         ))}
       </div>
 
       {!rootLoading && !rootError && !rootEntries.length ? <p className={styles.muted}>工作区为空</p> : null}
+      {!rootLoading && !rootError && rootEntries.length > 0 && !visibleRootEntries.length ? (
+        <p className={styles.muted}>没有匹配的文件</p>
+      ) : null}
     </section>
   );
 }
@@ -163,6 +202,7 @@ function TreeNode({
   entry,
   errorsByPath,
   expandedPaths,
+  filterQuery,
   loadingPaths,
   onSelectFile,
   onToggleDirectory,
@@ -173,6 +213,7 @@ function TreeNode({
   entry: WorkspaceEntry;
   errorsByPath: ErrorMap;
   expandedPaths: Set<string>;
+  filterQuery: string;
   loadingPaths: Set<string>;
   onSelectFile: (path: string) => void;
   onToggleDirectory: (path: string) => void;
@@ -180,9 +221,12 @@ function TreeNode({
   depth?: number;
 }) {
   const isDirectory = entry.type === "directory";
-  const expanded = expandedPaths.has(entry.path);
   const loading = loadingPaths.has(entry.path);
-  const children = useMemo(() => entriesByPath[entry.path] ?? [], [entriesByPath, entry.path]);
+  const children = useMemo(
+    () => filterEntries(entriesByPath[entry.path] ?? [], entriesByPath, filterQuery),
+    [entriesByPath, entry.path, filterQuery],
+  );
+  const expanded = expandedPaths.has(entry.path) || (Boolean(filterQuery) && children.length > 0);
   const error = errorsByPath[entry.path];
   const paddingLeft = 8 + depth * 14;
 
@@ -197,7 +241,7 @@ function TreeNode({
           type="button"
         >
           <ChevronRight className={styles.chevron} data-expanded={expanded ? "true" : "false"} size={14} />
-          <Folder size={14} />
+          <MaterialEntryIcon path={entry.path || entry.name} type="directory" />
           <span>{entry.name}</span>
           {loading ? <em>读取中</em> : null}
         </button>
@@ -211,20 +255,21 @@ function TreeNode({
           type="button"
         >
           <span className={styles.fileSpacer} />
-          <FileText size={14} />
+          <MaterialEntryIcon path={entry.path || entry.name} type="file" />
           <span>{entry.name}</span>
           {typeof entry.size === "number" ? <em>{formatSize(entry.size)}</em> : null}
         </button>
       )}
       {error ? <div className={styles.inlineError} role="alert">{error}</div> : null}
-      {isDirectory && expanded ? (
-        <div role="group">
+      {isDirectory ? (
+        <AnimatedTreeGroup expanded={expanded}>
           {children.map((child) => (
             <TreeNode
               entriesByPath={entriesByPath}
               entry={child}
               errorsByPath={errorsByPath}
               expandedPaths={expandedPaths}
+              filterQuery={filterQuery}
               key={child.path}
               loadingPaths={loadingPaths}
               onSelectFile={onSelectFile}
@@ -236,10 +281,101 @@ function TreeNode({
           {!loading && !error && entriesByPath[entry.path] && !children.length ? (
             <p className={styles.emptyDir} style={{ paddingLeft: paddingLeft + 28 }}>空目录</p>
           ) : null}
-        </div>
+        </AnimatedTreeGroup>
       ) : null}
     </div>
   );
+}
+
+function AnimatedTreeGroup({ children, expanded }: { children: ReactNode; expanded: boolean }) {
+  const [mounted, setMounted] = useState(expanded);
+  const [open, setOpen] = useState(expanded);
+  const closeTimerRef = useRef<number | null>(null);
+  const openFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (openFrameRef.current !== null) {
+      window.cancelAnimationFrame(openFrameRef.current);
+      openFrameRef.current = null;
+    }
+
+    if (expanded) {
+      setMounted(true);
+      openFrameRef.current = window.requestAnimationFrame(() => {
+        openFrameRef.current = null;
+        setOpen(true);
+      });
+      return;
+    }
+
+    setOpen(false);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setMounted(false);
+    }, TREE_GROUP_TRANSITION_MS);
+  }, [expanded]);
+
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+      if (openFrameRef.current !== null) {
+        window.cancelAnimationFrame(openFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  if (!mounted) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-hidden={open ? undefined : true}
+      className={styles.nodeGroup}
+      data-open={open ? "true" : "false"}
+      role="group"
+    >
+      <div className={styles.nodeGroupInner}>{children}</div>
+    </div>
+  );
+}
+
+function MaterialEntryIcon({ path, type }: { path: string; type: WorkspaceEntry["type"] }) {
+  const icon = type === "directory" ? resolveMaterialFolderIcon() : resolveMaterialFileIcon(path);
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      className={styles.materialIcon}
+      data-icon-id={icon.id}
+      draggable={false}
+      src={icon.src}
+    />
+  );
+}
+
+function filterEntries(entries: WorkspaceEntry[], entriesByPath: EntryMap, query: string): WorkspaceEntry[] {
+  if (!query) {
+    return entries;
+  }
+  return entries.filter((entry) => entryMatches(entry, entriesByPath, query));
+}
+
+function entryMatches(entry: WorkspaceEntry, entriesByPath: EntryMap, query: string): boolean {
+  if (entry.name.toLowerCase().includes(query) || entry.path.toLowerCase().includes(query)) {
+    return true;
+  }
+  if (entry.type !== "directory") {
+    return false;
+  }
+  return (entriesByPath[entry.path] ?? []).some((child) => entryMatches(child, entriesByPath, query));
 }
 
 function sortEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {

@@ -1,14 +1,21 @@
-import type { CSSProperties, PropsWithChildren } from "react";
+import { FileText, Folder, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PropsWithChildren } from "react";
 
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
+import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { FilePreview, WorkspaceFileBrowser } from "@/renderer/components/workspace";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
+import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Sider } from "./Sider";
 import { Titlebar } from "./Titlebar";
 import styles from "./Layout.module.css";
 import type { SiderEntry } from "./Sider";
+
+const FILES_PANEL_ID = "right-sidebar:files";
 
 export interface LayoutProps extends PropsWithChildren {
   title?: string;
@@ -16,6 +23,7 @@ export interface LayoutProps extends PropsWithChildren {
   conversations?: SiderEntry[];
   activePath?: string;
   contentMode?: "reading" | "full";
+  resetRightSidebarKey?: string;
   onNavigate?: (path: string) => void;
 }
 
@@ -26,25 +34,176 @@ export function Layout({
   conversations,
   activePath,
   contentMode = "reading",
+  resetRightSidebarKey,
   onNavigate,
 }: LayoutProps) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const lastPreviewOpenStampRef = useRef<string | null>(null);
+  const lastPreviewCollapseRequestRef = useRef(0);
+  const lastRightSidebarResetKeyRef = useRef<string | null>(null);
+  const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
+  const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   const { state, actions } = useLayoutState();
+  const previewContext = useOptionalPreview();
   const collapsed = state.sidebarCollapsed;
   const { sidebarMotion, toggleSidebar } = useSidebarCollapseMotion(actions.toggleSidebar);
+  const {
+    sidebarMotion: rightSidebarMotion,
+    startSidebarMotion: startRightSidebarMotion,
+  } = useSidebarCollapseMotion(actions.toggleRightSidebar);
+  const setLivePanelWidth = useCallback((property: string, width: number) => {
+    shellRef.current?.style.setProperty(property, `${width}px`);
+  }, []);
+  const activeSidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : state.sidebarWidth;
+  const getRightSidebarAvailableWidth = useCallback(() => {
+    const rectWidth = shellRef.current?.getBoundingClientRect().width ?? 0;
+    const liveShellWidth = rectWidth > 0 ? rectWidth : typeof window === "undefined" ? shellWidth : window.innerWidth;
+    return Math.max(0, Math.round(liveShellWidth - activeSidebarWidth));
+  }, [activeSidebarWidth, shellWidth]);
+  const rightSidebarAvailableWidth = Math.max(0, shellWidth - activeSidebarWidth);
+  const rightSidebarWidth = Math.round(rightSidebarAvailableWidth * state.rightSidebarRatio);
+  const previewSidebarWidth = useCallback(
+    (width: number) => setLivePanelWidth("--sidebar-width", width),
+    [setLivePanelWidth],
+  );
+  const previewRightSidebarRatio = useCallback(
+    (ratio: number) => {
+      const shell = shellRef.current;
+      if (!shell) {
+        return;
+      }
+      shell.style.setProperty("--right-sidebar-ratio", String(ratio));
+      shell.style.setProperty("--right-sidebar-width", `${Math.round(getRightSidebarAvailableWidth() * ratio)}px`);
+    },
+    [getRightSidebarAvailableWidth],
+  );
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+    const measureShellWidth = () => {
+      const rectWidth = shell.getBoundingClientRect().width;
+      const measuredWidth = rectWidth > 0 ? rectWidth : typeof window === "undefined" ? 0 : window.innerWidth;
+      setShellWidth(Math.round(measuredWidth));
+    };
+    measureShellWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measureShellWidth);
+      return () => window.removeEventListener("resize", measureShellWidth);
+    }
+    const observer = new ResizeObserver(measureShellWidth);
+    observer.observe(shell);
+    window.addEventListener("resize", measureShellWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measureShellWidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    const activeEntry = previewContext?.open ? previewContext.activeEntry : null;
+    if (!activeEntry) {
+      return;
+    }
+    const openedStamp = `${activeEntry.id}:${activeEntry.openedAt}`;
+    if (openedStamp === lastPreviewOpenStampRef.current) {
+      return;
+    }
+    lastPreviewOpenStampRef.current = openedStamp;
+    if (!state.rightSidebarOpen) {
+      setRightSidebarMode("split");
+      startRightSidebarMotion();
+    }
+    actions.setRightSidebarOpen(true);
+  }, [
+    actions,
+    previewContext?.activeEntry,
+    previewContext?.open,
+    startRightSidebarMotion,
+    state.rightSidebarOpen,
+  ]);
+
+  useEffect(() => {
+    const collapseRequestId = previewContext?.collapseRequestId ?? 0;
+    if (collapseRequestId === 0 || collapseRequestId === lastPreviewCollapseRequestRef.current) {
+      return;
+    }
+    lastPreviewCollapseRequestRef.current = collapseRequestId;
+    setRightSidebarMode("split");
+    if (state.rightSidebarOpen) {
+      startRightSidebarMotion();
+    }
+    actions.setRightSidebarOpen(false);
+  }, [actions, previewContext?.collapseRequestId, startRightSidebarMotion, state.rightSidebarOpen]);
+
+  const closeRightSidebar = useCallback(() => {
+    setRightSidebarMode("split");
+    if (state.rightSidebarOpen) {
+      startRightSidebarMotion();
+    }
+    actions.setRightSidebarOpen(false);
+  }, [actions, startRightSidebarMotion, state.rightSidebarOpen]);
+
+  const openRightSidebar = useCallback(() => {
+    setRightSidebarMode("split");
+    if (!state.rightSidebarOpen) {
+      startRightSidebarMotion();
+    }
+    actions.setRightSidebarOpen(true);
+  }, [actions, startRightSidebarMotion, state.rightSidebarOpen]);
+
+  const maximizeRightSidebar = useCallback(() => {
+    if (!state.rightSidebarOpen) {
+      actions.setRightSidebarOpen(true);
+    }
+    startRightSidebarMotion();
+    setRightSidebarMode("maximized");
+  }, [actions, startRightSidebarMotion, state.rightSidebarOpen]);
+
+  const restoreRightSidebar = useCallback(() => {
+    startRightSidebarMotion();
+    setRightSidebarMode("split");
+  }, [startRightSidebarMotion]);
+
+  const navigateFromShell = useCallback(
+    (path: string) => {
+      if (path === "/guid") {
+        closeRightSidebar();
+      }
+      onNavigate?.(path);
+    },
+    [closeRightSidebar, onNavigate],
+  );
+
+  useEffect(() => {
+    if (!resetRightSidebarKey || lastRightSidebarResetKeyRef.current === resetRightSidebarKey) {
+      return;
+    }
+    lastRightSidebarResetKeyRef.current = resetRightSidebarKey;
+    closeRightSidebar();
+  }, [closeRightSidebar, resetRightSidebarKey]);
+
+  const rightSidebarMaximized = state.rightSidebarOpen && rightSidebarMode === "maximized";
 
   return (
     <div
+      ref={shellRef}
       className={styles.shell}
       data-testid="app-shell"
       data-sidebar={collapsed ? "collapsed" : "expanded"}
       data-sidebar-motion={sidebarMotion ? "true" : "false"}
       data-right-sidebar={state.rightSidebarOpen ? "open" : "closed"}
+      data-right-sidebar-mode={rightSidebarMaximized ? "maximized" : "split"}
+      data-right-sidebar-motion={rightSidebarMotion ? "true" : "false"}
       data-workspace={state.workspaceOpen ? "open" : "closed"}
       data-preview={state.previewOpen ? "open" : "closed"}
       style={
         {
           "--sidebar-width": `${state.sidebarWidth}px`,
-          "--right-sidebar-width": `${state.rightSidebarWidth}px`,
+          "--right-sidebar-ratio": String(state.rightSidebarRatio),
+          "--right-sidebar-width": `${rightSidebarWidth}px`,
           "--workspace-panel-width": `${state.workspaceWidth}px`,
           "--preview-panel-width": `${state.previewWidth}px`,
         } as CSSProperties
@@ -53,9 +212,7 @@ export function Layout({
       <Titlebar
         title={title}
         sidebarCollapsed={collapsed}
-        rightSidebarOpen={state.rightSidebarOpen}
         onToggleSidebar={toggleSidebar}
-        onToggleRightSidebar={actions.toggleRightSidebar}
       />
 
       <div className={styles.body}>
@@ -64,43 +221,296 @@ export function Layout({
           collapsed={collapsed}
           projects={projects}
           conversations={conversations}
-          onNavigate={onNavigate}
+          onNavigate={navigateFromShell}
         />
         <SidebarResizeHandle
           disabled={collapsed}
           width={state.sidebarWidth}
+          onResizePreview={previewSidebarWidth}
           onResize={actions.setSidebarWidth}
         />
 
-        <section className={styles.content} aria-label="主内容区">
+        <section className={styles.content} data-content={contentMode} aria-label="主内容区">
           <div className={styles.readingColumn} data-content={contentMode}>
             {children}
           </div>
         </section>
+        {!state.rightSidebarOpen ? (
+          <button
+            className={styles.contentRightSidebarToggle}
+            data-icon="panel-right-open"
+            type="button"
+            aria-label="展开右侧栏"
+            title="展开右侧栏"
+            onClick={openRightSidebar}
+          >
+            <PanelRightOpen size={17} strokeWidth={2.1} />
+          </button>
+        ) : null}
 
         <RightSidebarResizeHandle
-          disabled={!state.rightSidebarOpen}
-          width={state.rightSidebarWidth}
-          onResize={actions.setRightSidebarWidth}
+          disabled={!state.rightSidebarOpen || rightSidebarMaximized}
+          ratio={state.rightSidebarRatio}
+          getAvailableWidth={getRightSidebarAvailableWidth}
+          onResizePreview={previewRightSidebarRatio}
+          onResize={actions.setRightSidebarRatio}
         />
-        {state.rightSidebarOpen ? <RightSidebarPanel /> : null}
+        <RightSidebarPanel
+          open={state.rightSidebarOpen}
+          maximized={rightSidebarMaximized}
+          onClose={closeRightSidebar}
+          onMaximize={maximizeRightSidebar}
+          onRestore={restoreRightSidebar}
+        />
       </div>
     </div>
   );
 }
 
-function RightSidebarPanel() {
+function RightSidebarPanel({
+  open,
+  maximized,
+  onClose,
+  onMaximize,
+  onRestore,
+}: {
+  open: boolean;
+  maximized: boolean;
+  onClose: () => void;
+  onMaximize: () => void;
+  onRestore: () => void;
+}) {
+  const previewContext = useOptionalPreview();
+  const request = previewContext?.open ? previewContext.request : null;
+  const renderContext = previewContext?.activeRenderContext;
+  const entries = previewContext?.entries ?? [];
+  const activeEntryId = previewContext?.activeEntryId ?? null;
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [activePanelId, setActivePanelId] = useState<string | null>(null);
+  const canOpenFiles = Boolean(renderContext?.workspaceAvailable && renderContext?.runtime && renderContext?.sessionId);
+  const resolvedActivePanelId = activePanelId ?? activeEntryId ?? (filesOpen ? FILES_PANEL_ID : null);
+  const activePreviewEntry =
+    resolvedActivePanelId && resolvedActivePanelId !== FILES_PANEL_ID
+      ? entries.find((entry) => entry.id === resolvedActivePanelId) ?? null
+      : null;
+  const activeRequest = activePreviewEntry?.request ?? (resolvedActivePanelId === activeEntryId ? request : null);
+  const activeRenderContext = activePreviewEntry?.renderContext ?? renderContext;
+  const showFilesPanel = filesOpen && resolvedActivePanelId === FILES_PANEL_ID;
+  const panelActivePreviewEntryId =
+    open && resolvedActivePanelId && resolvedActivePanelId !== FILES_PANEL_ID
+      ? activePreviewEntry?.id ?? (resolvedActivePanelId === activeEntryId ? activeEntryId : null)
+      : null;
+
+  useEffect(() => {
+    previewContext?.setPreviewPanelOpen(open, panelActivePreviewEntryId);
+  }, [open, panelActivePreviewEntryId, previewContext]);
+
+  useEffect(() => {
+    setFilesOpen(false);
+    setActivePanelId(activeEntryId ?? null);
+  }, [previewContext?.activeScopeKey]);
+
+  useEffect(() => {
+    if (activeEntryId) {
+      setActivePanelId(activeEntryId);
+    }
+  }, [activeEntryId, previewContext?.activeEntry?.openedAt]);
+
+  useEffect(() => {
+    if (canOpenFiles || !filesOpen) {
+      return;
+    }
+    setFilesOpen(false);
+    setActivePanelId(activeEntryId ?? null);
+  }, [activeEntryId, canOpenFiles, filesOpen]);
+
+  const openFilesPanel = useCallback(() => {
+    if (!canOpenFiles) {
+      return;
+    }
+    setFilesOpen(true);
+    setActivePanelId(FILES_PANEL_ID);
+  }, [canOpenFiles]);
+
+  const closeFilesPanel = useCallback(() => {
+    const shouldCloseSidebar = entries.length === 0;
+    setFilesOpen(false);
+    setActivePanelId((current) => (current === FILES_PANEL_ID ? activeEntryId ?? entries[0]?.id ?? null : current));
+    if (shouldCloseSidebar) {
+      onClose();
+    }
+  }, [activeEntryId, entries, onClose]);
+
+  const closePreviewEntry = useCallback(
+    (entryId: string) => {
+      const closedIndex = entries.findIndex((entry) => entry.id === entryId);
+      const remainingEntries = entries.filter((entry) => entry.id !== entryId);
+      const shouldCloseSidebar = remainingEntries.length === 0 && !filesOpen;
+      previewContext?.closePreviewEntry(entryId);
+      setActivePanelId((current) => {
+        if (current !== entryId) {
+          return current;
+        }
+        const nextEntry =
+          remainingEntries[Math.max(0, Math.min(closedIndex - 1, remainingEntries.length - 1))] ?? null;
+        return nextEntry?.id ?? (filesOpen ? FILES_PANEL_ID : null);
+      });
+      if (shouldCloseSidebar) {
+        onClose();
+      }
+    },
+    [entries, filesOpen, onClose, previewContext],
+  );
+
+  const controls = (
+    <RightSidebarControls
+      maximized={maximized}
+      onClose={onClose}
+      onMaximize={onMaximize}
+      onRestore={onRestore}
+    />
+  );
+
   return (
-    <aside className={styles.rightSidebar} aria-label="右侧栏">
-      <div className={styles.rightSidebarHeader}>
-        <h2>右侧栏</h2>
-      </div>
-      <div className={styles.rightSidebarBody}>
-        <div className={styles.rightSidebarTodo}>
-          <span>TODO</span>
-          <p>这里将承载上下文、预览、工具和会话辅助信息。</p>
-        </div>
-      </div>
+    <aside className={styles.rightSidebar} aria-label="右侧栏" aria-hidden={!open}>
+      {open ? (
+        <>
+          <div className={styles.rightSidebarTopbar}>
+            <div className={styles.rightSidebarTabs} role="tablist" aria-label="侧边栏窗口">
+              {filesOpen ? (
+                <div className={styles.rightSidebarTab} data-active={showFilesPanel ? "true" : "false"}>
+                  <button
+                    className={styles.rightSidebarTabMain}
+                    type="button"
+                    role="tab"
+                    aria-selected={showFilesPanel}
+                    title="文件"
+                    onClick={() => setActivePanelId(FILES_PANEL_ID)}
+                  >
+                    <Folder size={12} />
+                    <span>文件</span>
+                  </button>
+                  <button
+                    className={styles.rightSidebarTabClose}
+                    type="button"
+                    aria-label="关闭侧边栏窗口 文件"
+                    title="关闭侧边栏窗口 文件"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeFilesPanel();
+                    }}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ) : null}
+              {entries.map((entry) => {
+                const active = resolvedActivePanelId === entry.id;
+                return (
+                  <div className={styles.rightSidebarTab} data-active={active ? "true" : "false"} key={entry.id}>
+                    <button
+                      className={styles.rightSidebarTabMain}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      title={entry.sourceLabel}
+                      onClick={() => {
+                        setActivePanelId(entry.id);
+                        previewContext?.switchPreview(entry.id);
+                      }}
+                    >
+                      <FileText size={12} />
+                      <span>{entry.title}</span>
+                    </button>
+                    <button
+                      className={styles.rightSidebarTabClose}
+                      type="button"
+                      aria-label={`关闭侧边栏窗口 ${entry.title}`}
+                      title={`关闭侧边栏窗口 ${entry.title}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closePreviewEntry(entry.id);
+                      }}
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className={styles.rightSidebarPanelControls}>
+              {controls}
+            </div>
+          </div>
+          {showFilesPanel && activeRenderContext?.runtime && activeRenderContext.sessionId ? (
+            <div className={styles.rightSidebarBody} data-content="files">
+              <WorkspaceFileBrowser
+                label={activeRenderContext.workspaceLabel}
+                runtime={activeRenderContext.runtime}
+                workspaceId={activeRenderContext.workspaceId}
+                sessionId={activeRenderContext.sessionId}
+              />
+            </div>
+          ) : activeRequest ? (
+            <div className={styles.rightSidebarBody} data-content="preview">
+              <FilePreview
+                breadcrumbRootLabel={
+                  activeRequest.type === "content" && !activeRequest.sourcePath
+                    ? undefined
+                    : activeRenderContext?.workspaceLabel
+                }
+                workspaceId={activeRenderContext?.workspaceId}
+                sessionId={activeRenderContext?.sessionId}
+                request={activeRequest}
+                runtime={activeRenderContext?.runtime}
+                onQuoteSelection={activeRenderContext?.onQuoteSelection}
+                chrome="panel"
+              />
+            </div>
+          ) : (
+            <div className={styles.rightSidebarBody} data-content="empty">
+              <RightSidebarInitialPage canOpenFiles={canOpenFiles} onOpenFiles={openFilesPanel} />
+            </div>
+          )}
+        </>
+      ) : null}
     </aside>
+  );
+}
+
+function RightSidebarControls({
+  maximized,
+  onClose,
+  onMaximize,
+  onRestore,
+}: {
+  maximized: boolean;
+  onClose: () => void;
+  onMaximize: () => void;
+  onRestore: () => void;
+}) {
+  return (
+    <>
+      <button
+        className={styles.rightSidebarIconButton}
+        data-icon={maximized ? "minimize-2" : "maximize-2"}
+        type="button"
+        aria-label={maximized ? "缩小右侧栏" : "展开右侧栏到对话区域"}
+        title={maximized ? "缩小右侧栏" : "展开右侧栏到对话区域"}
+        onClick={maximized ? onRestore : onMaximize}
+      >
+        {maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+      </button>
+      <button
+        className={styles.rightSidebarIconButton}
+        data-icon="panel-right-close"
+        type="button"
+        aria-label="折叠右侧栏"
+        title="折叠右侧栏"
+        onClick={onClose}
+      >
+        <PanelRightClose size={17} strokeWidth={2.1} />
+      </button>
+    </>
   );
 }

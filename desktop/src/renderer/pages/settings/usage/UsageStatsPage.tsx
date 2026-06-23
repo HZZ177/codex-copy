@@ -61,7 +61,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
   const [customStart, setCustomStart] = useState(toDateTimeLocal(initialCustomRange.startTime));
   const [customEnd, setCustomEnd] = useState(toDateTimeLocal(initialCustomRange.endTime));
   const [selectedModel, setSelectedModel] = useState("");
-  const [trendBucket, setTrendBucket] = useState<UsageBucket>("day");
+  const [trendBucket, setTrendBucket] = useState<UsageBucket>("hour");
   const [page, setPage] = useState(1);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [summary, setSummary] = useState<UsageSummary>(EMPTY_SUMMARY);
@@ -107,7 +107,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
           return;
         }
         setSummary(nextSummary);
-        setTrend(nextTrend.points);
+        setTrend(completeUsageTrendPoints(nextTrend.points, trendBucket, range, timezoneOffsetMinutes));
         setRequests(nextRequests);
         setModelOptions(collectModelOptions(providers, nextRequests.list, selectedModel));
       })
@@ -134,7 +134,6 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
 
   function changeRange(next: RangePreset) {
     setRangePreset(next);
-    setTrendBucket(next === "today" ? "hour" : "day");
     setPage(1);
   }
 
@@ -468,18 +467,71 @@ export function buildUsageTrendOption(points: UsageTrendPoint[]): EChartsOption 
       splitLine: { lineStyle: { color: "#eeeeee", type: "dashed" } },
     },
     series: [
-      {
+      buildUsageLineSeries({
         name: "非缓存输入",
-        type: "line",
-        smooth: true,
-        areaStyle: { opacity: 0.08 },
         data: points.map((item) => nonCacheInputTokens(item)),
-      },
-      { name: "命中缓存", type: "line", smooth: true, data: points.map((item) => item.cache_read_tokens) },
-      { name: "输出", type: "line", smooth: true, data: points.map((item) => item.output_tokens) },
-      { name: "请求数", type: "line", smooth: true, yAxisIndex: 0, data: points.map((item) => item.request_count) },
+        areaStyle: { opacity: 0.08 },
+      }),
+      buildUsageLineSeries({ name: "命中缓存", data: points.map((item) => item.cache_read_tokens) }),
+      buildUsageLineSeries({ name: "输出", data: points.map((item) => item.output_tokens) }),
+      buildUsageLineSeries({ name: "请求数", data: points.map((item) => item.request_count), yAxisIndex: 0 }),
     ],
   };
+}
+
+function buildUsageLineSeries({
+  name,
+  data,
+  areaStyle,
+  yAxisIndex,
+}: {
+  name: string;
+  data: number[];
+  areaStyle?: { opacity: number };
+  yAxisIndex?: number;
+}) {
+  return {
+    name,
+    type: "line" as const,
+    smooth: true,
+    showSymbol: false,
+    symbol: "circle",
+    symbolSize: 7,
+    emphasis: {
+      focus: "series" as const,
+      scale: false,
+    },
+    areaStyle,
+    yAxisIndex,
+    data,
+  };
+}
+
+export function completeUsageTrendPoints(
+  points: UsageTrendPoint[],
+  bucket: UsageBucket,
+  range: { startTime?: string; endTime?: string },
+  timezoneOffsetMinutes: number,
+): UsageTrendPoint[] {
+  if (!points.length || !range.startTime || !range.endTime) {
+    return points;
+  }
+
+  const start = toUsageBucketDate(range.startTime, bucket, timezoneOffsetMinutes);
+  const end = toUsageBucketDate(range.endTime, bucket, timezoneOffsetMinutes);
+  if (!start || !end || end.getTime() < start.getTime()) {
+    return points;
+  }
+
+  const pointsByTime = new Map(points.map((point) => [point.time, point]));
+  const completed: UsageTrendPoint[] = [];
+  const cursor = new Date(start);
+  while (cursor.getTime() <= end.getTime()) {
+    const time = formatUsageBucketKey(cursor, bucket);
+    completed.push(pointsByTime.get(time) ?? emptyTrendPoint(time));
+    advanceUsageBucket(cursor, bucket);
+  }
+  return completed;
 }
 
 function UsageRequestTable({
@@ -751,6 +803,54 @@ function toDateTimeLocal(value: string | undefined) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
     date.getMinutes(),
   )}`;
+}
+
+function toUsageBucketDate(value: string, bucket: UsageBucket, timezoneOffsetMinutes: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const shifted = new Date(date.getTime() + timezoneOffsetMinutes * 60_000);
+  if (bucket === "hour") {
+    shifted.setUTCMinutes(0, 0, 0);
+  } else {
+    shifted.setUTCHours(0, 0, 0, 0);
+  }
+  return shifted;
+}
+
+function advanceUsageBucket(value: Date, bucket: UsageBucket) {
+  if (bucket === "hour") {
+    value.setUTCHours(value.getUTCHours() + 1);
+  } else {
+    value.setUTCDate(value.getUTCDate() + 1);
+  }
+}
+
+function formatUsageBucketKey(value: Date, bucket: UsageBucket) {
+  const year = value.getUTCFullYear();
+  const month = padDatePart(value.getUTCMonth() + 1);
+  const day = padDatePart(value.getUTCDate());
+  if (bucket === "hour") {
+    return `${year}-${month}-${day}T${padDatePart(value.getUTCHours())}:00:00`;
+  }
+  return `${year}-${month}-${day}`;
+}
+
+function emptyTrendPoint(time: string): UsageTrendPoint {
+  return {
+    time,
+    request_count: 0,
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+    failed_count: 0,
+  };
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function formatRange(startTime?: string, endTime?: string) {

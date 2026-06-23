@@ -1,4 +1,4 @@
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 
@@ -9,18 +9,14 @@ import type { WindowControls } from "./windowControls";
 export interface TitlebarProps {
   title: string;
   sidebarCollapsed: boolean;
-  rightSidebarOpen?: boolean;
   onToggleSidebar(): void;
-  onToggleRightSidebar?: () => void;
   windowControls?: WindowControls;
 }
 
 export function Titlebar({
   title,
   sidebarCollapsed,
-  rightSidebarOpen = false,
   onToggleSidebar,
-  onToggleRightSidebar,
   windowControls,
 }: TitlebarProps) {
   const controls = useMemo(() => windowControls ?? createWindowControls(), [windowControls]);
@@ -68,23 +64,7 @@ export function Titlebar({
         <div className={styles.title}>{title}</div>
       </div>
 
-      <div className={styles.right}>
-        <button
-          className={`${styles.iconButton} ${styles.sidebarToggle}`}
-          data-state={rightSidebarOpen ? "expanded" : "collapsed"}
-          data-icon={rightSidebarOpen ? "panel-right-close" : "panel-right-open"}
-          type="button"
-          aria-label={rightSidebarOpen ? "折叠右侧栏" : "展开右侧栏"}
-          aria-pressed={rightSidebarOpen}
-          onClick={onToggleRightSidebar}
-        >
-          {rightSidebarOpen ? (
-            <PanelRightClose size={17} strokeWidth={2.1} />
-          ) : (
-            <PanelRightOpen size={17} strokeWidth={2.1} />
-          )}
-        </button>
-      </div>
+      <div className={styles.right} />
     </header>
   );
 }

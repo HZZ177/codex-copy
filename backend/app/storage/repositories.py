@@ -874,6 +874,51 @@ class MessageEventsRepository:
             rows = conn.execute(query, params).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def count_by_session(self, session_id: str, *, include_deleted: bool = False) -> int:
+        query = "select count(*) as count from message_events where session_id = ?"
+        params: list[Any] = [session_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return int(row["count"] if row else 0)
+
+    def count_turns(self, session_id: str, *, include_deleted: bool = False) -> int:
+        query = "select count(distinct turn_index) as count from message_events where session_id = ?"
+        params: list[Any] = [session_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_turn_indexes(
+        self,
+        session_id: str,
+        *,
+        cursor_turn_index: int | None = None,
+        direction: str = "older",
+        limit: int = 5,
+        offset: int = 0,
+        include_deleted: bool = False,
+    ) -> list[int]:
+        query = "select turn_index from message_events where session_id = ?"
+        params: list[Any] = [session_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        if cursor_turn_index is not None:
+            if direction == "newer":
+                query += " and turn_index > ?"
+            else:
+                query += " and turn_index < ?"
+            params.append(cursor_turn_index)
+        order = "asc" if direction == "newer" else "desc"
+        query += f" group by turn_index order by turn_index {order} limit ? offset ?"
+        params.extend([max(1, min(limit, 101)), max(0, offset)])
+        with self.db.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [int(row["turn_index"]) for row in rows]
+
     def list_by_turn(
         self,
         session_id: str,

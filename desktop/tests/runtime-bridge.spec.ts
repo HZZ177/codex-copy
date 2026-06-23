@@ -423,6 +423,7 @@ describe("RuntimeBridge", () => {
     const channel = runtime.conversation.openChatChannel(onEvent, { sessionId: "ses-1" });
     channel.chat({ message: "你好" });
     channel.cancel();
+    channel.requestStatus();
     channel.ping();
 
     expect(createdOptions[0].baseUrl).toBe("wss://agent.example");
@@ -430,6 +431,7 @@ describe("RuntimeBridge", () => {
     expect(clients[0].sent).toEqual([
       { action: "chat", data: { message: "你好" } },
       { action: "cancel", data: { session_id: "ses-1" } },
+      { action: "get_status", data: { session_id: "ses-1" } },
       { action: "ping", data: {} },
     ]);
     expect(channel.getStatus()).toBe("open");
@@ -542,6 +544,10 @@ class FakeRuntimeWsClient extends RuntimeWsClient {
 
   override cancel(sessionId = this.fakeSessionId) {
     this.sent.push({ action: "cancel", data: sessionId ? { session_id: sessionId } : {} });
+  }
+
+  override requestStatus(sessionId = this.fakeSessionId) {
+    this.sent.push({ action: "get_status", data: sessionId ? { session_id: sessionId } : {} });
   }
 
   override ping() {

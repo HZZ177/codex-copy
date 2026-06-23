@@ -48,6 +48,8 @@ export interface LoadHistoryOptions {
   page?: number;
   pageSize?: number;
   order?: "asc" | "desc";
+  cursor?: string | null;
+  direction?: "older" | "newer";
 }
 
 export interface UpdateSessionPayload {
@@ -80,6 +82,7 @@ export interface ChatChannel {
   unbindSession(sessionId?: string): void;
   chat(payload: ChatPayload): void;
   cancel(sessionId?: string): void;
+  requestStatus(sessionId?: string): void;
   ping(): void;
 }
 
@@ -165,6 +168,7 @@ export function createConversationRuntime(
         unbindSession: (sessionId) => client.unbindSession(sessionId),
         chat: (payload) => client.chat(payload),
         cancel: (sessionId) => client.cancel(sessionId),
+        requestStatus: (sessionId) => client.requestStatus(sessionId),
         ping: () => client.ping(),
       };
     },
@@ -197,6 +201,8 @@ function historyQuery(options: LoadHistoryOptions) {
   appendParam(params, "page", options.page);
   appendParam(params, "page_size", options.pageSize);
   appendParam(params, "order", options.order);
+  appendParam(params, "cursor", options.cursor);
+  appendParam(params, "direction", options.direction);
   const query = params.toString();
   return query ? `?${query}` : "";
 }

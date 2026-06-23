@@ -129,7 +129,7 @@ class MessageEventService:
                 continue
 
             if action == ReplayAction.CANCELLED.value:
-                self._append_cancelled_suffix(messages)
+                self._append_cancelled_marker(messages, data, self._event_timestamp_ms(event))
                 continue
 
             if action == ReplayAction.ERROR.value:
@@ -232,7 +232,12 @@ class MessageEventService:
         if data.get("is_subagent") and subagent_id in active_subagents:
             messages[active_subagents[subagent_id]]["content"] += content
             return
-        if messages and messages[-1].get("role") == "assistant":
+        if (
+            messages
+            and messages[-1].get("role") == "assistant"
+            and not messages[-1].get("cancelled")
+            and messages[-1].get("status") != "cancelled"
+        ):
             messages[-1]["content"] += content
             return
         messages.append({"role": "assistant", "content": content, "timestamp": timestamp})
@@ -309,11 +314,32 @@ class MessageEventService:
         return ""
 
     @staticmethod
-    def _append_cancelled_suffix(messages: list[dict[str, Any]]) -> None:
-        for message in reversed(messages):
-            if message.get("role") == "assistant":
-                message["cancelled"] = True
-                return
+    def _append_cancelled_marker(
+        messages: list[dict[str, Any]],
+        data: dict[str, Any],
+        timestamp: int,
+    ) -> None:
+        for message in messages:
+            if message.get("role") == "tool" and message.get("status") == "running":
+                message["status"] = "cancelled"
+            for tool in message.get("subagentToolCalls", []) or []:
+                if tool.get("status") == "running":
+                    tool["status"] = "cancelled"
+
+        if messages and messages[-1].get("role") == "assistant" and messages[-1].get("cancelled"):
+            return
+
+        marker: dict[str, Any] = {
+            "role": "assistant",
+            "content": "",
+            "timestamp": timestamp,
+            "status": "cancelled",
+            "cancelled": True,
+        }
+        trace_id = str(data.get("trace_id") or "").strip()
+        if trace_id:
+            marker["traceId"] = trace_id
+        messages.append(marker)
 
     @staticmethod
     def _extract_ghost_footer(data: dict[str, Any]) -> dict[str, Any]:
@@ -329,7 +355,11 @@ class MessageEventService:
         if not ghost_footer:
             return
         for message in reversed(messages):
-            if message.get("role") != "assistant":
+            if (
+                message.get("role") != "assistant"
+                or message.get("cancelled")
+                or message.get("status") == "cancelled"
+            ):
                 continue
             trace_id = str(ghost_footer.get("trace_id") or "").strip()
             latest_usage = ghost_footer.get("latest_llm_token_usage") or {}

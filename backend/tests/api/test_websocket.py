@@ -15,7 +15,7 @@ from backend.app.agent.factory import AgentFactory
 from backend.app.core.config import AppSettings
 from backend.app.main import create_app
 from backend.app.model import ModelSettings
-from backend.app.services import ChatService
+from backend.app.services import ChatService, ChatStreamManager
 from backend.app.tools import FunctionTool, ToolRegistry
 
 
@@ -67,6 +67,8 @@ def _client(
         )
         app.state.chat_service = chat_service
         app.state.runtime.chat_service = chat_service
+        app.state.chat_stream_manager = ChatStreamManager(chat_service)
+        app.state.runtime.chat_stream_manager = app.state.chat_stream_manager
     return TestClient(app)
 
 

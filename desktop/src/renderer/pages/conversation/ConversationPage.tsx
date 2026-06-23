@@ -10,18 +10,21 @@ import {
 } from "@/runtime";
 import { SendBox } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, type RuntimeModelSelection, useRuntimeModelSelection } from "@/renderer/components/model";
-import { FilePreview, type FilePreviewRequest } from "@/renderer/components/workspace";
 import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
-import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { usePreview } from "@/renderer/providers/PreviewProvider";
+import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
+import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import {
   agentConversationReducer,
   createInitialAgentConversationState,
   selectAgentMessages,
   selectAgentRuntimeState,
+  selectAgentSessionState,
   type AgentConversationAction,
   type AgentSessionRuntimeState,
 } from "@/renderer/stores/agentSessionStore";
 import type { ConversationMessage, ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
 import type { AgentActionEnvelope, AgentChatMessage } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
@@ -46,27 +49,38 @@ export function ConversationPage({
   onOpenModelSettings,
   onQuickSendConsumed,
 }: ConversationPageProps) {
-  const [state, dispatch] = useReducer(agentConversationReducer, createInitialAgentConversationState());
+  const optionalAgentRuntime = useOptionalAgentSessionRuntime();
+  const sharedRuntimeContext = optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime : null;
+  const [localState, localDispatch] = useReducer(agentConversationReducer, createInitialAgentConversationState());
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [requestState, setRequestState] = useState<AgentSessionRuntimeState | null>(null);
-  const [runtimeDetail, setRuntimeDetail] = useState<string | null>(null);
-  const [wsStatus, setWsStatus] = useState<WsConnectionStatus>("idle");
-  const [preview, setPreview] = useState<FilePreviewRequest | null>(null);
+  const [localRuntimeDetail, setLocalRuntimeDetail] = useState<string | null>(null);
+  const [localWsStatus, setLocalWsStatus] = useState<WsConnectionStatus>("idle");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const channelRef = useRef<ChatChannel | null>(null);
   const quickSendConsumedRef = useRef<string | null>(null);
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null);
-  const previewContext = useOptionalPreview();
+  const { openPreview: openPreviewRequest, setPreviewHostContext } = usePreview();
   const modelSelection = useRuntimeModelSelection(runtime, initialModel);
+  const state = sharedRuntimeContext?.state ?? localState;
+  const dispatch = sharedRuntimeContext?.dispatch ?? localDispatch;
+  const wsStatus = sharedRuntimeContext?.wsStatus ?? localWsStatus;
+  const runtimeDetail = sharedRuntimeContext?.runtimeDetail ?? localRuntimeDetail;
+  const setRuntimeDetail = sharedRuntimeContext?.setRuntimeDetail ?? setLocalRuntimeDetail;
+  const usingSharedRuntime = Boolean(sharedRuntimeContext);
+  const sharedBindSession = sharedRuntimeContext?.bindSession;
 
   const session = state.sessionsById[threadId] ?? null;
+  const sessionViewState = selectAgentSessionState(state, threadId);
   const agentMessages = selectAgentMessages(state, threadId);
   const messages = useMemo(() => agentMessages.map(agentMessageToConversationMessage), [agentMessages]);
   const runtimeState = toConversationRuntimeState(requestState ?? selectAgentRuntimeState(state, threadId));
   const title = session?.title || (threadId ? `对话 ${threadId}` : "对话");
   const messageWorkspaceScope = useMemo(() => ({ sessionId: threadId }), [threadId]);
   const workspaceUnavailable = Boolean(session && session.session_type === "workspace" && !session.workspace);
+  const workspaceAvailable = Boolean(session?.session_type === "workspace" && session.workspace && !workspaceUnavailable);
+  const workspaceLabel = session?.workspace?.root_path ?? session?.workspace?.name ?? session?.cwd ?? undefined;
   const searchWorkspace =
     session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
       ? (query: string) => runtime.workspace.search({ sessionId: threadId }, query)
@@ -74,7 +88,7 @@ export function ConversationPage({
   const connectionReady = wsStatus === "open";
   const canSend = draft.trim().length > 0 && !isBusy(runtimeState) && connectionReady;
   const canStop = runtimeState === "running" && connectionReady;
-  const activePreview = previewContext ? previewContext.request : preview;
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
 
   const updateScrollControls = useCallback((controls: MessageListScrollControls) => {
     scrollToBottomRef.current = controls.scrollToBottom;
@@ -85,26 +99,93 @@ export function ConversationPage({
     scrollToBottomRef.current?.("smooth");
   }, []);
 
-  const openPreview = (request: FilePreviewRequest) => {
-    setPreview(request);
-    previewContext?.openPreview(request);
-  };
-
-  const quoteSelection = (text: string) => {
-    const quotedText = formatQuotedSelection(text);
-    if (!quotedText) {
+  const quoteSelection = useCallback((text: string) => {
+    const marker = createQuoteMarker(text);
+    if (!marker) {
       return;
     }
-    setDraft((current) => (current.trim() ? `${current.trimEnd()}\n\n${quotedText}` : quotedText));
-  };
+    setDraft((current) => (current.trim() ? `${current.trimEnd()}${marker}` : marker));
+  }, []);
 
   useEffect(() => {
+    setPreviewHostContext({
+      sessionId: threadId,
+      workspaceAvailable,
+      workspaceLabel,
+      runtime,
+      onQuoteSelection: quoteSelection,
+    });
+    return () => {
+      setPreviewHostContext(null);
+    };
+  }, [quoteSelection, runtime, setPreviewHostContext, threadId, workspaceAvailable, workspaceLabel]);
+
+  const openPreview = useCallback(
+    (request: PreviewRequest) => {
+      openPreviewRequest(request, {
+        sessionId: threadId,
+        workspaceAvailable,
+        workspaceLabel,
+        runtime,
+        onQuoteSelection: quoteSelection,
+      });
+    },
+    [openPreviewRequest, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+  );
+
+  useEffect(() => {
+    if (!usingSharedRuntime || !sharedBindSession || !threadId) {
+      return;
+    }
+
+    let active = true;
+    setLoading(true);
+    setLoadingOlderHistory(false);
+    setRuntimeDetail(null);
+    dispatch({ type: "session/select", sessionId: threadId });
+    sharedBindSession(threadId);
+
+    const loadHistory = async () => {
+      try {
+        const history = await runtime.conversation.loadHistory(threadId, {
+          direction: "older",
+          pageSize: 5,
+        });
+        if (!active) {
+          return;
+        }
+        dispatch({ type: "history/loaded", sessionId: threadId, history });
+      } catch (reason) {
+        if (!active) {
+          return;
+        }
+        const message = errorMessage(reason);
+        setRuntimeDetail(publicRuntimeDetail(message));
+        appendLocalError(dispatch, threadId, message);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadHistory();
+    return () => {
+      active = false;
+    };
+  }, [dispatch, runtime, setRuntimeDetail, sharedBindSession, threadId, usingSharedRuntime]);
+
+  useEffect(() => {
+    if (usingSharedRuntime) {
+      return;
+    }
     if (!threadId) {
       return;
     }
 
     let active = true;
     setLoading(true);
+    setLoadingOlderHistory(false);
     setRuntimeDetail(null);
     dispatch({ type: "session/select", sessionId: threadId });
 
@@ -118,7 +199,7 @@ export function ConversationPage({
         sessionId: threadId,
         onStatus: (status) => {
           if (active) {
-            setWsStatus(status);
+            setLocalWsStatus(status);
           }
         },
         onError: (reason) => {
@@ -134,7 +215,10 @@ export function ConversationPage({
 
     const loadHistory = async () => {
       try {
-        const history = await runtime.conversation.loadHistory(threadId, { order: "asc" });
+        const history = await runtime.conversation.loadHistory(threadId, {
+          direction: "older",
+          pageSize: 5,
+        });
         if (!active) {
           return;
         }
@@ -161,7 +245,34 @@ export function ConversationPage({
         channelRef.current = null;
       }
     };
-  }, [runtime, threadId]);
+  }, [dispatch, runtime, setRuntimeDetail, threadId, usingSharedRuntime]);
+
+  const loadOlderHistory = useCallback(async () => {
+    const cursor = sessionViewState?.historyCursor;
+    if (!threadId || !cursor || !sessionViewState?.historyHasMoreOlder || loadingOlderHistory) {
+      return;
+    }
+    setLoadingOlderHistory(true);
+    try {
+      const history = await runtime.conversation.loadHistory(threadId, {
+        cursor,
+        direction: "older",
+        pageSize: 5,
+      });
+      dispatch({ type: "history/olderLoaded", sessionId: threadId, history });
+    } catch (reason) {
+      const message = errorMessage(reason);
+      setRuntimeDetail(publicRuntimeDetail(message));
+    } finally {
+      setLoadingOlderHistory(false);
+    }
+  }, [
+    loadingOlderHistory,
+    runtime,
+    sessionViewState?.historyCursor,
+    sessionViewState?.historyHasMoreOlder,
+    threadId,
+  ]);
 
   const sendText = useCallback(
     (text: string, model: string, options: { clearDraft?: boolean } = {}) => {
@@ -176,8 +287,7 @@ export function ConversationPage({
         onOpenModelSettings?.();
         return false;
       }
-      const channel = channelRef.current;
-      if (!channel || wsStatus !== "open") {
+      if (wsStatus !== "open") {
         const message = "对话连接尚未就绪";
         setRuntimeDetail(message);
         return false;
@@ -187,7 +297,15 @@ export function ConversationPage({
       try {
         dispatch({ type: "message/addUser", sessionId: threadId, content: trimmedText });
         dispatch({ type: "runtime/setState", sessionId: threadId, runtimeState: "running" });
-        channel.chat({ session_id: threadId, message: trimmedText, model: trimmedModel });
+        if (sharedRuntimeContext) {
+          sharedRuntimeContext.chat({ session_id: threadId, message: trimmedText, model: trimmedModel });
+        } else {
+          const channel = channelRef.current;
+          if (!channel) {
+            throw new Error("对话连接尚未就绪");
+          }
+          channel.chat({ session_id: threadId, message: trimmedText, model: trimmedModel });
+        }
         if (options.clearDraft) {
           setDraft("");
         }
@@ -199,7 +317,7 @@ export function ConversationPage({
         return false;
       }
     },
-    [onOpenModelSettings, runtimeState, threadId, wsStatus],
+    [dispatch, onOpenModelSettings, runtimeState, setRuntimeDetail, sharedRuntimeContext, threadId, wsStatus],
   );
 
   const send = () => {
@@ -250,8 +368,7 @@ export function ConversationPage({
     if (!threadId || !canStop) {
       return;
     }
-    const channel = channelRef.current;
-    if (!channel || wsStatus !== "open") {
+    if (wsStatus !== "open") {
       setRuntimeDetail("对话连接尚未就绪");
       return;
     }
@@ -260,7 +377,15 @@ export function ConversationPage({
     setRuntimeDetail(null);
     try {
       dispatch({ type: "runtime/setState", sessionId: threadId, runtimeState: "cancelling" });
-      channel.cancel(threadId);
+      if (sharedRuntimeContext) {
+        sharedRuntimeContext.cancel(threadId);
+      } else {
+        const channel = channelRef.current;
+        if (!channel) {
+          throw new Error("对话连接尚未就绪");
+        }
+        channel.cancel(threadId);
+      }
     } catch (reason) {
       const message = errorMessage(reason);
       setRuntimeDetail(publicRuntimeDetail(message));
@@ -295,16 +420,6 @@ export function ConversationPage({
           onStop={stop}
         />
       }
-      previewPanel={
-        activePreview ? (
-          <FilePreview
-            sessionId={threadId}
-            request={activePreview}
-            runtime={runtime}
-            onQuoteSelection={quoteSelection}
-          />
-        ) : null
-      }
     >
       <MessageList
         messages={messages}
@@ -316,6 +431,9 @@ export function ConversationPage({
         workspaceScope={messageWorkspaceScope}
         onFilePreview={(file) => openPreview({ type: "diff", path: file.path, diff: file.diff })}
         onQuoteSelection={quoteSelection}
+        hasMoreOlder={Boolean(sessionViewState?.historyHasMoreOlder)}
+        loadingOlder={loadingOlderHistory}
+        onLoadOlder={loadOlderHistory}
         scrollButtonMode="external"
         onScrollControlsChange={updateScrollControls}
         emptyText="还没有消息，输入需求开始对话。"
@@ -596,14 +714,6 @@ function connectionSubtitle(status: WsConnectionStatus): string {
     case "idle":
       return "等待连接智能体运行时";
   }
-}
-
-function formatQuotedSelection(text: string): string {
-  return text
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => `> ${line}`)
-    .join("\n");
 }
 
 function errorMessage(reason: unknown): string {

@@ -1,9 +1,6 @@
 import {
-  useEffect,
-  useRef,
-  useState,
+  useCallback,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import {
@@ -14,90 +11,34 @@ import {
 } from "@/renderer/hooks/layout/layoutStore";
 
 import styles from "./SidebarResizeHandle.module.css";
+import { useRafPanelResize } from "./useRafPanelResize";
 
 interface SidebarResizeHandleProps {
   disabled?: boolean;
   width: number;
+  onResizePreview?: (width: number) => void;
   onResize: (width: number) => void;
 }
 
 const KEYBOARD_STEP = 12;
 
-export function SidebarResizeHandle({ disabled = false, width, onResize }: SidebarResizeHandleProps) {
-  const dragRef = useRef<{ pointerId: number; startWidth: number; startX: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging) {
-      return;
-    }
-    const handlePointerMove = (event: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) {
-        return;
-      }
-      onResize(clampSidebarWidth(drag.startWidth + event.clientX - drag.startX));
-    };
-    const handlePointerEnd = () => {
-      dragRef.current = null;
-      setDragging(false);
-    };
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerEnd);
-    window.addEventListener("pointercancel", handlePointerEnd);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerEnd);
-      window.removeEventListener("pointercancel", handlePointerEnd);
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-    };
-  }, [dragging, onResize]);
-
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (disabled) {
-      return;
-    }
-    event.preventDefault();
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Window-level pointer listeners below keep resizing available without capture.
-    }
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startWidth: width,
-      startX: event.clientX,
-    };
-    setDragging(true);
-  };
-
-  const updateDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) {
-      return;
-    }
-    event.preventDefault();
-    onResize(clampSidebarWidth(drag.startWidth + event.clientX - drag.startX));
-  };
-
-  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) {
-      return;
-    }
-    try {
-      event.currentTarget.releasePointerCapture?.(drag.pointerId);
-    } catch {
-      // Some test and WebView runtimes do not expose active pointer capture.
-    }
-    dragRef.current = null;
-    setDragging(false);
-  };
+export function SidebarResizeHandle({
+  disabled = false,
+  width,
+  onResizePreview,
+  onResize,
+}: SidebarResizeHandleProps) {
+  const getDragWidth = useCallback(
+    (startWidth: number, startX: number, clientX: number) => clampSidebarWidth(startWidth + clientX - startX),
+    [],
+  );
+  const { dragging, startDrag, finishDrag } = useRafPanelResize({
+    disabled,
+    width,
+    getWidth: getDragWidth,
+    onPreview: onResizePreview,
+    onCommit: onResize,
+  });
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (disabled) {
@@ -124,8 +65,8 @@ export function SidebarResizeHandle({ disabled = false, width, onResize }: Sideb
     if (disabled) {
       return;
     }
-    dragRef.current = null;
-    setDragging(false);
+    finishDrag();
+    onResizePreview?.(DEFAULT_SIDEBAR_WIDTH);
     onResize(DEFAULT_SIDEBAR_WIDTH);
   };
 
@@ -141,10 +82,7 @@ export function SidebarResizeHandle({ disabled = false, width, onResize }: Sideb
       data-dragging={dragging ? "true" : "false"}
       onDoubleClick={resetWidth}
       onKeyDown={handleKeyDown}
-      onPointerCancel={stopDrag}
       onPointerDown={startDrag}
-      onPointerMove={updateDrag}
-      onPointerUp={stopDrag}
       role="separator"
       tabIndex={disabled ? -1 : 0}
       title="拖动调整宽度，双击恢复默认宽度"

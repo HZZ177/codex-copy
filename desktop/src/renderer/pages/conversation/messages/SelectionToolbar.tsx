@@ -1,4 +1,5 @@
 import { CirclePlus } from "lucide-react";
+import { createPortal } from "react-dom";
 
 import type { SelectionPosition } from "./useTextSelection";
 import styles from "./SelectionToolbar.module.css";
@@ -18,7 +19,7 @@ export function SelectionToolbar({ selectedText, position, onQuote, onClear }: S
   const left = clamp(position.x, 16, window.innerWidth - 16);
   const top = clamp(position.y - 8, 12, window.innerHeight - 12);
 
-  return (
+  return createPortal(
     <div
       className={styles.toolbar}
       role="toolbar"
@@ -42,7 +43,8 @@ export function SelectionToolbar({ selectedText, position, onQuote, onClear }: S
         <CirclePlus size={13} strokeWidth={2.1} />
         <span>添加到对话</span>
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

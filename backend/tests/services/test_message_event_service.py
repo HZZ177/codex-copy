@@ -96,16 +96,45 @@ def test_message_event_service_handles_multi_turn_reasoning_error_and_cancel(tmp
 
     assert messages[0]["role"] == "assistant"
     assert messages[0]["content"] == "半截"
-    assert messages[0]["cancelled"] is True
     assert isinstance(messages[0]["timestamp"], int)
-    assert messages[1]["role"] == "reasoning"
-    assert messages[1]["content"] == "观察"
-    assert messages[1]["reasoningKind"] == "reasoning"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == ""
+    assert messages[1]["status"] == "cancelled"
+    assert messages[1]["cancelled"] is True
+    assert messages[1]["traceId"] == "trace_1"
     assert isinstance(messages[1]["timestamp"], int)
-    assert messages[2]["role"] == "error"
-    assert messages[2]["content"] == "失败"
-    assert messages[2]["traceId"] == "trace_2"
+    assert messages[2]["role"] == "reasoning"
+    assert messages[2]["content"] == "观察"
+    assert messages[2]["reasoningKind"] == "reasoning"
     assert isinstance(messages[2]["timestamp"], int)
+    assert messages[3]["role"] == "error"
+    assert messages[3]["content"] == "失败"
+    assert messages[3]["traceId"] == "trace_2"
+    assert isinstance(messages[3]["timestamp"], int)
+
+
+def test_message_event_service_appends_cancelled_marker_after_tool_only_turn(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    service = MessageEventService(repositories.message_events)
+
+    _append(
+        repositories,
+        "evt_1",
+        "tool_start",
+        {"tool": "read_file", "params": {"path": "README.md"}, "run_id": "tool_1"},
+        turn=1,
+    )
+    _append(repositories, "evt_2", "cancelled", {"trace_id": "trace_tool"}, turn=1)
+
+    messages = service.get_display_messages("ses_history")
+
+    assert messages[0]["role"] == "tool"
+    assert messages[0]["status"] == "cancelled"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == ""
+    assert messages[1]["status"] == "cancelled"
+    assert messages[1]["cancelled"] is True
+    assert messages[1]["traceId"] == "trace_tool"
 
 
 def test_message_event_service_pairs_subagent_tools(tmp_path) -> None:

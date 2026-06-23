@@ -11,8 +11,9 @@ from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.core.request_context import trace_id_var
 from backend.app.services import (
-    ChatCancellationToken,
     ChatRequest,
+    ChatStreamAlreadyRunningError,
+    ChatStreamMissingSessionError,
     SessionNotFoundError,
     SessionService,
     SessionValidationError,
@@ -45,6 +46,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
     runtime = websocket.app.state.runtime
     settings = runtime.settings
     repositories = runtime.repositories
+    stream_manager = runtime.chat_stream_manager
     session_service = SessionService(
         repositories.sessions,
         repositories.message_events,
@@ -52,8 +54,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
     )
     adapter = WebSocketChannelAdapter(websocket)
     bound_session_id = str(websocket.query_params.get("session_id") or "").strip() or None
-    current_task: asyncio.Task | None = None
-    current_token: ChatCancellationToken | None = None
+    bound_session_ids: set[str] = set()
+    if bound_session_id:
+        bound_session_ids.add(bound_session_id)
+        await stream_manager.subscribe(bound_session_id, adapter)
     logger.info(
         f"[WebSocket] 连接建立 | trace_id={connection_trace_id} | "
         f"bound_session_id={bound_session_id or '-'}"
@@ -69,23 +73,6 @@ async def chat_websocket(websocket: WebSocket) -> None:
         payload = {"code": code, "message": message, **(data or {})}
         await send("error", payload)
 
-    async def run_chat(payload: dict[str, Any], token: ChatCancellationToken) -> None:
-        nonlocal bound_session_id
-        session_id = str(payload.get("session_id") or bound_session_id or "").strip() or None
-        result = await runtime.chat_service.handle_chat(
-            ChatRequest(
-                session_id=session_id,
-                message=str(payload.get("message") or payload.get("content") or ""),
-                user_id=str(payload.get("user_id") or settings.default_user_id),
-                scene_id=str(payload.get("scene_id") or settings.default_scene_id),
-                model=str(payload.get("model") or ""),
-                system_prompt=payload.get("system_prompt"),
-            ),
-            chat_adapter=adapter,
-            cancellation=token,
-        )
-        bound_session_id = result.session_id
-
     try:
         while True:
             try:
@@ -95,8 +82,6 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     f"[WebSocket] 客户端断开 | trace_id={connection_trace_id} | "
                     f"bound_session_id={bound_session_id or '-'}"
                 )
-                if current_token is not None:
-                    current_token.cancel()
                 break
 
             try:
@@ -133,6 +118,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         workspace_roots=payload.get("workspace_roots"),
                     )
                     bound_session_id = session["id"]
+                    bound_session_ids.add(bound_session_id)
+                    await stream_manager.subscribe(bound_session_id, adapter)
                     logger.info(
                         f"[WebSocket] 会话创建成功 | trace_id={connection_trace_id} | "
                         f"session_id={bound_session_id}"
@@ -150,6 +137,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         continue
                     session_service.get_session_detail(session_id)
                     bound_session_id = session_id
+                    bound_session_ids.add(session_id)
+                    await stream_manager.subscribe(session_id, adapter)
                     logger.info(
                         f"[WebSocket] 会话绑定成功 | trace_id={connection_trace_id} | "
                         f"session_id={session_id}"
@@ -161,24 +150,39 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     session_id = str(payload.get("session_id") or bound_session_id or "").strip()
                     if bound_session_id == session_id:
                         bound_session_id = None
+                    if session_id:
+                        bound_session_ids.discard(session_id)
+                        await stream_manager.unsubscribe(session_id, adapter)
                     await send("unbind_ok", {"session_id": session_id})
                     continue
 
                 if action == "chat":
-                    if current_task is not None and not current_task.done():
-                        await send_error("chat_running", "当前会话已有对话正在执行")
+                    session_id = str(payload.get("session_id") or bound_session_id or "").strip()
+                    if not session_id:
+                        await send_error("missing_session", "session_id 必填")
                         continue
-                    current_token = ChatCancellationToken()
-                    current_task = asyncio.create_task(run_chat(payload, current_token))
-                    current_task.add_done_callback(_log_task_exception)
+                    session_service.get_session_detail(session_id)
+                    bound_session_id = session_id
+                    bound_session_ids.add(session_id)
+                    await stream_manager.subscribe(session_id, adapter)
+                    await stream_manager.start_chat(
+                        ChatRequest(
+                            session_id=session_id,
+                            message=str(payload.get("message") or payload.get("content") or ""),
+                            user_id=str(payload.get("user_id") or settings.default_user_id),
+                            scene_id=str(payload.get("scene_id") or settings.default_scene_id),
+                            model=str(payload.get("model") or ""),
+                            system_prompt=payload.get("system_prompt"),
+                        )
+                    )
                     continue
 
                 if action == "cancel":
-                    if current_token is not None:
-                        current_token.cancel()
+                    session_id = str(payload.get("session_id") or bound_session_id or "").strip()
+                    cancelled = await stream_manager.cancel(session_id)
                     logger.info(
                         f"[WebSocket] 收到取消请求 | trace_id={connection_trace_id} | "
-                        f"session_id={bound_session_id or '-'}"
+                        f"session_id={session_id or '-'} | cancelled={cancelled}"
                     )
                     continue
 
@@ -187,15 +191,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     continue
 
                 if action == "get_status":
-                    await send(
-                        "status",
-                        {
-                            "session_id": bound_session_id,
-                            "status": "running"
-                            if current_task is not None and not current_task.done()
-                            else "idle",
-                        },
-                    )
+                    session_id = str(payload.get("session_id") or bound_session_id or "").strip()
+                    await send("status", await stream_manager.status(session_id))
                     continue
 
                 await send_error("unknown_action", f"未知的 action: {action}")
@@ -217,6 +214,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     f"action={action} | code={exc.code} | error={exc}"
                 )
                 await send_error(exc.code, exc.message, {"details": exc.details})
+            except ChatStreamMissingSessionError as exc:
+                await send_error("missing_session", str(exc))
+            except ChatStreamAlreadyRunningError as exc:
+                await send_error("chat_running", str(exc))
             except Exception as exc:
                 logger.opt(exception=True).error(
                     f"[WebSocket] action 处理失败 | trace_id={connection_trace_id} | "
@@ -224,12 +225,12 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 )
                 await send_error("ws_action_error", str(exc))
     finally:
-        if current_token is not None:
-            current_token.cancel()
+        await stream_manager.unsubscribe_all(adapter)
         trace_id_var.reset(trace_token)
         logger.info(
             f"[WebSocket] 连接清理完成 | trace_id={connection_trace_id} | "
-            f"bound_session_id={bound_session_id or '-'}"
+            f"bound_session_id={bound_session_id or '-'} | "
+            f"subscriptions={len(bound_session_ids)}"
         )
 
 
@@ -238,14 +239,3 @@ def _payload(message: dict[str, Any]) -> dict[str, Any]:
     if isinstance(nested, dict):
         return nested
     return {key: value for key, value in message.items() if key != "action"}
-
-
-def _log_task_exception(task: asyncio.Task) -> None:
-    try:
-        task.result()
-    except asyncio.CancelledError:
-        logger.info("[WebSocket] 后台 chat task 已取消")
-        return
-    except Exception as exc:
-        logger.opt(exception=True).error(f"[WebSocket] 后台 chat task 异常 | error={exc}")
-        return

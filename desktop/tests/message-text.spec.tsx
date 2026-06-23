@@ -1,12 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import mermaid, { type ParseResult, type RenderResult } from "mermaid";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { calculateDynamicStreamStep } from "@/renderer/hooks/useDynamicStreamBuffer";
 import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
+import { LineChangeTicker } from "@/renderer/pages/conversation/messages/LineChangeTicker";
 import { MessageText } from "@/renderer/pages/conversation/messages";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
 
 const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
 const mermaidRenderResult: RenderResult = {
@@ -36,6 +38,10 @@ describe("MessageText", () => {
     vi.mocked(mermaid.render).mockResolvedValue(mermaidRenderResult);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders markdown without raw html execution", () => {
     render(
       <MessageText
@@ -46,6 +52,24 @@ describe("MessageText", () => {
     expect(screen.getByRole("heading", { name: "标题" })).not.toBeNull();
     expect(screen.getByText("事项")).not.toBeNull();
     expect(document.querySelector("script")).toBeNull();
+  });
+
+  it("renders persisted user quote markers as reference chips", async () => {
+    render(
+      <MessageText
+        message={message("user", `请基于 ${createQuoteMarker("这是一段选中的历史内容")} 继续分析`, "completed")}
+      />,
+    );
+
+    expect(screen.getByTestId("message-text").textContent).toContain("请基于");
+    expect(screen.getByText("引用片段")).not.toBeNull();
+    expect(screen.queryByTitle("这是一段选中的历史内容")).toBeNull();
+    expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("这是一段选中的历史内容");
+    });
+    expect(screen.queryByText("[[这是一段选中的历史内容]]")).toBeNull();
   });
 
   it("renders Chinese headings, ordered lists and code blocks without widening the message", () => {
@@ -89,11 +113,21 @@ describe("MessageText", () => {
     expect(screen.getByText("\\(not math\\)")).not.toBeNull();
   });
 
-  it("renders fenced latex code as a KaTeX block", () => {
+  it("shows fenced latex source by default and switches to a KaTeX block", async () => {
     const { container } = render(<MessageText message={message("assistant", "```latex\nx^2+y^2=z^2\n```", "completed")} />);
 
-    expect(screen.getByTestId("math-preview")).not.toBeNull();
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("x^2+y^2=z^2");
+    expect(screen.queryByTestId("math-preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "预览 公式" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "预览 公式" }));
+    expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("math-preview")).not.toBeNull();
+    });
     expect(container.querySelector(".katex-display")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
   });
 
   it("repairs unfinished fenced code while assistant content is streaming", () => {
@@ -102,6 +136,166 @@ describe("MessageText", () => {
     expect(screen.getByText("ts")).not.toBeNull();
     expect(screen.getByRole("button", { name: "复制代码" })).not.toBeNull();
     expect(screen.getByTestId("message-text").textContent).toContain("const streaming = true");
+  });
+
+  it("shows a generating line ticker instead of expand controls for streaming long code blocks", () => {
+    render(
+      <MessageText
+        message={message(
+          "assistant",
+          `\`\`\`ts\n${Array.from({ length: 12 }, (_, index) => `const line${index} = ${index};`).join("\n")}`,
+          "running",
+        )}
+      />,
+    );
+
+    expect(screen.queryByText(/const line11/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开代码" })).toBeNull();
+    expect(screen.queryByText(/展开其余/)).toBeNull();
+
+    const ticker = screen.getByTestId("line-change-ticker");
+    expect(ticker.getAttribute("aria-label")).toContain("正在生成内容");
+    expect(ticker.getAttribute("aria-label")).toContain("新增 2 行");
+    expect(screen.getAllByTestId("line-change-digit")).toHaveLength(1);
+  });
+
+  it("shows normal expand controls once a streaming code fence is closed", () => {
+    render(
+      <MessageText
+        message={message(
+          "assistant",
+          [
+            "```ts",
+            ...Array.from({ length: 12 }, (_, index) => `const line${index} = ${index};`),
+            "```",
+            "",
+            "后续正文还在输出",
+          ].join("\n"),
+          "running",
+        )}
+      />,
+    );
+
+    expect(screen.queryByTestId("line-change-ticker")).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开代码" })).not.toBeNull();
+    expect(screen.getByText("展开其余 2 行")).not.toBeNull();
+    expect(screen.queryByText(/const line11/)).toBeNull();
+  });
+
+  it("hides the generating line ticker until a streaming code block exceeds the preview rows", () => {
+    render(<MessageText message={message("assistant", "```ts\nconst first = true;", "running")} />);
+
+    expect(screen.queryByTestId("line-change-ticker")).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开代码" })).toBeNull();
+    expect(screen.queryByText(/展开其余/)).toBeNull();
+  });
+
+  it("rolls every digit in the line change ticker when the count changes", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<LineChangeTicker label="正在生成内容" added={9} />);
+
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 9 行");
+    rerender(<LineChangeTicker label="正在生成内容" added={10} />);
+
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 9 行");
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 10 行");
+    const digits = screen.getAllByTestId("line-change-digit");
+    expect(digits).toHaveLength(2);
+    expect(digits.every((digit) => digit.getAttribute("data-changed") === "true")).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    expect(digits.every((digit) => digit.getAttribute("data-phase") === "rolling")).toBe(true);
+  });
+
+  it("coalesces rapid line ticker changes to at most one update per half second", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<LineChangeTicker label="正在生成内容" added={1} />);
+
+    rerender(<LineChangeTicker label="正在生成内容" added={2} />);
+    rerender(<LineChangeTicker label="正在生成内容" added={3} />);
+    rerender(<LineChangeTicker label="正在生成内容" added={4} />);
+
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 4 行");
+  });
+
+  it("keeps the streaming code ticker mounted across markdown content updates", () => {
+    vi.useFakeTimers();
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    let now = performance.now();
+    try {
+      const { rerender } = render(
+        <MessageText
+          message={message(
+            "assistant",
+            `\`\`\`ts\n${Array.from({ length: 11 }, (_, index) => `const line${index} = ${index};`).join("\n")}`,
+            "running",
+          )}
+        />,
+      );
+      const initialTicker = screen.getByTestId("line-change-ticker");
+
+      rerender(
+        <MessageText
+          message={message(
+            "assistant",
+            `\`\`\`ts\n${Array.from({ length: 12 }, (_, index) => `const line${index} = ${index};`).join("\n")}`,
+            "running",
+          )}
+        />,
+      );
+
+      expect(screen.getByTestId("line-change-ticker")).toBe(initialTicker);
+      expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 1 行");
+
+      for (let index = 0; index < 8 && frames.length; index += 1) {
+        act(() => {
+          now += 500;
+          frames.shift()?.(now);
+          vi.advanceTimersByTime(500);
+        });
+      }
+      expect(screen.getByTestId("line-change-ticker").getAttribute("aria-label")).toContain("新增 2 行");
+    } finally {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+    }
+  });
+
+  it("does not cancel digit rolling when the ticker parent rerenders with the same value", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<LineChangeTicker label="正在生成内容" added={1} />);
+
+    rerender(<LineChangeTicker label="正在生成内容" added={12} />);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+
+    expect(screen.getAllByTestId("line-change-digit").some((digit) => digit.getAttribute("data-phase") === "rolling")).toBe(true);
+    rerender(<LineChangeTicker label="正在生成内容" added={12} />);
+    expect(screen.getAllByTestId("line-change-digit").some((digit) => digit.getAttribute("data-phase") === "rolling")).toBe(true);
   });
 
   it("repairs unfinished display math while assistant content is streaming", () => {
@@ -235,6 +429,7 @@ describe("MessageText", () => {
       />,
     );
 
+    expect(screen.queryByText(/line 11/)).toBeNull();
     expect(screen.getByRole("button", { name: "展开代码" })).not.toBeNull();
     expect(screen.getByText("展开其余 2 行")).not.toBeNull();
 
@@ -242,9 +437,73 @@ describe("MessageText", () => {
 
     expect(screen.getByRole("button", { name: "折叠代码" })).not.toBeNull();
     expect(screen.getByText("收起代码")).not.toBeNull();
+    expect(screen.getByText(/line 11/)).not.toBeNull();
   });
 
-  it("previews fenced html code by default and shows a loading placeholder when switching to source", async () => {
+  it("animates long code block expansion after rendering the full source", async () => {
+    const animation = {
+      cancel: vi.fn(),
+      oncancel: null,
+      onfinish: null,
+    } as unknown as Animation;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animate = vi.fn(() => animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+    });
+
+    render(
+      <MessageText
+        message={message(
+          "assistant",
+          `\`\`\`ts\n${Array.from({ length: 100 }, (_, index) => `const line${index} = ${index};`).join("\n")}\n\`\`\``,
+          "completed",
+        )}
+      />,
+    );
+
+    const viewport = screen.getByTestId("markdown-code-viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1600 });
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue({
+      bottom: 198,
+      height: 198,
+      left: 0,
+      right: 640,
+      top: 0,
+      width: 640,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "展开代码" }));
+
+    await waitFor(() => {
+      expect(animate).toHaveBeenCalled();
+    });
+    expect(animate).toHaveBeenCalledWith(
+      [
+        { height: "198px", opacity: 0.96 },
+        { height: "1600px", opacity: 1 },
+      ],
+      expect.objectContaining({
+        duration: 220,
+      }),
+    );
+    expect(screen.getByRole("button", { name: "折叠代码" })).not.toBeNull();
+
+    if (originalAnimate) {
+      Object.defineProperty(HTMLElement.prototype, "animate", {
+        configurable: true,
+        value: originalAnimate,
+      });
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+    }
+  });
+
+  it("shows fenced html source by default and switches to a sandboxed preview", async () => {
     render(
       <MessageText
         message={message(
@@ -256,21 +515,53 @@ describe("MessageText", () => {
     );
 
     expect(document.querySelector("script")).toBeNull();
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("预览标题");
+    expect(screen.queryByTitle("HTML 预览")).toBeNull();
+    expect(screen.getByRole("button", { name: "全屏显示 HTML" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "预览 HTML" })).not.toBeNull();
 
-    const frame = screen.getByTitle("HTML 预览") as HTMLIFrameElement;
+    fireEvent.click(screen.getByRole("button", { name: "预览 HTML" }));
+    expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
+
+    const frame = await screen.findByTitle("HTML 预览") as HTMLIFrameElement;
+
     expect(frame).not.toBeNull();
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.getAttribute("srcdoc")).toContain("预览标题");
-    expect(screen.getByRole("button", { name: "全屏显示 HTML" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
     expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "预览 HTML" })).not.toBeNull();
+      expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("预览标题");
     });
     expect(screen.queryByTitle("HTML 预览")).toBeNull();
+  });
+
+  it("shows fenced json source by default and switches to a searchable tree preview", async () => {
+    render(
+      <MessageText
+        message={message(
+          "assistant",
+          '```json\n{"users":[{"name":"Ada","role":"admin"}],"enabled":true}\n```',
+          "completed",
+        )}
+      />,
+    );
+
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain('"users"');
+    expect(screen.queryByTestId("json-tree-viewer")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "预览 JSON" }));
+
+    const viewer = await screen.findByTestId("json-tree-viewer");
+    expect(viewer).not.toBeNull();
+    expect(screen.getByRole("searchbox", { name: "查找 JSON" })).not.toBeNull();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "查找 JSON" }), { target: { value: "Ada" } });
+
+    expect(screen.getByText("1 / 1")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /\$\.users\[0\]\.name/ })).not.toBeNull();
   });
 
   it("opens rendered html code in a fullscreen preview dialog", () => {
@@ -291,18 +582,23 @@ describe("MessageText", () => {
     expect(screen.queryByRole("dialog", { name: "HTML 预览" })).toBeNull();
   });
 
-  it("previews fenced Mermaid code by default", async () => {
+  it("shows fenced Mermaid source by default and switches to preview", async () => {
     render(
       <MessageText
         message={message("assistant", "```mermaid\ngraph TD\nA[开始] --> B[结束]\n```", "completed")}
       />,
     );
 
-    expect(screen.getByTestId("mermaid-preview")).not.toBeNull();
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("graph TD");
+    expect(screen.queryByTestId("mermaid-preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "全屏显示 Mermaid" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "预览 Mermaid" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "预览 Mermaid" }));
+    expect(screen.queryByText("正在渲染 Mermaid...")).toBeNull();
     await waitFor(() => {
       expect(screen.getByLabelText("Mermaid 图表")).not.toBeNull();
     });
-    expect(screen.getByRole("button", { name: "全屏显示 Mermaid" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
   });
 
@@ -313,16 +609,101 @@ describe("MessageText", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Mermaid 图表")).not.toBeNull();
-    });
     fireEvent.click(screen.getByRole("button", { name: "全屏显示 Mermaid" }));
 
     const dialog = screen.getByRole("dialog", { name: "Mermaid 预览" });
-    expect(within(dialog).getByLabelText("Mermaid 视图控制")).not.toBeNull();
-    expect(within(dialog).getByRole("button", { name: "放大 Mermaid" })).not.toBeNull();
+    const controls = within(dialog).getByLabelText("Mermaid 视图控制");
+    expect(controls).not.toBeNull();
+    expect(within(controls).getByText("100%")).not.toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "放大 Mermaid" }));
+    expect(within(controls).getByText("110%")).not.toBeNull();
     expect(within(dialog).getByRole("button", { name: "缩小 Mermaid" })).not.toBeNull();
-    expect(within(dialog).getByRole("button", { name: "重置 Mermaid 视图" })).not.toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "重置 Mermaid 视图" }));
+    expect(within(controls).getByText("100%")).not.toBeNull();
+
+    for (let index = 0; index < 90; index += 1) {
+      fireEvent.click(within(dialog).getByRole("button", { name: "放大 Mermaid" }));
+    }
+    expect(within(controls).getByText("1000%")).not.toBeNull();
+  });
+
+  it("normalizes fullscreen Mermaid SVG dimensions before zooming", async () => {
+    vi.mocked(mermaid.render).mockResolvedValueOnce({
+      diagramType: "flowchart-v2",
+      svg: '<svg role="img" aria-label="complex chart" width="100%" style="max-width: 320px;" viewBox="0 0 2400 1200"></svg>',
+    });
+
+    render(
+      <MessageText
+        message={message("assistant", "```mermaid\ngraph TD\nA[寮€濮媇 --> B[缁撴潫]\n```", "completed")}
+      />,
+    );
+
+    const fullscreenButton = screen
+      .getAllByRole("button")
+      .find((button) => button.querySelector(".lucide-maximize2"));
+    expect(fullscreenButton).toBeDefined();
+    fireEvent.click(fullscreenButton as HTMLButtonElement);
+
+    const dialog = screen.getByRole("dialog", { name: /Mermaid/ });
+    const svg = await within(dialog).findByLabelText("complex chart");
+    const chart = svg.parentElement as HTMLDivElement;
+
+    expect(chart.getAttribute("data-sized")).toBe("true");
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("2400px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("1200px");
+    expect(chart.style.transform).not.toContain("scale");
+    expect(svg?.getAttribute("width")).toBe("2400");
+    expect(svg?.getAttribute("height")).toBe("1200");
+    expect(svg?.getAttribute("style") ?? "").not.toContain("max-width");
+
+    const zoomInButton = within(dialog)
+      .getAllByRole("button")
+      .find((button) => button.querySelector(".lucide-zoom-in"));
+    expect(zoomInButton).toBeDefined();
+    fireEvent.click(zoomInButton as HTMLButtonElement);
+    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("2640px");
+    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("1320px");
+    expect(chart.style.transform).not.toContain("scale");
+  });
+
+  it("auto-fits fullscreen Mermaid previews and centers oversized minimum zoom", async () => {
+    vi.mocked(mermaid.render).mockResolvedValueOnce({
+      diagramType: "flowchart-v2",
+      svg: '<svg role="img" aria-label="oversized chart" width="100%" style="max-width: 320px;" viewBox="0 0 20000 10000"></svg>',
+    });
+
+    render(
+      <MessageText
+        message={message("assistant", "```mermaid\ngraph TD\nA --> B\n```", "completed")}
+      />,
+    );
+
+    const fullscreenButton = screen
+      .getAllByRole("button")
+      .find((button) => button.querySelector(".lucide-maximize2"));
+    expect(fullscreenButton).toBeDefined();
+    fireEvent.click(fullscreenButton as HTMLButtonElement);
+
+    const dialog = screen.getByRole("dialog", { name: /Mermaid/ });
+    const preview = within(dialog).getByTestId("mermaid-preview") as HTMLDivElement;
+    Object.defineProperty(preview, "clientWidth", { configurable: true, value: 1200 });
+    Object.defineProperty(preview, "clientHeight", { configurable: true, value: 800 });
+    Object.defineProperty(preview, "scrollWidth", { configurable: true, value: 2000 });
+    Object.defineProperty(preview, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(preview, "scrollLeft", { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(preview, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+    await within(dialog).findByLabelText("oversized chart");
+
+    await waitFor(() => {
+      const chart = within(dialog).getByLabelText("Mermaid 图表") as HTMLDivElement;
+      expect(within(dialog).getByText("10%")).not.toBeNull();
+      expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("2000px");
+      expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("1000px");
+      expect(preview.scrollLeft).toBe(400);
+      expect(preview.scrollTop).toBe(100);
+    });
   });
 
   it("keeps Mermaid render errors inside the preview panel and removes global error artifacts", async () => {
@@ -338,7 +719,8 @@ describe("MessageText", () => {
       />,
     );
 
-    const preview = screen.getByTestId("mermaid-preview");
+    fireEvent.click(screen.getByRole("button", { name: "预览 Mermaid" }));
+    const preview = await screen.findByTestId("mermaid-preview");
     const alert = await within(preview).findByRole("alert");
     expect(alert.textContent).toContain("Mermaid 语法错误");
     expect(document.body.querySelector("#dmermaid-legacy")).toBeNull();
@@ -352,9 +734,6 @@ describe("MessageText", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Mermaid 图表")).not.toBeNull();
-    });
     fireEvent.click(screen.getByRole("button", { name: "全屏显示 Mermaid" }));
 
     await waitFor(() => {
@@ -412,7 +791,12 @@ describe("MessageText", () => {
     act(() => {
       document.dispatchEvent(new MouseEvent("mouseup"));
     });
-    fireEvent.click(await screen.findByRole("button", { name: "添加选中文本到对话" }));
+    const toolbar = await screen.findByRole("toolbar", { name: "选中文本操作" });
+    expect(toolbar.parentElement).toBe(document.body);
+    expect(toolbar.style.left).toBe("170px");
+    expect(toolbar.style.top).toBe("132px");
+
+    fireEvent.click(screen.getByRole("button", { name: "添加选中文本到对话" }));
 
     expect(onQuoteSelection).toHaveBeenCalledWith("这一段可以被引用");
     expect(selection.removeAllRanges).toHaveBeenCalled();
@@ -592,6 +976,143 @@ describe("MessageText", () => {
       });
     }
     expect(screen.getByTestId("runtime-typing-metrics").textContent).toBe("0/0");
+
+    requestFrame.mockRestore();
+    cancelFrame.mockRestore();
+  });
+
+  it("reports runtime typing speed while an unclosed streaming code fence grows", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const baseContent = "```ts\nconst first = 1;";
+    const nextContent = [
+      "```ts",
+      "const first = 1;",
+      ...Array.from({ length: 12 }, (_, index) => `const generated${index} = ${index};`),
+    ].join("\n");
+    let now = performance.now();
+    const { rerender } = render(
+      <>
+        <MessageText
+          message={{ ...message("assistant", baseContent, "running"), id: "streaming-code-fence" }}
+        />
+        <RuntimeTypingMetricsProbe />
+      </>,
+    );
+
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("const first = 1;");
+
+    rerender(
+      <>
+        <MessageText
+          message={{ ...message("assistant", nextContent, "running"), id: "streaming-code-fence" }}
+        />
+        <RuntimeTypingMetricsProbe />
+      </>,
+    );
+
+    expect(screen.getByTestId("message-text").textContent).not.toContain("generated11");
+
+    act(() => {
+      now += 100;
+      frames.shift()?.(now);
+    });
+
+    const [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
+      .split("/")
+      .map(Number);
+    expect(reportedSpeed).toBeGreaterThan(0);
+    expect(reportedBacklog).toBeGreaterThan(0);
+
+    requestFrame.mockRestore();
+    cancelFrame.mockRestore();
+  });
+
+  it("reports runtime typing speed when a streaming message mounts with buffered code content", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const content = [
+      "下面是代码：",
+      "",
+      "```ts",
+      ...Array.from({ length: 80 }, (_, index) => `const value${index} = ${index};`),
+      "```",
+    ].join("\n");
+    let now = performance.now();
+
+    render(
+      <>
+        <MessageText message={message("assistant", content, "running")} />
+        <RuntimeTypingMetricsProbe />
+      </>,
+    );
+
+    expect(screen.getByTestId("message-text").textContent).not.toContain("const value79 = 79;");
+
+    act(() => {
+      now += 100;
+      frames.shift()?.(now);
+    });
+
+    const [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
+      .split("/")
+      .map(Number);
+    expect(reportedSpeed).toBeGreaterThan(0);
+    expect(reportedBacklog).toBeGreaterThan(0);
+
+    requestFrame.mockRestore();
+    cancelFrame.mockRestore();
+  });
+
+  it("resets typing state when a recycled message component receives a new streaming message id", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const content = [
+      "继续输出代码：",
+      "",
+      "```tsx",
+      ...Array.from({ length: 90 }, (_, index) => `export const Row${index} = () => <div>${index}</div>;`),
+      "```",
+    ].join("\n");
+    let now = performance.now();
+    const { rerender } = render(
+      <>
+        <MessageText message={{ ...message("assistant", "历史回答", "completed"), id: "history-message" }} />
+        <RuntimeTypingMetricsProbe />
+      </>,
+    );
+
+    rerender(
+      <>
+        <MessageText message={{ ...message("assistant", content, "running"), id: "live-message" }} />
+        <RuntimeTypingMetricsProbe />
+      </>,
+    );
+
+    expect(screen.getByTestId("message-text").textContent).not.toContain("Row89");
+
+    act(() => {
+      now += 100;
+      frames.shift()?.(now);
+    });
+
+    const [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
+      .split("/")
+      .map(Number);
+    expect(reportedSpeed).toBeGreaterThan(0);
+    expect(reportedBacklog).toBeGreaterThan(0);
 
     requestFrame.mockRestore();
     cancelFrame.mockRestore();

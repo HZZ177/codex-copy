@@ -1,4 +1,9 @@
 .chatLayout {
+  --conversation-edge-padding: 18px;
+  --composer-accessory-gap: 8px;
+  --composer-fade-height: 30px;
+  --conversation-scrollbar-gutter-width: 17px;
+
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -8,13 +13,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 0 18px;
   color: var(--color-text-primary);
-  transition: grid-template-columns 180ms ease;
-}
-
-.chatLayout[data-side="open"] {
-  grid-template-columns: minmax(0, 1fr) minmax(360px, min(460px, 34vw));
 }
 
 .document {
@@ -23,32 +22,7 @@
   width: 100%;
   min-height: 0;
   min-width: min(100%, 320px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-color: color-mix(in srgb, var(--color-text-tertiary) 42%, transparent) transparent;
-  scrollbar-width: auto;
-}
-
-.document::-webkit-scrollbar {
-  width: 11px;
-  height: 11px;
-}
-
-.document::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.document::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-text-tertiary) 46%, transparent);
-  background-clip: padding-box;
-}
-
-.document::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-text-tertiary) 62%, transparent);
-  background-clip: padding-box;
+  overflow: hidden;
 }
 
 .topBar {
@@ -56,8 +30,7 @@
   top: 0;
   z-index: 24;
   grid-column: 1 / -1;
-  margin: 0 -18px;
-  padding: 10px 18px 8px;
+  padding: 10px var(--conversation-edge-padding) 8px;
   background: color-mix(in srgb, var(--shell-bg) 94%, transparent);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border-subtle) 76%, transparent);
   backdrop-filter: blur(14px);
@@ -170,29 +143,14 @@
   white-space: nowrap;
 }
 
-.iconButton {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-tertiary);
-}
-
-.iconButton:hover,
-.iconButton[aria-pressed="true"] {
-  background: var(--surface-hover);
-  color: var(--color-text-primary);
-}
-
 .messageSurface {
-  width: min(var(--content-reading-width), calc(100% - 72px));
+  width: 100%;
   min-width: 0;
+  height: 100%;
   min-height: 0;
-  margin: 0 auto;
-  padding: 18px 0 28px;
+  display: grid;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .emptyState {
@@ -204,68 +162,6 @@
   text-align: center;
 }
 
-.sideRail {
-  grid-column: 2;
-  grid-row: 2 / 4;
-  position: relative;
-  top: auto;
-  display: grid;
-  align-self: stretch;
-  gap: 12px;
-  max-height: none;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  animation: panelSlideIn 180ms ease both;
-}
-
-.sidePanel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-elevated);
-  box-shadow: var(--shadow-popover);
-  animation: panelFadeIn 160ms ease both;
-}
-
-.sidePanel[data-density="split"] {
-  min-height: 0;
-}
-
-.drawerHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 12px 10px 14px;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.drawerHeader h2 {
-  margin: 0;
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.drawerMuted {
-  margin: 0;
-  padding: 14px;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.sidePanelBody {
-  min-height: 0;
-  overflow: auto;
-  padding: 14px;
-  scrollbar-width: thin;
-}
-
 .composerDock {
   position: relative;
   z-index: 18;
@@ -274,22 +170,42 @@
   display: grid;
   min-width: 0;
   justify-items: center;
-  margin: 0 -18px;
-  padding: 10px 18px 18px;
+  padding: 0 var(--conversation-edge-padding) 18px;
   background: var(--shell-bg);
-  box-shadow: 0 -12px 26px var(--shell-bg);
 }
 
-.chatLayout[data-side="open"] .composerDock {
-  right: auto;
+.composerDock::before {
+  position: absolute;
+  right: var(--conversation-scrollbar-gutter-width);
+  bottom: 100%;
+  left: 0;
+  z-index: 0;
+  height: var(--composer-fade-height);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--shell-bg) 0%, transparent) 0%,
+    color-mix(in srgb, var(--shell-bg) 18%, transparent) 58%,
+    color-mix(in srgb, var(--shell-bg) 34%, transparent) 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.composerDock > * {
+  position: relative;
+  z-index: 1;
 }
 
 .composerAccessory {
+  position: absolute;
+  right: var(--conversation-edge-padding);
+  bottom: calc(100% + var(--composer-accessory-gap));
+  left: var(--conversation-edge-padding);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 0 2px 8px;
+  margin: 0;
   pointer-events: auto;
 }
 
@@ -348,8 +264,7 @@
 }
 
 @media (max-width: 1080px) {
-  .chatLayout,
-  .chatLayout[data-side="open"] {
+  .chatLayout {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -357,74 +272,32 @@
     width: 100%;
   }
 
-  .composerDock,
-  .chatLayout[data-side="open"] .composerDock {
+  .composerDock {
     right: 0;
-  }
-
-  .sideRail {
-    grid-column: 1;
-    grid-row: auto;
-    max-height: min(520px, 50vh);
-  }
-
-  .sidePanel,
-  .sidePanel[data-density="split"] {
-    min-height: 420px;
   }
 }
 
 @media (max-width: 860px) {
   .chatLayout {
-    padding: 0 14px;
+    --conversation-edge-padding: 14px;
   }
 
   .topBar {
-    margin: 0 -14px;
-    padding: 9px 14px 7px;
+    padding: 9px var(--conversation-edge-padding) 7px;
   }
 
   .document {
     width: 100%;
   }
 
-  .composerDock,
-  .chatLayout[data-side="open"] .composerDock {
-    margin: 0 -14px;
-    padding: 10px 14px 16px;
+  .composerDock {
+    padding: 0 var(--conversation-edge-padding) 16px;
   }
 
   .messageSurface {
     width: 100%;
-    padding-bottom: 24px;
   }
 
-  .sidePanel,
-  .sidePanel[data-density="split"] {
-    min-height: 360px;
-  }
-}
-
-@keyframes panelSlideIn {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes panelFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @keyframes menuFadeIn {
@@ -439,9 +312,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chatLayout,
-  .sideRail,
-  .sidePanel,
   .menu {
     animation: none;
     transition: none;

@@ -16,7 +16,7 @@ describe("Titlebar", () => {
     expect(screen.queryByLabelText("最小化")).toBeNull();
     expect(screen.queryByLabelText("最大化")).toBeNull();
     expect(screen.queryByLabelText("关闭")).toBeNull();
-    expect(screen.getByLabelText("展开右侧栏")).not.toBeNull();
+    expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
     const toggle = screen.getByLabelText("折叠侧边栏");
     expect(toggle.getAttribute("data-state")).toBe("expanded");
     expect(toggle.getAttribute("data-icon")).toBe("panel-left-close");
@@ -34,40 +34,6 @@ describe("Titlebar", () => {
     rerender(<Titlebar title="测试标题" sidebarCollapsed onToggleSidebar={() => undefined} />);
 
     expect(screen.getByLabelText("展开侧边栏").getAttribute("data-icon")).toBe("panel-left-open");
-  });
-
-  it("toggles the right sidebar button state", () => {
-    const onToggleRightSidebar = vi.fn();
-
-    const { rerender } = render(
-      <Titlebar
-        title="测试标题"
-        sidebarCollapsed={false}
-        rightSidebarOpen={false}
-        onToggleSidebar={() => undefined}
-        onToggleRightSidebar={onToggleRightSidebar}
-      />,
-    );
-
-    const openButton = screen.getByLabelText("展开右侧栏");
-    expect(openButton.getAttribute("aria-pressed")).toBe("false");
-    expect(openButton.getAttribute("data-icon")).toBe("panel-right-open");
-    fireEvent.click(openButton);
-    expect(onToggleRightSidebar).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <Titlebar
-        title="测试标题"
-        sidebarCollapsed={false}
-        rightSidebarOpen
-        onToggleSidebar={() => undefined}
-        onToggleRightSidebar={onToggleRightSidebar}
-      />,
-    );
-
-    const closeButton = screen.getByLabelText("折叠右侧栏");
-    expect(closeButton.getAttribute("aria-pressed")).toBe("true");
-    expect(closeButton.getAttribute("data-icon")).toBe("panel-right-close");
   });
 
   it("delegates title drag gestures to injected Tauri controls", async () => {

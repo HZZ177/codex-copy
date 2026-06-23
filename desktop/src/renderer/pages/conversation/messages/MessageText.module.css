@@ -67,6 +67,136 @@
   padding: 5px 9px;
 }
 
+.quoteReferenceWrapper {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.quoteReferenceChip {
+  display: inline-flex;
+  max-width: min(132px, 100%);
+  box-sizing: border-box;
+  height: 20px;
+  align-items: center;
+  overflow: hidden;
+  margin: 0;
+  vertical-align: middle;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 82%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--surface-muted));
+  box-shadow:
+    0 4px 12px rgb(15 23 42 / 5%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 72%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  font-weight: 450;
+  line-height: 1;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
+}
+
+.quoteReferenceWrapper:hover .quoteReferenceChip,
+.quoteReferenceChip:focus-visible {
+  border-color: color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 78%, var(--surface-hover));
+  color: var(--color-text-primary);
+  box-shadow:
+    0 7px 18px rgb(15 23 42 / 7%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 80%, transparent);
+}
+
+.quoteReferenceChip:focus-visible {
+  outline: none;
+}
+
+.quoteReferenceCard {
+  position: absolute;
+  z-index: 24;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: none;
+  width: max-content;
+  min-width: 164px;
+  max-width: min(280px, calc(100vw - 32px));
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 14px 34px rgb(15 23 42 / 10%),
+    0 2px 8px rgb(15 23 42 / 7%);
+  color: var(--color-text-primary);
+  padding: 10px;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.quoteReferenceCard::after {
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  background: inherit;
+  content: "";
+  pointer-events: none;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.quoteReferenceWrapper:hover .quoteReferenceCard,
+.quoteReferenceWrapper:focus-within .quoteReferenceCard {
+  display: block;
+  animation: quoteReferenceCardEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.quoteReferenceBody {
+  display: block;
+  max-height: 112px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quoteReferenceActions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quoteReferenceActions button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 9px;
+}
+
+.quoteReferenceActions button:hover {
+  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
+  color: var(--color-text-primary);
+}
+
+.quoteReferenceActions button:focus-visible {
+  outline: none;
+}
+
 .actions {
   display: inline-flex;
   align-items: center;
@@ -76,6 +206,10 @@
   font-size: 11px;
   opacity: 0;
   transition: opacity 160ms ease;
+}
+
+.actions[data-placement="turn"] {
+  opacity: 1;
 }
 
 .userMessage .actions {
@@ -121,13 +255,15 @@
   color: var(--color-text-primary);
 }
 
-.assistantMessage .actionButton {
+.assistantMessage .actionButton,
+.actions[data-message-kind="assistant"] .actionButton {
   width: 24px;
   padding: 0;
   justify-content: center;
 }
 
-.assistantMessage .actionButton span {
+.assistantMessage .actionButton span,
+.actions[data-message-kind="assistant"] .actionButton span {
   display: none;
 }
 
@@ -216,9 +352,43 @@
   color: var(--color-text-primary);
 }
 
-.codeTextButton {
-  display: inline-flex;
+.codeViewSwitch {
+  position: relative;
+  display: inline-grid;
+  width: 86px;
   height: 28px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-muted) 76%, transparent);
+  padding: 2px;
+}
+
+.codeViewSwitch::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-elevated);
+  box-shadow:
+    0 1px 3px rgb(15 23 42 / 8%),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+  content: "";
+  transition: transform 160ms var(--motion-ease-standard);
+}
+
+.codeViewSwitch[data-mode="preview"]::before {
+  transform: translateX(100%);
+}
+
+.codeViewSwitch button {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -226,18 +396,21 @@
   background: transparent;
   color: var(--color-text-tertiary);
   font-size: 11px;
-  padding: 0 8px;
-  white-space: nowrap;
+  line-height: 1;
+  padding: 0;
 }
 
-.codeTextButton:hover,
-.codeTextButton[aria-pressed="true"] {
-  background: var(--surface-hover);
+.codeViewSwitch button:hover,
+.codeViewSwitch button[aria-pressed="true"] {
   color: var(--color-text-primary);
 }
 
-.codeTextButton:focus-visible {
+.codeViewSwitch button:focus-visible {
   outline: none;
+}
+
+.codeViewSwitch button:disabled {
+  cursor: default;
 }
 
 .codeIconButton:focus-visible {
@@ -247,18 +420,18 @@
 .codeViewport {
   min-width: 0;
   max-width: 100%;
-  max-height: var(--code-expanded-height, 1200px);
   overflow-x: auto;
-  overflow-y: hidden;
-  transition:
-    max-height 260ms var(--motion-ease-standard),
-    opacity 180ms ease;
-  will-change: max-height;
+  overflow-y: visible;
+  contain: layout paint style;
 }
 
 .codeViewport[data-collapsed="true"] {
   max-height: var(--code-collapsed-height, 198px);
   overflow: hidden;
+}
+
+.codeViewport[data-animating="true"] {
+  will-change: height;
 }
 
 .codeViewLoading {
@@ -319,6 +492,17 @@
 .codeFooter:hover {
   background: var(--surface-hover);
   color: var(--color-text-primary);
+}
+
+.codeGenerationFooter {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--code-bg) 92%, var(--color-bg-elevated));
+  padding: 0 12px;
 }
 
 .codeCopyError {
@@ -515,15 +699,26 @@
 }
 
 .mermaidPreview[data-size="fullscreen"] {
+  display: grid;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  place-items: safe center;
+  scroll-padding: 32px;
   border-top: 0;
   background:
     radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--color-text-tertiary) 16%, transparent) 1px, transparent 0)
       0 0 / 22px 22px,
     var(--surface-bg);
   padding: 0;
+}
+
+.mermaidFullscreenShell {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .mermaidPreview[data-interactive="true"] {
@@ -533,6 +728,10 @@
 }
 
 .mermaidPreview[data-interactive="true"]:active {
+  cursor: grabbing;
+}
+
+.mermaidPreview[data-interactive="true"][data-dragging="true"] {
   cursor: grabbing;
 }
 
@@ -558,16 +757,25 @@
 }
 
 .mermaidPreview[data-size="fullscreen"] .mermaidSvg {
-  width: 100%;
-  height: 100%;
+  width: max-content;
+  height: max-content;
   min-height: 0;
   padding: 48px;
-  transition: transform 110ms ease-out;
-  transform-origin: center;
+  transform-origin: top center;
+}
+
+.mermaidPreview[data-size="fullscreen"] .mermaidSvg[data-sized="true"] {
+  width: var(--mermaid-render-width);
+  height: var(--mermaid-render-height);
+  padding: 0;
+}
+
+.mermaidPreview[data-size="fullscreen"] .mermaidSvg[data-sized="false"] {
+  zoom: var(--mermaid-scale, 1);
 }
 
 .mermaidSvg[data-interactive="true"] {
-  will-change: transform;
+  will-change: width, height;
 }
 
 .mermaidSvg svg {
@@ -578,6 +786,13 @@
 .mermaidPreview[data-size="fullscreen"] .mermaidSvg svg {
   max-width: none;
   max-height: none;
+}
+
+.mermaidPreview[data-size="fullscreen"] .mermaidSvg[data-sized="true"] svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
 }
 
 .mermaidControls {
@@ -593,6 +808,13 @@
   box-shadow: var(--shadow-popover);
   padding: 3px;
   backdrop-filter: blur(14px);
+}
+
+.mermaidFullscreenShell .mermaidControls {
+  position: absolute;
+  top: 12px;
+  right: 22px;
+  z-index: 2;
 }
 
 .mermaidControls button {
@@ -613,6 +835,20 @@
 
 .mermaidControls button:focus-visible {
   outline: none;
+}
+
+.mermaidScaleValue {
+  display: inline-flex;
+  width: 46px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  user-select: none;
 }
 
 @keyframes ellipsisPulse {
@@ -657,22 +893,42 @@
   }
 }
 
+@keyframes quoteReferenceCardEnter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(5px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .streamingDot {
     animation: none;
     opacity: 0.75;
   }
 
-  .codeViewport {
-    transition: none;
-  }
-
   .codeViewLoading span {
     animation: none;
   }
 
+  .codeViewport[data-animating="true"] {
+    will-change: auto;
+  }
+
+  .codeViewSwitch::before {
+    transition: none;
+  }
+
   .previewFullscreenOverlay,
   .previewFullscreenDialog {
+    animation: none;
+  }
+
+  .quoteReferenceWrapper:hover .quoteReferenceCard,
+  .quoteReferenceWrapper:focus-within .quoteReferenceCard {
     animation: none;
   }
 

@@ -1,0 +1,171 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type Dispatch,
+  type PropsWithChildren,
+} from "react";
+
+import {
+  runtimeBridge,
+  type ChatChannel,
+  type ChatPayload,
+  type RuntimeBridge,
+  type WsConnectionStatus,
+} from "@/runtime";
+import {
+  agentConversationReducer,
+  createInitialAgentConversationState,
+  type AgentConversationAction,
+  type AgentConversationState,
+} from "@/renderer/stores/agentSessionStore";
+
+export interface AgentSessionRuntimeContextValue {
+  runtime: RuntimeBridge;
+  state: AgentConversationState;
+  dispatch: Dispatch<AgentConversationAction>;
+  wsStatus: WsConnectionStatus;
+  runtimeDetail: string | null;
+  setRuntimeDetail: (detail: string | null) => void;
+  bindSession: (sessionId: string) => void;
+  chat: (payload: ChatPayload) => void;
+  cancel: (sessionId?: string) => void;
+  ping: () => void;
+}
+
+const AgentSessionRuntimeContext = createContext<AgentSessionRuntimeContextValue | null>(null);
+
+export function AgentSessionProvider({
+  children,
+  runtime = runtimeBridge,
+}: PropsWithChildren<{ runtime?: RuntimeBridge }>) {
+  const [state, dispatch] = useReducer(agentConversationReducer, createInitialAgentConversationState());
+  const [wsStatus, setWsStatus] = useState<WsConnectionStatus>("idle");
+  const [runtimeDetail, setRuntimeDetail] = useState<string | null>(null);
+  const channelRef = useRef<ChatChannel | null>(null);
+  const pendingBindSessionIdsRef = useRef(new Set<string>());
+  const requestedStatusRef = useRef(false);
+
+  const flushPendingBinds = useCallback(() => {
+    const channel = channelRef.current;
+    if (!channel || channel.getStatus() !== "open") {
+      return;
+    }
+    for (const sessionId of pendingBindSessionIdsRef.current) {
+      channel.bindSession(sessionId);
+    }
+    pendingBindSessionIdsRef.current.clear();
+  }, []);
+
+  const bindSession = useCallback(
+    (sessionId: string) => {
+      const cleaned = sessionId.trim();
+      if (!cleaned) {
+        return;
+      }
+      pendingBindSessionIdsRef.current.add(cleaned);
+      flushPendingBinds();
+    },
+    [flushPendingBinds],
+  );
+
+  useEffect(() => {
+    const channel = runtime.conversation.openChatChannel(
+      (event) => dispatch({ type: "event/receive", event }),
+      {
+        onStatus: setWsStatus,
+        onError: (reason) => {
+          const message = reason instanceof Error ? reason.message : String(reason || "连接异常");
+          setRuntimeDetail(message);
+        },
+      },
+    );
+    channelRef.current = channel;
+    return () => {
+      channel.close();
+      if (channelRef.current === channel) {
+        channelRef.current = null;
+      }
+    };
+  }, [runtime]);
+
+  useEffect(() => {
+    if (wsStatus === "open") {
+      flushPendingBinds();
+      if (!requestedStatusRef.current) {
+        channelRef.current?.requestStatus();
+        requestedStatusRef.current = true;
+      }
+    } else {
+      requestedStatusRef.current = false;
+    }
+  }, [flushPendingBinds, wsStatus]);
+
+  const chat = useCallback((payload: ChatPayload) => {
+    const channel = channelRef.current;
+    if (!channel || channel.getStatus() !== "open") {
+      throw new Error("对话连接尚未就绪");
+    }
+    const sessionId = typeof payload.session_id === "string" ? payload.session_id.trim() : "";
+    if (sessionId) {
+      pendingBindSessionIdsRef.current.add(sessionId);
+      channel.bindSession(sessionId);
+    }
+    channel.chat(payload);
+  }, []);
+
+  const cancel = useCallback((sessionId?: string) => {
+    const channel = channelRef.current;
+    if (!channel || channel.getStatus() !== "open") {
+      throw new Error("对话连接尚未就绪");
+    }
+    channel.cancel(sessionId);
+  }, []);
+
+  const ping = useCallback(() => {
+    const channel = channelRef.current;
+    if (!channel || channel.getStatus() !== "open") {
+      return;
+    }
+    channel.ping();
+  }, []);
+
+  const value = useMemo<AgentSessionRuntimeContextValue>(
+    () => ({
+      runtime,
+      state,
+      dispatch,
+      wsStatus,
+      runtimeDetail,
+      setRuntimeDetail,
+      bindSession,
+      chat,
+      cancel,
+      ping,
+    }),
+    [bindSession, cancel, chat, ping, runtime, runtimeDetail, state, wsStatus],
+  );
+
+  return (
+    <AgentSessionRuntimeContext.Provider value={value}>
+      {children}
+    </AgentSessionRuntimeContext.Provider>
+  );
+}
+
+export function useAgentSessionRuntime() {
+  const value = useContext(AgentSessionRuntimeContext);
+  if (!value) {
+    throw new Error("useAgentSessionRuntime 必须在 AgentSessionProvider 内使用");
+  }
+  return value;
+}
+
+export function useOptionalAgentSessionRuntime() {
+  return useContext(AgentSessionRuntimeContext);
+}

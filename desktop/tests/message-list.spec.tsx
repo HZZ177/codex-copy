@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
 import { MessageList } from "@/renderer/pages/conversation/messages";
+import { useVirtuosoAutoScroll } from "@/renderer/pages/conversation/messages/useVirtuosoAutoScroll";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
 describe("MessageList", () => {
@@ -21,6 +22,88 @@ describe("MessageList", () => {
     expect(screen.getByText("你好")).not.toBeNull();
     expect(screen.getByText("收到")).not.toBeNull();
     expect(screen.getAllByRole("button", { name: "复制消息" }).length).toBe(2);
+  });
+
+  it("keeps compact lists on the static renderer while processing", () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalUserAgent = navigator.userAgent;
+    class FakeResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: FakeResizeObserver,
+    });
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 Chrome",
+    });
+
+    try {
+      render(<MessageList messages={[message("m1", "assistant", "流式内容")]} isProcessing />);
+
+      expect(screen.getByTestId("message-list").getAttribute("data-list-mode")).toBe("static");
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+      if (originalResizeObserver) {
+        Object.defineProperty(globalThis, "ResizeObserver", {
+          configurable: true,
+          value: originalResizeObserver,
+        });
+      } else {
+        delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+      }
+    }
+  });
+
+  it("requests older history when the static list is scrolled into the top buffer", async () => {
+    const onLoadOlder = vi.fn();
+    render(
+      <MessageList
+        messages={[message("m1", "user", "hello"), message("m2", "assistant", "world")]}
+        hasMoreOlder
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-list-scroll") as HTMLDivElement;
+    mockScrollMetrics(scroller, { scrollHeight: 900, clientHeight: 300, scrollTop: 180 });
+    await act(async () => {
+      fireEvent.scroll(scroller);
+    });
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    mockScrollMetrics(scroller, { scrollHeight: 900, clientHeight: 300, scrollTop: 24 });
+    await act(async () => {
+      fireEvent.scroll(scroller);
+    });
+
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not request older history on initial top layout before the list is armed", async () => {
+    const onLoadOlder = vi.fn();
+    render(
+      <MessageList
+        messages={[message("m1", "user", "hello"), message("m2", "assistant", "world")]}
+        hasMoreOlder
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-list-scroll") as HTMLDivElement;
+    mockScrollMetrics(scroller, { scrollHeight: 900, clientHeight: 300, scrollTop: 0 });
+    await act(async () => {
+      fireEvent.scroll(scroller);
+    });
+
+    expect(onLoadOlder).not.toHaveBeenCalled();
   });
 
   it("loads relative markdown images through the session workspace scope", async () => {
@@ -70,7 +153,49 @@ describe("MessageList", () => {
 
     const textMessages = screen.getAllByTestId("message-text");
     expect(within(textMessages[1]).queryByRole("button", { name: "复制消息" })).toBeNull();
-    expect(within(textMessages[2]).getByRole("button", { name: "复制消息" })).not.toBeNull();
+    expect(within(textMessages[2]).queryByRole("button", { name: "复制消息" })).toBeNull();
+    const finalAssistantItem = textMessages[2].closest('[role="listitem"]');
+    expect(finalAssistantItem).not.toBeNull();
+    expect(within(finalAssistantItem as HTMLElement).getByRole("button", { name: "复制消息" })).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "复制消息" })).toHaveLength(2);
+  });
+
+  it("shows the assistant copy row at the bottom of a trailing tool activity group", () => {
+    render(
+      <MessageList
+        messages={[
+          message("m1", "user", "开始"),
+          message("m2", "assistant", "最后一条文字"),
+          toolMessage("t1", "read_file", { path: "docs/a.md" }),
+          commandMessage("c1"),
+        ]}
+      />,
+    );
+
+    const textMessages = screen.getAllByTestId("message-text");
+    expect(within(textMessages[1]).queryByRole("button", { name: "复制消息" })).toBeNull();
+    const groupItem = screen.getByTestId("message-group-block").closest('[role="listitem"]');
+    expect(groupItem).not.toBeNull();
+    expect(within(groupItem as HTMLElement).getByRole("button", { name: "复制消息" })).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "复制消息" })).toHaveLength(2);
+  });
+
+  it("shows the assistant copy row at the bottom of a trailing file change block", () => {
+    render(
+      <MessageList
+        messages={[
+          message("m1", "user", "开始"),
+          message("m2", "assistant", "最后一条文字"),
+          fileChangeMessage("f1", "docs/a.md"),
+        ]}
+      />,
+    );
+
+    const textMessages = screen.getAllByTestId("message-text");
+    expect(within(textMessages[1]).queryByRole("button", { name: "复制消息" })).toBeNull();
+    const fileChangeItem = screen.getByTestId("file-change-block").closest('[role="listitem"]');
+    expect(fileChangeItem).not.toBeNull();
+    expect(within(fileChangeItem as HTMLElement).getByRole("button", { name: "复制消息" })).not.toBeNull();
     expect(screen.getAllByRole("button", { name: "复制消息" })).toHaveLength(2);
   });
 
@@ -101,7 +226,10 @@ describe("MessageList", () => {
     );
 
     const textMessages = screen.getAllByTestId("message-text");
-    expect(within(textMessages[1]).getByRole("button", { name: "复制消息" })).not.toBeNull();
+    expect(within(textMessages[1]).queryByRole("button", { name: "复制消息" })).toBeNull();
+    const previousAssistantItem = textMessages[1].closest('[role="listitem"]');
+    expect(previousAssistantItem).not.toBeNull();
+    expect(within(previousAssistantItem as HTMLElement).getByRole("button", { name: "复制消息" })).not.toBeNull();
     expect(within(textMessages[3]).queryByRole("button", { name: "复制消息" })).toBeNull();
     expect(within(textMessages[4]).queryByRole("button", { name: "复制消息" })).toBeNull();
   });
@@ -181,6 +309,65 @@ describe("MessageList", () => {
     expect(screen.queryByText("read_file")).toBeNull();
   });
 
+  it("keeps grouped tool details expanded when new tools are appended", () => {
+    const firstTool = toolMessage("read-1", "read_file", { path: "README.md" });
+    const command = commandMessage("cmd-1");
+    const { rerender } = render(<MessageList messages={[firstTool, command]} />);
+
+    const initialButton = screen.getByRole("button", { name: "读取了 1 个文件，已运行 1 条命令详情" });
+    fireEvent.click(initialButton);
+
+    expect(initialButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("tool-call-block")).not.toBeNull();
+    expect(screen.getByTestId("command-execution-block")).not.toBeNull();
+
+    rerender(
+      <MessageList
+        messages={[
+          firstTool,
+          command,
+          toolMessage("read-2", "read_file", { path: "src/main.ts" }),
+        ]}
+      />,
+    );
+
+    const updatedButton = screen.getByRole("button", { name: "读取了 2 个文件，已运行 1 条命令详情" });
+    expect(updatedButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId("tool-call-block")).toHaveLength(2);
+    expect(screen.getByTestId("command-execution-block")).not.toBeNull();
+  });
+
+  it("keeps grouped tool details expanded when a terminal marker is appended to the same turn", () => {
+    const firstTool = toolMessage("read-1", "read_file", { path: "README.md" });
+    const command = commandMessage("cmd-1");
+    const { rerender } = render(<MessageList messages={[firstTool, command]} />);
+
+    const initialButton = screen.getByRole("button", { name: "读取了 1 个文件，已运行 1 条命令详情" });
+    fireEvent.click(initialButton);
+
+    expect(initialButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("tool-call-block")).not.toBeNull();
+
+    rerender(
+      <MessageList
+        messages={[
+          firstTool,
+          command,
+          {
+            ...message("cancel-1", "assistant", ""),
+            status: "cancelled",
+            payload: { cancelled: true },
+          },
+        ]}
+      />,
+    );
+
+    const updatedButton = screen.getByRole("button", { name: "读取了 1 个文件，已运行 1 条命令详情" });
+    expect(updatedButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("tool-call-block")).not.toBeNull();
+    expect(screen.getByText("已中断")).not.toBeNull();
+  });
+
   it("uses failure wording for grouped tools with error results", () => {
     render(
       <MessageList
@@ -215,6 +402,43 @@ describe("MessageList", () => {
     expect(screen.getByText("读取失败 1 个文件，运行失败 1 条命令")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "读取失败 1 个文件，运行失败 1 条命令详情" }));
     expect(screen.getByText("读取文件失败 missing.txt")).not.toBeNull();
+  });
+
+  it("separates failed and successful counts inside grouped tool categories", () => {
+    render(
+      <MessageList
+        messages={[
+          failedToolMessage("read-failed", "read_file", { path: "missing.txt" }),
+          toolMessage("read-ok", "read_file", { path: "README.md" }),
+          failedToolMessage("dir-failed", "list_directory", { path: "/" }),
+          toolMessage("dir-ok-1", "list_directory", { path: "src" }),
+          toolMessage("dir-ok-2", "list_directory", { path: "docs" }),
+          failedToolMessage("search-failed", "search_files", { query: "missing" }),
+          toolMessage("search-ok", "search_files", { query: "agent" }),
+          {
+            ...commandMessage("cmd-failed"),
+            payload: {
+              command: "pytest backend/tests",
+              cwd: "D:/repo",
+              stderr: "failed",
+              exit_code: 1,
+            },
+          },
+          commandMessage("cmd-ok"),
+          failedToolMessage("edit-failed", "write_file", { path: "bad.ts" }),
+          toolMessage("edit-ok", "write_file", { path: "good.ts" }),
+          failedToolMessage("other-failed", "unknown_tool", { path: "bad" }),
+          toolMessage("other-ok", "unknown_tool", { path: "ok" }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "读取失败 1 个文件，读取了 1 个文件，查看失败 1 个目录，查看了 2 个目录，搜索失败 1 次，搜索了 1 次，运行失败 1 条命令，已运行 1 条命令，编辑失败 1 个文件，编辑了 1 个文件，调用失败 1 个工具，调用了 1 个工具",
+      ),
+    ).not.toBeNull();
+    expect(screen.queryByText(/查看失败 3 个目录/)).toBeNull();
   });
 
   it("uses the concrete tool icon for grouped activity with one tool category", () => {
@@ -257,6 +481,20 @@ describe("MessageList", () => {
 
     expect(screen.getAllByTestId("file-change-block")).toHaveLength(2);
     expect(screen.getAllByText("编辑了 1 个文件")).toHaveLength(2);
+  });
+
+  it("separates failed and successful file-change counts", () => {
+    render(
+      <MessageList
+        messages={[
+          { ...fileChangeMessage("file-change-failed", "bad.ts"), status: "failed" },
+          fileChangeMessage("file-change-ok", "good.ts"),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("编辑失败 1 个文件，编辑了 1 个文件")).not.toBeNull();
+    expect(screen.queryByText("编辑失败 2 个文件")).toBeNull();
   });
 
   it("renders update_plan as a collapsible plan card", () => {
@@ -347,6 +585,44 @@ describe("MessageList", () => {
     expect(scroller.scrollTop).toBe(0);
   });
 
+  it("scrolls the virtualized scroller to its real bottom so bottom padding remains visible", () => {
+    const scrollToIndex = vi.fn();
+    const scrollTo = vi.fn();
+    const { result } = renderHook(() => useVirtuosoAutoScroll(3));
+    const scroller = document.createElement("div");
+    mockScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 200, scrollTop: 120 });
+    Object.defineProperty(scroller, "scrollTo", { configurable: true, value: scrollTo });
+
+    act(() => {
+      result.current.setScrollerRef(scroller);
+      (result.current.virtuosoRef as unknown as { current: { scrollToIndex: typeof scrollToIndex } | null }).current = {
+        scrollToIndex,
+      };
+    });
+
+    expect(typeof result.current.followOutput).toBe("function");
+    expect((result.current.followOutput as (isAtBottom: boolean) => false)(true)).toBe(false);
+
+    act(() => {
+      result.current.scrollToBottom("smooth");
+    });
+
+    expect(scroller.scrollTop).toBe(120);
+    expect(scrollTo).toHaveBeenLastCalledWith({
+      behavior: "smooth",
+      top: 800,
+    });
+    expect(scrollToIndex).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.scrollToBottom("auto");
+    });
+
+    expect(scroller.scrollTop).toBe(800);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollToIndex).not.toHaveBeenCalled();
+  });
+
   it("starts following automatically when streamed content grows past the viewport", async () => {
     const first = message("m1", "assistant", "短回复");
     const { rerender } = render(<MessageList messages={[first]} isProcessing />);
@@ -403,6 +679,28 @@ function toolMessage(
       result: {
         status: "success",
         model_content: "文件内容",
+      },
+    },
+  };
+}
+
+function failedToolMessage(
+  id: string,
+  name = "read_file",
+  args: Record<string, unknown> = { path: "missing.txt" },
+): ConversationMessage {
+  return {
+    ...toolMessage(id, name, args),
+    status: "failed",
+    payload: {
+      call: {
+        id: `call-${id}`,
+        name,
+        arguments: args,
+      },
+      result: {
+        status: "error",
+        error: "失败",
       },
     },
   };

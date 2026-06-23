@@ -34,6 +34,7 @@ const SOCKET_OPEN = 1;
 export class RuntimeWsClient {
   private socket: WebSocketLike | null = null;
   private sessionId: string | null = null;
+  private readonly boundSessionIds = new Set<string>();
   private status: WsConnectionStatus = "idle";
   private reconnectAttempts = 0;
   private closedByClient = false;
@@ -52,6 +53,10 @@ export class RuntimeWsClient {
   connect(sessionId?: string | null) {
     this.closeSocket();
     this.sessionId = sessionId?.trim() || null;
+    this.boundSessionIds.clear();
+    if (this.sessionId) {
+      this.boundSessionIds.add(this.sessionId);
+    }
     this.reconnectAttempts = 0;
     this.closedByClient = false;
     this.openSocket("connecting");
@@ -91,11 +96,19 @@ export class RuntimeWsClient {
       throw new Error("session_id 必填");
     }
     this.sessionId = sessionId;
-    this.sendAction("bind_session", { session_id: sessionId });
+    this.boundSessionIds.add(sessionId);
+    if (this.socket?.readyState === SOCKET_OPEN) {
+      this.sendAction("bind_session", { session_id: sessionId });
+    }
   }
 
   unbindSession(sessionId = this.sessionId) {
-    this.sendAction("unbind_session", sessionId ? { session_id: sessionId } : {});
+    if (sessionId) {
+      this.boundSessionIds.delete(sessionId);
+    }
+    if (this.socket?.readyState === SOCKET_OPEN) {
+      this.sendAction("unbind_session", sessionId ? { session_id: sessionId } : {});
+    }
     if (!sessionId || sessionId === this.sessionId) {
       this.sessionId = null;
     }
@@ -107,6 +120,10 @@ export class RuntimeWsClient {
 
   cancel(sessionId = this.sessionId) {
     this.sendAction("cancel", sessionId ? { session_id: sessionId } : {});
+  }
+
+  requestStatus(sessionId = this.sessionId) {
+    this.sendAction("get_status", sessionId ? { session_id: sessionId } : {});
   }
 
   ping() {
@@ -121,8 +138,8 @@ export class RuntimeWsClient {
     socket.onopen = () => {
       this.reconnectAttempts = 0;
       this.setStatus("open");
-      if (this.sessionId) {
-        this.sendAction("bind_session", { session_id: this.sessionId });
+      for (const sessionId of this.boundSessionIds) {
+        this.sendAction("bind_session", { session_id: sessionId });
       }
     };
     socket.onerror = (event) => {
@@ -186,6 +203,7 @@ export class RuntimeWsClient {
           : "";
     if (event.action === "session_created" && sessionId) {
       this.sessionId = sessionId;
+      this.boundSessionIds.add(sessionId);
     }
   }
 

@@ -93,13 +93,39 @@
 
 .sectionTitle {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   padding: 0 9px 7px;
   color: var(--color-text-4);
+  font: inherit;
   font-size: 11px;
   line-height: 1;
+  text-align: left;
+}
+
+button.sectionTitle {
+  cursor: pointer;
+}
+
+.sectionTitle[data-kind="workspace"] {
+  min-height: 30px;
+  margin-bottom: 2px;
+  padding: 0 9px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+button.sectionTitle[data-kind="workspace"]:hover,
+button.sectionTitle[data-kind="workspace"]:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--surface-hover) 86%, transparent);
+  color: var(--color-text-1);
 }
 
 .sectionTitle svg {
@@ -109,9 +135,58 @@
 
 .sectionTitle span {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sectionChevron {
+  margin-left: 1px;
+  transition: transform 160ms var(--motion-ease-standard);
+  transform: rotate(0deg);
+  transform-origin: center;
+}
+
+.sectionTitle[aria-expanded="false"] .sectionChevron {
+  transform: rotate(-90deg);
+}
+
+.sectionItems {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    grid-template-rows 180ms var(--motion-ease-standard),
+    opacity 140ms ease;
+}
+
+.sectionItems[data-expanded="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sectionItemsInner {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.section[data-kind="workspace"] .historyItem {
+  padding-left: 31px;
+}
+
+.section[data-kind="workspace"] .renameForm {
+  padding-left: 31px;
+}
+
+.section[data-kind="workspace"] .confirmRow {
+  padding-left: 31px;
 }
 
 .navItem,
@@ -170,28 +245,12 @@
   color: var(--color-text-1);
 }
 
-.historyItem[data-active="true"]::after {
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-accent) 86%, var(--color-text-4));
-  content: "";
-  transform: translateY(-50%);
-}
-
 .historyItem {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
   gap: 7px;
   padding: 0 24px 0 10px;
-}
-
-.historyItem[data-active="true"] {
-  padding-right: 25px;
 }
 
 .historyTitle {
@@ -214,8 +273,44 @@
   white-space: nowrap;
 }
 
-.historyItem[data-active="true"] .historyMeta {
-  margin-right: 10px;
+.historyIndicators {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 0 0 15px;
+}
+
+.historyIndicators[data-collapsed="true"] {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: auto;
+  height: auto;
+  gap: 2px;
+  flex-basis: auto;
+}
+
+.historyUnreadDot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background: #f97316;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sidebar-bg) 88%, transparent);
+}
+
+.historyStreamingSpinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2.25px solid color-mix(in srgb, var(--color-text-4) 44%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-text-2) 84%, transparent);
+  border-radius: var(--radius-pill);
+  animation: historySpinner 780ms linear infinite;
 }
 
 .historyActions {
@@ -238,9 +333,7 @@
 }
 
 .historyRow:hover .historyMeta,
-.historyRow:focus-within .historyMeta,
-.historyRow:hover .historyItem[data-active="true"]::after,
-.historyRow:focus-within .historyItem[data-active="true"]::after {
+.historyRow:focus-within .historyMeta {
   opacity: 0;
 }
 
@@ -534,17 +627,6 @@
   line-height: 1;
 }
 
-.collapsedSessionActiveDot {
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--sidebar-bg);
-  border-radius: var(--radius-pill);
-  background: var(--color-accent);
-}
-
 .collapsedSessionCard {
   position: fixed;
   top: var(--session-card-top);
@@ -617,6 +699,12 @@
   }
 }
 
+@keyframes historySpinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :global([data-sidebar-motion="true"]) .sider {
     transition: none;
@@ -630,5 +718,9 @@
 
   .collapsedSessionButton {
     transition: none;
+  }
+
+  .historyStreamingSpinner {
+    animation: none;
   }
 }

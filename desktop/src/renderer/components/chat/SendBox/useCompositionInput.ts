@@ -10,16 +10,16 @@ export interface UseCompositionInputOptions {
 export function useCompositionInput({ disabled = false, onSubmit }: UseCompositionInputOptions) {
   const [isComposing, setIsComposing] = useState(false);
 
-  const handleCompositionStart = useCallback((_event: CompositionEvent<HTMLTextAreaElement>) => {
+  const handleCompositionStart = useCallback((_event: CompositionEvent<HTMLElement>) => {
     setIsComposing(true);
   }, []);
 
-  const handleCompositionEnd = useCallback((_event: CompositionEvent<HTMLTextAreaElement>) => {
+  const handleCompositionEnd = useCallback((_event: CompositionEvent<HTMLElement>) => {
     setIsComposing(false);
   }, []);
 
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    (event: KeyboardEvent<HTMLElement>) => {
       if (disabled || !shouldSubmitFromKeyboard(event, isComposing)) {
         return;
       }

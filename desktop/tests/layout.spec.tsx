@@ -1,15 +1,28 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Layout } from "@/renderer/components/layout/Layout";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { MessageText } from "@/renderer/pages/conversation/messages";
+import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
+import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 
 function renderLayout(ui: ReactElement) {
   return render(
     <ThemeProvider>
       <LayoutStateProvider>{ui}</LayoutStateProvider>
+    </ThemeProvider>,
+  );
+}
+
+function renderLayoutWithPreview(ui: ReactElement) {
+  return render(
+    <ThemeProvider>
+      <LayoutStateProvider>
+        <PreviewProvider>{ui}</PreviewProvider>
+      </LayoutStateProvider>
     </ThemeProvider>,
   );
 }
@@ -69,7 +82,7 @@ describe("Layout", () => {
     expect(shell.getAttribute("style")).toContain("--sidebar-width: 286px");
   });
 
-  it("toggles and resizes the top-level right sidebar", () => {
+  it("toggles, maximizes and resizes the conversation right sidebar", () => {
     renderLayout(
       <Layout>
         <div>内容区</div>
@@ -77,22 +90,211 @@ describe("Layout", () => {
     );
 
     const shell = screen.getByTestId("app-shell");
+    expect(shell.dataset.rightSidebarMotion).toBe("false");
 
     fireEvent.click(screen.getByLabelText("展开右侧栏"));
 
     expect(shell.dataset.rightSidebar).toBe("open");
+    expect(shell.dataset.rightSidebarMode).toBe("split");
+    expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.getByRole("complementary", { name: "右侧栏" })).not.toBeNull();
-    expect(screen.getByText("TODO")).not.toBeNull();
+    expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
+    expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "侧边栏" })).toBeNull();
 
     const handle = screen.getByRole("separator", { name: "调整右侧栏宽度" });
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
-    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 372px");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.46");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 339px");
 
     fireEvent.doubleClick(handle);
-    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 360px");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.45");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 332px");
+
+    fireEvent.click(screen.getByLabelText("展开右侧栏到对话区域"));
+    expect(shell.dataset.rightSidebarMode).toBe("maximized");
+    expect(screen.getByRole("separator", { name: "调整右侧栏宽度" }).getAttribute("data-disabled")).toBe("true");
+
+    fireEvent.click(screen.getByLabelText("缩小右侧栏"));
+    expect(shell.dataset.rightSidebarMode).toBe("split");
+    expect(screen.getByRole("separator", { name: "调整右侧栏宽度" }).getAttribute("data-disabled")).toBe("false");
 
     fireEvent.click(screen.getByLabelText("折叠右侧栏"));
     expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(shell.dataset.rightSidebarMode).toBe("split");
+    expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
   });
+
+  it("collapses the right sidebar from its panel controls", () => {
+    renderLayout(
+      <Layout>
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    expect(shell.dataset.rightSidebar).toBe("open");
+
+    fireEvent.click(screen.getByLabelText("折叠右侧栏"));
+    expect(shell.dataset.rightSidebar).toBe("closed");
+  });
+
+  it("collapses the right sidebar when navigating to the new conversation page", () => {
+    const onNavigate = vi.fn();
+    renderLayout(
+      <Layout onNavigate={onNavigate}>
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    expect(shell.dataset.rightSidebar).toBe("open");
+
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+
+    expect(onNavigate).toHaveBeenCalledWith("/guid");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+  });
+
+  it("renders preview entries as top-level closable right sidebar tabs", () => {
+    renderLayoutWithPreview(
+      <>
+        <RightSidebarPreviewHarness />
+        <Layout contentMode="full">
+          <div>内容区</div>
+        </Layout>
+      </>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+
+    expect(shell.dataset.rightSidebar).toBe("open");
+    expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect((screen.getByTitle("HTML 文件预览") as HTMLIFrameElement).getAttribute("srcdoc")).toContain("HTML 窗口");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 Markdown 窗口" }));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "HTML 窗口" }));
+
+    expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect((screen.getByTitle("HTML 文件预览") as HTMLIFrameElement).getAttribute("srcdoc")).toContain("HTML 窗口");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 HTML 窗口" }));
+
+    expect(screen.queryByRole("tab", { name: "HTML 窗口" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 Markdown 窗口" }));
+
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+    expect(screen.queryByText("暂无侧边内容")).toBeNull();
+  });
+
+  it("routes code block side-preview clicks to existing right sidebar tabs and toggles the active panel", async () => {
+    renderLayoutWithPreview(
+      <>
+        <RightSidebarPreviewHarness />
+        <Layout contentMode="full">
+          <MessageText
+            message={message("assistant", "```markdown\n# Markdown 预览\n\n正文\n```", "completed")}
+          />
+        </Layout>
+      </>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    const codePreviewButton = screen.getByRole("button", { name: "在预览面板打开 Markdown 预览" });
+
+    fireEvent.click(codePreviewButton);
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebar).toBe("open");
+    });
+    expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+    expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(codePreviewButton);
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(codePreviewButton);
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebar).toBe("closed");
+    });
+
+    fireEvent.click(codePreviewButton);
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebar).toBe("open");
+    });
+    expect(screen.getByRole("tab", { name: "Markdown 预览" }).getAttribute("aria-selected")).toBe("true");
+  });
 });
+
+function RightSidebarPreviewHarness() {
+  const preview = usePreview();
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() =>
+          preview.openPreview({
+            type: "content",
+            title: "HTML 窗口",
+            content: "<main><h1>HTML 窗口</h1></main>",
+            contentType: "html",
+          })
+        }
+      >
+        打开 HTML 窗口
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          preview.openPreview({
+            type: "content",
+            title: "Markdown 窗口",
+            content: "# Markdown 窗口",
+            contentType: "markdown",
+          })
+        }
+      >
+        打开 Markdown 窗口
+      </button>
+    </div>
+  );
+}
+
+function message(
+  kind: ConversationMessage["kind"],
+  content: string,
+  status: ConversationMessage["status"],
+): ConversationMessage {
+  return {
+    id: "message-1",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "item-1",
+    kind,
+    status,
+    content,
+    payload: {},
+    createdAt: "2026-06-17T10:00:00Z",
+    updatedAt: "2026-06-17T10:01:00Z",
+  };
+}

@@ -10,24 +10,29 @@ export interface UseTypingAnimationOptions {
   content: string;
   enabled?: boolean;
   completeImmediately?: boolean;
+  resetKey?: string;
 }
 
 export function useTypingAnimation({
   content,
   enabled = true,
   completeImmediately = false,
+  resetKey = "",
 }: UseTypingAnimationOptions) {
-  const [displayedContent, setDisplayedContent] = useState(content);
+  const initialContent = initialDisplayedContent(content, enabled, completeImmediately, resetKey);
+  const [displayedContent, setDisplayedContent] = useState(initialContent);
   const [isAnimating, setIsAnimating] = useState(false);
   const frameRef = useRef<number | null>(null);
   const contentRef = useRef(content);
-  const displayedRef = useRef(content);
+  const displayedRef = useRef(initialContent);
   const lastTimestampRef = useRef<number | null>(null);
   const speedSourceIdRef = useRef(createRuntimeTypingSpeedSourceId());
   const carryRef = useRef(0);
+  const resetKeyRef = useRef(resetKey);
 
   const commitDisplayedContent = (nextContent: string) => {
     displayedRef.current = nextContent;
+    rememberDisplayedContent(resetKeyRef.current, nextContent);
     setDisplayedContent(nextContent);
   };
 
@@ -43,6 +48,11 @@ export function useTypingAnimation({
 
   useEffect(() => {
     contentRef.current = content;
+    if (resetKeyRef.current !== resetKey) {
+      resetKeyRef.current = resetKey;
+      cancelFrame();
+      commitDisplayedContent(initialDisplayedContent(content, enabled, completeImmediately, resetKey));
+    }
 
     if (completeImmediately || prefersReducedMotion()) {
       cancelFrame();
@@ -115,11 +125,51 @@ export function useTypingAnimation({
       lastTimestampRef.current = performance.now();
       frameRef.current = window.requestAnimationFrame(animate);
     }
-  }, [completeImmediately, content, enabled]);
+  }, [completeImmediately, content, enabled, resetKey]);
 
   useEffect(() => cancelFrame, []);
 
   return { displayedContent, isAnimating };
+}
+
+const INITIAL_STREAM_BACKLOG_CHARS = 420;
+const INITIAL_STREAM_PREFIX_CHARS = 24;
+const MAX_DISPLAY_CACHE_SIZE = 80;
+const displayedContentByKey = new Map<string, string>();
+
+function initialDisplayedContent(
+  content: string,
+  enabled: boolean,
+  completeImmediately: boolean,
+  resetKey: string,
+): string {
+  if (!enabled || completeImmediately || prefersReducedMotion()) {
+    return content;
+  }
+  const cached = resetKey ? displayedContentByKey.get(resetKey) : undefined;
+  if (cached !== undefined && content.startsWith(cached)) {
+    return cached;
+  }
+  if (content.length <= INITIAL_STREAM_BACKLOG_CHARS) {
+    return content;
+  }
+  const displayedLength = Math.max(INITIAL_STREAM_PREFIX_CHARS, content.length - INITIAL_STREAM_BACKLOG_CHARS);
+  return content.slice(0, displayedLength);
+}
+
+function rememberDisplayedContent(resetKey: string, content: string) {
+  if (!resetKey) {
+    return;
+  }
+  displayedContentByKey.delete(resetKey);
+  displayedContentByKey.set(resetKey, content);
+  while (displayedContentByKey.size > MAX_DISPLAY_CACHE_SIZE) {
+    const oldestKey = displayedContentByKey.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    displayedContentByKey.delete(oldestKey);
+  }
 }
 
 function prefersReducedMotion(): boolean {

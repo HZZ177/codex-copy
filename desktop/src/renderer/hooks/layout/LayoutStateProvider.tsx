@@ -16,7 +16,7 @@ export interface LayoutStateActions {
   setSidebarWidth(width: number): void;
   toggleRightSidebar(): void;
   setRightSidebarOpen(open: boolean): void;
-  setRightSidebarWidth(width: number): void;
+  setRightSidebarRatio(ratio: number): void;
   toggleWorkspace(): void;
   setWorkspaceOpen(open: boolean): void;
   togglePreview(): void;
@@ -46,7 +46,7 @@ export function LayoutStateProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     writeLayoutPreferences(window.localStorage, state);
-  }, [state.sidebarCollapsed, state.sidebarWidth, state.rightSidebarWidth, state.workspaceWidth, state.previewWidth]);
+  }, [state.sidebarCollapsed, state.sidebarWidth, state.rightSidebarRatio, state.workspaceWidth, state.previewWidth]);
 
   const actions = useMemo<LayoutStateActions>(
     () => ({
@@ -65,8 +65,8 @@ export function LayoutStateProvider({ children }: PropsWithChildren) {
       setRightSidebarOpen(open) {
         dispatch({ type: "set-right-sidebar-open", open });
       },
-      setRightSidebarWidth(width) {
-        dispatch({ type: "set-right-sidebar-width", width });
+      setRightSidebarRatio(ratio) {
+        dispatch({ type: "set-right-sidebar-ratio", ratio });
       },
       toggleWorkspace() {
         dispatch({ type: "toggle-workspace" });

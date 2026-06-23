@@ -1,0 +1,110 @@
+.browser {
+  --workspace-file-tree-width: 260px;
+  --workspace-file-divider-width: 7px;
+  --workspace-file-open-motion: 230ms;
+  --workspace-file-close-motion: 180ms;
+  --workspace-file-motion: var(--workspace-file-close-motion);
+  --workspace-file-tree-current-width: min(var(--workspace-file-tree-width), calc(100% - 287px));
+  position: relative;
+  display: grid;
+  grid-template-columns: 100% 0 0;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  transition: grid-template-columns var(--workspace-file-motion) cubic-bezier(0.2, 0, 0, 1);
+}
+
+.browser[data-preview-mounted="true"][data-preview-open="true"] {
+  --workspace-file-motion: var(--workspace-file-open-motion);
+  grid-template-columns:
+    var(--workspace-file-tree-current-width)
+    var(--workspace-file-divider-width)
+    calc(100% - var(--workspace-file-tree-current-width) - var(--workspace-file-divider-width));
+}
+
+.treePane,
+.previewPane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  contain: layout paint style;
+}
+
+.treePane {
+  grid-column: 1;
+}
+
+.resizeHandle {
+  position: relative;
+  z-index: 1;
+  grid-column: 2;
+  width: 100%;
+  min-width: 0;
+  cursor: col-resize;
+  background: transparent;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 110ms var(--motion-ease-standard);
+}
+
+.resizeHandle::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: color-mix(in srgb, var(--color-border-subtle) 78%, transparent);
+  content: "";
+}
+
+.browser[data-preview-open="true"] .resizeHandle {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 70ms;
+}
+
+.resizeHandle:hover::before,
+.resizeHandle:focus-visible::before,
+.browser[data-resizing="true"] .resizeHandle::before {
+  background: color-mix(in srgb, var(--color-accent) 72%, var(--color-border-subtle));
+}
+
+.resizeHandle:focus-visible {
+  outline: none;
+}
+
+.browser[data-resizing="true"] {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+
+.previewPane {
+  grid-column: 3;
+  background: var(--color-bg-elevated);
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--color-border-subtle) 78%, transparent);
+}
+
+.browser:not([data-preview-open="true"]) .previewPane {
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .browser {
+    --workspace-file-tree-current-width: 42%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser,
+  .treePane,
+  .resizeHandle,
+  .previewPane {
+    transition: none;
+  }
+
+}

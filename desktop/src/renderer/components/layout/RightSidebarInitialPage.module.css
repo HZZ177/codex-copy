@@ -1,0 +1,49 @@
+.root {
+  display: grid;
+  min-height: 100%;
+  align-content: center;
+  gap: 6px;
+  padding: 28px;
+  box-sizing: border-box;
+  place-items: center;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.action {
+  display: grid;
+  width: min(100%, 440px);
+  height: 44px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 14px;
+  text-align: left;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.action:hover,
+.action:focus-visible {
+  background: var(--surface-hover);
+  color: var(--color-text-1);
+  outline: none;
+}
+
+.action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -18,6 +18,7 @@ def test_create_app_mounts_desktop_runtime_and_keeps_health(tmp_path) -> None:
     assert app.state.runtime.database is app.state.database
     assert app.state.runtime.repositories is app.state.repositories
     assert app.state.runtime.chat_service is app.state.chat_service
+    assert app.state.runtime.chat_stream_manager is app.state.chat_stream_manager
     assert app.state.runtime.tool_registry is app.state.tool_registry
     assert "read_file" in app.state.runtime.tool_registry.names()
     assert "update_plan" in app.state.runtime.tool_registry.names()

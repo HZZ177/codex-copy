@@ -6,6 +6,11 @@ from backend.app.services.chat_service import (
     ChatService,
     ChatTurnResult,
 )
+from backend.app.services.chat_stream_manager import (
+    ChatStreamAlreadyRunningError,
+    ChatStreamManager,
+    ChatStreamMissingSessionError,
+)
 from backend.app.services.message_event_service import MessageEventService
 from backend.app.services.session_service import (
     GetHistoryRequest,
@@ -32,6 +37,9 @@ __all__ = [
     "ChatCancellationToken",
     "ChatRequest",
     "ChatService",
+    "ChatStreamAlreadyRunningError",
+    "ChatStreamManager",
+    "ChatStreamMissingSessionError",
     "ChatTurnResult",
     "GetHistoryRequest",
     "ListSessionsRequest",

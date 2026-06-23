@@ -4,15 +4,18 @@ import { describe, expect, it } from "vitest";
 
 import { AppRouter } from "@/renderer/components/layout/Router";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 
 function renderRouter(initialEntries: Array<string | { pathname: string; state?: unknown }>) {
   return render(
     <ThemeProvider>
       <LayoutStateProvider>
-        <MemoryRouter initialEntries={initialEntries}>
-          <AppRouter />
-        </MemoryRouter>
+        <PreviewProvider>
+          <MemoryRouter initialEntries={initialEntries}>
+            <AppRouter />
+          </MemoryRouter>
+        </PreviewProvider>
       </LayoutStateProvider>
     </ThemeProvider>,
   );

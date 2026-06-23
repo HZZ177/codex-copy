@@ -4,12 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModelProvider, RuntimeBridge } from "@/runtime";
 import {
   buildUsageTrendOption,
+  completeUsageTrendPoints,
   UsageStatsPage,
 } from "@/renderer/pages/settings/usage/UsageStatsPage";
 import type {
   UsageRequestDetail,
   UsageRequestListResponse,
   UsageSummary,
+  UsageTrendPoint,
   UsageTrendResponse,
 } from "@/types/protocol";
 
@@ -41,6 +43,13 @@ describe("UsageStatsPage", () => {
     expect(screen.getAllByText("12,960")).toHaveLength(2);
     expect(screen.getAllByText("538")).toHaveLength(2);
     expect(screen.getByTestId("usage-trend-chart")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "按小时" }).getAttribute("data-active")).toBe("true");
+    expect(runtime.usage.getTrend).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        bucket: "hour",
+        timezoneOffsetMinutes: expect.any(Number),
+      }),
+    );
     await waitFor(() => {
       expect(setOption).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -186,6 +195,10 @@ describe("UsageStatsPage", () => {
         expect.objectContaining({ name: "请求数", data: [3] }),
       ]),
     );
+    const series = option.series as Array<Record<string, unknown>>;
+    expect(series.every((item) => item.showSymbol === false)).toBe(true);
+    expect(series.every((item) => item.symbol === "circle")).toBe(true);
+    expect(series.every((item) => item.symbolSize === 7)).toBe(true);
   });
 
   it("formats hourly trend labels for ECharts", () => {
@@ -202,6 +215,51 @@ describe("UsageStatsPage", () => {
     ]);
 
     expect(option.xAxis).toMatchObject({ data: ["06/19 16:00"] });
+  });
+
+  it("fills hourly trend buckets inside the selected range", () => {
+    const completed = completeUsageTrendPoints(
+      [
+        trendPoint({
+          time: "2026-06-19T16:00:00",
+          request_count: 2,
+          input_tokens: 100,
+          cache_read_tokens: 20,
+          output_tokens: 30,
+          total_tokens: 150,
+        }),
+      ],
+      "hour",
+      {
+        startTime: "2026-06-19T14:30:00Z",
+        endTime: "2026-06-19T17:05:00Z",
+      },
+      0,
+    );
+
+    expect(completed.map((point) => point.time)).toEqual([
+      "2026-06-19T14:00:00",
+      "2026-06-19T15:00:00",
+      "2026-06-19T16:00:00",
+      "2026-06-19T17:00:00",
+    ]);
+    expect(completed.map((point) => point.request_count)).toEqual([0, 0, 2, 0]);
+    expect(completed[2].input_tokens).toBe(100);
+  });
+
+  it("fills day trend buckets using the same local timezone offset as the backend", () => {
+    const completed = completeUsageTrendPoints(
+      [trendPoint({ time: "2026-06-20", request_count: 1 })],
+      "day",
+      {
+        startTime: "2026-06-18T16:00:00Z",
+        endTime: "2026-06-20T12:00:00Z",
+      },
+      480,
+    );
+
+    expect(completed.map((point) => point.time)).toEqual(["2026-06-19", "2026-06-20"]);
+    expect(completed.map((point) => point.request_count)).toEqual([0, 1]);
   });
 });
 
@@ -228,7 +286,7 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
   const trend = options.trend ?? {
     points: [
       {
-        time: "2026-06-19",
+        time: "2026-06-19T16:00:00",
         request_count: 2,
         input_tokens: 17_907,
         cache_read_tokens: 12_960,
@@ -339,6 +397,19 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
       listRequests: ReturnType<typeof vi.fn>;
       getRequestDetail: ReturnType<typeof vi.fn>;
     };
+  };
+}
+
+function trendPoint(overrides: Partial<UsageTrendPoint>): UsageTrendPoint {
+  return {
+    time: "2026-06-19T00:00:00",
+    request_count: 0,
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+    failed_count: 0,
+    ...overrides,
   };
 }
 

@@ -7,7 +7,7 @@
 .trigger {
   display: inline-flex;
   max-width: min(280px, 42vw);
-  height: 32px;
+  height: 30px;
   min-width: 0;
   align-items: center;
   gap: 7px;
@@ -17,7 +17,7 @@
   color: var(--color-text-tertiary);
   font: inherit;
   font-size: 13px;
-  line-height: 1;
+  line-height: 1.28;
   padding: 0 9px;
   transition:
     background var(--motion-fast) ease,
@@ -47,6 +47,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--color-text-secondary);
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -180,13 +181,13 @@
 .optionText span {
   color: var(--color-text-primary);
   font-size: 12px;
-  line-height: 1;
+  line-height: 1.28;
 }
 
 .optionText small {
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.25;
 }
 
 .empty {

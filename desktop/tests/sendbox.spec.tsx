@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SendBox } from "@/renderer/components/chat/SendBox";
+import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
 
 describe("SendBox", () => {
   it("renders a Codex-like floating input shell without unavailable actions", () => {
@@ -19,7 +20,8 @@ describe("SendBox", () => {
     );
 
     expect(screen.getByLabelText("继续输入")).not.toBeNull();
-    expect(screen.getByPlaceholderText("要求后续变更")).not.toBeNull();
+    expect(screen.getByLabelText("继续输入").getAttribute("data-placeholder")).toBe("要求后续变更");
+    expect(screen.getByLabelText("继续输入").getAttribute("contenteditable")).toBe("true");
     expect(screen.queryByRole("button", { name: "添加附件" })).toBeNull();
     expect(screen.queryByText("按需审批")).toBeNull();
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
@@ -89,7 +91,8 @@ describe("SendBox", () => {
     );
 
     expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
-    expect((screen.getByLabelText("继续输入") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.getByLabelText("继续输入").getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByLabelText("继续输入").getAttribute("contenteditable")).toBe("false");
     fireEvent.submit(screen.getByRole("form", { name: "继续对话输入" }));
     expect(onSend).not.toHaveBeenCalled();
 
@@ -138,7 +141,7 @@ describe("SendBox", () => {
       onStop: vi.fn(),
     };
     const { rerender } = render(<SendBox value="短文本" {...props} />);
-    const input = screen.getByLabelText("继续输入") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("继续输入") as HTMLDivElement;
 
     Object.defineProperty(input, "scrollHeight", { configurable: true, value: 220 });
     rerender(<SendBox value={"第一行\n第二行\n第三行\n第四行"} {...props} />);
@@ -147,5 +150,109 @@ describe("SendBox", () => {
     Object.defineProperty(input, "scrollHeight", { configurable: true, value: 82 });
     rerender(<SendBox value={"第一行\n第二行"} {...props} />);
     expect(input.style.height).toBe("82px");
+  });
+
+  it("reports plain contenteditable text changes", () => {
+    const onChange = vi.fn();
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        onChange={onChange}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("继续输入");
+    input.textContent = "普通输入";
+    fireEvent.input(input);
+
+    expect(onChange).toHaveBeenCalledWith("普通输入");
+  });
+
+  it("renders quoted draft markers as removable inline chips", async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal("navigator", {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    vi.useFakeTimers();
+    try {
+      render(
+        <SendBox
+          value={createQuoteMarker("这是一段选中的历史内容")}
+          runtimeState="idle"
+          canSend
+          canStop={false}
+          onChange={onChange}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />,
+      );
+
+      const input = screen.getByLabelText("继续输入");
+      expect(input.textContent).toContain("引用片段");
+      fireEvent.mouseOver(screen.getByText("引用片段"));
+      act(() => {
+        vi.advanceTimersByTime(199);
+      });
+      expect(screen.queryByText("这是一段选中的历史内容")).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("这是一段选中的历史内容");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("hides the quote card when the pointer leaves a chip inside the editor", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SendBox
+          value={createQuoteMarker("这是一段选中的历史内容")}
+          runtimeState="idle"
+          canSend
+          canStop={false}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />,
+      );
+
+      const input = screen.getByLabelText("继续输入");
+      fireEvent.mouseOver(screen.getByText("引用片段"));
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
+
+      const remove = input.querySelector("[data-quote-remove]");
+      expect(remove).not.toBeNull();
+      fireEvent.mouseOut(remove as HTMLElement, { relatedTarget: input });
+
+      act(() => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(screen.queryByText("这是一段选中的历史内容")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

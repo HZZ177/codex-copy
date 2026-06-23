@@ -37,8 +37,9 @@ function EventReplayRoute() {
 function RoutedLayout({
   title,
   contentMode = "reading",
+  resetRightSidebarOnEnter = false,
   children,
-}: PropsWithChildren<{ title: string; contentMode?: "reading" | "full" }>) {
+}: PropsWithChildren<{ title: string; contentMode?: "reading" | "full"; resetRightSidebarOnEnter?: boolean }>) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -51,7 +52,13 @@ function RoutedLayout({
   };
 
   return (
-    <Layout title={title} activePath={location.pathname} contentMode={contentMode} onNavigate={handleNavigate}>
+    <Layout
+      title={title}
+      activePath={location.pathname}
+      contentMode={contentMode}
+      resetRightSidebarKey={resetRightSidebarOnEnter ? location.key : undefined}
+      onNavigate={handleNavigate}
+    >
       {children}
     </Layout>
   );
@@ -62,7 +69,7 @@ function HomeRoute() {
   const location = useLocation();
 
   return (
-    <RoutedLayout title="新对话" contentMode="full">
+    <RoutedLayout title="新对话" contentMode="full" resetRightSidebarOnEnter>
       <HomePage
         onNavigateToConversation={(threadId, initialModel, initialMessage) => {
           const quickSend = queueQuickChatSend({

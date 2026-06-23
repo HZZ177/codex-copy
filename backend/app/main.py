@@ -28,7 +28,7 @@ from backend.app.core.middleware import RequestLoggingMiddleware
 from backend.app.model import OpenAICompatibleProviderClient
 from backend.app.model.e2e_transport import create_e2e_model_transport
 from backend.app.runtime import create_desktop_runtime
-from backend.app.services import ChatService
+from backend.app.services import ChatService, ChatStreamManager
 from backend.app.storage import StorageRepositories, init_database
 from backend.app.tools import create_default_tool_registry
 
@@ -83,6 +83,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         repositories=app.state.repositories,
         agent_runner=app.state.agent_runner,
     )
+    app.state.chat_stream_manager = ChatStreamManager(app.state.chat_service)
     app.state.runtime = create_desktop_runtime(
         settings=resolved_settings,
         database=app.state.database,
@@ -90,6 +91,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         model_provider_client_provider=app.state.model_provider_client_provider,
         tool_registry=app.state.tool_registry,
         chat_service=app.state.chat_service,
+        chat_stream_manager=app.state.chat_stream_manager,
     )
     logger.info(
         "[App] 后端应用创建完成 | "

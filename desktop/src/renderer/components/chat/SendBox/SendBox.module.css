@@ -17,7 +17,7 @@
 }
 
 .root[data-variant="codex"] {
-  width: min(860px, 100%);
+  width: min(var(--composer-width), 100%);
   min-height: 110px;
   gap: 0;
   overflow: visible;
@@ -46,7 +46,6 @@
   width: 100%;
   min-height: 44px;
   max-height: 188px;
-  resize: none;
   border: 0;
   outline: 0;
   background: transparent;
@@ -56,17 +55,185 @@
   line-height: 1.55;
 }
 
+.richInput {
+  cursor: text;
+  overflow-y: auto;
+  caret-color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.richInput:empty::before,
+.richInput[data-empty="true"]::before {
+  color: var(--color-text-tertiary);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.root[data-variant="codex"] .richInput:empty::before,
+.root[data-variant="codex"] .richInput[data-empty="true"]::before {
+  color: color-mix(in srgb, var(--color-text-tertiary) 68%, transparent);
+}
+
+.quoteInputChip {
+  position: relative;
+  display: inline-flex;
+  max-width: min(132px, 100%);
+  box-sizing: border-box;
+  height: 20px;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  vertical-align: middle;
+  border: 1px solid color-mix(in srgb, var(--composer-border) 82%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--composer-bg) 91%, var(--surface-muted));
+  box-shadow:
+    0 4px 12px rgb(15 23 42 / 5%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 72%, transparent);
+  color: var(--color-text-secondary);
+  cursor: default;
+  font-size: 11.5px;
+  font-weight: 450;
+  line-height: 1;
+  padding: 0 5px 0 8px;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
+}
+
+.quoteInputChipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quoteInputChipRemove {
+  display: inline-grid;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.62;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
+}
+
+.quoteInputChip:hover {
+  border-color: color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  background: color-mix(in srgb, var(--composer-bg) 84%, var(--surface-hover));
+  color: var(--color-text-primary);
+  box-shadow:
+    0 7px 18px rgb(15 23 42 / 7%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 80%, transparent);
+}
+
+.quoteInputChip:hover .quoteInputChipRemove {
+  color: color-mix(in srgb, var(--color-danger) 84%, var(--color-text-secondary));
+  opacity: 1;
+}
+
+.quoteInputChipRemove:hover {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+}
+
+.quoteHoverCard {
+  position: absolute;
+  z-index: 24;
+  width: max-content;
+  min-width: 164px;
+  max-width: min(280px, calc(100% - 24px));
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 14px 34px rgb(15 23 42 / 10%),
+    0 2px 8px rgb(15 23 42 / 7%);
+  color: var(--color-text-primary);
+  padding: 10px;
+  transform: translate(-50%, -100%);
+  transform-origin: center bottom;
+  backdrop-filter: blur(12px);
+  animation: quoteHoverCardEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.quoteHoverCard::after {
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  background: inherit;
+  content: "";
+  pointer-events: none;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.quoteHoverBody {
+  max-height: 112px;
+  overflow: auto;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quoteHoverActions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quoteHoverActions button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 9px;
+}
+
+.quoteHoverActions button:hover {
+  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
+  color: var(--color-text-primary);
+}
+
+.quoteHoverActions button[data-danger="true"]:hover {
+  background: color-mix(in srgb, var(--color-danger) 9%, transparent);
+  color: var(--color-danger);
+}
+
+.quoteHoverActions button:focus-visible {
+  outline: none;
+}
+
 .root[data-variant="codex"] .input {
   min-height: 48px;
   font-size: 14px;
   line-height: 1.45;
 }
 
-.input::placeholder {
-  color: var(--color-text-tertiary);
-}
-
-.input:disabled {
+.richInput[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.64;
 }
@@ -238,8 +405,24 @@
   color: var(--color-text-tertiary);
 }
 
+.root[data-variant="codex"] .contextBar {
+  min-height: 44px;
+  padding: 0 14px;
+}
+
 .contextBar:empty {
   display: none;
+}
+
+@keyframes quoteHoverCardEnter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 5px)) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+  }
 }
 
 @media (max-width: 680px) {
@@ -285,5 +468,11 @@
 
   .leftHint span {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quoteHoverCard {
+    animation: none;
   }
 }

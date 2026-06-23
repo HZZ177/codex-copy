@@ -21,8 +21,32 @@ describe("processMessages", () => {
     ]);
     expect(result[1]).toMatchObject({
       type: "group",
+      id: "tool_activity:t1",
       groupKind: "tool_activity",
       sourceMessageIds: ["t1", "c1"],
+    });
+  });
+
+  it("keeps a grouped activity id stable when later tool messages are appended", () => {
+    const initial = processMessages([
+      message("t1", "tool"),
+      message("c1", "command"),
+    ]);
+    const updated = processMessages([
+      message("t1", "tool"),
+      message("c1", "command"),
+      message("t2", "tool"),
+    ]);
+
+    expect(initial[0]).toMatchObject({
+      type: "group",
+      id: "tool_activity:t1",
+      sourceMessageIds: ["t1", "c1"],
+    });
+    expect(updated[0]).toMatchObject({
+      type: "group",
+      id: "tool_activity:t1",
+      sourceMessageIds: ["t1", "c1", "t2"],
     });
   });
 

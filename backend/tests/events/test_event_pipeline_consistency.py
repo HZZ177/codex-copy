@@ -206,11 +206,15 @@ async def test_realtime_persistence_and_history_keep_cancelled_sequence(tmp_path
 
     assert [item["action"] for item in chat_adapter.sent] == ["stream", "cancelled"]
     assert [event.action for event in persisted_events] == ["stream_batch", "cancelled"]
-    assert len(messages) == 1
+    assert len(messages) == 2
     assert messages[0]["role"] == "assistant"
     assert messages[0]["content"] == "半截"
-    assert messages[0]["cancelled"] is True
     assert isinstance(messages[0]["timestamp"], int)
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == ""
+    assert messages[1]["status"] == "cancelled"
+    assert messages[1]["cancelled"] is True
+    assert isinstance(messages[1]["timestamp"], int)
     assert terminal_payload["status"] == "cancelled"
     assert terminal_payload["final_content"] == "半截"
 

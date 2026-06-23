@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatChannel, RuntimeBridge } from "@/runtime";
 import { ChatLayout } from "@/renderer/pages/conversation/ChatLayout";
 import { ConversationPage } from "@/renderer/pages/conversation";
+import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
 import type { AgentHistoryResponse, AgentSession } from "@/types/protocol";
 
 describe("ChatLayout", () => {
@@ -19,13 +20,10 @@ describe("ChatLayout", () => {
     expect(screen.getByLabelText("更多对话操作")).not.toBeNull();
     expect(screen.getByTestId("chat-reading-column")).not.toBeNull();
     expect(screen.getByTestId("conversation-composer")).not.toBeNull();
-    expect(screen.queryByLabelText("打开工作区")).toBeNull();
-    expect(screen.queryByLabelText("打开预览")).toBeNull();
-    expect(screen.queryByRole("complementary", { name: "工作区" })).toBeNull();
-    expect(screen.queryByRole("complementary", { name: "预览" })).toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
   });
 
-  it("keeps the message flow mounted when a real preview panel is toggled", () => {
+  it("keeps the message flow mounted when the conversation menu opens", () => {
     let mounts = 0;
     function MessageFlow() {
       useEffect(() => {
@@ -35,24 +33,28 @@ describe("ChatLayout", () => {
     }
 
     render(
-      <ChatLayout title="对话 thread-1" previewPanel={<div>真实预览内容</div>}>
+      <ChatLayout title="对话 thread-1">
         <MessageFlow />
       </ChatLayout>,
     );
 
-    expect(screen.queryByLabelText("打开工作区")).toBeNull();
-    expect(screen.getByRole("complementary", { name: "预览" })).not.toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
     expect(screen.getByTestId("message-flow")).not.toBeNull();
     fireEvent.click(screen.getByLabelText("更多对话操作"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "关闭预览" }));
-    expect(screen.queryByRole("complementary", { name: "预览" })).toBeNull();
+    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+    expect(screen.getByRole("menuitem", { name: "复制标题" })).not.toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
     expect(mounts).toBe(1);
   });
 });
 
 describe("ConversationPage", () => {
   it("renders the document chat shell for a thread", async () => {
-    render(<ConversationPage threadId="thread-1" runtime={fakeRuntime()} />);
+    render(
+      <PreviewProvider>
+        <ConversationPage threadId="thread-1" runtime={fakeRuntime()} />
+      </PreviewProvider>,
+    );
 
     expect(screen.getByRole("heading", { name: "对话 thread-1" })).not.toBeNull();
     expect(await screen.findByTestId("conversation-empty")).not.toBeNull();
@@ -100,6 +102,7 @@ function fakeRuntime(): RuntimeBridge {
     unbindSession: vi.fn(),
     chat: vi.fn(),
     cancel: vi.fn(),
+    requestStatus: vi.fn(),
     ping: vi.fn(),
   };
   return {

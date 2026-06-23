@@ -321,6 +321,9 @@ def test_session_service_restores_multi_turn_history_and_turn_filter(tmp_path) -
     assert full_history["list"][1]["traceId"] == "trace_1"
     assert full_history["turn_indexes"] == [1, 2]
     assert full_history["event_total"] == 5
+    assert full_history["total"] == 2
+    assert full_history["has_more_older"] is False
+    assert full_history["list"][0]["turnIndex"] == 1
 
     second_turn = service.get_history(
         GetHistoryRequest(session_id="ses_history", turn_index=2)
@@ -328,6 +331,71 @@ def test_session_service_restores_multi_turn_history_and_turn_filter(tmp_path) -
 
     assert [item["content"] for item in second_turn["list"]] == ["第二轮", "思考中"]
     assert second_turn["turn_indexes"] == [2]
+
+
+def test_session_service_pages_history_by_turn_without_splitting_messages(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    repositories.sessions.create(
+        session_id="ses_turn_pages",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="turn pages",
+    )
+    for turn in range(1, 7):
+        _append(
+            repositories,
+            event_id=f"evt_{turn}_user",
+            session_id="ses_turn_pages",
+            action="user_message",
+            data={"content": f"user {turn}"},
+            turn=turn,
+        )
+        _append(
+            repositories,
+            event_id=f"evt_{turn}_tool",
+            session_id="ses_turn_pages",
+            action="tool_start",
+            data={"tool": "read_file", "run_id": f"run_{turn}"},
+            turn=turn,
+        )
+        _append(
+            repositories,
+            event_id=f"evt_{turn}_stream",
+            session_id="ses_turn_pages",
+            action="stream_batch",
+            data={"content": f"answer {turn}"},
+            turn=turn,
+        )
+    service = _service(repositories)
+
+    latest = service.get_history(GetHistoryRequest(session_id="ses_turn_pages", page_size=5))
+
+    assert latest["turn_indexes"] == [2, 3, 4, 5, 6]
+    assert latest["total"] == 6
+    assert latest["event_total"] == 18
+    assert latest["has_more_older"] is True
+    assert latest["next_cursor"]
+    assert [message["turnIndex"] for message in latest["list"] if message["role"] == "user"] == [2, 3, 4, 5, 6]
+    assert [message["content"] for message in latest["list"] if message["role"] == "assistant"] == [
+        "answer 2",
+        "answer 3",
+        "answer 4",
+        "answer 5",
+        "answer 6",
+    ]
+
+    older = service.get_history(
+        GetHistoryRequest(
+            session_id="ses_turn_pages",
+            cursor=latest["next_cursor"],
+            page_size=5,
+        )
+    )
+
+    assert older["turn_indexes"] == [1]
+    assert older["has_more_older"] is False
+    assert older["next_cursor"] is None
+    assert [message["turnIndex"] for message in older["list"]] == [1, 1, 1]
 
 
 def test_session_service_updates_session_terminal_status(tmp_path) -> None:

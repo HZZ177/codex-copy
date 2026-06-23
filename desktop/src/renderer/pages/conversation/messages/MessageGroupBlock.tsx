@@ -155,6 +155,8 @@ interface GroupSummary {
   state: "done" | "running" | "failed" | "pending";
 }
 
+type CountState = "done" | "running" | "failed";
+
 function groupState(summaries: GroupSummary[]): GroupSummary["state"] {
   if (summaries.some((summary) => summary.state === "failed")) {
     return "failed";
@@ -261,65 +263,67 @@ function toolActivityLabel(
   state: GroupSummary["state"],
   fallbackCount: number,
 ): string {
-  const stats = {
-    readFiles: new Set<string>(),
-    listedDirectories: new Set<string>(),
-    searches: 0,
-    commands: 0,
-    editedFiles: new Set<string>(),
-    otherTools: 0,
-  };
+  const stats = createToolStats();
 
   messages.forEach((message, index) => {
+    const countState = countStateFromSummary(summarizeMessage(message).state);
     if (message.kind === "command") {
-      stats.commands += 1;
+      stats.commands[countState] += 1;
       return;
     }
     const toolName = toolNameFromMessage(message);
     const args = toolArgsFromMessage(message);
     const target = toolTarget(args, index);
     if (isReadTool(toolName)) {
-      stats.readFiles.add(target);
+      stats.readFiles[countState].add(target);
       return;
     }
     if (isDirectoryTool(toolName)) {
-      stats.listedDirectories.add(target);
+      stats.listedDirectories[countState].add(target);
       return;
     }
     if (isSearchTool(toolName)) {
-      stats.searches += 1;
+      stats.searches[countState] += 1;
       return;
     }
     if (isEditTool(toolName)) {
-      editedFilesFromMessage(message, index).forEach((path) => stats.editedFiles.add(path));
+      editedFilesFromMessage(message, index).forEach((path) => stats.editedFiles[countState].add(path));
       return;
     }
-    stats.otherTools += 1;
+    stats.otherTools[countState] += 1;
   });
 
   const parts = [
-    countPhrase("readFiles", stats.readFiles.size, state),
-    countPhrase("listedDirectories", stats.listedDirectories.size, state),
-    countPhrase("searches", stats.searches, state),
-    countPhrase("commands", stats.commands, state),
-    countPhrase("editedFiles", stats.editedFiles.size, state),
-    countPhrase("otherTools", stats.otherTools, state),
-  ].filter(Boolean);
+    ...countSetPhrases("readFiles", stats.readFiles),
+    ...countSetPhrases("listedDirectories", stats.listedDirectories),
+    ...countNumberPhrases("searches", stats.searches),
+    ...countNumberPhrases("commands", stats.commands),
+    ...countSetPhrases("editedFiles", stats.editedFiles),
+    ...countNumberPhrases("otherTools", stats.otherTools),
+  ];
 
   if (parts.length) {
     return parts.join("，");
   }
-  return countPhrase("otherTools", fallbackCount, state) || "执行了工具";
+  return countPhrase("otherTools", fallbackCount, countStateFromSummary(state)) || "执行了工具";
 }
 
 function fileChangeLabel(messages: ConversationMessage[], state: GroupSummary["state"], fallbackCount: number): string {
-  const fileCount = messages.reduce((total, message, index) => total + filePathsFromPayload(message.payload, index).size, 0);
-  return countPhrase("editedFiles", fileCount || fallbackCount, state) || "编辑了文件";
+  const files = createStateSetBuckets();
+  messages.forEach((message, index) => {
+    const countState = countStateFromSummary(summarizeFileChange(message).state);
+    filePathsFromPayload(message.payload, index).forEach((path) => files[countState].add(path));
+  });
+  const parts = countSetPhrases("editedFiles", files);
+  if (parts.length) {
+    return parts.join("，");
+  }
+  return countPhrase("editedFiles", fallbackCount, countStateFromSummary(state)) || "编辑了文件";
 }
 
 type ToolSummaryKind = "readFiles" | "listedDirectories" | "searches" | "commands" | "editedFiles" | "otherTools";
 
-function countPhrase(kind: ToolSummaryKind, count: number, state: GroupSummary["state"]): string {
+function countPhrase(kind: ToolSummaryKind, count: number, state: CountState): string {
   if (!count) {
     return "";
   }
@@ -340,8 +344,8 @@ function countPhrase(kind: ToolSummaryKind, count: number, state: GroupSummary["
   }
 }
 
-function verbForKind(kind: ToolSummaryKind, state: GroupSummary["state"]): string {
-  const running = state === "running" || state === "pending";
+function verbForKind(kind: ToolSummaryKind, state: CountState): string {
+  const running = state === "running";
   const failed = state === "failed";
   switch (kind) {
     case "readFiles":
@@ -357,6 +361,62 @@ function verbForKind(kind: ToolSummaryKind, state: GroupSummary["state"]): strin
     case "otherTools":
       return failed ? "调用失败" : running ? "正在调用" : "调用了";
   }
+}
+
+type StateSetBuckets = Record<CountState, Set<string>>;
+type StateNumberBuckets = Record<CountState, number>;
+
+function createToolStats() {
+  return {
+    readFiles: createStateSetBuckets(),
+    listedDirectories: createStateSetBuckets(),
+    searches: createStateNumberBuckets(),
+    commands: createStateNumberBuckets(),
+    editedFiles: createStateSetBuckets(),
+    otherTools: createStateNumberBuckets(),
+  };
+}
+
+function createStateSetBuckets(): StateSetBuckets {
+  return {
+    failed: new Set<string>(),
+    running: new Set<string>(),
+    done: new Set<string>(),
+  };
+}
+
+function createStateNumberBuckets(): StateNumberBuckets {
+  return {
+    failed: 0,
+    running: 0,
+    done: 0,
+  };
+}
+
+function countSetPhrases(kind: ToolSummaryKind, buckets: StateSetBuckets): string[] {
+  return orderedCountStates()
+    .map((state) => countPhrase(kind, buckets[state].size, state))
+    .filter(Boolean);
+}
+
+function countNumberPhrases(kind: ToolSummaryKind, buckets: StateNumberBuckets): string[] {
+  return orderedCountStates()
+    .map((state) => countPhrase(kind, buckets[state], state))
+    .filter(Boolean);
+}
+
+function orderedCountStates(): CountState[] {
+  return ["failed", "running", "done"];
+}
+
+function countStateFromSummary(state: GroupSummary["state"]): CountState {
+  if (state === "failed") {
+    return "failed";
+  }
+  if (state === "running" || state === "pending") {
+    return "running";
+  }
+  return "done";
 }
 
 function toolNameFromMessage(message: ConversationMessage): string {

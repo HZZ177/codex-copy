@@ -1,6 +1,8 @@
-import { Check, ChevronDown, ChevronUp, Copy, Maximize2, PanelRightOpen, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, Maximize2, PanelRightDashed, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import katex from "katex";
 import {
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -15,9 +17,12 @@ import ReactMarkdown from "react-markdown";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { vs, vs2015 } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
+import { JsonTreeViewer } from "@/renderer/components/json/JsonTreeViewer";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
+import { formatMermaidCssPixels, normalizeMermaidSvgDimensions, type SvgDimensions } from "@/renderer/utils/mermaidSvg";
 
+import { LineChangeTicker } from "./LineChangeTicker";
 import { MarkdownTable } from "./MarkdownTable";
 import { copyText, markdownRehypePlugins, markdownRemarkPlugins, normalizeMarkdownContent } from "./markdown";
 import styles from "./MessageText.module.css";
@@ -25,23 +30,48 @@ import styles from "./MessageText.module.css";
 const PREVIEW_LINES = 10;
 const VIEW_SWITCH_DELAY_MS = 180;
 const COLLAPSED_CODE_HEIGHT = 198;
+const CODE_COLLAPSE_ANIMATION_MS = 220;
+const CODE_HIGHLIGHTER_STYLE: CSSProperties = {
+  margin: 0,
+  padding: "0 12px 10px",
+  border: "none",
+  background: "transparent",
+  color: "var(--color-text-1)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  lineHeight: 1.55,
+  overflowX: "visible",
+};
+const CODE_TAG_PROPS = {
+  style: {
+    background: "transparent",
+    color: "var(--color-text-1)",
+    fontFamily: "var(--font-mono)",
+  },
+};
+const MERMAID_MIN_SCALE = 0.1;
+const MERMAID_MAX_SCALE = 10;
+const MERMAID_SCALE_STEP = 0.1;
+const MERMAID_FIT_PADDING = 64;
+const MERMAID_AUTO_FIT_FRAMES = 40;
 type ContentPreviewRequest = Extract<PreviewRequest, { type: "content" }>;
 
 export interface MarkdownCodeBlockProps {
   children?: ReactNode;
   defaultViewMode?: "source" | "preview";
+  streaming?: boolean;
 }
 
-export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: MarkdownCodeBlockProps) {
+export function MarkdownCodeBlock({ children, defaultViewMode = "source", streaming = false }: MarkdownCodeBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [viewModeOverride, setViewModeOverride] = useState<"source" | "preview" | null>(null);
   const [pendingViewMode, setPendingViewMode] = useState<"source" | "preview" | null>(null);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
-  const [sourceHeight, setSourceHeight] = useState(COLLAPSED_CODE_HEIGHT);
   const [theme, setTheme] = useState<"light" | "dark">(() => getTheme());
   const containerRef = useRef<HTMLDivElement>(null);
   const sourceViewportRef = useRef<HTMLDivElement>(null);
+  const sourceAnimationRef = useRef<Animation | null>(null);
   const switchTimerRef = useRef<number | null>(null);
   const previewContext = useOptionalPreview();
   const codeChild = getCodeChild(children);
@@ -51,24 +81,36 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
   const panelPreview = useMemo(() => buildPanelPreviewRequest(language, text), [language, text]);
   const displayText = useMemo(() => formatCode(text), [text]);
   const lines = useMemo(() => displayText.split("\n"), [displayText]);
+  const previewLines = useMemo(() => lines.slice(0, PREVIEW_LINES), [lines]);
   const canPreviewHtml = isHtmlPreviewLanguage(language);
   const canPreviewMermaid = language === "mermaid";
   const canPreviewMath = isMathLanguage(language) && !isFullLatexDocument(text);
-  const previewLabel = canPreviewHtml ? "HTML" : canPreviewMermaid ? "Mermaid" : canPreviewMath ? "公式" : null;
+  const canPreviewJson = language === "json";
+  const previewLabel = canPreviewHtml
+    ? "HTML"
+    : canPreviewMermaid
+      ? "Mermaid"
+      : canPreviewMath
+        ? "公式"
+        : canPreviewJson
+          ? "JSON"
+          : null;
   const canOpenFullscreen = Boolean(previewLabel || panelPreview);
   const fullscreenLabel = previewLabel ?? panelPreview?.title ?? language;
   const fullscreenTitle = previewLabel ? `${previewLabel} 预览` : panelPreview?.title ?? `${language} 预览`;
-  const preferredViewMode = previewLabel ? "preview" : defaultViewMode;
+  const preferredViewMode = defaultViewMode;
   const viewMode = viewModeOverride ?? preferredViewMode;
   const isSwitchingView = pendingViewMode !== null;
-  const canCollapse = lines.length > PREVIEW_LINES;
+  const switchViewMode = pendingViewMode ?? viewMode;
+  const overflowLineCount = Math.max(0, lines.length - PREVIEW_LINES);
+  const canCollapse = overflowLineCount > 0;
   const showSourceView = !isSwitchingView && viewMode === "source";
-  const showCollapseControls = showSourceView && canCollapse;
+  const sourceCollapsed = canCollapse && (!expanded || streaming);
+  const showCollapseControls = showSourceView && canCollapse && !streaming;
+  const showStreamingLineStatus = showSourceView && streaming && overflowLineCount > 0;
   const isDiff = language === "diff";
-  const highlighterTheme = theme === "dark" ? vs2015 : vs;
-  const sourceViewportStyle = {
-    "--code-expanded-height": `${Math.max(sourceHeight, COLLAPSED_CODE_HEIGHT)}px`,
-  } as CSSProperties;
+  const renderedLines = sourceCollapsed ? previewLines : lines;
+  const renderedDisplayText = sourceCollapsed ? previewLines.join("\n") : displayText;
 
   useEffect(() => {
     const themeObserver = new MutationObserver(() => setTheme(getTheme()));
@@ -81,29 +123,17 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
     setViewModeOverride(null);
     setPendingViewMode(null);
     setFullscreenOpen(false);
+    clearSourceAnimation(sourceAnimationRef, sourceViewportRef.current);
     setExpanded(false);
   }, [language, preferredViewMode, text]);
 
-  useLayoutEffect(() => {
-    const element = sourceViewportRef.current;
-    if (!element || !showSourceView) {
-      return;
-    }
-
-    const measure = () => {
-      setSourceHeight(Math.max(element.scrollHeight, COLLAPSED_CODE_HEIGHT));
-    };
-    measure();
-
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [displayText, showSourceView, theme]);
-
-  useEffect(() => () => clearSwitchTimer(switchTimerRef), []);
+  useEffect(
+    () => () => {
+      clearSwitchTimer(switchTimerRef);
+      clearSourceAnimation(sourceAnimationRef, sourceViewportRef.current);
+    },
+    [],
+  );
 
   const handleCopy = async () => {
     try {
@@ -115,20 +145,73 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
   };
 
   const toggleExpanded = () => {
-    const willCollapse = expanded;
-    setExpanded((value) => !value);
-    if (willCollapse) {
-      window.requestAnimationFrame(() => {
-        containerRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
-      });
-    }
-  };
+    const nextExpanded = !expanded;
+    const viewport = sourceViewportRef.current;
 
-  const toggleViewMode = () => {
-    if (!previewLabel || pendingViewMode) {
+    if (!viewport || prefersReducedMotion() || typeof viewport.animate !== "function") {
+      setExpanded(nextExpanded);
+      if (!nextExpanded) {
+        window.requestAnimationFrame(() => {
+          containerRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
+        });
+      }
       return;
     }
-    const nextViewMode = viewMode === "source" ? "preview" : "source";
+
+    const fromHeight = viewport.getBoundingClientRect().height;
+    const targetHeight = nextExpanded
+      ? viewport.scrollHeight
+      : Math.min(COLLAPSED_CODE_HEIGHT, viewport.scrollHeight);
+
+    clearSourceAnimation(sourceAnimationRef, viewport);
+    viewport.dataset.animating = "true";
+    viewport.style.height = `${fromHeight}px`;
+    viewport.style.maxHeight = "none";
+    viewport.style.overflow = "hidden";
+
+    setExpanded(nextExpanded);
+
+    window.requestAnimationFrame(() => {
+      const activeViewport = sourceViewportRef.current;
+      if (activeViewport !== viewport) {
+        return;
+      }
+      const currentTargetHeight = nextExpanded
+        ? viewport.scrollHeight
+        : Math.min(COLLAPSED_CODE_HEIGHT, viewport.scrollHeight);
+      const animation = viewport.animate(
+        [
+          { height: `${fromHeight}px`, opacity: nextExpanded ? 0.96 : 1 },
+          { height: `${currentTargetHeight || targetHeight}px`, opacity: 1 },
+        ],
+        {
+          duration: CODE_COLLAPSE_ANIMATION_MS,
+          easing: "cubic-bezier(0.2, 0, 0.13, 1)",
+        },
+      );
+      sourceAnimationRef.current = animation;
+
+      animation.onfinish = () => {
+        if (sourceAnimationRef.current !== animation) {
+          return;
+        }
+        clearSourceAnimation(sourceAnimationRef, viewport);
+        if (!nextExpanded) {
+          containerRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
+        }
+      };
+      animation.oncancel = () => {
+        if (sourceAnimationRef.current === animation) {
+          clearSourceAnimation(sourceAnimationRef, viewport);
+        }
+      };
+    });
+  };
+
+  const setCodeViewMode = (nextViewMode: "source" | "preview") => {
+    if (!previewLabel || pendingViewMode || nextViewMode === viewMode) {
+      return;
+    }
     clearSwitchTimer(switchTimerRef);
     setPendingViewMode(nextViewMode);
     switchTimerRef.current = window.setTimeout(
@@ -145,7 +228,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
     if (!panelPreview) {
       return;
     }
-    previewContext?.openPreview(panelPreview);
+    previewContext?.togglePreview(panelPreview);
   };
 
   return (
@@ -154,15 +237,31 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
         <span className={styles.codeLanguage}>{language}</span>
         <div className={styles.codeActions}>
           {previewLabel ? (
-            <button
-              className={styles.codeTextButton}
-              type="button"
-              aria-pressed={viewMode === "preview"}
-              disabled={isSwitchingView}
-              onClick={toggleViewMode}
+            <div
+              className={styles.codeViewSwitch}
+              data-mode={switchViewMode}
+              role="group"
+              aria-label={`${previewLabel} 视图切换`}
             >
-              {isSwitchingView ? "切换中" : viewMode === "source" ? `预览 ${previewLabel}` : "查看源码"}
-            </button>
+              <button
+                type="button"
+                aria-label="查看源码"
+                aria-pressed={switchViewMode === "source"}
+                disabled={isSwitchingView}
+                onClick={() => setCodeViewMode("source")}
+              >
+                源码
+              </button>
+              <button
+                type="button"
+                aria-label={`预览 ${previewLabel}`}
+                aria-pressed={switchViewMode === "preview"}
+                disabled={isSwitchingView}
+                onClick={() => setCodeViewMode("preview")}
+              >
+                预览
+              </button>
+            </div>
           ) : null}
           {canOpenFullscreen ? (
             <button
@@ -183,7 +282,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
               title={`在预览面板打开 ${panelPreview.title}`}
               onClick={openInPanel}
             >
-              <PanelRightOpen size={14} />
+              <PanelRightDashed size={14} />
             </button>
           ) : null}
           {showCollapseControls ? (
@@ -210,54 +309,34 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
         <MermaidPreview code={text} theme={theme} />
       ) : canPreviewMath && viewMode === "preview" ? (
         <MathPreview source={text} />
+      ) : canPreviewJson && viewMode === "preview" ? (
+        <JsonTreeViewer source={text} size="inline" />
       ) : (
         <div
           ref={sourceViewportRef}
           className={styles.codeViewport}
-          data-collapsed={canCollapse && !expanded ? "true" : "false"}
+          data-collapsed={sourceCollapsed ? "true" : "false"}
           data-scroll-axis="x"
           data-testid="markdown-code-viewport"
-          style={sourceViewportStyle}
         >
-          <SyntaxHighlighter
+          <SourceCodeHighlighter
+            displayText={renderedDisplayText}
             language={language}
-            style={highlighterTheme}
-            PreTag="div"
-            wrapLines={isDiff}
-            lineProps={
-              isDiff
-                ? (lineNumber: number) => ({
-                    style: getDiffLineStyle(lines[lineNumber - 1] ?? "", theme),
-                  })
-                : undefined
-            }
-            customStyle={{
-              margin: 0,
-              padding: "0 12px 10px",
-              border: "none",
-              background: "transparent",
-              color: "var(--color-text-1)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              lineHeight: 1.55,
-              overflowX: "visible",
-            }}
-            codeTagProps={{
-              style: {
-                background: "transparent",
-                color: "var(--color-text-1)",
-                fontFamily: "var(--font-mono)",
-              },
-            }}
-          >
-            {displayText}
-          </SyntaxHighlighter>
+            lines={renderedLines}
+            isDiff={isDiff}
+            theme={theme}
+          />
         </div>
       )}
 
+      {showStreamingLineStatus ? (
+        <div className={styles.codeGenerationFooter} aria-live="polite">
+          <LineChangeTicker label="正在生成内容" added={overflowLineCount} />
+        </div>
+      ) : null}
       {showCollapseControls ? (
         <button className={styles.codeFooter} type="button" onClick={toggleExpanded}>
-          {expanded ? "收起代码" : `展开其余 ${lines.length - PREVIEW_LINES} 行`}
+          {expanded ? "收起代码" : `展开其余 ${overflowLineCount} 行`}
           {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         </button>
       ) : null}
@@ -274,6 +353,63 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source" }: Mark
       ) : null}
     </div>
   );
+}
+
+const SourceCodeHighlighter = memo(function SourceCodeHighlighter({
+  displayText,
+  language,
+  lines,
+  isDiff,
+  theme,
+}: {
+  displayText: string;
+  language: string;
+  lines: string[];
+  isDiff: boolean;
+  theme: "light" | "dark";
+}) {
+  const highlighterTheme = theme === "dark" ? vs2015 : vs;
+  const lineProps = useMemo(
+    () =>
+      isDiff
+        ? (lineNumber: number) => ({
+            style: getDiffLineStyle(lines[lineNumber - 1] ?? "", theme),
+          })
+        : undefined,
+    [isDiff, lines, theme],
+  );
+
+  return (
+    <SyntaxHighlighter
+      language={language}
+      style={highlighterTheme}
+      PreTag="div"
+      wrapLines={isDiff}
+      lineProps={lineProps}
+      customStyle={CODE_HIGHLIGHTER_STYLE}
+      codeTagProps={CODE_TAG_PROPS}
+    >
+      {displayText}
+    </SyntaxHighlighter>
+  );
+});
+
+function clearSourceAnimation(animationRef: { current: Animation | null }, element: HTMLElement | null) {
+  const animation = animationRef.current;
+  if (animation) {
+    animation.onfinish = null;
+    animation.oncancel = null;
+    animation.cancel();
+    animationRef.current = null;
+  }
+
+  if (!element) {
+    return;
+  }
+  delete element.dataset.animating;
+  element.style.height = "";
+  element.style.maxHeight = "";
+  element.style.overflow = "";
 }
 
 function PreviewFullscreenDialog({
@@ -347,6 +483,9 @@ function FullscreenPreviewContent({
   if (isMathLanguage(language) && !isFullLatexDocument(text)) {
     return <MathPreview source={text} size="fullscreen" />;
   }
+  if (contentType === "json" || language === "json") {
+    return <JsonTreeViewer source={text} size="fullscreen" />;
+  }
   if (contentType === "markdown") {
     return (
       <div className={styles.fullscreenMarkdown}>
@@ -363,11 +502,8 @@ function FullscreenPreviewContent({
     );
   }
   return (
-    <pre
-      className={styles.fullscreenSource}
-      data-kind={contentType === "diff" ? "diff" : contentType === "json" ? "json" : "source"}
-    >
-      {contentType === "json" ? formatCode(text) : text || "内容为空"}
+    <pre className={styles.fullscreenSource} data-kind={contentType === "diff" ? "diff" : "source"}>
+      {text || "内容为空"}
     </pre>
   );
 }
@@ -482,8 +618,16 @@ function MathPreview({ source, size = "inline" }: { source: string; size?: "inli
 
 type MermaidPreviewState =
   | { status: "loading" }
-  | { status: "ready"; svg: string }
+  | { status: "ready"; svg: string; dimensions: SvgDimensions | null }
   | { status: "error"; message: string };
+
+interface MermaidDragState {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
 
 function MermaidPreview({
   code,
@@ -498,19 +642,20 @@ function MermaidPreview({
 }) {
   const [state, setState] = useState<MermaidPreviewState>({ status: "loading" });
   const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const previewRef = useRef<HTMLDivElement>(null);
   const instanceId = useRef(`mermaid-${Math.random().toString(36).slice(2)}`);
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(
-    null,
-  );
+  const dragRef = useRef<MermaidDragState | null>(null);
+  const autoFitRef = useRef(true);
+  const centerFrameRef = useRef<number | null>(null);
+  const autoFitFrameRef = useRef<number | null>(null);
+  const autoFitAttemptRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const renderId = `${instanceId.current}-${hashMermaidCode(code)}`;
     setState({ status: "loading" });
     setScale(1);
-    setOffset({ x: 0, y: 0 });
+    autoFitRef.current = true;
 
     void import("mermaid")
       .then(async ({ default: mermaid }) => {
@@ -519,6 +664,9 @@ function MermaidPreview({
           theme: theme === "dark" ? "dark" : "default",
           securityLevel: "strict",
           suppressErrorRendering: true,
+          flowchart: {
+            useMaxWidth: false,
+          },
         });
         await mermaid.parse(code, { suppressErrors: false });
         const renderHost = document.createElement("div");
@@ -537,7 +685,8 @@ function MermaidPreview({
           return;
         }
         const svg = typeof result === "string" ? result : result.svg;
-        setState({ status: "ready", svg });
+        const normalized = normalizeMermaidSvgDimensions(svg);
+        setState({ status: "ready", svg: normalized.svg, dimensions: normalized.dimensions });
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -553,8 +702,130 @@ function MermaidPreview({
     };
   }, [code, theme]);
 
+  const cancelCenterViewport = useCallback(() => {
+    if (centerFrameRef.current !== null) {
+      window.cancelAnimationFrame(centerFrameRef.current);
+      centerFrameRef.current = null;
+    }
+  }, []);
+
+  const scheduleCenterViewport = useCallback((viewport: HTMLElement, dimensions: SvgDimensions, nextScale: number) => {
+    if (!autoFitRef.current) {
+      return;
+    }
+    cancelCenterViewport();
+    centerMermaidViewport(viewport, dimensions, nextScale);
+    centerFrameRef.current = window.requestAnimationFrame(() => {
+      centerFrameRef.current = null;
+      if (autoFitRef.current) {
+        centerMermaidViewport(viewport, dimensions, nextScale);
+      }
+    });
+  }, [cancelCenterViewport]);
+
+  const cancelAutoFitLoop = useCallback(() => {
+    if (autoFitFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoFitFrameRef.current);
+      autoFitFrameRef.current = null;
+    }
+    cancelCenterViewport();
+  }, [cancelCenterViewport]);
+
+  const fitMermaidToViewport = useCallback(() => {
+    if (!interactive || state.status !== "ready" || !state.dimensions) {
+      return false;
+    }
+    const viewport = previewRef.current;
+    if (!viewport) {
+      return false;
+    }
+    const next = calculateMermaidFitScale(viewport, state.dimensions);
+    if (next === null) {
+      return false;
+    }
+    setScale((current) => (current === next ? current : next));
+    scheduleCenterViewport(viewport, state.dimensions, next);
+    return true;
+  }, [interactive, scheduleCenterViewport, state]);
+
+  const scheduleAutoFitLoop = useCallback(() => {
+    cancelAutoFitLoop();
+    autoFitAttemptRef.current = 0;
+
+    const tick = () => {
+      autoFitFrameRef.current = null;
+      if (!autoFitRef.current) {
+        return;
+      }
+
+      fitMermaidToViewport();
+      autoFitAttemptRef.current += 1;
+
+      if (autoFitAttemptRef.current < MERMAID_AUTO_FIT_FRAMES) {
+        autoFitFrameRef.current = window.requestAnimationFrame(tick);
+      }
+    };
+
+    autoFitFrameRef.current = window.requestAnimationFrame(tick);
+  }, [cancelAutoFitLoop, fitMermaidToViewport]);
+
+  const zoomBy = useCallback((delta: number, focus?: { clientX: number; clientY: number }) => {
+    autoFitRef.current = false;
+    cancelAutoFitLoop();
+    setScale((current) => {
+      const next = clampMermaidScale(current + delta);
+      const viewport = previewRef.current;
+      if (focus && viewport && next !== current) {
+        preserveMermaidZoomAnchor(viewport, current, next, focus);
+      }
+      return next;
+    });
+  }, [cancelAutoFitLoop]);
+
+  const resetTransform = () => {
+    autoFitRef.current = true;
+    if (state.status !== "ready" || !state.dimensions) {
+      setScale(1);
+      return;
+    }
+    scheduleAutoFitLoop();
+  };
+
+  useLayoutEffect(() => {
+    if (!interactive || !autoFitRef.current) {
+      return;
+    }
+    scheduleAutoFitLoop();
+  }, [interactive, scheduleAutoFitLoop]);
+
   useEffect(() => {
-    if (!interactive) {
+    if (!interactive || state.status !== "ready" || !state.dimensions || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const viewport = previewRef.current;
+    if (!viewport) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (autoFitRef.current) {
+        scheduleAutoFitLoop();
+      }
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [interactive, scheduleAutoFitLoop, state]);
+
+  useEffect(() => {
+    return () => {
+      if (centerFrameRef.current !== null) {
+        window.cancelAnimationFrame(centerFrameRef.current);
+      }
+      cancelAutoFitLoop();
+    };
+  }, [cancelAutoFitLoop]);
+
+  useEffect(() => {
+    if (!interactive || state.status !== "ready") {
       return;
     }
     const element = previewRef.current;
@@ -562,55 +833,117 @@ function MermaidPreview({
       return;
     }
     const handleNativeWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) === 0) {
+        return;
+      }
       event.preventDefault();
-      setScale((current) => clampMermaidScale(current + (event.deltaY < 0 ? 0.12 : -0.12)));
+      zoomBy(event.deltaY < 0 ? MERMAID_SCALE_STEP : -MERMAID_SCALE_STEP, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
     };
     element.addEventListener("wheel", handleNativeWheel, { passive: false });
     return () => element.removeEventListener("wheel", handleNativeWheel);
-  }, [interactive]);
+  }, [interactive, state.status, zoomBy]);
 
-  const zoomBy = (delta: number) => {
-    setScale((current) => clampMermaidScale(current + delta));
-  };
-
-  const resetTransform = () => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
+  const zoomFromViewportCenter = (delta: number) => {
+    const viewport = previewRef.current;
+    if (!viewport) {
+      zoomBy(delta);
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    zoomBy(delta, {
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!interactive || state.status !== "ready") {
+    if (!interactive || state.status !== "ready" || event.button > 0) {
       return;
     }
+    autoFitRef.current = false;
+    cancelAutoFitLoop();
     dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: offset.x,
-      originY: offset.y,
+      pointerId: pointerIdValue(event),
+      startX: pointerCoordinate(event.clientX),
+      startY: pointerCoordinate(event.clientY),
+      scrollLeft: event.currentTarget.scrollLeft,
+      scrollTop: event.currentTarget.scrollTop,
     };
+    event.currentTarget.dataset.dragging = "true";
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
-    if (!interactive || !drag || drag.pointerId !== event.pointerId) {
+    if (!interactive || !drag || drag.pointerId !== pointerIdValue(event)) {
       return;
     }
-    setOffset({
-      x: drag.originX + event.clientX - drag.startX,
-      y: drag.originY + event.clientY - drag.startY,
-    });
+    event.currentTarget.scrollLeft = drag.scrollLeft - (pointerCoordinate(event.clientX) - drag.startX);
+    event.currentTarget.scrollTop = drag.scrollTop - (pointerCoordinate(event.clientY) - drag.startY);
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (dragRef.current?.pointerId !== pointerIdValue(event)) {
+      return;
     }
+    dragRef.current = null;
+    delete event.currentTarget.dataset.dragging;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
-  return (
+  const scaleLabel = formatMermaidScale(scale);
+  const usesLayoutScale = state.status === "ready" && interactive && Boolean(state.dimensions);
+  const renderDimensions =
+    state.status === "ready" && interactive && state.dimensions
+      ? {
+          "--mermaid-render-width": formatMermaidCssPixels(state.dimensions.width * scale),
+          "--mermaid-render-height": formatMermaidCssPixels(state.dimensions.height * scale),
+        }
+      : null;
+
+  const controls = interactive ? (
+    <div className={styles.mermaidControls} aria-label="Mermaid 视图控制" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" aria-label="缩小 Mermaid" onClick={() => zoomFromViewportCenter(-MERMAID_SCALE_STEP)}>
+        <ZoomOut size={15} />
+      </button>
+      <span className={styles.mermaidScaleValue} aria-label={`当前缩放 ${scaleLabel}`}>
+        {scaleLabel}
+      </span>
+      <button type="button" aria-label="放大 Mermaid" onClick={() => zoomFromViewportCenter(MERMAID_SCALE_STEP)}>
+        <ZoomIn size={15} />
+      </button>
+      <button type="button" aria-label="重置 Mermaid 视图" onClick={resetTransform}>
+        <RotateCcw size={15} />
+      </button>
+    </div>
+  ) : null;
+  const previewContent =
+    state.status === "ready" ? (
+      <div
+        className={styles.mermaidSvg}
+        aria-label="Mermaid 图表"
+        data-interactive={interactive ? "true" : "false"}
+        data-sized={usesLayoutScale ? "true" : "false"}
+        style={
+          {
+            "--mermaid-scale": scale,
+            ...renderDimensions,
+          } as CSSProperties
+        }
+        dangerouslySetInnerHTML={{ __html: state.svg }}
+      />
+    ) : state.status === "error" ? (
+      <div className={styles.mermaidStatus} role="alert">
+        {state.message}
+      </div>
+    ) : (
+      <div className={styles.mermaidStatus} aria-hidden="true" />
+    );
+  const preview = (
     <div
       ref={previewRef}
       className={styles.mermaidPreview}
@@ -622,42 +955,70 @@ function MermaidPreview({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      {interactive ? (
-        <div className={styles.mermaidControls} aria-label="Mermaid 视图控制" onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" aria-label="放大 Mermaid" onClick={() => zoomBy(0.15)}>
-            <ZoomIn size={15} />
-          </button>
-          <button type="button" aria-label="缩小 Mermaid" onClick={() => zoomBy(-0.15)}>
-            <ZoomOut size={15} />
-          </button>
-          <button type="button" aria-label="重置 Mermaid 视图" onClick={resetTransform}>
-            <RotateCcw size={15} />
-          </button>
-        </div>
-      ) : null}
-      {state.status === "ready" ? (
-        <div
-          className={styles.mermaidSvg}
-          aria-label="Mermaid 图表"
-          data-interactive={interactive ? "true" : "false"}
-          style={{
-            transform: interactive ? `translate(${offset.x}px, ${offset.y}px) scale(${scale})` : undefined,
-          }}
-          dangerouslySetInnerHTML={{ __html: state.svg }}
-        />
-      ) : state.status === "error" ? (
-        <div className={styles.mermaidStatus} role="alert">
-          {state.message}
-        </div>
-      ) : (
-        <div className={styles.mermaidStatus}>正在渲染 Mermaid...</div>
-      )}
+      {size === "fullscreen" ? null : controls}
+      {previewContent}
     </div>
   );
+
+  if (interactive && size === "fullscreen") {
+    return (
+      <div className={styles.mermaidFullscreenShell}>
+        {controls}
+        {preview}
+      </div>
+    );
+  }
+
+  return preview;
 }
 
 function clampMermaidScale(value: number): number {
-  return Math.min(3, Math.max(0.35, Math.round(value * 100) / 100));
+  return Math.min(MERMAID_MAX_SCALE, Math.max(MERMAID_MIN_SCALE, Math.round(value * 100) / 100));
+}
+
+function calculateMermaidFitScale(viewport: HTMLElement, dimensions: SvgDimensions): number | null {
+  const availableWidth = viewport.clientWidth - MERMAID_FIT_PADDING;
+  const availableHeight = viewport.clientHeight - MERMAID_FIT_PADDING;
+  if (availableWidth <= 0 || availableHeight <= 0) {
+    return null;
+  }
+  return clampMermaidScale(Math.min(availableWidth / dimensions.width, availableHeight / dimensions.height));
+}
+
+function centerMermaidViewport(viewport: HTMLElement, dimensions: SvgDimensions, scale: number) {
+  viewport.scrollLeft = Math.max(0, (dimensions.width * scale - viewport.clientWidth) / 2);
+  viewport.scrollTop = Math.max(0, (dimensions.height * scale - viewport.clientHeight) / 2);
+}
+
+function formatMermaidScale(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function preserveMermaidZoomAnchor(
+  viewport: HTMLElement,
+  currentScale: number,
+  nextScale: number,
+  focus: { clientX: number; clientY: number },
+) {
+  const rect = viewport.getBoundingClientRect();
+  const viewportX = focus.clientX - rect.left;
+  const viewportY = focus.clientY - rect.top;
+  const anchorX = viewport.scrollLeft + viewportX;
+  const anchorY = viewport.scrollTop + viewportY;
+  const ratio = nextScale / currentScale;
+
+  window.requestAnimationFrame(() => {
+    viewport.scrollLeft = Math.max(0, anchorX * ratio - viewportX);
+    viewport.scrollTop = Math.max(0, anchorY * ratio - viewportY);
+  });
+}
+
+function pointerIdValue(event: ReactPointerEvent<HTMLElement>): number {
+  return Number.isFinite(event.pointerId) ? event.pointerId : 1;
+}
+
+function pointerCoordinate(value: number): number {
+  return Number.isFinite(value) ? value : 0;
 }
 
 function cleanupGlobalMermaidErrors() {

@@ -1,9 +1,10 @@
-import { Check, Folder, MessageCircle, Moon, Pencil, Search, Settings, SquarePen, Sun, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Folder, FolderOpen, MessageCircle, Moon, Pencil, Search, Settings, SquarePen, Sun, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { subscribeSessionCreated } from "@/renderer/events/sessionEvents";
+import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import { useTheme } from "@/renderer/providers/ThemeProvider";
 import type { AgentSession } from "@/types/protocol";
 
@@ -23,6 +24,16 @@ interface SiderGroup {
   items: SiderEntry[];
   latestUpdatedAt?: string;
 }
+
+interface SessionIndicator {
+  isStreaming: boolean;
+  hasUnread: boolean;
+}
+
+const EMPTY_SESSION_INDICATOR: SessionIndicator = {
+  isStreaming: false,
+  hasUnread: false,
+};
 
 export interface SiderProps {
   collapsed?: boolean;
@@ -47,6 +58,9 @@ export function Sider({
   onNavigate,
 }: SiderProps) {
   const { theme, toggleTheme } = useTheme();
+  const optionalAgentRuntime = useOptionalAgentSessionRuntime();
+  const sharedSessionState =
+    optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime.state.sessionStateById : {};
   const ThemeIcon = theme === "dark" ? Sun : Moon;
   const [loadedSessions, setLoadedSessions] = useState<AgentSession[]>([]);
   const [query, setQuery] = useState("");
@@ -72,6 +86,20 @@ export function Sider({
     }
     return historyItems.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(keyword));
   }, [historyItems, query]);
+  const sessionIndicators = useMemo<Record<string, SessionIndicator>>(() => {
+    return Object.fromEntries(
+      Object.entries(sharedSessionState).map(([sessionId, state]) => {
+        const isStreaming = state.runtimeState === "running" || state.runtimeState === "cancelling" || state.isStreaming;
+        return [
+          sessionId,
+          {
+            isStreaming,
+            hasUnread: state.hasUnread && !isStreaming && !isActivePath(activePath, conversationPath(sessionId)),
+          },
+        ];
+      }),
+    );
+  }, [activePath, sharedSessionState]);
 
   const navigateTo = (path: string) => {
     setSearchOpen(false);
@@ -191,6 +219,7 @@ export function Sider({
             editing={editing}
             confirmDeleteId={confirmDeleteId}
             canMutate={canMutateConversations}
+            sessionIndicators={sessionIndicators}
             key={group.id}
             onDelete={(id) => void deleteConversation(id)}
             onCancelDelete={() => setConfirmDeleteId(null)}
@@ -319,6 +348,7 @@ interface SiderSectionProps {
   editing?: { id: string; title: string } | null;
   confirmDeleteId?: string | null;
   canMutate?: boolean;
+  sessionIndicators?: Record<string, SessionIndicator>;
   onDelete?: (id: string) => void;
   onCancelDelete?: () => void;
   onCancelRename?: () => void;
@@ -339,6 +369,7 @@ function SiderSection({
   editing,
   confirmDeleteId,
   canMutate = false,
+  sessionIndicators = {},
   onDelete,
   onCancelDelete,
   onCancelRename,
@@ -349,6 +380,21 @@ function SiderSection({
   onUpdateRename,
 }: SiderSectionProps) {
   const [hoveredSession, setHoveredSession] = useState<CollapsedSessionCard | null>(null);
+  const [sectionExpanded, setSectionExpanded] = useState(true);
+  const sectionItemsId = useId();
+  const previousActivePathRef = useRef(activePath);
+  const canToggleSection = kind === "workspace";
+
+  useEffect(() => {
+    const activePathChanged = previousActivePathRef.current !== activePath;
+    previousActivePathRef.current = activePath;
+    if (!canToggleSection || !activePathChanged) {
+      return;
+    }
+    if (items.some((item) => isActivePath(activePath, conversationPath(item.id)))) {
+      setSectionExpanded(true);
+    }
+  }, [activePath, canToggleSection, items]);
 
   const showCollapsedCard = (item: SiderEntry, active: boolean, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
@@ -368,6 +414,7 @@ function SiderSection({
         {items.map((item) => {
           const path = conversationPath(item.id);
           const active = isActivePath(activePath, path);
+          const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
           return (
             <button
               aria-current={active ? "page" : undefined}
@@ -383,7 +430,7 @@ function SiderSection({
               type="button"
             >
               <span className={styles.collapsedSessionInitial}>{sessionInitial(item.title)}</span>
-              {active ? <span className={styles.collapsedSessionActiveDot} aria-hidden="true" /> : null}
+              <SessionStatusIndicators indicator={indicator} collapsed />
             </button>
           );
         })}
@@ -393,81 +440,142 @@ function SiderSection({
   }
 
   return (
-    <section className={styles.section} aria-label={title}>
-      <div className={styles.sectionTitle}>
-        {kind === "workspace" ? <Folder size={15} strokeWidth={1.75} aria-hidden="true" /> : null}
-        <span>{title}</span>
-      </div>
-      {items.length === 0 ? (
-        <div className={styles.empty}>{emptyText}</div>
+    <section className={styles.section} aria-label={title} data-kind={kind}>
+      {canToggleSection ? (
+        <button
+          className={styles.sectionTitle}
+          type="button"
+          aria-controls={sectionItemsId}
+          aria-expanded={sectionExpanded}
+          aria-label={`${sectionExpanded ? "收起" : "展开"}项目 ${title}`}
+          data-kind={kind}
+          onClick={() => setSectionExpanded((expanded) => !expanded)}
+        >
+          {sectionExpanded ? (
+            <FolderOpen size={15} strokeWidth={1.75} aria-hidden="true" />
+          ) : (
+            <Folder size={15} strokeWidth={1.75} aria-hidden="true" />
+          )}
+          <span>{title}</span>
+          <ChevronDown className={styles.sectionChevron} size={14} strokeWidth={1.9} aria-hidden="true" />
+        </button>
       ) : (
-        items.map((item) => {
-          const path = conversationPath(item.id);
-          const active = isActivePath(activePath, path);
-          return (
-            <div className={styles.historyRow} key={item.id}>
-              {editing?.id === item.id ? (
-                <form
-                  className={styles.renameForm}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    onRename?.(item.id, editing.title);
-                  }}
-                >
-                  <input
-                    aria-label={`重命名 ${item.title}`}
-                    onChange={(event) => onUpdateRename?.(event.target.value)}
-                    value={editing.title}
-                  />
-                  <button aria-label="保存重命名" type="submit">
-                    <Check size={13} />
-                  </button>
-                  <button aria-label="取消重命名" onClick={onCancelRename} type="button">
-                    <X size={13} />
-                  </button>
-                </form>
-              ) : confirmDeleteId === item.id ? (
-                <div className={styles.confirmRow}>
-                  <span>确认删除？</span>
-                  <button onClick={() => onDelete?.(item.id)} type="button">
-                    确认
-                  </button>
-                  <button onClick={onCancelDelete} type="button">
-                    取消
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <button
-                    className={styles.historyItem}
-                    type="button"
-                    aria-label={item.title}
-                    aria-current={active ? "page" : undefined}
-                    data-active={active ? "true" : "false"}
-                    onClick={() => onNavigate?.(path)}
-                  >
-                    <span className={styles.historyTitle}>{item.title}</span>
-                    <span className={styles.historyMeta}>
-                      {item.updatedAt ? <time dateTime={item.updatedAt}>{formatRelativeTime(item.updatedAt)}</time> : null}
-                    </span>
-                  </button>
-                  {canMutate ? (
-                    <div className={styles.historyActions}>
-                      <button aria-label={`重命名 ${item.title}`} onClick={() => onStartRename?.(item)} type="button">
-                        <Pencil size={13} />
+        <div className={styles.sectionTitle} data-kind={kind}>
+          <span>{title}</span>
+        </div>
+      )}
+      <div
+        className={styles.sectionItems}
+        aria-hidden={!sectionExpanded}
+        data-expanded={sectionExpanded ? "true" : "false"}
+        id={sectionItemsId}
+      >
+        <div className={styles.sectionItemsInner}>
+          {items.length === 0 ? (
+            <div className={styles.empty}>{emptyText}</div>
+          ) : (
+            items.map((item) => {
+              const path = conversationPath(item.id);
+              const active = isActivePath(activePath, path);
+              const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
+              const showUpdatedTime = Boolean(item.updatedAt && !indicator.isStreaming && !indicator.hasUnread);
+              const hasMeta = Boolean(showUpdatedTime || indicator.isStreaming || indicator.hasUnread);
+              return (
+                <div className={styles.historyRow} key={item.id}>
+                  {editing?.id === item.id ? (
+                    <form
+                      className={styles.renameForm}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        onRename?.(item.id, editing.title);
+                      }}
+                    >
+                      <input
+                        aria-label={`重命名 ${item.title}`}
+                        onChange={(event) => onUpdateRename?.(event.target.value)}
+                        value={editing.title}
+                      />
+                      <button aria-label="保存重命名" type="submit">
+                        <Check size={13} />
                       </button>
-                      <button aria-label={`删除 ${item.title}`} onClick={() => onConfirmDelete?.(item.id)} type="button">
-                        <Trash2 size={13} />
+                      <button aria-label="取消重命名" onClick={onCancelRename} type="button">
+                        <X size={13} />
+                      </button>
+                    </form>
+                  ) : confirmDeleteId === item.id ? (
+                    <div className={styles.confirmRow}>
+                      <span>确认删除？</span>
+                      <button onClick={() => onDelete?.(item.id)} type="button">
+                        确认
+                      </button>
+                      <button onClick={onCancelDelete} type="button">
+                        取消
                       </button>
                     </div>
-                  ) : null}
-                </>
-              )}
-            </div>
-          );
-        })
-      )}
+                  ) : (
+                    <>
+                      <button
+                        className={styles.historyItem}
+                        type="button"
+                        aria-label={item.title}
+                        aria-current={active ? "page" : undefined}
+                        data-active={active ? "true" : "false"}
+                        onClick={() => onNavigate?.(path)}
+                      >
+                        <span className={styles.historyTitle}>{item.title}</span>
+                        {hasMeta ? (
+                          <span className={styles.historyMeta}>
+                            {showUpdatedTime && item.updatedAt ? (
+                              <time dateTime={item.updatedAt}>{formatRelativeTime(item.updatedAt)}</time>
+                            ) : null}
+                            <SessionStatusIndicators indicator={indicator} />
+                          </span>
+                        ) : null}
+                      </button>
+                      {canMutate ? (
+                        <div className={styles.historyActions}>
+                          <button aria-label={`重命名 ${item.title}`} onClick={() => onStartRename?.(item)} type="button">
+                            <Pencil size={13} />
+                          </button>
+                          <button aria-label={`删除 ${item.title}`} onClick={() => onConfirmDelete?.(item.id)} type="button">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </section>
+  );
+}
+
+function SessionStatusIndicators({
+  indicator,
+  collapsed = false,
+}: {
+  indicator: SessionIndicator;
+  collapsed?: boolean;
+}) {
+  if (!indicator.isStreaming && !indicator.hasUnread) {
+    return null;
+  }
+  return (
+    <span
+      className={styles.historyIndicators}
+      data-collapsed={collapsed ? "true" : "false"}
+      data-session-indicators="true"
+      data-streaming={indicator.isStreaming ? "true" : "false"}
+      data-unread={indicator.hasUnread ? "true" : "false"}
+      aria-hidden="true"
+    >
+      {indicator.isStreaming ? <span className={styles.historyStreamingSpinner} /> : null}
+      {indicator.hasUnread ? <span className={styles.historyUnreadDot} /> : null}
+    </span>
   );
 }
 

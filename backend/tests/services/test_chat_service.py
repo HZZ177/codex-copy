@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -278,3 +279,25 @@ async def test_chat_service_requires_runtime_model_parameter(tmp_path) -> None:
     assert chat_adapter.sent[-1]["action"] == "error"
     assert chat_adapter.sent[-1]["data"]["message"] == "模型不能为空"
     assert repositories.sessions.get(result.session_id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_converts_task_cancel_to_cancelled_turn(tmp_path, monkeypatch) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
+    service, repositories, _checkpointer, _factory = _service(tmp_path, model)
+    chat_adapter = RecordingChatAdapter()
+
+    async def raise_cancelled(**_kwargs: Any):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(service, "_run_agent_loop", raise_cancelled)
+
+    result = await service.handle_chat(
+        ChatRequest(message="取消这轮", model="qwen-coder"),
+        chat_adapter=chat_adapter,
+    )
+
+    assert result.status == "cancelled"
+    assert chat_adapter.sent[-1]["action"] == "cancelled"
+    assert repositories.trace_records.get(result.trace_id).status == "cancelled"
+    assert repositories.sessions.get(result.session_id).status == "active"
