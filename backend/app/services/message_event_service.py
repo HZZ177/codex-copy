@@ -193,14 +193,7 @@ class MessageEventService:
                 run_id = str(data.get("run_id") or "")
                 if run_id in tool_run_map:
                     target = messages[tool_run_map[run_id]]
-                    target["toolResult"] = data.get("result", "")
-                    target["toolDurationMs"] = data.get("duration_ms")
-                    error = data.get("error") or MessageEventService._tool_result_error(
-                        data.get("result")
-                    )
-                    target["status"] = "error" if error else "completed"
-                    if error:
-                        target["toolError"] = error
+                    MessageEventService._apply_tool_payload_to_message(target, data)
                 continue
             if action == CompletedEventItemAction.REASONING_MESSAGE.value:
                 messages.append(
@@ -248,7 +241,12 @@ class MessageEventService:
         action: str,
     ) -> dict[str, Any]:
         metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        item_type = str(metadata.get("kind") or metadata.get("type") or data.get("injectionSource") or "follow")
+        item_type = str(
+            metadata.get("kind")
+            or metadata.get("type")
+            or data.get("injectionSource")
+            or "follow"
+        )
         content = str(data.get("content") or "")
         item: dict[str, Any] = {
             "id": str(metadata.get("id") or f"injection:{event.id}"),
@@ -336,11 +334,76 @@ class MessageEventService:
             else messages[msg_idx]
         )
         target["toolResult"] = data.get("result", "")
+        MessageEventService._apply_tool_payload_to_message(target, data)
+
+    @staticmethod
+    def _apply_tool_payload_to_message(target: dict[str, Any], data: dict[str, Any]) -> None:
+        target["toolResult"] = data.get("result", "")
         target["toolDurationMs"] = data.get("duration_ms")
+        ui_payload = MessageEventService._tool_ui_payload(data)
+        if ui_payload:
+            target["uiPayload"] = ui_payload
+        files = MessageEventService._tool_files(data, ui_payload)
+        if files:
+            target["fileChanges"] = files
         error = data.get("error") or MessageEventService._tool_result_error(data.get("result"))
         target["status"] = "error" if error else "completed"
         if error:
             target["toolError"] = error
+
+    @staticmethod
+    def _tool_ui_payload(data: dict[str, Any]) -> dict[str, Any] | None:
+        direct = data.get("ui_payload")
+        if isinstance(direct, dict):
+            return direct
+        output_data = data.get("output_data")
+        if isinstance(output_data, dict) and isinstance(output_data.get("result"), dict):
+            return output_data["result"]
+        result = data.get("result")
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+            except json.JSONDecodeError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
+
+    @staticmethod
+    def _tool_files(
+        data: dict[str, Any],
+        ui_payload: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        source = data.get("files")
+        if not isinstance(source, list) and ui_payload:
+            source = ui_payload.get("files") or ui_payload.get("changes")
+        if not isinstance(source, list):
+            return []
+        files: list[dict[str, Any]] = []
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            files.append(MessageEventService._normalize_file_change(item))
+        return files
+
+    @staticmethod
+    def _normalize_file_change(item: dict[str, Any]) -> dict[str, Any]:
+        added = int(item.get("added_lines") or item.get("additions") or 0)
+        deleted = int(
+            item.get("deleted_lines")
+            or item.get("removed_lines")
+            or item.get("deletions")
+            or 0
+        )
+        return {
+            **item,
+            "added_lines": max(0, added),
+            "deleted_lines": max(0, deleted),
+            "removed_lines": max(0, deleted),
+            "additions": max(0, added),
+            "deletions": max(0, deleted),
+        }
 
     @staticmethod
     def _tool_result_error(result: Any) -> str:

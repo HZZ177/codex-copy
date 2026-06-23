@@ -884,7 +884,10 @@ class MessageEventsRepository:
         return int(row["count"] if row else 0)
 
     def count_turns(self, session_id: str, *, include_deleted: bool = False) -> int:
-        query = "select count(distinct turn_index) as count from message_events where session_id = ?"
+        query = (
+            "select count(distinct turn_index) as count "
+            "from message_events where session_id = ?"
+        )
         params: list[Any] = [session_id]
         if not include_deleted:
             query += " and is_deleted = 0"

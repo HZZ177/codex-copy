@@ -2,14 +2,13 @@ import {
   CheckCircle2,
   ChevronDown,
   FileDiff,
+  FilePenLine,
   FileText,
+  FileX2,
   FolderOpen,
   LoaderCircle,
-  Pencil,
-  Plus,
   Search,
   SquareTerminal,
-  Trash2,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -110,14 +109,14 @@ function groupIconKind(
   messages: ConversationMessage[],
   state: GroupSummary["state"],
 ): GroupIconKind {
-  if (state === "running" || state === "pending") {
-    return "running";
-  }
   if (state === "failed") {
     return "failed";
   }
   if (kind === "file_changes") {
-    return "file_change";
+    return fileChangeGroupIconKind(messages);
+  }
+  if (state === "running" || state === "pending") {
+    return "running";
   }
   const toolKinds = new Set(messages.map(toolIconKindFromMessage));
   if (toolKinds.size === 1) {
@@ -129,29 +128,29 @@ function groupIconKind(
 function groupIcon(kind: GroupIconKind) {
   switch (kind) {
     case "running":
-      return <LoaderCircle size={15} />;
+      return <LoaderCircle size={16} />;
     case "failed":
-      return <XCircle size={15} />;
+      return <XCircle size={16} />;
     case "file_change":
-      return <FileDiff size={15} />;
+      return <FileDiff size={16} />;
     case "read":
-      return <FileText size={15} />;
+      return <FileText size={16} />;
     case "directory":
-      return <FolderOpen size={15} />;
+      return <FolderOpen size={16} />;
     case "search":
-      return <Search size={15} />;
+      return <Search size={16} />;
     case "command":
-      return <SquareTerminal size={15} />;
+      return <SquareTerminal size={16} />;
     case "edit":
-      return <Pencil size={15} />;
+      return <FilePenLine size={16} />;
     case "create":
-      return <Plus size={15} />;
+      return <FilePenLine size={16} />;
     case "delete":
-      return <Trash2 size={15} />;
+      return <FileX2 size={16} />;
     case "other":
-      return <Wrench size={15} />;
+      return <Wrench size={16} />;
     case "done":
-      return <CheckCircle2 size={15} />;
+      return <CheckCircle2 size={16} />;
   }
 }
 
@@ -234,16 +233,44 @@ function toolIconKindFromMessage(message: ConversationMessage): GroupIconKind {
   if (isSearchTool(toolName)) {
     return "search";
   }
-  if (["write_file", "apply_patch", "edit_file"].includes(toolName)) {
-    return "edit";
-  }
-  if (toolName === "create_file") {
+  if (["write_file", "create_file"].includes(toolName)) {
     return "create";
+  }
+  if (["apply_patch", "edit_file"].includes(toolName)) {
+    return "edit";
   }
   if (toolName === "delete_file") {
     return "delete";
   }
   return "other";
+}
+
+function fileChangeGroupIconKind(messages: ConversationMessage[]): GroupIconKind {
+  const iconKinds = new Set<GroupIconKind>();
+  messages.forEach((message, index) => {
+    fileChangesFromMessage(message, index).forEach((change) => {
+      iconKinds.add(iconKindForFileOperation(change.operation));
+    });
+  });
+  if (iconKinds.size === 1) {
+    return [...iconKinds][0] ?? "file_change";
+  }
+  return "file_change";
+}
+
+function iconKindForFileOperation(operation: FileChangeOperation): GroupIconKind {
+  switch (operation) {
+    case "add":
+      return "create";
+    case "delete":
+      return "delete";
+    case "append":
+    case "update":
+    case "write":
+      return "edit";
+    case "unknown":
+      return "file_change";
+  }
 }
 
 function summaryState(message: ConversationMessage): GroupSummary["state"] {
@@ -292,7 +319,9 @@ function toolActivityLabel(
       return;
     }
     if (isEditTool(toolName)) {
-      editedFilesFromMessage(message, index).forEach((path) => stats.editedFiles[countState].add(path));
+      fileChangesFromMessage(message, index, operationFromToolName(toolName)).forEach((change) => {
+        stats[fileSummaryKindForOperation(change.operation)][countState].add(change.path);
+      });
       return;
     }
     stats.otherTools[countState] += 1;
@@ -303,7 +332,9 @@ function toolActivityLabel(
     ...countSetPhrases("listedDirectories", stats.listedDirectories),
     ...countNumberPhrases("searches", stats.searches),
     ...countNumberPhrases("commands", stats.commands),
+    ...countSetPhrases("createdFiles", stats.createdFiles),
     ...countSetPhrases("editedFiles", stats.editedFiles),
+    ...countSetPhrases("deletedFiles", stats.deletedFiles),
     ...countNumberPhrases("otherTools", stats.otherTools),
   ];
 
@@ -314,19 +345,40 @@ function toolActivityLabel(
 }
 
 function fileChangeLabel(messages: ConversationMessage[], state: GroupSummary["state"], fallbackCount: number): string {
-  const files = createStateSetBuckets();
+  const files = createFileChangeStats();
   messages.forEach((message, index) => {
     const countState = countStateFromSummary(summarizeFileChange(message).state);
-    filePathsFromPayload(message.payload, index).forEach((path) => files[countState].add(path));
+    fileChangesFromMessage(message, index).forEach((change) => {
+      files[fileSummaryKindForOperation(change.operation)][countState].add(change.path);
+    });
   });
-  const parts = countSetPhrases("editedFiles", files);
+  const parts = [
+    ...countSetPhrases("createdFiles", files.createdFiles),
+    ...countSetPhrases("editedFiles", files.editedFiles),
+    ...countSetPhrases("deletedFiles", files.deletedFiles),
+  ];
   if (parts.length) {
     return parts.join("，");
   }
   return countPhrase("editedFiles", fallbackCount, countStateFromSummary(state)) || "编辑了文件";
 }
 
-type ToolSummaryKind = "readFiles" | "listedDirectories" | "searches" | "commands" | "editedFiles" | "otherTools";
+type ToolSummaryKind =
+  | "readFiles"
+  | "listedDirectories"
+  | "searches"
+  | "commands"
+  | "createdFiles"
+  | "editedFiles"
+  | "deletedFiles"
+  | "otherTools";
+
+type FileChangeOperation = "add" | "update" | "delete" | "append" | "write" | "unknown";
+
+interface FileChangeSummary {
+  path: string;
+  operation: FileChangeOperation;
+}
 
 function countPhrase(kind: ToolSummaryKind, count: number, state: CountState): string {
   if (!count) {
@@ -342,7 +394,9 @@ function countPhrase(kind: ToolSummaryKind, count: number, state: CountState): s
       return `${verb} ${count} 次`;
     case "commands":
       return `${verb} ${count} 条命令`;
+    case "createdFiles":
     case "editedFiles":
+    case "deletedFiles":
       return `${verb} ${count} 个文件`;
     case "otherTools":
       return `${verb} ${count} 个工具`;
@@ -361,8 +415,12 @@ function verbForKind(kind: ToolSummaryKind, state: CountState): string {
       return failed ? "搜索失败" : running ? "正在搜索" : "搜索了";
     case "commands":
       return failed ? "运行失败" : running ? "正在运行" : "已运行";
+    case "createdFiles":
+      return failed ? "创建失败" : running ? "正在创建" : "创建了";
     case "editedFiles":
       return failed ? "编辑失败" : running ? "正在编辑" : "编辑了";
+    case "deletedFiles":
+      return failed ? "删除失败" : running ? "正在删除" : "删除了";
     case "otherTools":
       return failed ? "调用失败" : running ? "正在调用" : "调用了";
   }
@@ -377,8 +435,18 @@ function createToolStats() {
     listedDirectories: createStateSetBuckets(),
     searches: createStateNumberBuckets(),
     commands: createStateNumberBuckets(),
+    createdFiles: createStateSetBuckets(),
     editedFiles: createStateSetBuckets(),
+    deletedFiles: createStateSetBuckets(),
     otherTools: createStateNumberBuckets(),
+  };
+}
+
+function createFileChangeStats() {
+  return {
+    createdFiles: createStateSetBuckets(),
+    editedFiles: createStateSetBuckets(),
+    deletedFiles: createStateSetBuckets(),
   };
 }
 
@@ -438,29 +506,124 @@ function toolTarget(args: Record<string, unknown> | null, index: number): string
   return stringValue(args?.path) || stringValue(args?.file) || stringValue(args?.query) || `item-${index}`;
 }
 
-function editedFilesFromMessage(message: ConversationMessage, index: number): Set<string> {
+function fileChangesFromMessage(
+  message: ConversationMessage,
+  index: number,
+  fallbackOperation: FileChangeOperation = "unknown",
+): FileChangeSummary[] {
   const result = asRecord(message.payload.result);
-  const files = filePathsFromPayload(message.payload, index);
-  filePathsFromPayload(result ?? {}, index).forEach((path) => files.add(path));
-  if (!files.size) {
-    files.add(toolTarget(toolArgsFromMessage(message), index));
+  const toolOperation = operationFromToolName(toolNameFromMessage(message));
+  const forcedOperation = toolOperation !== "unknown" ? toolOperation : null;
+  const effectiveFallback = forcedOperation ?? fallbackOperation;
+  const changes = new Map<string, FileChangeSummary>();
+  fileChangesFromPayload(message.payload, index, effectiveFallback, forcedOperation).forEach((change) => changes.set(change.path, change));
+  fileChangesFromPayload(result ?? {}, index, operationFromRecord(result, effectiveFallback), forcedOperation).forEach((change) => {
+    const existing = changes.get(change.path);
+    changes.set(change.path, {
+      path: change.path,
+      operation: forcedOperation ?? (change.operation !== "unknown" ? change.operation : existing?.operation ?? effectiveFallback),
+    });
+  });
+  if (!changes.size) {
+    const path = toolTarget(toolArgsFromMessage(message), index);
+    changes.set(path, { path, operation: effectiveFallback });
   }
-  return files;
+  return [...changes.values()];
 }
 
-function filePathsFromPayload(payload: Record<string, unknown>, index: number): Set<string> {
-  const paths = new Set<string>();
+function fileChangesFromPayload(
+  payload: Record<string, unknown>,
+  index: number,
+  fallbackOperation: FileChangeOperation,
+  forcedOperation: FileChangeOperation | null,
+): FileChangeSummary[] {
+  const changes = new Map<string, FileChangeSummary>();
+  const parentOperation = forcedOperation ?? operationFromRecord(payload, fallbackOperation);
   const directPath = stringValue(payload.path);
   if (directPath) {
-    paths.add(directPath);
+    changes.set(directPath, { path: directPath, operation: parentOperation });
   }
   if (Array.isArray(payload.files)) {
     payload.files.forEach((item, fileIndex) => {
       const record = asRecord(item);
-      paths.add(stringValue(record?.path) || `file-${index}-${fileIndex}`);
+      const path = stringValue(record?.path) || `file-${index}-${fileIndex}`;
+      changes.set(path, { path, operation: forcedOperation ?? operationFromRecord(record, parentOperation) });
     });
   }
-  return paths;
+  return [...changes.values()];
+}
+
+function fileSummaryKindForOperation(operation: FileChangeOperation): "createdFiles" | "editedFiles" | "deletedFiles" {
+  switch (operation) {
+    case "add":
+      return "createdFiles";
+    case "delete":
+      return "deletedFiles";
+    case "append":
+    case "update":
+    case "write":
+    case "unknown":
+      return "editedFiles";
+  }
+}
+
+function operationFromToolName(toolName: string): FileChangeOperation {
+  if (["write_file", "create_file"].includes(toolName)) {
+    return "add";
+  }
+  if (toolName === "delete_file") {
+    return "delete";
+  }
+  if (["apply_patch", "edit_file"].includes(toolName)) {
+    return "update";
+  }
+  return "unknown";
+}
+
+function operationFromRecord(
+  record: Record<string, unknown> | null,
+  fallbackOperation: FileChangeOperation,
+): FileChangeOperation {
+  if (!record) {
+    return fallbackOperation;
+  }
+  const explicit = normalizeOperation(
+    record.operation ??
+      record.action ??
+      record.kind ??
+      record.change_type ??
+      record.changeType,
+  );
+  if (explicit !== "unknown") {
+    return explicit;
+  }
+  if (record.created === true || record.is_new === true || record.isNew === true) {
+    return "add";
+  }
+  return fallbackOperation;
+}
+
+function normalizeOperation(value: unknown): FileChangeOperation {
+  if (typeof value !== "string") {
+    return "unknown";
+  }
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["add", "create", "created", "new", "new_file", "insert"].includes(normalized)) {
+    return "add";
+  }
+  if (["delete", "deleted", "remove", "removed"].includes(normalized)) {
+    return "delete";
+  }
+  if (["append", "append_file"].includes(normalized)) {
+    return "append";
+  }
+  if (["write", "write_file", "overwrite"].includes(normalized)) {
+    return "add";
+  }
+  if (["update", "edit", "modify", "modified", "patch", "apply_patch"].includes(normalized)) {
+    return "update";
+  }
+  return "unknown";
 }
 
 function isReadTool(toolName: string): boolean {

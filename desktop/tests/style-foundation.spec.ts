@@ -130,7 +130,8 @@ describe("style foundation", () => {
     expect(filePreview).toMatch(/\.mermaidSvgContent svg\s*{[^}]*max-width:\s*none !important/s);
     expect(filePreview).toMatch(/\.mermaidControls\s*{[^}]*position:\s*absolute/s);
     expect(sider).toMatch(/\.historyMeta\s*{[^}]*white-space:\s*nowrap/s);
-    expect(sider).toMatch(/\.historyItem\[data-active="true"\]::after\s*{[^}]*position:\s*absolute/s);
+    expect(sider).toMatch(/\.historyItem\s*{[^}]*position:\s*relative/s);
+    expect(sider).toMatch(/\.historyItem\[data-active="true"\]\s*{[^}]*background:\s*color-mix/s);
     expect(sider).toMatch(/\.sectionChevron\s*{[^}]*transition:\s*transform 160ms var\(--motion-ease-standard\)/s);
     expect(sider).toMatch(/\.sectionTitle\[aria-expanded="false"\]\s+\.sectionChevron\s*{[^}]*transform:\s*rotate\(-90deg\)/s);
     expect(sider).toMatch(/\.sectionItems\s*{[^}]*grid-template-rows:\s*1fr/s);
@@ -184,7 +185,7 @@ describe("style foundation", () => {
     expect(mainLayout).not.toMatch(/\.shell\[data-right-sidebar="open"\]\[data-right-sidebar-mode="maximized"\]\s+\.rightSidebar\s*{[^}]*flex:\s*1 1 auto/s);
     expect(mainLayout).not.toContain("rightSidebarEnter");
     expect(titlebar).not.toMatch(/\.titlebar\s*{[^}]*border-bottom/s);
-    expect(titlebar).toMatch(/\.titlebar\s*{[^}]*background:\s*color-mix\(in srgb,\s*var\(--sidebar-bg\) 94%,\s*var\(--shell-bg\)\)/s);
+    expect(titlebar).toMatch(/\.titlebar\s*{[^}]*background:\s*var\(--sidebar-bg\)/s);
     expect(sider).toMatch(/\.sider\s*{[^}]*width:\s*var\(--sidebar-width\)/s);
     expect(sider).toMatch(/\.sider\s*{[^}]*flex:\s*0 0 var\(--sidebar-width\)/s);
     expect(sider).not.toContain("border-right:");

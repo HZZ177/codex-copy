@@ -20,10 +20,13 @@ export function useCompositionInput({ disabled = false, onSubmit }: UseCompositi
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
-      if (disabled || !shouldSubmitFromKeyboard(event, isComposing)) {
+      if (!shouldSubmitFromKeyboard(event, isComposing)) {
         return;
       }
       event.preventDefault();
+      if (disabled) {
+        return;
+      }
       onSubmit();
     },
     [disabled, isComposing, onSubmit],

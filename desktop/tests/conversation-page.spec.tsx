@@ -207,6 +207,224 @@ describe("ConversationPage", () => {
     });
   });
 
+  it("shows active turn file-change totals in the composer accessory", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    typeComposer("生成文件");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await act(async () => {
+      emit(agentEvent("tool_progress", {
+        id: "evt-file-progress",
+        session_id: "ses-1",
+        run_id: "run-write",
+        tool_name: "write_file",
+        files: [
+          {
+            path: "docs/project-structure.md",
+            operation: "add",
+            additions: 149,
+            deletions: 0,
+          },
+        ],
+      }));
+      emit(agentEvent("tool_progress", {
+        id: "evt-file-progress-edit",
+        session_id: "ses-1",
+        run_id: "run-edit",
+        tool_name: "apply_patch",
+        files: [
+          {
+            path: "desktop/src/App.tsx",
+            operation: "update",
+            additions: 2,
+            deletions: 1,
+          },
+        ],
+      }));
+    });
+
+    const pill = await screen.findByTestId("file-change-summary-pill");
+    expect(pill.textContent).toContain("本轮共创建了 1 个文件，编辑了 1 个文件");
+    expect(pill.textContent).toContain("+151");
+    expect(pill.textContent).toContain("-1");
+    expect(screen.queryByTestId("typing-speed-pill")).toBeNull();
+    expect(screen.getByTestId("file-change-summary-card").textContent).toContain("docs/project-structure.md");
+    expect(screen.getByTestId("file-change-summary-card").textContent).toContain("desktop/src/App.tsx");
+  });
+
+  it("allows manually switching composer accessory items", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    typeComposer("生成文件");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await act(async () => {
+      emit(agentEvent("tool_progress", {
+        id: "evt-file-progress",
+        session_id: "ses-1",
+        run_id: "run-write",
+        tool_name: "write_file",
+        files: [
+          {
+            path: "docs/project-structure.md",
+            operation: "add",
+            additions: 149,
+            deletions: 0,
+          },
+        ],
+      }));
+    });
+
+    expect((await screen.findByTestId("file-change-summary-pill")).textContent).toContain("+149");
+    expect(screen.queryByTestId("typing-speed-pill")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("切换胶囊信息"));
+    expect(screen.getByTestId("composer-accessory-menu")).not.toBeNull();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /打字机/ }));
+
+    expect(screen.getByTestId("typing-speed-pill")).not.toBeNull();
+    expect(screen.queryByTestId("file-change-summary-pill")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("切换胶囊信息"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /文件变更/ }));
+
+    expect(screen.getByTestId("file-change-summary-pill").textContent).toContain("+149");
+    expect(screen.queryByTestId("typing-speed-pill")).toBeNull();
+  });
+
+  it("drops active file-change totals when the progressing tool fails", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    typeComposer("生成文件");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await act(async () => {
+      emit(agentEvent("tool_progress", {
+        id: "evt-file-progress",
+        session_id: "ses-1",
+        run_id: "run-write",
+        tool_name: "write_file",
+        files: [
+          {
+            path: "docs/broken.md",
+            operation: "add",
+            additions: 149,
+            deletions: 0,
+          },
+        ],
+      }));
+    });
+
+    expect((await screen.findByTestId("file-change-summary-pill")).textContent).toContain("+149");
+
+    await act(async () => {
+      emit(agentEvent("tool_end", {
+        id: "evt-file-end",
+        session_id: "ses-1",
+        run_id: "run-write",
+        tool_name: "write_file",
+        status: "error",
+        error: "write failed",
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("file-change-summary-pill")).toBeNull();
+    });
+    expect(screen.getByTestId("typing-speed-pill")).not.toBeNull();
+  });
+
+  it("keeps completed turn file-change totals until the next user message starts", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "生成文件"),
+        historyMessage("tool", "", {
+          toolName: "write_file",
+          toolParams: { path: "docs/project-structure.md" },
+          fileChanges: [
+            {
+              path: "docs/project-structure.md",
+              operation: "add",
+              additions: 149,
+              deletions: 0,
+            },
+          ],
+          status: "completed",
+        }),
+        historyMessage("assistant", "完成"),
+      ],
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const pill = await screen.findByTestId("file-change-summary-pill");
+    expect(pill.textContent).toContain("本轮共创建了 1 个文件");
+    expect(pill.textContent).toContain("+149");
+    expect(screen.queryByTestId("typing-speed-pill")).toBeNull();
+
+    typeComposer("继续");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("file-change-summary-pill")).toBeNull();
+    });
+    expect(screen.getByTestId("typing-speed-pill").textContent).toBe("打字机 0 字符/s - 待输出 0 字");
+  });
+
+  it("excludes failed file changes from composer accessory totals", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "生成文件"),
+        historyMessage("tool", "", {
+          toolName: "write_file",
+          toolParams: { path: "docs/broken.md" },
+          fileChanges: [
+            {
+              path: "docs/broken.md",
+              operation: "add",
+              additions: 149,
+              deletions: 0,
+            },
+          ],
+          status: "failed",
+          toolError: "write failed",
+        }),
+        historyMessage("tool", "", {
+          toolName: "apply_patch",
+          toolParams: { path: "desktop/src/App.tsx" },
+          fileChanges: [
+            {
+              path: "desktop/src/App.tsx",
+              operation: "update",
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          status: "completed",
+        }),
+        historyMessage("assistant", "完成"),
+      ],
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const pill = await screen.findByTestId("file-change-summary-pill");
+    expect(pill.textContent).toContain("+2");
+    expect(pill.textContent).toContain("-1");
+    expect(pill.textContent).not.toContain("+151");
+    expect(screen.getByTestId("file-change-summary-card").textContent).toContain("desktop/src/App.tsx");
+    expect(screen.getByTestId("file-change-summary-card").textContent).not.toContain("docs/broken.md");
+  });
+
   it("restores tool history as collapsed tool panels with result details", async () => {
     const { runtime } = fakeRuntime({
       history: [
@@ -341,6 +559,8 @@ describe("ConversationPage", () => {
 
     expect(channel.chat).toHaveBeenCalledWith({ session_id: "ses-1", message: "继续修改", model: "qwen-coder" });
     expect(screen.getByLabelText("停止")).not.toBeNull();
+    expect(screen.queryByText("智能体正在处理")).toBeNull();
+    expect(screen.getByLabelText("继续输入").getAttribute("contenteditable")).toBe("true");
     expect(screen.getByTestId("streaming-cursor")).not.toBeNull();
     expect(screen.queryByTestId("message-agent-status")).toBeNull();
   });
@@ -800,10 +1020,63 @@ describe("ConversationPage", () => {
     expect(screen.getByRole("separator", { name: "调整文件树宽度" })).not.toBeNull();
     expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "desktop/README.md");
 
+    fireEvent.click(screen.getByRole("button", { name: "新建侧边栏页面" }));
+    expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+
+    const fileTabs = screen.getAllByRole("tab", { name: "文件" });
+    expect(fileTabs).toHaveLength(2);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["文件", "文件"]);
+    expect(fileTabs[0].getAttribute("aria-selected")).toBe("false");
+    expect(fileTabs[1].getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("heading", { name: "文件预览" })).toBeNull();
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭侧边栏窗口 文件" })[1]);
+    expect(screen.getAllByRole("tab", { name: "文件" })).toHaveLength(1);
+    expect(await screen.findByRole("heading", { name: "文件预览" })).not.toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 文件" }));
     expect(screen.queryByRole("tab", { name: "文件" })).toBeNull();
     expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("closed");
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+  });
+
+  it("keeps the current tab order when a new tab opens the file page", async () => {
+    const projectSession = agentSession({
+      id: "ses-1",
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 64)],
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    const addTabButton = await screen.findByRole("button", { name: "新建侧边栏页面" });
+
+    fireEvent.click(addTabButton);
+    fireEvent.click(addTabButton);
+    fireEvent.click(addTabButton);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["新tab", "新tab", "新tab"]);
+    expect(screen.getAllByRole("tab")[2].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["新tab", "新tab", "文件"]);
+    expect(screen.getAllByRole("tab")[2].getAttribute("aria-selected")).toBe("true");
   });
 
   it("restores the file panel preview when switching back to a session", async () => {
@@ -863,6 +1136,78 @@ describe("ConversationPage", () => {
     expect(await screen.findByRole("tab", { name: "文件" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "会话 A 文件" })).not.toBeNull();
     expect(screen.getByTestId("workspace-file-browser-preview")).not.toBeNull();
+  });
+
+  it("keeps file tab preview state isolated between sessions", async () => {
+    const sessionA = agentSession({
+      id: "ses-a",
+      title: "会话 A",
+      session_type: "workspace",
+      workspace_id: "ws-a",
+      workspace: workspace("ws-a", "repo-a", "D:/repo/a"),
+      cwd: "D:/repo/a",
+    });
+    const sessionB = agentSession({
+      id: "ses-b",
+      title: "会话 B",
+      session_type: "workspace",
+      workspace_id: "ws-b",
+      workspace: workspace("ws-b", "repo-b", "D:/repo/b"),
+      cwd: "D:/repo/b",
+    });
+    const { runtime: runtimeA } = fakeRuntime({
+      session: sessionA,
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 64)],
+      },
+      workspaceFilesByPath: {
+        "README.md": "# 会话 A 文件\n\nA 内容",
+      },
+    });
+    const { runtime: runtimeB } = fakeRuntime({
+      session: sessionB,
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 64)],
+      },
+      workspaceFilesByPath: {
+        "README.md": "# 会话 B 文件\n\nB 内容",
+      },
+    });
+
+    const view = renderConversationInLayout(<ConversationPage threadId="ses-a" runtime={runtimeA} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择文件 README.md" }));
+    expect(await screen.findByRole("heading", { name: "会话 A 文件" })).not.toBeNull();
+    expect(screen.getByTestId("workspace-file-browser-preview")).not.toBeNull();
+
+    view.rerender(conversationInLayout(<ConversationPage threadId="ses-b" runtime={runtimeB} />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+      expect(screen.queryByRole("heading", { name: "会话 A 文件" })).toBeNull();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    expect(screen.queryByTestId("workspace-file-browser-preview")).toBeNull();
+    expect(runtimeB.workspace.readFile).not.toHaveBeenCalled();
+
+    view.rerender(conversationInLayout(<ConversationPage threadId="ses-a" runtime={runtimeA} />));
+
+    expect(await screen.findByRole("heading", { name: "会话 A 文件" })).not.toBeNull();
+    expect(screen.getByTestId("workspace-file-browser-preview")).not.toBeNull();
+
+    view.rerender(conversationInLayout(<ConversationPage threadId="ses-b" runtime={runtimeB} />));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "文件" }).getAttribute("aria-selected")).toBe("true");
+      expect(screen.queryByRole("heading", { name: "会话 A 文件" })).toBeNull();
+      expect(screen.queryByTestId("workspace-file-browser-preview")).toBeNull();
+    });
+    expect(runtimeB.workspace.readFile).not.toHaveBeenCalled();
   });
 });
 

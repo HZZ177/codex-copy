@@ -1,10 +1,10 @@
 .ticker {
-  --line-change-added: #00a152;
-  --line-change-added-glow: rgb(0 161 82 / 10%);
+  --line-change-added: var(--diff-added-text);
+  --line-change-added-glow: var(--diff-added-glow);
   --line-change-digit-duration: 680ms;
   --line-change-digit-window: 1.28em;
-  --line-change-removed: #d1242f;
-  --line-change-removed-glow: rgb(209 36 47 / 10%);
+  --line-change-removed: var(--diff-removed-text);
+  --line-change-removed-glow: var(--diff-removed-glow);
 
   display: inline-flex;
   min-width: 0;
@@ -14,13 +14,6 @@
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
-}
-
-:global(html[data-theme="dark"]) .ticker {
-  --line-change-added: #42d77d;
-  --line-change-added-glow: rgb(66 215 125 / 12%);
-  --line-change-removed: #ff6b6b;
-  --line-change-removed-glow: rgb(255 107 107 / 12%);
 }
 
 .label {

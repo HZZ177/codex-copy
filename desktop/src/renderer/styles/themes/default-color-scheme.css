@@ -38,6 +38,14 @@
   --color-info-6: #1677ff;
   --color-accent: var(--color-primary-6);
   --color-danger: var(--color-danger-6);
+  --diff-added-bg: #e6f6ea;
+  --diff-added-text: #00a152;
+  --diff-added-glow: rgb(0 161 82 / 8%);
+  --diff-removed-bg: #fde8e7;
+  --diff-removed-text: #d1242f;
+  --diff-removed-glow: rgb(209 36 47 / 8%);
+  --diff-hunk-bg: #eef5ff;
+  --diff-hunk-text: var(--color-primary-6);
 
   --app-bg: var(--color-bg-2);
   --shell-bg: var(--color-bg-1);
@@ -101,6 +109,14 @@
   --color-info-6: #3b8cff;
   --color-accent: var(--color-primary-6);
   --color-danger: var(--color-danger-6);
+  --diff-added-bg: rgb(46 160 67 / 16%);
+  --diff-added-text: #42d77d;
+  --diff-added-glow: rgb(66 215 125 / 10%);
+  --diff-removed-bg: rgb(248 81 73 / 15%);
+  --diff-removed-text: #ff6b6b;
+  --diff-removed-glow: rgb(255 107 107 / 10%);
+  --diff-hunk-bg: rgb(56 139 253 / 14%);
+  --diff-hunk-text: var(--color-primary-6);
 
   --app-bg: var(--color-bg-2);
   --shell-bg: var(--color-bg-1);

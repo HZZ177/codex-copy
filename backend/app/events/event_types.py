@@ -25,6 +25,7 @@ class DomainEventType(StrEnum):
     LLM_MESSAGE_FINISHED = "llm.message.finished"
     LLM_MESSAGE_FAILED = "llm.message.failed"
     LLM_TOOL_STARTED = "llm.tool.started"
+    LLM_TOOL_PROGRESS = "llm.tool.progress"
     LLM_TOOL_FINISHED = "llm.tool.finished"
     LLM_TOOL_FAILED = "llm.tool.failed"
 
@@ -70,6 +71,7 @@ CORE_EVENT_TYPES = frozenset(
         DomainEventType.LLM_MESSAGE_FINISHED,
         DomainEventType.LLM_MESSAGE_FAILED,
         DomainEventType.LLM_TOOL_STARTED,
+        DomainEventType.LLM_TOOL_PROGRESS,
         DomainEventType.LLM_TOOL_FINISHED,
         DomainEventType.LLM_TOOL_FAILED,
         DomainEventType.SUBAGENT_STARTED,

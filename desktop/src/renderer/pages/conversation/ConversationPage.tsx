@@ -1,4 +1,3 @@
-import { ArrowDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import {
@@ -12,7 +11,6 @@ import {
 } from "@/runtime";
 import { SendBox, type SelectedFile } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, type RuntimeModelSelection, useRuntimeModelSelection } from "@/renderer/components/model";
-import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
 import { usePreview } from "@/renderer/providers/PreviewProvider";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
@@ -32,9 +30,9 @@ import { prepareComposerMessage } from "@/renderer/utils/messageInjection";
 import type { AgentActionEnvelope, AgentChatMessage } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
-import { MessageList, type MessageListScrollControls } from "./messages";
+import { ConversationComposerAccessory } from "./ComposerAccessory";
+import { MessageList, type FileChangePreview, type MessageListScrollControls } from "./messages";
 import { consumeQuickChatSend } from "./quickSend";
-import styles from "./ConversationPage.module.css";
 
 export interface ConversationPageProps {
   threadId: string;
@@ -148,6 +146,22 @@ export function ConversationPage({
 
   const openFileReference = useCallback(
     (file: SelectedFile) => {
+      if (!workspaceAvailable || !file.path) {
+        return;
+      }
+      openFilePanel(file.path, {
+        sessionId: threadId,
+        workspaceAvailable,
+        workspaceLabel,
+        runtime,
+        onQuoteSelection: quoteSelection,
+      });
+    },
+    [openFilePanel, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+  );
+
+  const openFileChangePreview = useCallback(
+    (file: FileChangePreview) => {
       if (!workspaceAvailable || !file.path) {
         return;
       }
@@ -475,7 +489,9 @@ export function ConversationPage({
       subtitle={connectionSubtitle(wsStatus)}
       composerAccessory={
         <ConversationComposerAccessory
+          messages={messages}
           showScrollToBottom={showScrollToBottom}
+          onFilePreview={openFileChangePreview}
           onScrollToBottom={scrollToBottom}
         />
       }
@@ -505,7 +521,7 @@ export function ConversationPage({
         runtimeDetail={runtimeDetail}
         workspaceRuntime={runtime}
         workspaceScope={messageWorkspaceScope}
-        onFilePreview={(file) => openPreview({ type: "diff", path: file.path, diff: file.diff })}
+        onFilePreview={openFileChangePreview}
         onQuoteSelection={quoteSelection}
         hasMoreOlder={Boolean(sessionViewState?.historyHasMoreOlder)}
         loadingOlder={loadingOlderHistory}
@@ -516,33 +532,6 @@ export function ConversationPage({
         emptyTestId="conversation-empty"
       />
     </ChatLayout>
-  );
-}
-
-function ConversationComposerAccessory({
-  showScrollToBottom,
-  onScrollToBottom,
-}: {
-  showScrollToBottom: boolean;
-  onScrollToBottom: () => void;
-}) {
-  const runtimeTypingMetrics = useRuntimeTypingMetrics();
-  return (
-    <div className={styles.composerAccessoryBar} aria-label="输入框状态">
-      <span className={styles.typingSpeedPill} data-testid="typing-speed-pill">
-        打字机 {runtimeTypingMetrics.speed} 字符/s - 待输出 {runtimeTypingMetrics.backlog} 字
-      </span>
-      <button
-        className={styles.scrollBottomButton}
-        type="button"
-        aria-label="滚动到底"
-        title="滚动到底"
-        disabled={!showScrollToBottom}
-        onClick={onScrollToBottom}
-      >
-        <ArrowDown size={15} />
-      </button>
-    </div>
   );
 }
 
@@ -665,6 +654,9 @@ function conversationKindFromAgent(message: AgentChatMessage): ConversationMessa
     if (message.toolName === "update_plan") {
       return "plan";
     }
+    if (isEditToolName(message.toolName) && hasFileChanges(message)) {
+      return "file_change";
+    }
     return message.toolName === "run_command" ? "command" : "tool";
   }
   if (message.role === "error") {
@@ -711,12 +703,19 @@ function payloadFromAgentMessage(message: AgentChatMessage): Record<string, unkn
         arguments: message.toolParams ?? {},
       },
       result: {
-        status: message.toolError || message.status === "error" ? "error" : "success",
+        status:
+          message.toolError || message.status === "error"
+            ? "error"
+            : message.status === "running" || message.streaming
+              ? "running"
+              : "success",
         model_content: message.toolResult ?? "",
         duration_ms: message.toolDurationMs,
         error: message.toolError,
         ui_payload: message.uiPayload,
+        files: message.fileChanges ?? fileChangesFromUiPayload(message.uiPayload),
       },
+      files: message.fileChanges ?? fileChangesFromUiPayload(message.uiPayload),
       duration_ms: message.toolDurationMs,
       metadata: message.metadata,
     };
@@ -747,6 +746,27 @@ function payloadFromAgentMessage(message: AgentChatMessage): Record<string, unkn
   return base;
 }
 
+function isEditToolName(toolName: string | undefined): boolean {
+  return ["write_file", "apply_patch", "edit_file", "create_file", "delete_file"].includes(toolName ?? "");
+}
+
+function hasFileChanges(message: AgentChatMessage): boolean {
+  return Boolean(message.fileChanges?.length || fileChangesFromUiPayload(message.uiPayload).length);
+}
+
+function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): unknown[] {
+  if (!uiPayload) {
+    return [];
+  }
+  if (Array.isArray(uiPayload.files)) {
+    return uiPayload.files;
+  }
+  if (Array.isArray(uiPayload.changes)) {
+    return uiPayload.changes;
+  }
+  return [];
+}
+
 function toConversationRuntimeState(state: AgentSessionRuntimeState): ConversationRuntimeState {
   if (state === "running") {
     return "running";
@@ -768,7 +788,7 @@ function composerStatusText(state: ConversationRuntimeState, connectionReady: bo
   if (!connectionReady) {
     return "正在连接后端";
   }
-  if (state === "idle") {
+  if (state === "idle" || state === "running") {
     return "";
   }
   return composerHint(state);

@@ -111,8 +111,8 @@ export function SendBox({
   const editorValue = useMemo(() => editorTextFromComposerValue(value), [value]);
   const quoteChips = useMemo(() => quoteChipsFromComposerValue(value), [value]);
   const busy = isBusy(runtimeState);
-  const inputDisabled = disabled || busy;
-  const canSubmit = canSend || fileSelection.files.length > 0;
+  const inputDisabled = disabled || (busy && runtimeState !== "running");
+  const canSubmit = !busy && (canSend || fileSelection.files.length > 0);
   const requestSend = useCallback(() => {
     const result = onSend(fileSelection.files);
     void Promise.resolve(result).then((sent) => {
@@ -166,6 +166,12 @@ export function SendBox({
       setAtBrowseState(null);
     }
   }, [atOpen]);
+
+  useEffect(() => {
+    if (atQuery === null && dismissedAtValue !== null) {
+      setDismissedAtValue(null);
+    }
+  }, [atQuery, dismissedAtValue]);
 
   useEffect(() => {
     if (atBrowseState && atBrowseState.value !== editorValue && atQuery !== "") {
@@ -333,12 +339,12 @@ export function SendBox({
     if (atOpen) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setAtActiveIndex((index) => Math.min(index + 1, Math.max(atResults.length - 1, 0)));
+        setAtActiveIndex((index) => nextMenuIndex(index, atResults.length, 1));
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setAtActiveIndex((index) => Math.max(index - 1, 0));
+        setAtActiveIndex((index) => nextMenuIndex(index, atResults.length, -1));
         return;
       }
       if (event.key === "Escape") {
@@ -482,11 +488,11 @@ export function SendBox({
           {rightControls}
           {busy ? (
             <button className={styles.stopButton} type="button" aria-label="停止" disabled={!canStop} onClick={onStop}>
-              <Square size={13} />
+              <Square size={variant === "codex" ? 12 : 13} />
             </button>
           ) : (
             <button className={styles.sendButton} type="submit" aria-label="发送" disabled={!canSubmit}>
-              <SendIcon size={variant === "codex" ? 19 : 17} />
+              <SendIcon size={17} />
             </button>
           )}
         </div>
@@ -499,6 +505,13 @@ export function SendBox({
 
 function isBusy(state: ConversationRuntimeState): boolean {
   return state === "starting" || state === "running" || state === "waiting_approval" || state === "cancelling";
+}
+
+function nextMenuIndex(index: number, length: number, delta: 1 | -1): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return (index + delta + length) % length;
 }
 
 function editorTextFromComposerValue(value: string): string {

@@ -89,6 +89,104 @@ describe("AtFileMenu", () => {
     }
   });
 
+  it("wraps keyboard navigation at the start and end of the file menu", async () => {
+    const onSearchWorkspace = vi.fn().mockResolvedValue([
+      { path: "alpha.md", name: "alpha.md", type: "file" as const },
+      { path: "beta.md", name: "beta.md", type: "file" as const },
+    ]);
+
+    render(
+      <SendBox
+        value="@a"
+        runtimeState="idle"
+        canSend
+        canStop={false}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onSearchWorkspace={onSearchWorkspace}
+      />,
+    );
+
+    const input = screen.getByLabelText("继续输入");
+    const first = await screen.findByRole("option", { name: "选择文件 alpha.md" });
+    const last = await screen.findByRole("option", { name: "选择文件 beta.md" });
+
+    expect(first.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    await waitFor(() => {
+      expect(last.getAttribute("aria-selected")).toBe("true");
+    });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(first.getAttribute("aria-selected")).toBe("true");
+    });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(last.getAttribute("aria-selected")).toBe("true");
+    });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(first.getAttribute("aria-selected")).toBe("true");
+    });
+  });
+
+  it("reopens the bare at menu after deleting and typing the trigger again", async () => {
+    const onListWorkspaceDirectory = vi.fn().mockResolvedValue([
+      { path: "README.md", name: "README.md", type: "file" as const },
+    ]);
+
+    render(<StatefulSendBox initialValue="" onListWorkspaceDirectory={onListWorkspaceDirectory} />);
+
+    const input = screen.getByLabelText("继续输入");
+    input.textContent = "@";
+    fireEvent.input(input);
+    expect(await screen.findByRole("option", { name: "选择文件 README.md" })).not.toBeNull();
+    expect(onListWorkspaceDirectory).toHaveBeenCalledTimes(1);
+
+    input.textContent = "";
+    fireEvent.input(input);
+    await waitFor(() => {
+      expect(screen.queryByTestId("at-file-menu")).toBeNull();
+    });
+
+    input.textContent = "@";
+    fireEvent.input(input);
+    await waitFor(() => {
+      expect(onListWorkspaceDirectory).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByRole("option", { name: "选择文件 README.md" })).not.toBeNull();
+  });
+
+  it("forgets a dismissed bare at query once the trigger is deleted", async () => {
+    const onListWorkspaceDirectory = vi.fn().mockResolvedValue([
+      { path: "README.md", name: "README.md", type: "file" as const },
+    ]);
+
+    render(<StatefulSendBox initialValue="@" onListWorkspaceDirectory={onListWorkspaceDirectory} />);
+
+    const input = screen.getByLabelText("继续输入");
+    expect(await screen.findByTestId("at-file-menu")).not.toBeNull();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("at-file-menu")).toBeNull();
+
+    input.textContent = "";
+    fireEvent.input(input);
+
+    input.textContent = "@";
+    fireEvent.input(input);
+
+    await waitFor(() => {
+      expect(onListWorkspaceDirectory).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByRole("option", { name: "选择文件 README.md" })).not.toBeNull();
+  });
+
   it("opens directories from the at menu and only inserts files", async () => {
     const onChange = vi.fn();
     const onListWorkspaceDirectory = vi.fn((path: string) =>

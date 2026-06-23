@@ -115,9 +115,9 @@
 }
 
 .searchBox:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border-subtle));
+  border-color: color-mix(in srgb, var(--color-border-default) 86%, var(--color-text-tertiary));
   background: var(--color-bg-elevated);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border-subtle) 70%, transparent);
 }
 
 .searchBox input {
@@ -191,6 +191,7 @@
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;
+  line-height: 1.35;
   text-align: left;
 }
 
@@ -218,8 +219,14 @@
   color: var(--color-text-primary);
 }
 
-.nodeButton span:not(.fileSpacer) {
+.nodeLabel {
+  display: block;
+  min-width: 0;
   overflow: hidden;
+  padding-bottom: 2px;
+  margin-bottom: -2px;
+  color: currentColor;
+  line-height: 1.42;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

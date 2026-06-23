@@ -60,6 +60,8 @@ class DelayedSSEStream(httpx.AsyncByteStream):
 
 def _chat_chunks(payload: dict[str, Any]) -> list[str]:
     user_message = _last_user_message(payload)
+    if "编辑进度" in user_message:
+        return _file_edit_progress_chunks(payload)
     if "工具时序" in user_message:
         return _tool_sequence_chunks(payload)
     if "预览面板" in user_message:
@@ -160,6 +162,70 @@ def _tool_sequence_chunks(payload: dict[str, Any]) -> list[str]:
         ),
         _sse_done(),
     ]
+
+
+def _file_edit_progress_chunks(payload: dict[str, Any]) -> list[str]:
+    if _has_tool_message(payload):
+        return _content_chunks(
+            payload,
+            "编辑进度已经完成：已更新 src/app.ts，并保留最终文件变更统计。",
+            usage={"prompt_tokens": 22, "completion_tokens": 18},
+        )
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: src/app.ts\n"
+        "@@\n"
+        "-export const status = \"old\";\n"
+        "+export const status = \"new\";\n"
+        "+export const marker = \"e2e-edit-progress\";\n"
+        "*** End Patch\n"
+    )
+    arguments = json.dumps({"patch": patch}, ensure_ascii=False, separators=(",", ":"))
+    chunks = [
+        _chat_sse(
+            payload,
+            delta={
+                "reasoning_content": (
+                    "准备通过 apply_patch 编辑 src/app.ts，并实时返回文件变更进度。"
+                )
+            },
+        ),
+        _chat_sse(
+            payload,
+            delta={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_e2e_apply_patch_progress",
+                        "type": "function",
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": "",
+                        },
+                    }
+                ]
+            },
+        ),
+    ]
+    chunks.extend(
+        _chat_sse(
+            payload,
+            delta={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "function": {
+                            "arguments": arguments[index : index + 18],
+                        },
+                    }
+                ]
+            },
+        )
+        for index in range(0, len(arguments), 18)
+    )
+    chunks.append(_chat_sse(payload, delta={}, finish_reason="tool_calls"))
+    chunks.append(_sse_done())
+    return chunks
 
 
 def _preview_panel_chunks(payload: dict[str, Any]) -> list[str]:

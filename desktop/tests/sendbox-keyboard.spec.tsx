@@ -24,6 +24,15 @@ describe("SendBox keyboard and IME", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  it("prevents Enter from inserting a newline when submit is unavailable", () => {
+    const onSend = vi.fn();
+    render(<KeyboardSendBox value="" onSend={onSend} />);
+
+    const input = screen.getByLabelText("继续输入");
+    expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("keeps the editable viewport pinned to the bottom after Shift+Enter", () => {
     const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       callback(0);
@@ -49,9 +58,9 @@ describe("SendBox keyboard and IME", () => {
     render(<KeyboardSendBox runtimeState="running" onSend={onSend} />);
 
     const input = screen.getByLabelText("继续输入");
-    expect(input.getAttribute("aria-disabled")).toBe("true");
-    expect(input.getAttribute("contenteditable")).toBe("false");
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.getAttribute("aria-disabled")).toBe("false");
+    expect(input.getAttribute("contenteditable")).toBe("true");
+    expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -71,17 +80,19 @@ describe("SendBox keyboard and IME", () => {
 });
 
 function KeyboardSendBox({
+  value = "中文输入",
   runtimeState = "idle",
   onSend,
 }: {
+  value?: string;
   runtimeState?: "idle" | "starting" | "running" | "waiting_approval" | "cancelling" | "failed";
   onSend: () => void;
 }) {
   return (
     <SendBox
-      value="中文输入"
+      value={value}
       runtimeState={runtimeState}
-      canSend={runtimeState === "idle"}
+      canSend={runtimeState === "idle" && value.trim().length > 0}
       canStop={runtimeState === "running"}
       onChange={vi.fn()}
       onSend={onSend}

@@ -17,6 +17,7 @@ describe("agent protocol types", () => {
     expect(AGENT_CHAT_ACTIONS).toContain("session_created");
     expect(AGENT_CHAT_ACTIONS).toContain("stream");
     expect(AGENT_CHAT_ACTIONS).toContain("tool_start");
+    expect(AGENT_CHAT_ACTIONS).toContain("tool_progress");
     expect(AGENT_CHAT_ACTIONS).toContain("tool_end");
     expect(AGENT_CHAT_ACTIONS).toContain("reasoning");
     expect(AGENT_CHAT_ACTIONS).toContain("completed");
@@ -126,6 +127,7 @@ describe("agent protocol types", () => {
       params: { patch: "*** Begin Patch" },
       status: "running",
       trace_id: "trace_1",
+      files: [{ path: "src/app.ts", added_lines: 2, deleted_lines: 1 }],
     } satisfies AgentToolEventData;
 
     const completed = {

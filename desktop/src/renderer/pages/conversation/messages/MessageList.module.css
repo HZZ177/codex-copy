@@ -116,6 +116,13 @@
   transition: opacity 160ms ease;
 }
 
+.turnEndStreamingCursor {
+  display: flex;
+  max-width: 100%;
+  margin-top: 7px;
+  padding-left: 1px;
+}
+
 .turnGroup:hover .turnActionRow,
 .turnGroup:focus-within .turnActionRow {
   opacity: 1;
@@ -145,6 +152,7 @@
 
 .content {
   color: var(--color-text-primary);
+  font-family: var(--font-reading);
   font-size: 13px;
   line-height: 1.72;
   white-space: pre-wrap;

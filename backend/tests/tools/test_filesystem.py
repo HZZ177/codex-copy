@@ -64,7 +64,41 @@ async def test_write_file_tool_writes_and_appends_inside_workspace(tmp_path) -> 
 
     assert first.ok is True
     assert second.ok is True
+    assert first.result["created"] is True
+    assert first.result["operation"] == "add"
+    assert first.result["added_lines"] == 1
+    assert first.result["deleted_lines"] == 0
+    assert first.result["files"][0]["path"] == "out/result.txt"
+    assert first.result["files"][0]["operation"] == "add"
+    assert first.result["files"][0]["diff"] == "--- /dev/null\n+++ b/out/result.txt\n@@ -0,0 +1 @@\n+hello"
+    assert second.result["created"] is False
+    assert second.result["operation"] == "add"
+    assert second.result["files"][0]["operation"] == "add"
+    assert second.result["added_lines"] == 1
+    assert "+world" in second.result["files"][0]["diff"]
     assert (tmp_path / "out" / "result.txt").read_text(encoding="utf-8") == "hello\nworld"
+
+
+async def test_write_file_tool_reports_overwrite_line_diff(tmp_path) -> None:
+    target = tmp_path / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    result = await _run(
+        "write_file",
+        {"path": "src/app.py", "content": "one\nTWO\n"},
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert result.result["created"] is False
+    assert result.result["operation"] == "add"
+    assert result.result["added_lines"] == 1
+    assert result.result["deleted_lines"] == 2
+    assert result.result["files"][0]["additions"] == 1
+    assert "-two" in result.result["files"][0]["diff"]
+    assert "-three" in result.result["files"][0]["diff"]
+    assert "+TWO" in result.result["files"][0]["diff"]
 
 
 async def test_filesystem_tools_reject_workspace_escape(tmp_path) -> None:

@@ -55,6 +55,7 @@ import { useTextSelection } from "@/renderer/pages/conversation/messages/useText
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { PreviewContentKind, PreviewRequest } from "@/renderer/providers/previewTypes";
 import { formatMermaidCssPixels, normalizeMermaidSvgDimensions, type SvgDimensions } from "@/renderer/utils/mermaidSvg";
+import { parseUnifiedDiffDisplayLines } from "@/renderer/utils/unifiedDiff";
 
 import styles from "./FilePreview.module.css";
 
@@ -426,7 +427,7 @@ function PreviewMarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const text = stripTrailingNewline(extractMarkdownText(codeChild?.props?.children ?? children));
 
   if (language === "mermaid") {
-    return <NativeMermaidPreview code={text} />;
+    return <NativeMermaidPreview code={text} layout="document" />;
   }
 
   return (
@@ -807,7 +808,7 @@ interface MermaidDragState {
   scrollTop: number;
 }
 
-function NativeMermaidPreview({ code }: { code: string }) {
+function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout?: "panel" | "document" }) {
   const [theme, setTheme] = useState<"light" | "dark">(() => getTheme());
   const [state, setState] = useState<MermaidPreviewState>({ status: "loading" });
   const [scale, setScale] = useState(1);
@@ -1076,7 +1077,7 @@ function NativeMermaidPreview({ code }: { code: string }) {
       : null;
 
   return (
-    <div className={styles.mermaidPane} data-testid="preview-mermaid-pane">
+    <div className={styles.mermaidPane} data-layout={layout} data-testid="preview-mermaid-pane">
       {state.status === "ready" ? (
         <div className={styles.mermaidControls} aria-label="Mermaid 视图控制">
           <button type="button" aria-label="缩小 Mermaid" title="缩小 Mermaid" onClick={() => zoomBy(-MERMAID_SCALE_STEP)}>
@@ -1254,12 +1255,16 @@ function workspaceScope({
 }
 
 function DiffPreview({ diff }: { diff: string }) {
+  const lines = parseUnifiedDiffDisplayLines(diff);
   return (
     <div className={styles.diffPane} aria-label="Diff 渲染内容">
-      {diff.split("\n").map((line, index) => (
-        <div key={`${index}-${line}`} className={styles.diffLine} data-kind={diffLineKind(line)}>
-          <span className={styles.diffLineNo}>{index + 1}</span>
-          <code>{line || " "}</code>
+      {lines.map((line) => (
+        <div key={line.key} className={styles.diffLine} data-kind={line.kind}>
+          <span className={styles.diffLineNo}>{line.lineNumber ?? ""}</span>
+          <code>
+            {line.sign}
+            {line.content || " "}
+          </code>
         </div>
       ))}
     </div>
@@ -1448,22 +1453,6 @@ function formatBytes(size: number): string {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function diffLineKind(line: string): "add" | "delete" | "hunk" | "meta" | "context" {
-  if (line.startsWith("+") && !line.startsWith("+++")) {
-    return "add";
-  }
-  if (line.startsWith("-") && !line.startsWith("---")) {
-    return "delete";
-  }
-  if (line.startsWith("@@")) {
-    return "hunk";
-  }
-  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) {
-    return "meta";
-  }
-  return "context";
 }
 
 function previewTitle(request: FilePreviewRequest): string {

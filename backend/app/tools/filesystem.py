@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from backend.app.agent.tool_call_progress import (
+    build_text_diff,
+    count_text_lines,
+    normalize_file_change,
+)
 from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
@@ -140,6 +146,17 @@ async def write_file_tool(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     append = bool(args.get("append", False))
+    existed = path.exists()
+    original = ""
+    if existed and path.is_file():
+        try:
+            original = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ToolExecutionError(
+                "文件不是 UTF-8 文本",
+                code="file_not_text",
+                details={"path": _relative(path, context)},
+            ) from exc
     if append:
         with path.open("a", encoding="utf-8", newline="") as file:
             file.write(content)
@@ -152,11 +169,22 @@ async def write_file_tool(
         "[FilesystemTool] 写入文件 | "
         f"path={relative} | size={size} | append={append} | content_chars={len(content)}"
     )
+    new_content = path.read_text(encoding="utf-8")
+    change = _write_file_change(
+        path=relative,
+        original=original,
+        content=content,
+        new_content=new_content,
+        existed=existed,
+        append=append,
+    )
     return {
         "path": relative,
         "size": size,
         "append": append,
-        "created": True,
+        "created": not existed,
+        **change,
+        "files": [change],
     }
 
 
@@ -219,3 +247,62 @@ def _positive_int(value: Any, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, parsed)
+
+
+def _write_file_change(
+    *,
+    path: str,
+    original: str,
+    content: str,
+    new_content: str,
+    existed: bool,
+    append: bool,
+) -> dict[str, Any]:
+    if append:
+        if existed:
+            added, deleted = _line_diff_counts(original, new_content)
+            return normalize_file_change(
+                path=path,
+                operation="add",
+                added_lines=added,
+                deleted_lines=deleted,
+                diff=build_text_diff(path=path, before=original, after=new_content),
+            )
+        return normalize_file_change(
+            path=path,
+            operation="add",
+            added_lines=count_text_lines(new_content),
+            deleted_lines=0,
+            diff=build_text_diff(path=path, before="", after=new_content, operation="add"),
+        )
+    if not existed:
+        return normalize_file_change(
+            path=path,
+            operation="add",
+            added_lines=count_text_lines(new_content),
+            deleted_lines=0,
+            diff=build_text_diff(path=path, before="", after=new_content, operation="add"),
+        )
+    added, deleted = _line_diff_counts(original, new_content)
+    return normalize_file_change(
+        path=path,
+        operation="add",
+        added_lines=added,
+        deleted_lines=deleted,
+        diff=build_text_diff(path=path, before=original, after=new_content),
+    )
+
+
+def _line_diff_counts(before: str, after: str) -> tuple[int, int]:
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    added = 0
+    deleted = 0
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, before_lines, after_lines).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag in {"replace", "delete"}:
+            deleted += i2 - i1
+        if tag in {"replace", "insert"}:
+            added += j2 - j1
+    return added, deleted

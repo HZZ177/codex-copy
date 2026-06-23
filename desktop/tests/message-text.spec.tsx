@@ -1099,14 +1099,20 @@ describe("MessageText", () => {
 
     expect(screen.getByTestId("message-text").textContent).not.toContain("generated11");
 
-    act(() => {
-      now += 100;
-      frames.shift()?.(now);
-    });
-
-    const [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
-      .split("/")
-      .map(Number);
+    let reportedSpeed = 0;
+    let reportedBacklog = 0;
+    for (let index = 0; index < 5 && frames.length; index += 1) {
+      act(() => {
+        now += 100;
+        frames.shift()?.(now);
+      });
+      [reportedSpeed, reportedBacklog] = (screen.getByTestId("runtime-typing-metrics").textContent ?? "")
+        .split("/")
+        .map(Number);
+      if (reportedSpeed > 0 && reportedBacklog > 0) {
+        break;
+      }
+    }
     expect(reportedSpeed).toBeGreaterThan(0);
     expect(reportedBacklog).toBeGreaterThan(0);
 

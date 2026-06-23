@@ -1,0 +1,386 @@
+.composerAccessoryBar {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.composerAccessoryItem {
+  display: inline-flex;
+  position: relative;
+  min-width: 0;
+  max-width: calc(100% - 38px);
+  flex: 0 1 auto;
+  pointer-events: auto;
+}
+
+.accessoryShell {
+  display: inline-flex;
+  height: 30px;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--composer-bg) 92%, var(--surface-muted));
+  box-shadow: 0 6px 18px rgb(15 23 42 / 6%);
+  padding: 0 6px;
+  pointer-events: auto;
+}
+
+.accessorySwitch {
+  position: relative;
+  display: inline-flex;
+  height: 22px;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.accessorySwitchButton {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.accessorySwitchButton:hover,
+.accessorySwitchButton[data-open="true"] {
+  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.accessoryContent {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  align-items: center;
+}
+
+.accessoryMenu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 38;
+  display: grid;
+  width: max-content;
+  min-width: 178px;
+  max-width: min(260px, 70vw);
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 16px 34px rgb(15 23 42 / 12%),
+    0 2px 8px rgb(15 23 42 / 8%);
+  opacity: 0;
+  padding: 5px;
+  pointer-events: none;
+  transform: translateY(4px) scale(0.985);
+  transform-origin: bottom left;
+  transition:
+    opacity 140ms ease,
+    transform 160ms var(--motion-ease-out);
+  visibility: hidden;
+}
+
+.accessoryMenu[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+}
+
+.accessoryMenuItem {
+  display: grid;
+  min-width: 0;
+  min-height: 34px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.accessoryMenuItem:hover:not(:disabled),
+.accessoryMenuItem[aria-checked="true"] {
+  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
+}
+
+.accessoryMenuItem:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.accessoryMenuCheck {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--color-accent);
+}
+
+.accessoryMenuText {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.accessoryMenuLabel {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accessoryMenuDescription {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typingSpeedPill {
+  display: inline-flex;
+  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 8px 0 4px;
+  pointer-events: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileChangePillWrap {
+  position: relative;
+  display: inline-flex;
+  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  outline: 0;
+  pointer-events: auto;
+}
+
+.fileChangePillWrap::after {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  z-index: 29;
+  height: 12px;
+  content: "";
+  pointer-events: auto;
+}
+
+.fileChangeSummaryPill {
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+
+.fileChangeSummaryText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerLineTicker,
+.cardLineTicker,
+.cardFileLineTicker {
+  flex: 0 0 auto;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.composerLineTicker :global([data-kind="added"]),
+.composerLineTicker :global([data-kind="removed"]),
+.cardLineTicker :global([data-kind="added"]),
+.cardLineTicker :global([data-kind="removed"]),
+.cardFileLineTicker :global([data-kind="added"]),
+.cardFileLineTicker :global([data-kind="removed"]) {
+  padding: 0;
+  background: transparent;
+  text-shadow: none;
+}
+
+.composerLineTicker :global(.unit),
+.cardLineTicker :global(.unit),
+.cardFileLineTicker :global(.unit) {
+  display: none;
+}
+
+.fileChangeHoverCard {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  width: min(420px, 100%);
+  min-width: min(280px, 100%);
+  max-height: min(310px, 42vh);
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 18px 42px rgb(15 23 42 / 12%),
+    0 3px 9px rgb(15 23 42 / 8%);
+  opacity: 0;
+  padding: 10px;
+  pointer-events: none;
+  transform: translate(-50%, 4px) scale(0.985);
+  transform-origin: bottom center;
+  transition:
+    opacity 140ms ease,
+    transform 140ms var(--motion-ease-out);
+}
+
+.fileChangePillWrap:hover .fileChangeHoverCard {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.fileChangeCardHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.fileChangeCardStats {
+  display: inline-flex;
+  min-width: 0;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.fileChangeCardList {
+  display: grid;
+  min-height: 0;
+  gap: 2px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fileChangeCardRow {
+  display: grid;
+  min-width: 0;
+  min-height: 28px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 0 6px;
+}
+
+.fileChangeCardRow:hover {
+  background: color-mix(in srgb, var(--surface-hover) 70%, transparent);
+}
+
+.fileChangeKind {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.fileChangeKind[data-kind="created"] {
+  color: color-mix(in srgb, var(--diff-added-text) 82%, var(--color-text-secondary));
+}
+
+.fileChangePathButton {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fileChangePathButton:hover {
+  color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text-primary));
+}
+
+.scrollBottomButton {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--composer-bg) 92%, var(--surface-muted));
+  box-shadow: 0 6px 18px rgb(15 23 42 / 6%);
+  color: var(--color-text-primary);
+  pointer-events: auto;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.scrollBottomButton:not(:disabled):hover {
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--color-border-subtle) 72%, var(--color-text-tertiary));
+  box-shadow: 0 8px 20px rgb(15 23 42 / 8%);
+  color: var(--color-text-primary);
+  transform: translateY(-1px);
+}
+
+.scrollBottomButton:disabled {
+  cursor: default;
+  opacity: 0.68;
+}

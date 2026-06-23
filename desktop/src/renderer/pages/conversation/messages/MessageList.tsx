@@ -30,7 +30,7 @@ import { FileChangeBlock, type FileChangePreview } from "./FileChangeBlock";
 import { MessageGroupBlock } from "./MessageGroupBlock";
 import { MessagePlan } from "./MessagePlan";
 import { MessageThinking } from "./MessageThinking";
-import { MessageActionFooter, MessageText } from "./MessageText";
+import { MessageActionFooter, MessageText, StreamingCursor } from "./MessageText";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { processMessages, type ProcessedMessageItem } from "./processMessages";
 import { useAutoScroll } from "./useAutoScroll";
@@ -114,6 +114,10 @@ export function MessageList({
   const displayTurns = useMemo(() => groupDisplayItemsByTurn(displayItems), [displayItems]);
   const assistantTurnFooters = useMemo(
     () => collectAssistantTurnFooters(messages, displayItems, isProcessing),
+    [displayItems, isProcessing, messages],
+  );
+  const turnEndStreamingCursor = useMemo(
+    () => collectTurnEndStreamingCursor(messages, displayItems, isProcessing),
     [displayItems, isProcessing, messages],
   );
   const useStaticList = shouldUseStaticMessageList(displayItems.length);
@@ -288,6 +292,7 @@ export function MessageList({
               turn,
               renderMessage,
               assistantTurnFooters,
+              turnEndStreamingCursor,
               workspaceRuntime,
               workspaceScope,
               onApprovalDecision,
@@ -321,6 +326,7 @@ export function MessageList({
           turn,
           renderMessage,
           assistantTurnFooters,
+          turnEndStreamingCursor,
           workspaceRuntime,
           workspaceScope,
           onApprovalDecision,
@@ -428,6 +434,7 @@ function renderMessageTurn({
   turn,
   renderMessage,
   assistantTurnFooters,
+  turnEndStreamingCursor,
   workspaceRuntime,
   workspaceScope,
   onApprovalDecision,
@@ -437,6 +444,7 @@ function renderMessageTurn({
   turn: MessageTurn;
   renderMessage?: (message: ConversationMessage) => ReactNode;
   assistantTurnFooters: AssistantTurnFooters;
+  turnEndStreamingCursor: TurnEndStreamingCursor;
   workspaceRuntime?: RuntimeBridge;
   workspaceScope?: WorkspaceScope | null;
   onApprovalDecision?: ApprovalDecisionHandler;
@@ -449,6 +457,8 @@ function renderMessageTurn({
         item,
         renderMessage,
         footerMessage: assistantTurnFooters.footerByItemId.get(item.id),
+        showTurnEndStreamingCursor: turnEndStreamingCursor.cursorAfterItemIds.has(item.id),
+        suppressStreamingCursorMessageIds: turnEndStreamingCursor.suppressedMessageIds,
         workspaceRuntime,
         workspaceScope,
         onApprovalDecision,
@@ -463,6 +473,8 @@ function renderMessageItem({
   item,
   renderMessage,
   footerMessage,
+  showTurnEndStreamingCursor,
+  suppressStreamingCursorMessageIds,
   workspaceRuntime,
   workspaceScope,
   onApprovalDecision,
@@ -472,6 +484,8 @@ function renderMessageItem({
   item: ProcessedMessageItem;
   renderMessage?: (message: ConversationMessage) => ReactNode;
   footerMessage?: ConversationMessage;
+  showTurnEndStreamingCursor: boolean;
+  suppressStreamingCursorMessageIds: Set<string>;
   workspaceRuntime?: RuntimeBridge;
   workspaceScope?: WorkspaceScope | null;
   onApprovalDecision?: ApprovalDecisionHandler;
@@ -484,6 +498,7 @@ function renderMessageItem({
     ) : (
       <DefaultMessage
         message={item.message}
+        suppressStreamingCursor={suppressStreamingCursorMessageIds.has(item.message.id)}
         workspaceRuntime={workspaceRuntime}
         workspaceScope={workspaceScope}
         onApprovalDecision={onApprovalDecision}
@@ -491,7 +506,7 @@ function renderMessageItem({
         onQuoteSelection={onQuoteSelection}
       />
     );
-    return withTurnActionFooter(renderedMessage, footerMessage);
+    return withTurnEndStreamingCursor(withTurnActionFooter(renderedMessage, footerMessage), showTurnEndStreamingCursor);
   }
 
   const renderedGroup = (
@@ -514,7 +529,7 @@ function renderMessageItem({
       ))}
     </MessageGroupBlock>
   );
-  return withTurnActionFooter(renderedGroup, footerMessage);
+  return withTurnEndStreamingCursor(withTurnActionFooter(renderedGroup, footerMessage), showTurnEndStreamingCursor);
 }
 
 function withTurnActionFooter(content: ReactNode, footerMessage?: ConversationMessage) {
@@ -531,8 +546,23 @@ function withTurnActionFooter(content: ReactNode, footerMessage?: ConversationMe
   );
 }
 
+function withTurnEndStreamingCursor(content: ReactNode, showCursor: boolean) {
+  if (!showCursor) {
+    return content;
+  }
+  return (
+    <>
+      {content}
+      <div className={styles.turnEndStreamingCursor}>
+        <StreamingCursor />
+      </div>
+    </>
+  );
+}
+
 function DefaultMessage({
   message,
+  suppressStreamingCursor = false,
   workspaceRuntime,
   workspaceScope,
   onApprovalDecision,
@@ -540,6 +570,7 @@ function DefaultMessage({
   onQuoteSelection,
 }: {
   message: ConversationMessage;
+  suppressStreamingCursor?: boolean;
   workspaceRuntime?: RuntimeBridge;
   workspaceScope?: WorkspaceScope | null;
   onApprovalDecision?: ApprovalDecisionHandler;
@@ -571,6 +602,7 @@ function DefaultMessage({
     <MessageText
       message={message}
       showActionRow={message.kind !== "assistant"}
+      suppressStreamingCursor={suppressStreamingCursor}
       workspaceRuntime={workspaceRuntime}
       workspaceScope={workspaceScope}
       onQuoteSelection={onQuoteSelection}
@@ -600,6 +632,11 @@ interface MessageTurn {
 
 interface AssistantTurnFooters {
   footerByItemId: Map<string, ConversationMessage>;
+}
+
+interface TurnEndStreamingCursor {
+  suppressedMessageIds: Set<string>;
+  cursorAfterItemIds: Set<string>;
 }
 
 function groupDisplayItemsByTurn(displayItems: ProcessedMessageItem[]): MessageTurn[] {
@@ -675,6 +712,48 @@ function collectAssistantTurnFooters(
   return { footerByItemId };
 }
 
+function collectTurnEndStreamingCursor(
+  messages: ConversationMessage[],
+  displayItems: ProcessedMessageItem[],
+  isProcessing: boolean,
+): TurnEndStreamingCursor {
+  const empty = {
+    suppressedMessageIds: new Set<string>(),
+    cursorAfterItemIds: new Set<string>(),
+  };
+  if (!isProcessing) {
+    return empty;
+  }
+  const activeTurnStart = messages.findLastIndex((message) => message.kind === "user") + 1;
+  const activeTurnMessages = messages.slice(activeTurnStart);
+  const streamingAssistantIndex = activeTurnMessages.findLastIndex(
+    (message) => message.kind === "assistant" && isStreamingStatus(message.status),
+  );
+  if (streamingAssistantIndex < 0) {
+    return empty;
+  }
+  const itemIdByMessageId = mapMessageIdsToDisplayItems(displayItems);
+  const laterDisplayMessages = activeTurnMessages
+    .slice(streamingAssistantIndex + 1)
+    .filter((message) => itemIdByMessageId.has(message.id));
+  if (!laterDisplayMessages.length) {
+    return empty;
+  }
+  const lastDisplayMessage = laterDisplayMessages[laterDisplayMessages.length - 1];
+  const lastItemId = itemIdByMessageId.get(lastDisplayMessage.id);
+  if (!lastItemId) {
+    return empty;
+  }
+  return {
+    suppressedMessageIds: new Set(
+      activeTurnMessages
+        .filter((message) => message.kind === "assistant" && isStreamingStatus(message.status))
+        .map((message) => message.id),
+    ),
+    cursorAfterItemIds: new Set([lastItemId]),
+  };
+}
+
 function mapMessageIdsToDisplayItems(displayItems: ProcessedMessageItem[]): Map<string, string> {
   const itemIdByMessageId = new Map<string, string>();
   displayItems.forEach((item) => {
@@ -692,7 +771,12 @@ function shouldShowPendingAssistantCursor(messages: ConversationMessage[]): bool
   if (!last) {
     return false;
   }
-  return !(last.kind === "assistant" && isStreamingStatus(last.status));
+  if (isStreamingStatus(last.status)) {
+    return false;
+  }
+  const activeTurnStart = messages.findLastIndex((message) => message.kind === "user") + 1;
+  const activeTurnMessages = messages.slice(activeTurnStart);
+  return !activeTurnMessages.some((message) => message.kind === "assistant" && isStreamingStatus(message.status));
 }
 
 function createPendingAssistantMessage(messages: ConversationMessage[]): ConversationMessage {

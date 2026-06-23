@@ -100,6 +100,7 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       const context = renderContext ?? current.hostContext;
       return {
         ...current,
+        hostContext: context ?? current.hostContext,
         filePanelRequest: {
           requestId: (current.filePanelRequest?.requestId ?? 0) + 1,
           scopeKey: previewScopeKey(context),

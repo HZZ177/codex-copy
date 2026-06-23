@@ -4,10 +4,51 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.app.agent.tool_call_progress import count_text_lines, finalize_file_change
 from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
+
+APPLY_PATCH_USAGE = """在当前工作区内应用 Codex apply_patch 风格的文本补丁。
+
+patch 必须严格使用以下文件操作头，不能使用普通 unified diff 文件头：
+- *** Add File: <path>
+- *** Update File: <path>
+- *** Delete File: <path>
+
+更新文件示例：
+*** Begin Patch
+*** Update File: docs/project-structure.md
+@@
+ # keydex 项目结构
++> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
+
+*** End Patch
+
+新增文件示例：
+*** Begin Patch
+*** Add File: docs/note.md
++第一行
++第二行
+*** End Patch
+
+删除文件示例：
+*** Begin Patch
+*** Delete File: docs/old.md
+*** End Patch
+
+禁止写法：不要写 `*** docs/file.md`、`--- docs/file.md`、`+++ docs/file.md` 或只包含 `@@ -1,2 +1,3 @@` 的普通 diff。"""
+
+PATCH_PARAMETER_DESCRIPTION = """完整 patch 文本。必须以 `*** Begin Patch` 开始、以 `*** End Patch` 结束。
+每个文件操作必须使用 `*** Add File: <path>`、`*** Update File: <path>` 或 `*** Delete File: <path>`。
+Update File 内容行只能以空格、+、- 或 @@ 开头；普通上下文行前面必须保留一个空格。"""
+
+PATCH_EXPECTED_HEADERS = [
+    "*** Add File: <path>",
+    "*** Update File: <path>",
+    "*** Delete File: <path>",
+]
 
 
 @dataclass(frozen=True)
@@ -21,13 +62,13 @@ def create_patch_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
             name="apply_patch",
-            description="在当前工作区内应用 Codex apply_patch 风格的文本补丁。",
+            description=APPLY_PATCH_USAGE,
             parameters={
                 "type": "object",
                 "properties": {
                     "patch": {
                         "type": "string",
-                        "description": "以 *** Begin Patch 开始、*** End Patch 结束的补丁文本",
+                        "description": PATCH_PARAMETER_DESCRIPTION,
                     }
                 },
                 "required": ["patch"],
@@ -72,7 +113,7 @@ async def apply_patch_tool(
         "[PatchTool] 应用补丁完成 | "
         f"changes={len(changes)} | summary={_summarize_changes(changes)}"
     )
-    return {"changes": changes}
+    return {"changes": changes, "files": changes}
 
 
 def _parse_patch(patch: str) -> list[PatchOperation]:
@@ -99,15 +140,35 @@ def _parse_patch(patch: str) -> list[PatchOperation]:
             operations.append(PatchOperation(kind="delete", path=path, lines=[]))
             index += 1
         else:
-            raise ToolExecutionError(
-                "无法识别的 patch 行",
-                code="invalid_patch",
-                details={"line": header, "line_number": index + 1},
-            )
+            _raise_unrecognized_patch_line(header, index + 1)
 
     if not operations:
         raise ToolExecutionError("patch 没有任何文件操作", code="invalid_patch")
     return operations
+
+
+def _raise_unrecognized_patch_line(line: str, line_number: int) -> None:
+    hint = "文件操作头必须写成 `*** Update File: <path>`、`*** Add File: <path>` 或 `*** Delete File: <path>`。"
+    if line.startswith("*** ") and ":" not in line:
+        hint = (
+            "看起来你写成了 `*** <path>`。这不是有效的 apply_patch 文件头；"
+            "如果要修改已有文件，请改成 `*** Update File: <path>`。"
+        )
+    elif line.startswith("--- ") or line.startswith("+++ ") or line.startswith("@@ -"):
+        hint = (
+            "当前工具不接受普通 unified diff 文件头。请先写 `*** Update File: <path>`，"
+            "然后在其后放置以空格、+、- 或 @@ 开头的变更行。"
+        )
+    raise ToolExecutionError(
+        "无法识别的 patch 行",
+        code="invalid_patch",
+        details={
+            "line": line,
+            "line_number": line_number,
+            "expected_headers": PATCH_EXPECTED_HEADERS,
+            "hint": hint,
+        },
+    )
 
 
 def _collect_operation(
@@ -154,12 +215,13 @@ def _apply_add(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8", newline="")
-    return {
-        "operation": "add",
+    return finalize_file_change({
+        "operation": "update",
         "path": _relative(target, context),
         "added_lines": len(content_lines),
         "removed_lines": 0,
-    }
+        "diff": _operation_diff(_relative(target, context), "add", operation.lines),
+    })
 
 
 def _apply_update(
@@ -198,12 +260,13 @@ def _apply_update(
 
     updated = original.replace(old_block, new_block, 1)
     target.write_text(updated, encoding="utf-8", newline="")
-    return {
+    return finalize_file_change({
         "operation": "update",
         "path": _relative(target, context),
         "added_lines": added,
         "removed_lines": removed,
-    }
+        "diff": _operation_diff(_relative(target, context), "update", operation.lines),
+    })
 
 
 def _apply_delete(
@@ -224,14 +287,34 @@ def _apply_delete(
             details={"path": _relative(target, context)},
         )
     size = target.stat().st_size
+    try:
+        content = target.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ToolExecutionError(
+            "文件不是 UTF-8 文本",
+            code="file_not_text",
+            details={"path": _relative(target, context)},
+        ) from exc
+    removed_lines = count_text_lines(content)
     target.unlink()
-    return {
-        "operation": "delete",
+    return finalize_file_change({
+        "operation": "update",
         "path": _relative_missing(target, context),
         "removed_bytes": size,
         "added_lines": 0,
-        "removed_lines": 0,
-    }
+        "removed_lines": removed_lines,
+        "diff": _operation_diff(_relative_missing(target, context), "delete", operation.lines),
+    })
+
+
+def _operation_diff(path: str, operation: str, lines: list[str]) -> str:
+    if operation == "add":
+        header = ["--- /dev/null", f"+++ b/{path}"]
+    elif operation == "delete":
+        header = [f"--- a/{path}", "+++ /dev/null"]
+    else:
+        header = [f"--- a/{path}", f"+++ b/{path}"]
+    return "\n".join([*header, *lines])
 
 
 def _build_update_blocks(lines: list[str]) -> tuple[str, str, int, int]:

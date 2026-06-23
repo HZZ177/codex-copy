@@ -64,6 +64,26 @@ describe("ToolCallBlock", () => {
     expect(screen.getByText("读取失败")).not.toBeNull();
   });
 
+  it("renders failed file mutation tools with file-change style target", () => {
+    render(
+      <ToolCallBlock
+        message={toolMessage(
+          "failed",
+          { status: "error", error: "patch failed" },
+          "apply_patch",
+          {
+            patch: "*** Begin Patch\n*** Update File: docs/project-structure.md\n@@\n+intro\n*** End Patch",
+          },
+        )}
+      />,
+    );
+
+    const block = screen.getByTestId("tool-call-block");
+    expect(block.textContent).toContain("编辑文件失败 docs/project-structure.md");
+    expect(screen.getByText("docs/project-structure.md")).not.toBeNull();
+    expect(block.querySelector("svg.lucide-circle-x")).not.toBeNull();
+  });
+
   it("is used by MessageList for tool messages", () => {
     render(<MessageList messages={[toolMessage("completed")]} />);
 
@@ -74,6 +94,8 @@ describe("ToolCallBlock", () => {
 function toolMessage(
   status: ConversationMessage["status"],
   result: Record<string, unknown> | null = { status: "success", model_content: "文件内容" },
+  name = "read_file",
+  args: Record<string, unknown> = { path: "README.md" },
 ): ConversationMessage {
   return {
     id: "tool-1",
@@ -83,12 +105,12 @@ function toolMessage(
     kind: "tool",
     itemType: "tool_call",
     status,
-    content: "read_file",
+    content: name,
     payload: {
       call: {
         id: "call-1",
-        name: "read_file",
-        arguments: { path: "README.md" },
+        name,
+        arguments: args,
       },
       ...(result ? { result } : {}),
     },

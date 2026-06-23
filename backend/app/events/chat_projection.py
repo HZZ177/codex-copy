@@ -17,6 +17,7 @@ class ChatProjection:
     EVENT_TYPE_TO_ACTION = {
         DomainEventType.LLM_STREAM: ChatAction.STREAM,
         DomainEventType.LLM_TOOL_STARTED: ChatAction.TOOL_START,
+        DomainEventType.LLM_TOOL_PROGRESS: ChatAction.TOOL_PROGRESS,
         DomainEventType.LLM_TOOL_FINISHED: ChatAction.TOOL_END,
         DomainEventType.LLM_TOOL_FAILED: ChatAction.TOOL_END,
         DomainEventType.SUBAGENT_STARTED: ChatAction.SUBAGENT_START,

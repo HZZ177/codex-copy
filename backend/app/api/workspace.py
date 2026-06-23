@@ -354,16 +354,19 @@ def _search(scope: WorkspaceRuntimeContext, q: str, limit: int) -> list[Workspac
         ]
         for candidate in sorted(candidates, key=_entry_sort_key):
             visited += 1
-            if visited > MAX_SEARCH_VISITED_PATHS or time.perf_counter() - started_at > MAX_SEARCH_SECONDS:
+            if (
+                visited > MAX_SEARCH_VISITED_PATHS
+                or time.perf_counter() - started_at > MAX_SEARCH_SECONDS
+            ):
                 logger.info(
                     "[WorkspaceAPI] 搜索达到预算提前返回 | "
                     f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | "
                     f"visited={visited} | limit={limit}"
                 )
                 return results
-            rel = _relative_path(scope, candidate)
-            if query not in candidate.name.lower() and query not in rel.lower():
+            if query not in candidate.name.lower():
                 continue
+            rel = _relative_path(scope, candidate)
             results.append(
                 WorkspaceSearchResult(
                     path=rel,

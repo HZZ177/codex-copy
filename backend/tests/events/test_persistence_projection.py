@@ -118,6 +118,45 @@ async def test_persistence_projection_writes_tool_end_and_completed_payload(tmp_
 
 
 @pytest.mark.asyncio
+async def test_persistence_projection_ignores_tool_progress_but_persists_final_files(
+    tmp_path,
+) -> None:
+    repositories = _repositories(tmp_path)
+    projection = PersistenceProjection(
+        repository=repositories.message_events,
+        session_id="ses_persist",
+        turn_index=1,
+    )
+
+    await projection.handle(
+        _event(
+            DomainEventType.LLM_TOOL_PROGRESS,
+            {
+                "tool": "apply_patch",
+                "run_id": "call_1",
+                "files": [{"path": "src/app.py", "added_lines": 2, "deleted_lines": 1}],
+            },
+        )
+    )
+    await projection.handle(
+        _event(
+            DomainEventType.LLM_TOOL_FINISHED,
+            {
+                "tool": "apply_patch",
+                "run_id": "tool_1",
+                "result": "{}",
+                "files": [{"path": "src/app.py", "added_lines": 2, "deleted_lines": 1}],
+            },
+        )
+    )
+
+    events = repositories.message_events.list_by_session("ses_persist")
+
+    assert [event.action for event in events] == ["tool_end"]
+    assert events[0].data["files"] == [{"path": "src/app.py", "added_lines": 2, "deleted_lines": 1}]
+
+
+@pytest.mark.asyncio
 async def test_persistence_projection_keeps_subagent_stream_separate(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     projection = PersistenceProjection(

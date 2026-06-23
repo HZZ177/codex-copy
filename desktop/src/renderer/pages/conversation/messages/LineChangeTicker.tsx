@@ -32,7 +32,7 @@ export function LineChangeTicker({ className, label, added = 0, removed = 0, uni
       aria-label={accessibleText}
       data-testid="line-change-ticker"
     >
-      <span className={styles.label}>{label}</span>
+      {label ? <span className={styles.label}>{label}</span> : null}
       {displayed.added > 0 ? <LineDelta kind="added" sign="+" value={displayed.added} unit={unit} /> : null}
       {displayed.removed > 0 ? <LineDelta kind="removed" sign="-" value={displayed.removed} unit={unit} /> : null}
     </span>

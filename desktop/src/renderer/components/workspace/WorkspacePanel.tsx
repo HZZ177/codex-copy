@@ -296,7 +296,7 @@ function TreeNode({
         >
           <ChevronRight className={styles.chevron} data-expanded={expanded ? "true" : "false"} size={14} />
           <MaterialEntryIcon path={entry.path || entry.name} type="directory" />
-          <span>{entry.name}</span>
+          <span className={styles.nodeLabel}>{entry.name}</span>
           {loading ? <em>读取中</em> : null}
         </button>
       ) : (
@@ -310,7 +310,7 @@ function TreeNode({
         >
           <span className={styles.fileSpacer} />
           <MaterialEntryIcon path={entry.path || entry.name} type="file" />
-          <span>{entry.name}</span>
+          <span className={styles.nodeLabel}>{entry.name}</span>
           {typeof entry.size === "number" ? <em>{formatSize(entry.size)}</em> : null}
         </button>
       )}
@@ -369,7 +369,7 @@ function SearchResultNode({
           <span className={styles.fileSpacer} />
         )}
         <MaterialEntryIcon path={entry.path || entry.name} type={entry.type} />
-        <span>{entry.name}</span>
+        <span className={styles.nodeLabel}>{entry.name}</span>
         <em title={entry.path}>{entry.path}</em>
       </button>
     </div>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from langchain_core.messages import RemoveMessage, SystemMessage
@@ -45,12 +45,12 @@ class NullChatProjectionAdapter:
         return False
 
 
-class MessageInjectionType(str, Enum):
+class MessageInjectionType(StrEnum):
     SLOT = "slot"
     FOLLOW = "follow"
 
 
-class MessageInjectionRole(str, Enum):
+class MessageInjectionRole(StrEnum):
     SYSTEM = "SystemMessage"
     HUMAN = "HumanMessage"
     AI = "AIMessage"
@@ -183,12 +183,15 @@ async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: 
 
     snapshot = await graph.aget_state(config)
     values = snapshot.values or {}
-    state_messages = list((values.get("messages") or [])) if isinstance(values, dict) else []
+    state_messages = list(values.get("messages") or []) if isinstance(values, dict) else []
     existing_slot = next(
         (
             message
             for message in state_messages
-            if isinstance(message, SystemMessage) and getattr(message, "id", None) == _SLOT_MESSAGE_ID
+            if (
+                isinstance(message, SystemMessage)
+                and getattr(message, "id", None) == _SLOT_MESSAGE_ID
+            )
         ),
         None,
     )
@@ -198,7 +201,10 @@ async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: 
     rebuilt = [
         message
         for message in state_messages
-        if not (isinstance(message, SystemMessage) and getattr(message, "id", None) == _SLOT_MESSAGE_ID)
+        if not (
+            isinstance(message, SystemMessage)
+            and getattr(message, "id", None) == _SLOT_MESSAGE_ID
+        )
     ]
     rebuilt.insert(0, SystemMessage(content=content, id=_SLOT_MESSAGE_ID))
     await graph.aupdate_state(
@@ -678,8 +684,12 @@ class ChatService:
         turn_index: int,
         message_injection: list[InjectedMessage],
     ) -> tuple[list[dict[str, Any]], bool]:
-        follow_messages = [item for item in message_injection if item.type == MessageInjectionType.FOLLOW]
-        slot_messages = [item for item in message_injection if item.type == MessageInjectionType.SLOT]
+        follow_messages = [
+            item for item in message_injection if item.type == MessageInjectionType.FOLLOW
+        ]
+        slot_messages = [
+            item for item in message_injection if item.type == MessageInjectionType.SLOT
+        ]
         if not follow_messages and not slot_messages:
             return [], False
 
@@ -709,7 +719,8 @@ class ChatService:
             )
 
         logger.info(
-            f"[MessageInjection] 注入消息完成 | session_id={session.id} | turn_index={turn_index} | "
+            f"[MessageInjection] 注入消息完成 | session_id={session.id} | "
+            f"turn_index={turn_index} | "
             f"slot_count={len(slot_messages)} | follow_count={len(follow_messages)}"
         )
         return injected_runtime_messages, bool(slot_messages)
@@ -739,7 +750,9 @@ class ChatService:
                 "source": "message_injection",
                 "injectionSource": item.type.value,
                 "injectionRole": item.role.value,
-                "slotMessageId": _SLOT_MESSAGE_ID if item.type == MessageInjectionType.SLOT else None,
+                "slotMessageId": (
+                    _SLOT_MESSAGE_ID if item.type == MessageInjectionType.SLOT else None
+                ),
                 "metadata": item.metadata or {},
                 "fallbackUserMessage": request.message,
             },

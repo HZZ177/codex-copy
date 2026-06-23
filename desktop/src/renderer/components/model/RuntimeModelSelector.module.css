@@ -29,6 +29,7 @@
 .modelCluster {
   display: inline-flex;
   min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
 }
@@ -36,11 +37,12 @@
 .modelPicker {
   position: relative;
   min-width: 0;
+  max-width: 100%;
 }
 
 .modelPill {
   gap: 6px;
-  max-width: min(230px, 34vw);
+  max-width: min(230px, 100%);
   padding: 0 7px 0 9px;
 }
 
@@ -56,6 +58,7 @@
 }
 
 .modelName {
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 154px;
   overflow: hidden;

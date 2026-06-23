@@ -391,7 +391,7 @@ const SourceCodeHighlighter = memo(function SourceCodeHighlighter({
     () =>
       isDiff
         ? (lineNumber: number) => ({
-            style: getDiffLineStyle(lines[lineNumber - 1] ?? "", theme),
+            style: getDiffLineStyle(lines[lineNumber - 1] ?? ""),
           })
         : undefined,
     [isDiff, lines, theme],
@@ -1122,16 +1122,15 @@ function hashMermaidCode(code: string): string {
   return hash.toString(36);
 }
 
-function getDiffLineStyle(line: string, theme: "light" | "dark"): CSSProperties {
-  const alpha = theme === "dark" ? 0.18 : 0.11;
+function getDiffLineStyle(line: string): CSSProperties {
   if (line.startsWith("+")) {
-    return { display: "block", background: `rgba(39, 174, 96, ${alpha})` };
+    return { display: "block", background: "var(--diff-added-bg)", color: "var(--diff-added-text)" };
   }
   if (line.startsWith("-")) {
-    return { display: "block", background: `rgba(235, 87, 87, ${alpha})` };
+    return { display: "block", background: "var(--diff-removed-bg)", color: "var(--diff-removed-text)" };
   }
   if (line.startsWith("@@")) {
-    return { display: "block", background: `rgba(47, 128, 237, ${alpha})`, color: "var(--color-primary-6)" };
+    return { display: "block", background: "var(--diff-hunk-bg)", color: "var(--diff-hunk-text)" };
   }
   return { display: "block" };
 }

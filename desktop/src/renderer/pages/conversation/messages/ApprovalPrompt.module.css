@@ -31,13 +31,7 @@
   display: inline-grid;
   flex: 0 0 auto;
   place-items: center;
-  color: var(--color-accent);
-}
-
-.block[data-status="rejected"] .icon,
-.block[data-status="expired"] .icon,
-.block[data-status="cancelled"] .icon {
-  color: var(--color-danger);
+  color: currentColor;
 }
 
 .titleGroup {

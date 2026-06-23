@@ -55,6 +55,18 @@ async def test_chat_projection_maps_tool_lifecycle_to_tool_actions() -> None:
     )
     await projection.handle(
         _event(
+            DomainEventType.LLM_TOOL_PROGRESS,
+            {
+                "tool": "apply_patch",
+                "run_id": "call_1",
+                "tool_call_id": "call_1",
+                "files": [{"path": "a.py", "added_lines": 1, "deleted_lines": 0}],
+                "status": "running",
+            },
+        )
+    )
+    await projection.handle(
+        _event(
             DomainEventType.LLM_TOOL_FINISHED,
             {"tool": "read_file", "run_id": "run_1", "result": "ok"},
         )
@@ -66,8 +78,14 @@ async def test_chat_projection_maps_tool_lifecycle_to_tool_actions() -> None:
         )
     )
 
-    assert [item["action"] for item in adapter.sent] == ["tool_start", "tool_end", "tool_end"]
-    assert adapter.sent[2]["data"]["error"] == "failed"
+    assert [item["action"] for item in adapter.sent] == [
+        "tool_start",
+        "tool_progress",
+        "tool_end",
+        "tool_end",
+    ]
+    assert adapter.sent[1]["data"]["files"][0]["path"] == "a.py"
+    assert adapter.sent[3]["data"]["error"] == "failed"
 
 
 @pytest.mark.asyncio

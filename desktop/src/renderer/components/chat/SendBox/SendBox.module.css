@@ -4,6 +4,7 @@
   width: min(880px, 100%);
   margin-inline: auto;
   min-height: 118px;
+  container-type: inline-size;
   grid-template-rows: minmax(0, auto) auto;
   gap: 10px;
   border: 1px solid var(--composer-border);
@@ -366,6 +367,7 @@
 
 .toolbar {
   display: flex;
+  min-width: 0;
   min-height: 36px;
   align-items: center;
   justify-content: flex-end;
@@ -391,9 +393,13 @@
 }
 
 .rightActions {
-  flex: 0 0 auto;
-  max-width: min(58%, 520px);
+  flex: 1 1 auto;
+  max-width: 100%;
   justify-content: flex-end;
+}
+
+.rightActions > * {
+  min-width: 0;
 }
 
 .sendButton,
@@ -403,6 +409,12 @@
   place-items: center;
   border: 0;
   border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
 }
 
 .leftActions:empty {
@@ -440,9 +452,9 @@
 
 .root[data-variant="codex"] .sendButton,
 .root[data-variant="codex"] .stopButton {
-  width: 38px;
-  height: 38px;
-  background: color-mix(in srgb, var(--color-text-tertiary) 82%, var(--color-text-primary));
+  width: 34px;
+  height: 34px;
+  background: var(--color-text-primary);
   color: var(--color-bg-elevated);
 }
 
@@ -460,7 +472,8 @@
 
 .root[data-variant="codex"] .sendButton:hover:not(:disabled),
 .root[data-variant="codex"] .stopButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-text-primary) 64%, var(--color-text-tertiary));
+  background: color-mix(in srgb, var(--color-text-primary) 88%, #fff);
+  transform: translateY(-1px);
 }
 
 .root:not([data-variant="codex"]) .sendButton:hover:not(:disabled),
@@ -556,6 +569,24 @@
 
   .leftHint span {
     display: none;
+  }
+}
+
+@container (max-width: 360px) {
+  .toolbar {
+    gap: 8px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .leftActions,
+  .rightActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .rightActions {
+    max-width: none;
   }
 }
 

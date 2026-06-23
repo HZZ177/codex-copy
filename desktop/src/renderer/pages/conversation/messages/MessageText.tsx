@@ -30,6 +30,7 @@ import styles from "./MessageText.module.css";
 export interface MessageTextProps {
   message: ConversationMessage;
   showActionRow?: boolean;
+  suppressStreamingCursor?: boolean;
   workspaceRuntime?: RuntimeBridge;
   workspaceScope?: WorkspaceScope | null;
   onQuoteSelection?: (text: string) => void;
@@ -38,6 +39,7 @@ export interface MessageTextProps {
 export function MessageText({
   message,
   showActionRow = true,
+  suppressStreamingCursor = false,
   workspaceRuntime,
   workspaceScope,
   onQuoteSelection,
@@ -94,7 +96,8 @@ export function MessageText({
     isUser,
     visuallyStreaming,
   };
-  const showStreamingCursor = !isUser && isStreaming && !isAnimating && !hasPendingDisplayBacklog && !cancelled;
+  const showStreamingCursor =
+    !suppressStreamingCursor && !isUser && isStreaming && !isAnimating && !hasPendingDisplayBacklog && !cancelled;
   const markdownComponents = useMemo(
     () => ({
       pre: ({ node, ...props }: MarkdownPreProps) => {
@@ -156,11 +159,7 @@ export function MessageText({
               {renderedContent}
             </ReactMarkdown>
             {showStreamingCursor ? (
-              <span className={styles.streamingCursor} data-testid="streaming-cursor" aria-hidden="true">
-                <span className={styles.streamingDot} />
-                <span className={styles.streamingDot} />
-                <span className={styles.streamingDot} />
-              </span>
+              <StreamingCursor />
             ) : null}
           </div>
         ) : (
@@ -182,6 +181,16 @@ export function MessageText({
         <MessageActionFooter message={message} />
       ) : null}
     </article>
+  );
+}
+
+export function StreamingCursor() {
+  return (
+    <span className={styles.streamingCursor} data-testid="streaming-cursor" aria-hidden="true">
+      <span className={styles.streamingDot} />
+      <span className={styles.streamingDot} />
+      <span className={styles.streamingDot} />
+    </span>
   );
 }
 
@@ -350,7 +359,7 @@ function previewRenderContextFromWorkspaceScope(
   onQuoteSelection: ((text: string) => void) | undefined,
   hostContext: PreviewRenderContext | null | undefined,
 ): PreviewRenderContext | undefined {
-  if (hostContext && previewContextMatchesWorkspaceScope(hostContext, workspaceScope)) {
+  if (hostContext?.workspaceAvailable && previewContextMatchesWorkspaceScope(hostContext, workspaceScope)) {
     return hostContext;
   }
   if (!workspaceScope) {

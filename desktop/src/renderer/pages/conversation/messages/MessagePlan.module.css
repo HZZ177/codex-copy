@@ -38,7 +38,7 @@
   place-items: center;
   border-radius: var(--radius-xs);
   background: var(--surface-muted);
-  color: var(--color-accent);
+  color: var(--color-text-tertiary);
 }
 
 .titleGroup {
@@ -116,12 +116,7 @@
   place-items: center;
 }
 
-.entry[data-status="completed"] .statusIcon {
-  color: var(--color-success-6);
-}
-
 .entry[data-status="in_progress"] .statusIcon {
-  color: var(--color-primary-6);
   animation: planPulse 1.4s ease-in-out infinite;
 }
 

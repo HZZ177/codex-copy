@@ -75,25 +75,32 @@ describe("SendBox", () => {
     expect(Boolean(model.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
-  it("switches to stop button while running and prevents repeated send", () => {
+  it("keeps the editor writable while running and prevents repeated send", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();
+    const onChange = vi.fn();
     render(
       <SendBox
         value="继续修改"
         runtimeState="running"
         canSend={false}
         canStop
-        onChange={vi.fn()}
+        onChange={onChange}
         onSend={onSend}
         onStop={onStop}
       />,
     );
 
+    const input = screen.getByLabelText("继续输入");
     expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
-    expect(screen.getByLabelText("继续输入").getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getByLabelText("继续输入").getAttribute("contenteditable")).toBe("false");
+    expect(input.getAttribute("aria-disabled")).toBe("false");
+    expect(input.getAttribute("contenteditable")).toBe("true");
+
+    input.textContent = "下一条先写好";
+    fireEvent.input(input);
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     fireEvent.submit(screen.getByRole("form", { name: "继续对话输入" }));
+    expect(onChange).toHaveBeenCalledWith("下一条先写好");
     expect(onSend).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "停止" }));

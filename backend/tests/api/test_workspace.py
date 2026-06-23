@@ -107,6 +107,28 @@ def test_workspace_search_skips_generated_and_secret_paths(tmp_path) -> None:
     assert ".env.local" not in paths
 
 
+def test_workspace_search_matches_only_entry_names_not_parent_paths(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    (root / "backend" / "app" / "core").mkdir(parents=True)
+    (root / "backend" / "app" / "core" / "config.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "frontend").mkdir(parents=True)
+    (root / "frontend" / "backend_notes.md").write_text("notes\n", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "backend", "limit": 20},
+        )
+
+    assert response.status_code == 200
+    paths = [entry["path"] for entry in response.json()]
+    assert "backend" in paths
+    assert "frontend/backend_notes.md" in paths
+    assert "backend/app" not in paths
+    assert "backend/app/core/config.py" not in paths
+
+
 def test_session_bound_workspace_tree_read_and_search(tmp_path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()

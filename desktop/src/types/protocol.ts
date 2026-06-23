@@ -264,6 +264,7 @@ export const AGENT_CHAT_ACTIONS = [
   "completed",
   "cancelled",
   "tool_start",
+  "tool_progress",
   "tool_end",
   "subagent_start",
   "subagent_end",
@@ -424,6 +425,7 @@ export interface AgentTraceQueryContext {
 export interface AgentToolCall {
   id?: string;
   runId: string;
+  toolCallId?: string;
   parentRunId?: string | null;
   toolName: string;
   toolParams?: unknown;
@@ -433,7 +435,20 @@ export interface AgentToolCall {
   toolErrorType?: string;
   status: AgentToolStatus;
   uiPayload?: Record<string, unknown>;
+  fileChanges?: AgentFileChange[];
   metadata?: Record<string, unknown>;
+}
+
+export interface AgentFileChange {
+  path: string;
+  operation?: string;
+  added_lines?: number;
+  deleted_lines?: number;
+  removed_lines?: number;
+  additions?: number;
+  deletions?: number;
+  diff?: string;
+  [key: string]: unknown;
 }
 
 export interface AgentSubagentTextItem {
@@ -480,6 +495,7 @@ export interface AgentChatMessage {
   traceId?: string;
   traceQueryContext?: AgentTraceQueryContext;
   runId?: string;
+  toolCallId?: string;
   toolName?: string;
   toolParams?: unknown;
   toolResult?: string;
@@ -488,6 +504,7 @@ export interface AgentChatMessage {
   toolErrorType?: string;
   status?: AgentToolStatus | AgentSessionStatus | "streaming";
   uiPayload?: Record<string, unknown>;
+  fileChanges?: AgentFileChange[];
   metadata?: Record<string, unknown>;
   subagentName?: string;
   subagentId?: string;
@@ -524,10 +541,12 @@ export interface AgentStreamActionData {
 export interface AgentToolEventData {
   session_id?: string;
   run_id: string;
+  tool_call_id?: string;
   parent_run_id?: string | null;
   tool?: string;
   tool_name?: string;
   params?: unknown;
+  files?: AgentFileChange[];
   result?: string;
   duration_ms?: number;
   status?: AgentToolStatus | "success" | "failed";
@@ -543,6 +562,13 @@ export interface AgentToolEventData {
   node_id?: string;
   input_data?: Record<string, unknown>;
   output_data?: Record<string, unknown>;
+}
+
+export interface AgentToolProgressData extends Omit<AgentToolEventData, "duration_ms" | "result"> {
+  run_id: string;
+  tool_call_id?: string;
+  phase?: "streaming" | "completed" | "failed" | string;
+  files?: AgentFileChange[];
 }
 
 export interface AgentReasoningData {

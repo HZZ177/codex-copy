@@ -31,7 +31,7 @@ class ChatStreamRun:
 
 
 class BroadcastChatAdapter:
-    def __init__(self, manager: "ChatStreamManager", session_id: str) -> None:
+    def __init__(self, manager: ChatStreamManager, session_id: str) -> None:
         self._manager = manager
         self._session_id = session_id
 

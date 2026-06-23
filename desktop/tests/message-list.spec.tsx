@@ -264,6 +264,42 @@ describe("MessageList", () => {
     expect(screen.getByTestId("streaming-cursor")).not.toBeNull();
   });
 
+  it("does not append a second pending cursor while a file change is streaming", () => {
+    const { rerender } = render(
+      <MessageList
+        messages={[
+          message("m1", "user", "开始"),
+          { ...message("m2", "assistant", "没问题，直接重新创建："), status: "running" },
+          { ...fileChangeMessage("file-change-running", "docs/project-structure.md", "add"), status: "running" },
+        ]}
+        isProcessing
+      />,
+    );
+
+    expect(screen.getAllByTestId("streaming-cursor")).toHaveLength(1);
+    const assistantMessage = screen.getAllByTestId("message-text")[1];
+    expect(within(assistantMessage).queryByTestId("streaming-cursor")).toBeNull();
+    const runningFileChangeItem = screen.getByTestId("file-change-block").closest('[role="listitem"]');
+    expect(runningFileChangeItem).not.toBeNull();
+    expect(within(runningFileChangeItem as HTMLElement).getByTestId("streaming-cursor")).not.toBeNull();
+
+    rerender(
+      <MessageList
+        messages={[
+          message("m1", "user", "开始"),
+          { ...message("m2", "assistant", "没问题，直接重新创建："), status: "running" },
+          fileChangeMessage("file-change-completed", "docs/project-structure.md", "add"),
+        ]}
+        isProcessing
+      />,
+    );
+
+    expect(screen.getAllByTestId("streaming-cursor")).toHaveLength(1);
+    const completedFileChangeItem = screen.getByTestId("file-change-block").closest('[role="listitem"]');
+    expect(completedFileChangeItem).not.toBeNull();
+    expect(within(completedFileChangeItem as HTMLElement).getByTestId("streaming-cursor")).not.toBeNull();
+  });
+
   it("summarizes consecutive tool messages and expands original blocks on demand", () => {
     render(<MessageList messages={[toolMessage("t1"), commandMessage("c1")]} />);
 
@@ -462,7 +498,7 @@ describe("MessageList", () => {
 
     expect(
       screen.getByText(
-        "读取失败 1 个文件，读取了 1 个文件，查看失败 1 个目录，查看了 2 个目录，搜索失败 1 次，搜索了 1 次，运行失败 1 条命令，已运行 1 条命令，编辑失败 1 个文件，编辑了 1 个文件，调用失败 1 个工具，调用了 1 个工具",
+        "读取失败 1 个文件，读取了 1 个文件，查看失败 1 个目录，查看了 2 个目录，搜索失败 1 次，搜索了 1 次，运行失败 1 条命令，已运行 1 条命令，创建失败 1 个文件，创建了 1 个文件，调用失败 1 个工具，调用了 1 个工具",
       ),
     ).not.toBeNull();
     expect(screen.queryByText(/查看失败 3 个目录/)).toBeNull();
@@ -507,7 +543,39 @@ describe("MessageList", () => {
     fireEvent.click(screen.getByRole("button", { name: "编辑了 2 个文件详情" }));
 
     expect(screen.getAllByTestId("file-change-block")).toHaveLength(2);
-    expect(screen.getAllByText("编辑了 1 个文件")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "src/main.py" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "src/app.py" })).not.toBeNull();
+    expect(screen.getAllByTestId("line-change-ticker")).toHaveLength(2);
+  });
+
+  it("labels grouped created file changes separately from edits", () => {
+    render(
+      <MessageList
+        messages={[
+          fileChangeMessage("file-create-1", "src/new.ts", "add"),
+          fileChangeMessage("file-create-2", "src/other.ts", "add"),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("创建了 2 个文件")).not.toBeNull();
+    expect(screen.queryByText("编辑了 2 个文件")).toBeNull();
+    expect(screen.getByTestId("message-group-block").querySelector("[data-icon-kind]")?.getAttribute("data-icon-kind")).toBe("create");
+  });
+
+  it("uses the tool name over payload operation when grouping file changes", () => {
+    render(
+      <MessageList
+        messages={[
+          fileChangeMessage("file-patch-add-1", "src/new.ts", "add", "apply_patch"),
+          fileChangeMessage("file-patch-add-2", "src/other.ts", "add", "apply_patch"),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("编辑了 2 个文件")).not.toBeNull();
+    expect(screen.queryByText("创建了 2 个文件")).toBeNull();
+    expect(screen.getByTestId("message-group-block").querySelector("[data-icon-kind]")?.getAttribute("data-icon-kind")).toBe("edit");
   });
 
   it("separates failed and successful file-change counts", () => {
@@ -545,7 +613,9 @@ describe("MessageList", () => {
     render(<MessageList messages={[fileChangeMessage()]} onFilePreview={onFilePreview} />);
 
     fireEvent.click(screen.getByRole("button", { name: "展开文件变更详情" }));
-    fireEvent.click(screen.getByRole("button", { name: "预览" }));
+    expect(screen.getByLabelText("文件变更预览")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
 
     expect(onFilePreview).toHaveBeenCalledWith({
       path: "src/main.py",
@@ -745,7 +815,12 @@ function commandMessage(id: string): ConversationMessage {
   };
 }
 
-function fileChangeMessage(id = "file-change-1", path = "src/main.py"): ConversationMessage {
+function fileChangeMessage(
+  id = "file-change-1",
+  path = "src/main.py",
+  operation = "update",
+  toolName = "",
+): ConversationMessage {
   return {
     id,
     threadId: "thread-1",
@@ -755,7 +830,9 @@ function fileChangeMessage(id = "file-change-1", path = "src/main.py"): Conversa
     status: "completed",
     content: path,
     payload: {
+      ...(toolName ? { call: { name: toolName, arguments: {} }, tool: toolName } : {}),
       path,
+      operation,
       diff: "@@\n+hello",
       additions: 1,
       deletions: 0,

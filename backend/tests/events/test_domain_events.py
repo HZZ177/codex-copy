@@ -47,6 +47,7 @@ def test_event_enums_cover_core_contract_and_exclude_a2ui() -> None:
         DomainEventType.MESSAGE_USER_CREATED,
         DomainEventType.LLM_STREAM,
         DomainEventType.LLM_TOOL_STARTED,
+        DomainEventType.LLM_TOOL_PROGRESS,
         DomainEventType.LLM_TOOL_FINISHED,
         DomainEventType.LLM_TOOL_FAILED,
         DomainEventType.TURN_STARTED,
@@ -64,6 +65,7 @@ def test_event_enums_cover_core_contract_and_exclude_a2ui() -> None:
 def test_external_action_enums_match_source_contract() -> None:
     assert ChatAction.STREAM.value == "stream"
     assert ChatAction.TOOL_START.value == "tool_start"
+    assert ChatAction.TOOL_PROGRESS.value == "tool_progress"
     assert ChatAction.TOOL_END.value == "tool_end"
     assert ChatAction.REASONING.value == "reasoning"
     assert ReplayAction.STREAM_BATCH.value == "stream_batch"

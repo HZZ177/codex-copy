@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
+import { Layout } from "@/renderer/components/layout/Layout";
+import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { HomePage } from "@/renderer/pages/home";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
+import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
+import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import type { AgentSession, ModelInfo, Workspace } from "@/types/protocol";
 
 describe("HomePage", () => {
@@ -120,6 +125,53 @@ describe("HomePage", () => {
       );
     });
     expect(await screen.findByRole("option", { name: /README\.md/ })).not.toBeNull();
+  });
+
+  it("uses the selected project as the right sidebar file workspace on the new chat page", async () => {
+    const runtime = fakeRuntime({
+      model: "qwen-coder",
+      workspaces: [
+        workspace("ws-1", "keydex", "D:\\Projects\\keydex"),
+        workspace("ws-2", "desktop-app", "D:\\Projects\\desktop-app"),
+      ],
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 12)],
+      },
+    });
+
+    renderHomeInLayout(
+      <HomePage
+        runtime={runtime}
+        onNavigateToConversation={vi.fn()}
+        onOpenModelSettings={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
+    });
+
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ workspaceId: "ws-1" }, "");
+    });
+
+    fireEvent.click(screen.getByLabelText("选择工作区"));
+    fireEvent.click(await screen.findByRole("option", { name: /desktop-app/ }));
+
+    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ workspaceId: "ws-2" }, "");
+    });
+
+    fireEvent.click(screen.getByLabelText("选择工作区"));
+    fireEvent.click(screen.getByRole("button", { name: /无项目聊天/ }));
+
+    expect(await screen.findByTestId("right-sidebar-initial-page")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "文件" })).toBeNull();
   });
 
   it("starts a new chat with selected files as follow injections", async () => {
@@ -410,6 +462,18 @@ function enterPrompt(value: string) {
   fireEvent.input(input);
 }
 
+function renderHomeInLayout(ui: ReactElement) {
+  return render(
+    <ThemeProvider>
+      <LayoutStateProvider>
+        <PreviewProvider>
+          <Layout contentMode="full">{ui}</Layout>
+        </PreviewProvider>
+      </LayoutStateProvider>
+    </ThemeProvider>,
+  );
+}
+
 function fakeRuntime({
   model,
   models = model ? [{ id: model }] : [],
@@ -489,6 +553,21 @@ function fakeRuntime({
       createSession: vi.fn().mockResolvedValue(session),
     },
   } as unknown as RuntimeBridge;
+}
+
+function workspaceEntry(
+  name: string,
+  path: string,
+  type: WorkspaceEntry["type"],
+  size: number | null = null,
+): WorkspaceEntry {
+  return {
+    name,
+    path,
+    type,
+    size,
+    modified_at: null,
+  };
 }
 
 function workspace(

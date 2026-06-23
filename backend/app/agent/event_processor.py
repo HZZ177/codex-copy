@@ -12,6 +12,10 @@ from backend.app.agent.factory import (
     get_llm_gateway_trace_id,
     pop_llm_gateway_trace_id,
 )
+from backend.app.agent.tool_call_progress import (
+    ToolCallChunkPipeline,
+    finalize_file_change,
+)
 from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.events import DomainEventType, EventDispatcher
@@ -52,8 +56,10 @@ async def process_agent_events(
     llm_start_times: dict[str, float] = {}
     llm_request_ids: dict[str, str] = {}
     reasoning_parts_by_run_id: dict[str, list[str]] = {}
+    tool_chunk_pipeline = ToolCallChunkPipeline()
     stream_chunk_count = 0
     reasoning_chunk_count = 0
+    tool_progress_count = 0
     tool_call_count = 0
 
     try:
@@ -99,9 +105,10 @@ async def process_agent_events(
                     stream_chunk_count += 1
                 if _reasoning_text(chunk):
                     reasoning_chunk_count += 1
-                await _handle_chat_model_stream(
+                tool_progress_count += await _handle_chat_model_stream(
                     data=data,
                     run_id=run_id,
+                    tool_chunk_pipeline=tool_chunk_pipeline,
                     dispatcher=dispatcher,
                     session_id=session_id,
                     trace_id=trace_id,
@@ -177,6 +184,11 @@ async def process_agent_events(
             if event_type == "on_tool_start":
                 tool_start_times[run_id] = time.perf_counter()
                 tool_call_count += 1
+                tool_call_id = tool_chunk_pipeline.bind_tool_run(
+                    run_id=run_id,
+                    tool_name=name,
+                    params=_make_json_serializable(data.get("input")),
+                )
                 logger.info(
                     f"[AgentEvents] 工具开始 | session_id={session_id} | "
                     f"turn_index={turn_index} | trace_id={trace_id} | "
@@ -188,6 +200,7 @@ async def process_agent_events(
                     payload={
                         "tool": name,
                         "run_id": run_id,
+                        **({"tool_call_id": tool_call_id} if tool_call_id else {}),
                         "params": _make_json_serializable(data.get("input")),
                         "session_id": session_id,
                         "trace_id": trace_id,
@@ -208,6 +221,14 @@ async def process_agent_events(
                 duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
                 output = data.get("output")
                 is_error = _tool_output_is_error(output)
+                result_text = _stringify_tool_output(output)
+                structured_output = _structured_tool_output(output)
+                ui_payload = structured_output if isinstance(structured_output, dict) else None
+                files = _tool_files_from_structured_output(structured_output)
+                tool_call_id = (
+                    tool_chunk_pipeline.tool_call_id_for_run(run_id)
+                    or _tool_call_id_from_output(output)
+                )
                 if is_error:
                     logger.warning(
                         f"[AgentEvents] 工具返回错误 | session_id={session_id} | "
@@ -230,15 +251,22 @@ async def process_agent_events(
                     payload={
                         "tool": name,
                         "run_id": run_id,
-                        "result": _stringify_tool_output(output),
+                        **({"tool_call_id": tool_call_id} if tool_call_id else {}),
+                        "result": result_text,
                         "duration_ms": duration_ms,
                         "session_id": session_id,
                         "trace_id": trace_id,
                         "end_time": int(time.time() * 1000),
                         "status": "failed" if is_error else "completed",
-                        "error": _stringify_tool_output(output) if is_error else None,
+                        "error": result_text if is_error else None,
                         "error_type": "ToolMessageError" if is_error else None,
-                        "output_data": {"result": _stringify_tool_output(output)},
+                        "output_data": {
+                            "result": structured_output
+                            if structured_output is not None
+                            else result_text
+                        },
+                        "ui_payload": ui_payload,
+                        "files": files,
                     },
                     trace_id=trace_id,
                     user_id=user_id,
@@ -253,6 +281,7 @@ async def process_agent_events(
                 started_at = tool_start_times.pop(run_id, time.perf_counter())
                 duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
                 error_text = str(data.get("error") or event.get("error") or "工具执行失败")
+                tool_call_id = tool_chunk_pipeline.tool_call_id_for_run(run_id)
                 logger.warning(
                     f"[AgentEvents] 工具异常 | session_id={session_id} | "
                     f"turn_index={turn_index} | trace_id={trace_id} | tool={name} | "
@@ -264,6 +293,7 @@ async def process_agent_events(
                     payload={
                         "tool": name,
                         "run_id": run_id,
+                        **({"tool_call_id": tool_call_id} if tool_call_id else {}),
                         "result": "",
                         "duration_ms": duration_ms,
                         "session_id": session_id,
@@ -286,7 +316,8 @@ async def process_agent_events(
         logger.info(
             f"[AgentEvents] 事件流汇总 | session_id={session_id} | turn_index={turn_index} | "
             f"trace_id={trace_id} | stream_chunks={stream_chunk_count} | "
-            f"reasoning_chunks={reasoning_chunk_count} | tool_calls={tool_call_count} | "
+            f"reasoning_chunks={reasoning_chunk_count} | tool_progress={tool_progress_count} | "
+            f"tool_calls={tool_call_count} | "
             f"llm_calls={result.chain_token_usage.get('llm_call_count', 0)}"
         )
 
@@ -403,6 +434,7 @@ async def _handle_chat_model_stream(
     *,
     data: dict[str, Any],
     run_id: str,
+    tool_chunk_pipeline: ToolCallChunkPipeline,
     dispatcher: EventDispatcher,
     session_id: str,
     trace_id: str,
@@ -411,10 +443,31 @@ async def _handle_chat_model_stream(
     turn_index: int,
     result: AgentEventResult,
     reasoning_parts_by_run_id: dict[str, list[str]],
-) -> None:
+) -> int:
     chunk = data.get("chunk")
     text = _message_text(chunk)
     reasoning_text = _reasoning_text(chunk)
+    tool_progress_payloads = tool_chunk_pipeline.process_chunk(chunk, model_run_id=run_id)
+    emitted_tool_progress = 0
+
+    for payload in tool_progress_payloads:
+        payload = {
+            **payload,
+            "session_id": session_id,
+            "trace_id": trace_id,
+        }
+        await dispatcher.emit_event(
+            event_type=DomainEventType.LLM_TOOL_PROGRESS.value,
+            source="langchain_event_handler",
+            payload=payload,
+            trace_id=trace_id,
+            user_id=user_id,
+            original_session_id=session_id,
+            active_session_id=active_session_id,
+            run_id=str(payload.get("run_id") or run_id),
+            turn_index=turn_index,
+        )
+        emitted_tool_progress += 1
 
     if reasoning_text:
         reasoning_parts_by_run_id.setdefault(run_id, []).append(reasoning_text)
@@ -455,6 +508,8 @@ async def _handle_chat_model_stream(
             run_id=run_id,
             turn_index=turn_index,
         )
+
+    return emitted_tool_progress
 
 
 async def _flush_reasoning(
@@ -600,6 +655,48 @@ def _stringify_tool_output(output: Any) -> str:
     if isinstance(output, str):
         return output
     return str(_make_json_serializable(output))
+
+
+def _structured_tool_output(output: Any) -> Any:
+    if isinstance(output, ToolMessage):
+        return _parse_structured_tool_content(getattr(output, "content", ""))
+    if isinstance(output, dict):
+        return _make_json_serializable(output)
+    if isinstance(output, str):
+        return _parse_structured_tool_content(output)
+    return None
+
+
+def _tool_call_id_from_output(output: Any) -> str:
+    if isinstance(output, ToolMessage):
+        return str(getattr(output, "tool_call_id", "") or "")
+    return ""
+
+
+def _parse_structured_tool_content(content: Any) -> Any:
+    if isinstance(content, dict):
+        return _make_json_serializable(content)
+    if not isinstance(content, str):
+        return None
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return _make_json_serializable(parsed)
+
+
+def _tool_files_from_structured_output(output: Any) -> list[dict[str, Any]]:
+    if not isinstance(output, dict):
+        return []
+    source = output.get("files") or output.get("changes")
+    if not isinstance(source, list):
+        return []
+    files = []
+    for item in source:
+        if not isinstance(item, dict):
+            continue
+        files.append(finalize_file_change(item))
+    return files
 
 
 def _make_json_serializable(obj: Any) -> Any:

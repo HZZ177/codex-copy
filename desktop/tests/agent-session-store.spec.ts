@@ -28,6 +28,7 @@ describe("agentSessionStore reducer", () => {
       "completed",
       "cancelled",
       "tool_start",
+      "tool_progress",
       "tool_end",
       "subagent_start",
       "subagent_end",
@@ -372,6 +373,122 @@ describe("agentSessionStore reducer", () => {
       toolResult: "文件内容",
       toolDurationMs: 12,
       status: "completed",
+    });
+  });
+
+  it("merges tool progress into edit tool messages and lets final output override the same file stats", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "tool_progress",
+      data: {
+        session_id: "ses-1",
+        run_id: "call-patch",
+        tool_call_id: "call-patch",
+        tool_name: "apply_patch",
+        params: { patch: "*** Begin Patch" },
+        files: [{ path: "src/app.ts", added_lines: 1, deleted_lines: 0 }],
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      {
+        role: "tool",
+        runId: "call-patch",
+        toolCallId: "call-patch",
+        toolName: "apply_patch",
+        status: "running",
+        fileChanges: [{ path: "src/app.ts", additions: 1, deletions: 0 }],
+      },
+    ]);
+
+    state = reduceAgentWsEvent(state, {
+      action: "tool_end",
+      data: {
+        session_id: "ses-1",
+        run_id: "call-patch",
+        tool_name: "apply_patch",
+        result: "{}",
+        status: "success",
+        files: [{ path: "src/app.ts", added_lines: 4, deleted_lines: 2 }],
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      status: "completed",
+      fileChanges: [{ path: "src/app.ts", additions: 4, deletions: 2 }],
+      uiPayload: {
+        files: [{ path: "src/app.ts", additions: 4, deletions: 2 }],
+      },
+    });
+  });
+
+  it("merges streamed apply_patch progress with later tool lifecycle events by tool call id", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "tool_progress",
+      data: {
+        session_id: "ses-1",
+        run_id: "call-patch",
+        tool_call_id: "call-patch",
+        tool_name: "apply_patch",
+        files: [{ path: "src/app.ts", added_lines: 1, deleted_lines: 0 }],
+      },
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "tool_start",
+      data: {
+        session_id: "ses-1",
+        run_id: "tool-run",
+        tool_name: "apply_patch",
+        tool_call_id: "call-patch",
+        params: {},
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(1);
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      runId: "tool-run",
+      toolCallId: "call-patch",
+      toolName: "apply_patch",
+      status: "running",
+      fileChanges: [{ path: "src/app.ts", additions: 1, deletions: 0 }],
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "tool_progress",
+      data: {
+        session_id: "ses-1",
+        run_id: "call-patch",
+        tool_call_id: "call-patch",
+        tool_name: "apply_patch",
+        files: [{ path: "src/app.ts", added_lines: 2, deleted_lines: 0 }],
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      runId: "tool-run",
+      toolCallId: "call-patch",
+      status: "running",
+      fileChanges: [{ path: "src/app.ts", additions: 2, deletions: 0 }],
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "tool_end",
+      data: {
+        session_id: "ses-1",
+        run_id: "tool-run",
+        tool_name: "apply_patch",
+        tool_call_id: "call-patch",
+        status: "completed",
+        files: [{ path: "src/app.ts", added_lines: 2, deleted_lines: 1 }],
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(1);
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      status: "completed",
+      fileChanges: [{ path: "src/app.ts", additions: 2, deletions: 1 }],
     });
   });
 

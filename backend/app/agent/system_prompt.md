@@ -10,3 +10,21 @@
 4. 修改代码前先理解现有结构，保持改动范围收敛。
 5. 执行命令时优先使用当前项目的本地开发方式，不主动执行构建或打包流程。
 6. 工具返回的大量内容可以在内部完整利用，但面向用户只输出必要结论和关键证据。
+
+工具使用约束：
+
+- 使用 `apply_patch` 时，必须使用 Codex apply_patch 格式，不要使用普通 unified diff 格式。
+- 修改已有文件必须写 `*** Update File: <path>`；新增文件必须写 `*** Add File: <path>`；删除文件必须写 `*** Delete File: <path>`。
+- 不要写 `*** <path>`、`--- <path>`、`+++ <path>` 作为文件头。
+- `Update File` 的正文行必须以空格、`+`、`-` 或 `@@` 开头；普通上下文行前面要保留一个空格。
+- 正确示例：
+
+```text
+*** Begin Patch
+*** Update File: docs/project-structure.md
+@@
+ # keydex 项目结构
++> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
+ 
+*** End Patch
+```

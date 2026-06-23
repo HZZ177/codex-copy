@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+﻿import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -100,6 +100,7 @@ describe("Layout", () => {
     expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.getByRole("complementary", { name: "右侧栏" })).not.toBeNull();
     expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "新建侧边栏页面" })).not.toBeNull();
     expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
     expect(screen.getByText("暂无侧边内容")).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "侧边栏" })).toBeNull();
@@ -229,6 +230,23 @@ describe("Layout", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "新建侧边栏页面" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建侧边栏页面" }));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Markdown 窗口" }));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "HTML 窗口" }));
 
@@ -242,10 +260,40 @@ describe("Layout", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 Markdown 窗口" }));
 
+    expect(shell.dataset.rightSidebar).toBe("open");
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 新tab" }));
+
     expect(shell.dataset.rightSidebar).toBe("closed");
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
-    expect(screen.queryByText("暂无侧边内容")).toBeNull();
+  });
+
+  it("keeps newly added empty right sidebar pages as duplicate display names", () => {
+    renderLayout(
+      <Layout contentMode="full">
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    const addPageButton = screen.getByRole("button", { name: "新建侧边栏页面" });
+
+    fireEvent.click(addPageButton);
+    fireEvent.click(addPageButton);
+
+    expect(screen.getAllByRole("tab", { name: "新tab" })).toHaveLength(2);
+    expect(screen.queryByRole("tab", { name: "新tab 2" })).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭侧边栏窗口 新tab" })[1]);
+    fireEvent.click(addPageButton);
+
+    expect(screen.getAllByRole("tab", { name: "新tab" })).toHaveLength(2);
+    expect(screen.queryByRole("tab", { name: "新tab 3" })).toBeNull();
   });
 
   it("routes code block side-preview clicks to existing right sidebar tabs and toggles the active panel", async () => {

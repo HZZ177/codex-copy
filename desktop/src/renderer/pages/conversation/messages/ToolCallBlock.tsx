@@ -2,13 +2,13 @@ import {
   Check,
   ChevronDown,
   Clipboard,
+  FilePenLine,
   FileText,
+  FileX2,
   FolderOpen,
-  Pencil,
-  Plus,
   Search,
-  Trash2,
   Wrench,
+  XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -60,10 +60,20 @@ export function ToolCallBlock({ message }: ToolCallBlockProps) {
         }}
       >
         <span className={styles.icon} aria-hidden="true">
-          {toolIcon(tool.name)}
+          {toolIcon(tool.name, failed)}
         </span>
         <div className={styles.titleGroup}>
-          <div className={styles.title}>{tool.title}</div>
+          <div className={styles.title}>
+            {tool.fileTarget && tool.target ? (
+              <>
+                <span>{tool.actionLabel}</span>
+                <span> </span>
+                <span className={tool.fileTarget ? styles.fileTarget : undefined}>{tool.target}</span>
+              </>
+            ) : (
+              tool.title
+            )}
+          </div>
           {tool.duration ? <div className={styles.meta}>{tool.duration}</div> : null}
         </div>
         <ChevronDown className={styles.chevron} size={14} />
@@ -108,6 +118,9 @@ export function ToolCallBlock({ message }: ToolCallBlockProps) {
 interface ParsedToolPayload {
   name: string;
   title: string;
+  actionLabel: string;
+  target: string;
+  fileTarget: boolean;
   argsText: string;
   resultText: string;
   resultStatus: string | null;
@@ -120,9 +133,14 @@ function parseToolPayload(message: ConversationMessage): ParsedToolPayload {
   const args = asRecord(call?.arguments) ?? asRecord(message.payload.arguments) ?? {};
   const name = stringValue(call?.name) || stringValue(message.payload.tool) || stringValue(message.payload.tool_name) || message.content || "未知工具";
   const resultStatus = stringValue(result?.status);
+  const target = toolTarget(args, message.payload);
+  const actionLabel = toolActionLabel(name, message.status, resultStatus);
   return {
     name,
-    title: toolTitle(name, toolTarget(args, message.payload), message.status, resultStatus),
+    title: target ? `${actionLabel} ${target}` : actionLabel,
+    actionLabel,
+    target,
+    fileTarget: isFileMutationTool(name),
     argsText: stringify(args),
     resultText: resultText(result, message.payload),
     resultStatus,
@@ -153,9 +171,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function toolTitle(
+function toolActionLabel(
   name: string,
-  target: string,
   status: ConversationMessage["status"],
   resultStatus: string | null,
 ): string {
@@ -173,7 +190,7 @@ function toolTitle(
         : status === "cancelled"
           ? action.cancelled
           : action.done;
-  return target ? `${prefix} ${target}` : prefix;
+  return prefix;
 }
 
 function toolAction(name: string): ToolAction | null {
@@ -234,26 +251,29 @@ function toolAction(name: string): ToolAction | null {
   return null;
 }
 
-function toolIcon(name: string) {
+function toolIcon(name: string, failed: boolean) {
+  if (failed) {
+    return <XCircle size={16} />;
+  }
   if (["read_file", "read_text_file", "open_file"].includes(name)) {
-    return <FileText size={14} />;
+    return <FileText size={16} />;
   }
   if (["list_directory", "list_dir", "read_directory"].includes(name)) {
-    return <FolderOpen size={14} />;
+    return <FolderOpen size={16} />;
   }
   if (["search_files", "search_text", "search", "grep"].includes(name)) {
-    return <Search size={14} />;
+    return <Search size={16} />;
   }
   if (["write_file", "apply_patch", "edit_file"].includes(name)) {
-    return <Pencil size={14} />;
+    return <FilePenLine size={16} />;
   }
   if (name === "create_file") {
-    return <Plus size={14} />;
+    return <FilePenLine size={16} />;
   }
   if (name === "delete_file") {
-    return <Trash2 size={14} />;
+    return <FileX2 size={16} />;
   }
-  return <Wrench size={14} />;
+  return <Wrench size={16} />;
 }
 
 interface ToolAction {
@@ -268,10 +288,27 @@ function toolTarget(args: Record<string, unknown>, payload: Record<string, unkno
   return (
     stringValue(args.path) ||
     stringValue(args.file) ||
+    patchFileTarget(stringValue(args.patch) || stringValue(args.diff) || stringValue(args.content) || stringValue(payload.patch)) ||
     stringValue(args.query) ||
     stringValue(args.pattern) ||
     stringValue(payload.path)
   );
+}
+
+function patchFileTarget(patch: string): string {
+  if (!patch) {
+    return "";
+  }
+  const explicit = patch.match(/^\s*\*\*\*\s+(?:Add|Update|Delete)\s+File:\s+(.+?)\s*$/m);
+  if (explicit?.[1]) {
+    return explicit[1].trim();
+  }
+  const diffHeader = patch.match(/^\s*(?:\+\+\+\s+b\/|---\s+a\/)(.+?)\s*$/m);
+  return diffHeader?.[1]?.trim() ?? "";
+}
+
+function isFileMutationTool(name: string): boolean {
+  return ["write_file", "apply_patch", "edit_file", "create_file", "delete_file"].includes(name);
 }
 
 function stringValue(value: unknown): string {

@@ -14,8 +14,10 @@ import type {
   AgentStreamActionData,
   AgentSubagentItem,
   AgentSubagentToolItem,
+  AgentFileChange,
   AgentToolCall,
   AgentToolEventData,
+  AgentToolProgressData,
   AgentToolStatus,
   Workspace,
 } from "@/types/protocol";
@@ -130,6 +132,9 @@ export function reduceAgentWsEvent(
       break;
     case "tool_start":
       next = handleToolStart(state, event.data as unknown as AgentToolEventData);
+      break;
+    case "tool_progress":
+      next = handleToolProgress(state, event.data as unknown as AgentToolProgressData);
       break;
     case "tool_end":
       next = handleToolEnd(state, event.data as unknown as AgentToolEventData);
@@ -508,7 +513,9 @@ function handleToolStart(state: AgentConversationState, data: AgentToolEventData
     subagent.streaming = true;
   } else {
     closeTopLevelTextStreams(view);
-    const existing = view.messages.find((message) => message.role === "tool" && message.runId === data.run_id);
+    const existing =
+      view.messages.find((message) => message.role === "tool" && message.runId === data.run_id) ??
+      findMatchingProgressTool(view, data, toolName);
     const patch = toolCallFromStart(data, toolName);
     if (existing) {
       Object.assign(existing, patch);
@@ -557,8 +564,9 @@ function handleToolEnd(state: AgentConversationState, data: AgentToolEventData):
     }
   } else {
     const message = view.messages.find((item) => item.role === "tool" && item.runId === data.run_id);
-    if (message) {
-      applyToolEnd(message, result, data.duration_ms, status, error, errorType, data);
+    const target = message ?? findMatchingProgressTool(view, data, toolNameFromData(data));
+    if (target) {
+      applyToolEnd(target, result, data.duration_ms, status, error, errorType, data);
     } else {
       view.messages.push({
         id: nextMessageId(next, "tool", sessionId),
@@ -814,6 +822,47 @@ function handleStatus(state: AgentConversationState, data: Record<string, unknow
   if (view.runtimeState !== "running") {
     view.isStreaming = false;
   }
+  return next;
+}
+
+function handleToolProgress(state: AgentConversationState, data: AgentToolProgressData): AgentConversationState {
+  const sessionId = data.session_id ?? state.selectedSessionId ?? "";
+  const progressRunId = data.run_id || data.tool_call_id || "";
+  if (!sessionId || !progressRunId) {
+    return state;
+  }
+  const next = cloneState(state);
+  const view = ensureSessionState(next, sessionId);
+  const toolName = toolNameFromData(data);
+  const existing =
+    view.messages.find(
+      (message) =>
+        message.role === "tool" &&
+        (message.runId === progressRunId ||
+          Boolean(data.tool_call_id && message.toolCallId === data.tool_call_id)),
+    ) ?? findMatchingProgressTool(view, data, toolName);
+  if (existing) {
+    applyToolProgress(existing, data, toolName);
+  } else {
+    const created: AgentChatMessage = {
+      id: nextMessageId(next, "tool-progress", sessionId),
+      sessionId,
+      role: "tool",
+      content: "",
+      timestamp: timestampFromData(data),
+      runId: progressRunId,
+      toolCallId: data.tool_call_id,
+      toolName,
+      toolParams: data.params ?? data.input_data,
+      status: "running",
+      fileChanges: normalizedFileChanges(data.files),
+      uiPayload: mergeToolFilesIntoUiPayload(data.ui_payload, data.files),
+      metadata: data.metadata,
+    };
+    view.messages.push(created);
+  }
+  view.isStreaming = true;
+  markTurnInProgress(view);
   return next;
 }
 
@@ -1128,15 +1177,58 @@ function findSubagentTool(
 }
 
 function toolCallFromStart(data: AgentToolEventData, toolName: string): AgentToolCall {
-  return {
+  const fileChanges = normalizedFileChanges(data.files);
+  const call: AgentToolCall = {
     runId: data.run_id,
     parentRunId: data.parent_run_id ?? null,
     toolName,
     toolParams: data.params ?? data.input_data,
     status: "running",
-    uiPayload: data.ui_payload,
+    uiPayload: mergeToolFilesIntoUiPayload(data.ui_payload, fileChanges),
     metadata: data.metadata,
   };
+  if (data.tool_call_id) {
+    call.toolCallId = data.tool_call_id;
+  }
+  if (fileChanges.length) {
+    call.fileChanges = fileChanges;
+  }
+  return call;
+}
+
+function applyToolProgress(
+  target: AgentToolCall | AgentChatMessage,
+  data: AgentToolProgressData,
+  toolName: string,
+) {
+  if (data.run_id && shouldAcceptProgressRunId(target, data)) {
+    target.runId = data.run_id;
+  }
+  target.toolCallId = data.tool_call_id ?? target.toolCallId;
+  target.toolName = toolName || target.toolName;
+  target.toolParams = data.params ?? data.input_data ?? target.toolParams;
+  target.status = "running";
+  const fileChanges = normalizedFileChanges(data.files);
+  if (fileChanges.length) {
+    target.fileChanges = fileChanges;
+    target.uiPayload = mergeToolFilesIntoUiPayload(data.ui_payload ?? target.uiPayload, fileChanges);
+  } else {
+    target.uiPayload = data.ui_payload ?? target.uiPayload;
+  }
+  target.metadata = data.metadata ?? target.metadata;
+}
+
+function shouldAcceptProgressRunId(
+  target: AgentToolCall | AgentChatMessage,
+  data: AgentToolProgressData,
+): boolean {
+  if (!target.runId) {
+    return true;
+  }
+  if (!target.toolCallId) {
+    return true;
+  }
+  return target.runId === target.toolCallId || target.runId === data.tool_call_id;
 }
 
 function applyToolEnd(
@@ -1153,7 +1245,15 @@ function applyToolEnd(
   target.toolDurationMs = durationMs;
   target.toolError = error || undefined;
   target.toolErrorType = errorType || undefined;
-  target.uiPayload = data.ui_payload ?? structuredToolOutput(data) ?? target.uiPayload;
+  const structured = structuredToolOutput(data);
+  target.uiPayload = data.ui_payload ?? structured ?? target.uiPayload;
+  const fileChanges = normalizedFileChanges(
+    data.files ?? fileChangesFromUiPayload(target.uiPayload),
+  );
+  if (fileChanges.length) {
+    target.fileChanges = fileChanges;
+    target.uiPayload = mergeToolFilesIntoUiPayload(target.uiPayload, fileChanges);
+  }
   target.metadata = data.metadata ?? target.metadata;
 }
 
@@ -1185,6 +1285,108 @@ function structuredToolOutput(data: AgentToolEventData): Record<string, unknown>
     return data.result as Record<string, unknown>;
   }
   return undefined;
+}
+
+function findMatchingProgressTool(
+  view: AgentSessionViewState,
+  data: AgentToolEventData | AgentToolProgressData,
+  toolName: string,
+): AgentChatMessage | undefined {
+  const targetPaths = fileChangePaths(normalizedFileChanges(data.files));
+  const params = asRecord(data.params) ?? asRecord(data.input_data);
+  const paramsPath = stringValue(params?.path);
+  if (paramsPath) {
+    targetPaths.add(paramsPath);
+  }
+  for (const path of fileChangePathsFromPatch(stringValue(params?.patch))) {
+    targetPaths.add(path);
+  }
+  return [...view.messages]
+    .reverse()
+    .find((message) => {
+      if (message.role !== "tool" || message.toolName !== toolName || message.status !== "running") {
+        return false;
+      }
+      if (data.tool_call_id && message.toolCallId === data.tool_call_id) {
+        return true;
+      }
+      if (!targetPaths.size) {
+        return false;
+      }
+      const messagePaths = fileChangePaths(message.fileChanges ?? fileChangesFromUiPayload(message.uiPayload));
+      const messageParamsPath = stringValue(asRecord(message.toolParams)?.path);
+      if (messageParamsPath) {
+        messagePaths.add(messageParamsPath);
+      }
+      for (const path of fileChangePathsFromPatch(stringValue(asRecord(message.toolParams)?.patch))) {
+        messagePaths.add(path);
+      }
+      return [...targetPaths].some((path) => messagePaths.has(path));
+    });
+}
+
+function fileChangePathsFromPatch(patch: string): Set<string> {
+  const paths = new Set<string>();
+  for (const line of patch.split("\n")) {
+    const match = /^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$/u.exec(line.trim());
+    if (match?.[1]) {
+      paths.add(match[1]);
+    }
+  }
+  return paths;
+}
+
+function normalizedFileChanges(value: unknown): AgentFileChange[] {
+  const rawFiles = Array.isArray(value) ? value : [];
+  return rawFiles.map((item, index) => normalizeFileChange(asRecord(item), index)).filter(isDefined);
+}
+
+function normalizeFileChange(record: Record<string, unknown> | null, index: number): AgentFileChange | null {
+  if (!record) {
+    return null;
+  }
+  const path = stringValue(record.path) || `file-${index + 1}`;
+  const added = numberValue(record.added_lines) ?? numberValue(record.additions) ?? 0;
+  const deleted =
+    numberValue(record.deleted_lines) ??
+    numberValue(record.removed_lines) ??
+    numberValue(record.deletions) ??
+    0;
+  return {
+    ...record,
+    path,
+    added_lines: added,
+    deleted_lines: deleted,
+    removed_lines: deleted,
+    additions: added,
+    deletions: deleted,
+  };
+}
+
+function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): AgentFileChange[] {
+  if (!uiPayload) {
+    return [];
+  }
+  const source = Array.isArray(uiPayload.files) ? uiPayload.files : uiPayload.changes;
+  return normalizedFileChanges(source);
+}
+
+function mergeToolFilesIntoUiPayload(
+  uiPayload: Record<string, unknown> | undefined,
+  files: unknown,
+): Record<string, unknown> | undefined {
+  const fileChanges = normalizedFileChanges(files);
+  if (!uiPayload && !fileChanges.length) {
+    return undefined;
+  }
+  return {
+    ...(uiPayload ?? {}),
+    ...(fileChanges.length ? { files: fileChanges } : {}),
+  };
+}
+
+function fileChangePaths(files: AgentFileChange[]): Set<string> {
+  return new Set(files.map((file) => file.path).filter(Boolean));
 }
 
 function toolStatusFromEnd(status: AgentToolEventData["status"], error: string): AgentToolStatus {
@@ -1337,6 +1539,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function timestampFromData(data: object): number {

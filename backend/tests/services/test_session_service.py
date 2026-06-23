@@ -375,7 +375,13 @@ def test_session_service_pages_history_by_turn_without_splitting_messages(tmp_pa
     assert latest["event_total"] == 18
     assert latest["has_more_older"] is True
     assert latest["next_cursor"]
-    assert [message["turnIndex"] for message in latest["list"] if message["role"] == "user"] == [2, 3, 4, 5, 6]
+    assert [message["turnIndex"] for message in latest["list"] if message["role"] == "user"] == [
+        2,
+        3,
+        4,
+        5,
+        6,
+    ]
     assert [message["content"] for message in latest["list"] if message["role"] == "assistant"] == [
         "answer 2",
         "answer 3",

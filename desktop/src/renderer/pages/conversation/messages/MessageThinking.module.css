@@ -33,16 +33,12 @@
 .statusIcon {
   display: inline-grid;
   place-items: center;
-  color: var(--color-accent);
+  color: currentColor;
 }
 
 .thinking[data-status="running"] .statusIcon,
 .thinking[data-status="pending"] .statusIcon {
   animation: spin 900ms linear infinite;
-}
-
-.thinking[data-status="failed"] .statusIcon {
-  color: var(--color-danger);
 }
 
 .title {
@@ -70,7 +66,6 @@
   max-width: 100%;
   margin: 0 7px 4px 28px;
   padding: 8px 0 0 10px;
-  border-left: 2px solid var(--inline-block-border);
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.65;

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from backend.app.agent.event_processor import process_agent_events
 from backend.app.agent.factory import register_llm_gateway_trace_id
@@ -208,3 +208,236 @@ async def test_process_agent_events_marks_serialized_local_tool_error_failed() -
     assert tool_events[1].payload["status"] == "failed"
     assert "file_not_found" in tool_events[1].payload["error"]
     assert result.final_content == ""
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_emits_tool_progress_from_model_chunks() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {
+                                    "id": "call_patch",
+                                    "index": 0,
+                                    "name": "apply_patch",
+                                    "args": (
+                                        '{"patch":"*** Begin Patch\\n'
+                                        '*** Add File: src/app.py\\n+one"}'
+                                    ),
+                                }
+                            ],
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    progress_events = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_PROGRESS.value
+    ]
+    assert len(progress_events) == 1
+    assert progress_events[0].payload["tool"] == "apply_patch"
+    assert progress_events[0].payload["tool_call_id"] == "call_patch"
+    assert progress_events[0].payload["files"][0]["path"] == "src/app.py"
+    assert progress_events[0].payload["files"][0]["operation"] == "update"
+    assert progress_events[0].payload["files"][0]["added_lines"] == 1
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_classifies_streamed_write_file_by_tool_name() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {
+                                    "id": "call_write",
+                                    "index": 0,
+                                    "name": "write_file",
+                                    "args": '{"path":"docs/note.md","content":"new\\n"}',
+                                }
+                            ],
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    progress_events = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_PROGRESS.value
+    ]
+    assert len(progress_events) == 1
+    file_change = progress_events[0].payload["files"][0]
+    assert file_change["operation"] == "add"
+    assert "+new" in file_change["diff"]
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_binds_streamed_tool_call_to_real_tool_run() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {
+                                    "id": "call_write",
+                                    "index": 0,
+                                    "name": "write_file",
+                                    "args": '{"path":"docs/note.md","content":"new\\n"}',
+                                }
+                            ],
+                        )
+                    },
+                },
+                {
+                    "event": "on_tool_start",
+                    "run_id": "tool_write",
+                    "name": "write_file",
+                    "data": {"input": {"path": "docs/note.md", "content": "new\n"}},
+                },
+                {
+                    "event": "on_tool_end",
+                    "run_id": "tool_write",
+                    "name": "write_file",
+                    "data": {
+                        "output": (
+                            '{"files":[{"path":"docs/note.md","operation":"add",'
+                            '"added_lines":1,"deleted_lines":0}]}'
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    progress = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_PROGRESS.value
+    ][0]
+    started = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_STARTED.value
+    ][0]
+    finished = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_FINISHED.value
+    ][0]
+
+    assert progress.run_id == "call_write"
+    assert progress.payload["tool_call_id"] == "call_write"
+    assert started.run_id == "tool_write"
+    assert started.payload["tool_call_id"] == "call_write"
+    assert finished.run_id == "tool_write"
+    assert finished.payload["tool_call_id"] == "call_write"
+    assert finished.payload["files"][0]["operation"] == "add"
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_includes_structured_tool_files_on_tool_end() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_tool_start",
+                    "run_id": "tool_1",
+                    "name": "apply_patch",
+                    "data": {"input": {"patch": "*** Begin Patch"}},
+                },
+                {
+                    "event": "on_tool_end",
+                    "run_id": "tool_1",
+                    "name": "apply_patch",
+                    "data": {
+                        "output": ToolMessage(
+                            content=(
+                                '{"files":[{"path":"src/app.py","added_lines":2,'
+                                '"deleted_lines":1}]}'
+                            ),
+                            tool_call_id="call_patch",
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    finished = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_FINISHED.value
+    ][0]
+    assert finished.payload["files"][0] == {
+        "path": "src/app.py",
+        "added_lines": 2,
+        "deleted_lines": 1,
+        "removed_lines": 1,
+        "additions": 2,
+        "deletions": 1,
+    }
+    assert finished.payload["ui_payload"]["files"][0]["path"] == "src/app.py"
+    assert finished.payload["output_data"]["result"]["files"][0]["added_lines"] == 2

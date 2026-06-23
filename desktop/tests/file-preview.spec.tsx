@@ -500,6 +500,36 @@ describe("FilePreview", () => {
     expect(screen.queryByRole("button", { name: /在预览面板打开/ })).toBeNull();
   });
 
+  it("keeps mermaid diagrams bounded when rendered inside markdown previews", async () => {
+    mockElementMetrics({ clientWidth: 640, clientHeight: 320 });
+
+    render(
+      <FilePreview
+        chrome="panel"
+        request={{
+          type: "content",
+          title: "Markdown diagram",
+          content: "# Diagram\n\n```mermaid\ngraph TD\nA[Start] --> B[Finish]\n```\n\nAfter",
+          contentType: "markdown",
+        }}
+      />,
+    );
+
+    const pane = await screen.findByTestId("preview-mermaid-pane");
+    expect(pane.getAttribute("data-layout")).toBe("document");
+    await waitFor(() => {
+      expect(pane.querySelector("svg")).not.toBeNull();
+    });
+
+    const chart = pane.querySelector('[data-interactive="true"]') as HTMLDivElement | null;
+    expect(chart).not.toBeNull();
+    await waitFor(() => {
+      expect(chart?.style.getPropertyValue("--mermaid-scale")).toBe("0.24");
+    });
+    expect(chart?.style.getPropertyValue("--mermaid-render-width")).toBe("576px");
+    expect(chart?.style.getPropertyValue("--mermaid-render-height")).toBe("288px");
+  });
+
   it("quotes selected preview text through the floating selection toolbar", async () => {
     const onQuoteSelection = vi.fn();
     render(

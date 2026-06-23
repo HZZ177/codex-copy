@@ -38,6 +38,30 @@ export function HomePage({
   const modelSelection = useRuntimeModelSelection(runtime);
   const notifications = useNotifications();
   const previewContext = useOptionalPreview();
+  const setPreviewHostContext = previewContext?.setPreviewHostContext;
+
+  useEffect(() => {
+    if (!setPreviewHostContext) {
+      return;
+    }
+    if (workspaceSelection.type !== "workspace") {
+      setPreviewHostContext(null);
+      return;
+    }
+    setPreviewHostContext({
+      workspaceId: workspaceSelection.workspace.id,
+      workspaceAvailable: true,
+      workspaceLabel: workspaceSelection.workspace.root_path ?? workspaceSelection.workspace.name,
+      runtime,
+    });
+  }, [runtime, setPreviewHostContext, workspaceSelection]);
+
+  useEffect(
+    () => () => {
+      setPreviewHostContext?.(null);
+    },
+    [setPreviewHostContext],
+  );
 
   useEffect(() => {
     let active = true;

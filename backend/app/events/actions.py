@@ -11,6 +11,7 @@ class ChatAction(StrEnum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     TOOL_START = "tool_start"
+    TOOL_PROGRESS = "tool_progress"
     TOOL_END = "tool_end"
     SUBAGENT_START = "subagent_start"
     SUBAGENT_END = "subagent_end"

@@ -239,13 +239,18 @@
 }
 
 .error {
-  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-danger) 7%, var(--surface-bg));
-  color: var(--color-danger);
-  font-size: 11px;
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--color-text-primary);
+  font-size: 12px;
   line-height: 1.45;
-  padding: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.preview[data-chrome="panel"] .error {
+  min-height: 0;
 }
 
 .body {
@@ -378,11 +383,11 @@
   overflow: auto;
 }
 
-.body[data-chrome="panel"] .markdownPane,
-.body[data-chrome="panel"] .htmlPane,
-.body[data-chrome="panel"] .diffPane,
-.body[data-chrome="panel"] .mermaidPane,
-.body[data-chrome="panel"] .imagePane {
+.body[data-chrome="panel"] > .markdownPane,
+.body[data-chrome="panel"] > .htmlPane,
+.body[data-chrome="panel"] > .diffPane,
+.body[data-chrome="panel"] > .mermaidPane,
+.body[data-chrome="panel"] > .imagePane {
   height: 100%;
   min-height: 0;
   max-height: none;
@@ -506,9 +511,24 @@
 .mermaidPane {
   position: relative;
   display: grid;
+  min-width: 0;
   place-items: stretch;
   background: var(--color-bg-elevated);
   padding: 16px;
+}
+
+.mermaidPane[data-layout="document"] {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  height: clamp(220px, 48vh, 520px);
+  min-height: 220px;
+  max-height: 520px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  margin: 12px 0;
+  padding: 12px;
 }
 
 .mermaidSvg {
@@ -618,8 +638,12 @@
   text-align: center;
 }
 
-.body[data-chrome="panel"] .mermaidPane,
-.body[data-chrome="panel"] .mermaidSvg {
+.mermaidPane[data-layout="document"] .mermaidSvg {
+  min-height: 0;
+}
+
+.body[data-chrome="panel"] > .mermaidPane,
+.body[data-chrome="panel"] > .mermaidPane > .mermaidSvg {
   min-height: 0;
 }
 
@@ -687,18 +711,18 @@
 }
 
 .diffLine[data-kind="add"] {
-  background: rgba(39, 174, 96, 0.11);
-  color: var(--color-text-primary);
+  background: var(--diff-added-bg);
+  color: var(--diff-added-text);
 }
 
 .diffLine[data-kind="delete"] {
-  background: rgba(235, 87, 87, 0.1);
-  color: var(--color-text-primary);
+  background: var(--diff-removed-bg);
+  color: var(--diff-removed-text);
 }
 
 .diffLine[data-kind="hunk"] {
-  background: rgba(47, 128, 237, 0.11);
-  color: var(--color-primary-6);
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
 }
 
 .diffLine[data-kind="meta"] {

@@ -438,8 +438,12 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 
 .navItem span,
 .projectItem span {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
   min-width: 0;
   overflow: hidden;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
