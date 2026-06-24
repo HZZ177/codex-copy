@@ -289,7 +289,18 @@ export function WorkspaceFileBrowser({
                 onPointerUp={stopResize}
               />
             ) : null}
-            <div className={styles.previewPane} data-testid="workspace-file-browser-preview" aria-hidden={!previewOpen}>
+            <div
+              className={styles.previewPane}
+              data-workspace-file-preview-pane="true"
+              data-testid="workspace-file-browser-preview"
+              aria-hidden={!previewOpen}
+            >
+              <div className={styles.previewResizeSkeleton} aria-hidden="true" data-resize-preview-skeleton="true">
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
               <FilePreview
                 breadcrumbRootLabel={label}
                 workspaceId={workspaceId}

@@ -58,10 +58,17 @@ export function useMaterialEntryIcon(path: string, type: MaterialIconEntryType):
 
   useEffect(() => {
     let active = true;
-    setAsset(cachedIconAsset(info));
+    const cachedAsset = cachedIconAsset(info);
+    setAsset((current) => (materialIconAssetsEqual(current, cachedAsset) ? current : cachedAsset));
+    if (iconSrcCache.has(info.key)) {
+      return () => {
+        active = false;
+      };
+    }
     void loadIconSrc(info).then((src) => {
       if (active) {
-        setAsset({ id: info.id, src });
+        const loadedAsset = { id: info.id, src };
+        setAsset((current) => (materialIconAssetsEqual(current, loadedAsset) ? current : loadedAsset));
       }
     });
     return () => {
@@ -70,6 +77,10 @@ export function useMaterialEntryIcon(path: string, type: MaterialIconEntryType):
   }, [info]);
 
   return asset;
+}
+
+function materialIconAssetsEqual(a: MaterialIconAsset, b: MaterialIconAsset): boolean {
+  return a.id === b.id && a.src === b.src;
 }
 
 function resolveMaterialFileIconInfo(path: string): MaterialIconInfo {

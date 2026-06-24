@@ -499,6 +499,7 @@
   display: grid;
   overflow: hidden;
   padding: 0;
+  position: relative;
 }
 
 .rightSidebarBody[data-content="files"] {
@@ -511,6 +512,55 @@
   display: grid;
   overflow: hidden;
   padding: 0;
+}
+
+.shell[data-right-sidebar-resizing="true"] .rightSidebarBody[data-content="preview"] [data-file-preview-root="true"],
+.shell[data-right-sidebar-resizing="true"] .rightSidebarBody[data-content="files"] [data-workspace-file-preview-pane="true"] [data-file-preview-root="true"] {
+  content-visibility: hidden;
+  contain-intrinsic-size: 720px;
+  pointer-events: none;
+}
+
+.rightSidebarResizeSkeleton {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(260px, 78%);
+  z-index: 8;
+  display: none;
+  gap: 8px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.rightSidebarResizeSkeleton span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
+    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
+  );
+  background-size: 220% 100%;
+  animation: rightSidebarPreviewSkeleton 1.2s ease-in-out infinite;
+}
+
+.rightSidebarResizeSkeleton span:nth-child(2) {
+  width: 88%;
+}
+
+.rightSidebarResizeSkeleton span:nth-child(3) {
+  width: 72%;
+}
+
+.rightSidebarResizeSkeleton span:nth-child(4) {
+  width: 54%;
+}
+
+.shell[data-right-sidebar-resizing="true"] .rightSidebarBody[data-content="preview"] .rightSidebarResizeSkeleton {
+  display: grid;
 }
 
 .rightSidebarLoading {
@@ -569,6 +619,16 @@
   }
 }
 
+@keyframes rightSidebarPreviewSkeleton {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 .rightSidebarIconButton {
   display: inline-grid;
   width: 28px;
@@ -610,7 +670,8 @@
     transition: none;
   }
 
-  .rightSidebarLoadingSkeleton span {
+  .rightSidebarLoadingSkeleton span,
+  .rightSidebarResizeSkeleton span {
     animation: none;
   }
 

@@ -1340,10 +1340,13 @@ describe("FilePreview", () => {
         behavior: "smooth",
       });
       await waitFor(() => {
-        expect(document.querySelector('[data-preview-annotation-id="ann-selection"]')?.getAttribute("data-flash")).toBe(
+        expect(document.querySelector('[data-preview-annotation-id="ann-selection"]')?.getAttribute("data-active")).toBe(
           "true",
         );
       });
+      expect(document.querySelector('[data-preview-annotation-id="ann-selection"]')?.getAttribute("data-flash")).toBe(
+        "false",
+      );
       expect(screen.queryByLabelText("选区批注")).toBeNull();
     } finally {
       if (scrollDescriptor) {
@@ -1435,11 +1438,15 @@ describe("FilePreview", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "定位批注片段" }));
 
     await waitFor(() => {
-      expect(document.querySelector('[data-preview-annotation-id="ann-split"]')?.getAttribute("data-flash")).toBe(
+      expect(document.querySelector('[data-preview-annotation-id="ann-split"]')?.getAttribute("data-active")).toBe(
         "true",
       );
-      expect(document.querySelector('[data-file-annotation-id="ann-split"]')?.getAttribute("data-flash")).toBe("true");
+      expect(document.querySelector('[data-file-annotation-id="ann-split"]')?.getAttribute("data-active")).toBe("true");
     });
+    expect(document.querySelector('[data-preview-annotation-id="ann-split"]')?.getAttribute("data-flash")).toBe(
+      "false",
+    );
+    expect(document.querySelector('[data-file-annotation-id="ann-split"]')?.getAttribute("data-flash")).toBe("false");
   });
 
   it("shows a locate failure without switching views when an anchor is missing", async () => {

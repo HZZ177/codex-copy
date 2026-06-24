@@ -295,7 +295,6 @@
     grid-template-rows 340ms var(--motion-ease-standard),
     opacity 220ms var(--motion-ease-standard),
     transform 340ms var(--motion-ease-standard);
-  will-change: grid-template-rows, opacity, transform;
 }
 
 .nodeGroup[data-open="true"] {

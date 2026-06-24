@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ChevronsLeftRight } from "lucide-react";
@@ -22,6 +23,7 @@ interface RightSidebarResizeHandleProps {
   getAvailableWidth: () => number;
   onResizePreview?: (ratio: number) => void;
   onResize: (ratio: number) => void;
+  onResizeDragChange?: (dragging: boolean) => void;
   onSwapPlacement: () => void;
 }
 
@@ -34,6 +36,7 @@ export function RightSidebarResizeHandle({
   getAvailableWidth,
   onResizePreview,
   onResize,
+  onResizeDragChange,
   onSwapPlacement,
 }: RightSidebarResizeHandleProps) {
   const getDragRatio = useCallback(
@@ -50,6 +53,15 @@ export function RightSidebarResizeHandle({
     onPreview: onResizePreview,
     onCommit: onResize,
   });
+
+  useEffect(() => {
+    onResizeDragChange?.(dragging);
+    return () => {
+      if (dragging) {
+        onResizeDragChange?.(false);
+      }
+    };
+  }, [dragging, onResizeDragChange]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (disabled) {

@@ -173,6 +173,11 @@ export function FilePreview({
   const [annotationMutationError, setAnnotationMutationError] = useState<string | null>(null);
   const [annotationMutatingId, setAnnotationMutatingId] = useState<string | null>(null);
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
+  const updateSourceSelection = useCallback((nextSelection: SourceSelection | null) => {
+    setSourceSelection((currentSelection) =>
+      sourceSelectionsEqual(currentSelection, nextSelection) ? currentSelection : nextSelection,
+    );
+  }, []);
   const [lineRevealRequest, setLineRevealRequest] = useState<SourceLineRevealRequest | null>(null);
   const [previewRevealRequest, setPreviewRevealRequest] = useState<PreviewAnnotationRevealRequest | null>(null);
   const [annotationPanelOpen, setAnnotationPanelOpen] = useState(false);
@@ -697,7 +702,7 @@ export function FilePreview({
   }, []);
 
   const revealAnnotationLine = useCallback(
-    (annotation: WorkspaceFileAnnotation) => {
+    (annotation: WorkspaceFileAnnotation, { flash = true }: { flash?: boolean } = {}) => {
       const range = annotationSourceRange(formatSource(previewContent, kind), annotation);
       if (!range) {
         return false;
@@ -707,17 +712,21 @@ export function FilePreview({
         position: range.from,
       }));
       setFocusedAnnotationId(annotation.id);
-      flashAnnotation(annotation.id);
+      if (flash) {
+        flashAnnotation(annotation.id);
+      }
       return true;
     },
     [flashAnnotation, kind, previewContent],
   );
 
   const scrollAnnotationElementIntoView = useCallback(
-    (annotation: WorkspaceFileAnnotation, element: HTMLElement) => {
+    (annotation: WorkspaceFileAnnotation, element: HTMLElement, { flash = true }: { flash?: boolean } = {}) => {
       element.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "smooth" });
       setFocusedAnnotationId(annotation.id);
-      flashAnnotation(annotation.id);
+      if (flash) {
+        flashAnnotation(annotation.id);
+      }
     },
     [flashAnnotation],
   );
@@ -730,7 +739,7 @@ export function FilePreview({
       setFocusedAnnotationId(annotation.id);
       const existingElement = !splitMode ? findAnnotationElement(bodyRef.current, annotation.id) : null;
       if (existingElement) {
-        scrollAnnotationElementIntoView(annotation, existingElement);
+        scrollAnnotationElementIntoView(annotation, existingElement, { flash: false });
         setLocateError(null);
         return;
       }
@@ -738,12 +747,12 @@ export function FilePreview({
       if (viewMode === "preview" || splitMode) {
         const previewElement = findPreviewAnnotationElement(bodyRef.current, annotation.id);
         if (previewElement) {
-          scrollAnnotationElementIntoView(annotation, previewElement);
+          scrollAnnotationElementIntoView(annotation, previewElement, { flash: false });
           located = true;
         }
       }
       if (viewMode === "source" || splitMode) {
-        located = revealAnnotationLine(annotation) || located;
+        located = revealAnnotationLine(annotation, { flash: false }) || located;
       }
       if (located) {
         setLocateError(null);
@@ -781,7 +790,7 @@ export function FilePreview({
       flashAnnotationId={flashAnnotationId}
       revealLineRequest={lineRevealRequest}
       onAnnotationActivate={activateAnnotation}
-      onSelectionChange={setSourceSelection}
+      onSelectionChange={updateSourceSelection}
     />
   );
 
@@ -947,7 +956,7 @@ export function FilePreview({
   };
 
   return (
-    <section className={styles.preview} data-chrome={chrome} aria-label="文件预览">
+    <section className={styles.preview} data-chrome={chrome} data-file-preview-root="true" aria-label="文件预览">
       {showPreviewTabs && !panelChrome ? (
         <div className={styles.tabs} role="tablist" aria-label="预览历史">
           {previewEntries.map((entry) => {
@@ -1137,6 +1146,24 @@ interface SourceSelection {
   lineEnd: number;
   columnStart: number;
   columnEnd: number;
+}
+
+function sourceSelectionsEqual(a: SourceSelection | null, b: SourceSelection | null): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  return (
+    a.selectedText === b.selectedText &&
+    a.sourceStart === b.sourceStart &&
+    a.sourceEnd === b.sourceEnd &&
+    a.lineStart === b.lineStart &&
+    a.lineEnd === b.lineEnd &&
+    a.columnStart === b.columnStart &&
+    a.columnEnd === b.columnEnd
+  );
 }
 
 interface SourceLineRevealRequest {

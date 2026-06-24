@@ -1,5 +1,5 @@
 import { ChevronRight, Crosshair, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import type {
@@ -47,6 +47,7 @@ export function WorkspacePanel({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [locateRequest, setLocateRequest] = useState<{ id: number; path: string } | null>(null);
+  const onSelectFileRef = useRef(onSelectFile);
   const scope = useMemo(() => workspaceScope({ workspaceId, sessionId }), [workspaceId, sessionId]);
   const scopeLabel = label ?? workspaceId ?? sessionId ?? "未绑定工作区";
   const searchWorkspace = useCallback(
@@ -124,7 +125,11 @@ export function WorkspacePanel({
         ? "没有匹配的文件"
         : null;
 
-  async function loadDirectory(path: string, force = false) {
+  useEffect(() => {
+    onSelectFileRef.current = onSelectFile;
+  }, [onSelectFile]);
+
+  const loadDirectory = useCallback(async (path: string, force = false) => {
     if (!force && entriesByPath[path]) {
       return;
     }
@@ -142,21 +147,21 @@ export function WorkspacePanel({
     } finally {
       setLoadingPaths((paths) => removeFromSet(paths, path));
     }
-  }
+  }, [entriesByPath, runtime, scope]);
 
-  async function toggleDirectory(path: string) {
+  const toggleDirectory = useCallback(async (path: string) => {
     if (expandedPaths.has(path)) {
       setExpandedPaths((paths) => removeFromSet(paths, path));
       return;
     }
     setExpandedPaths((paths) => addToSet(paths, path));
     await loadDirectory(path);
-  }
+  }, [expandedPaths, loadDirectory]);
 
-  function selectFile(path: string) {
+  const selectFile = useCallback((path: string) => {
     setSelectedPath(path);
-    onSelectFile?.(path);
-  }
+    onSelectFileRef.current?.(path);
+  }, []);
 
   async function openSearchDirectory(path: string) {
     setFilterQuery("");
@@ -224,7 +229,7 @@ export function WorkspacePanel({
   }, [entriesByPath, expandedPaths, locateRequest, searchActive]);
 
   return (
-    <section className={styles.panel} data-chrome={chrome} aria-label="工作区文件树">
+    <section className={styles.panel} data-chrome={chrome} data-workspace-panel-root="true" aria-label="工作区文件树">
       {chrome === "default" ? (
         <header className={styles.header}>
           <div className={styles.rootInfo}>
@@ -361,18 +366,7 @@ function workspaceScope({
   return null;
 }
 
-function TreeNode({
-  entriesByPath,
-  entry,
-  errorsByPath,
-  expandedPaths,
-  filterQuery,
-  loadingPaths,
-  onSelectFile,
-  onToggleDirectory,
-  selectedPath,
-  depth = 0,
-}: {
+interface TreeNodeProps {
   entriesByPath: EntryMap;
   entry: WorkspaceEntry;
   errorsByPath: ErrorMap;
@@ -383,7 +377,20 @@ function TreeNode({
   onToggleDirectory: (path: string) => void;
   selectedPath: string | null;
   depth?: number;
-}) {
+}
+
+const TreeNode = memo(function TreeNode({
+  entriesByPath,
+  entry,
+  errorsByPath,
+  expandedPaths,
+  filterQuery,
+  loadingPaths,
+  onSelectFile,
+  onToggleDirectory,
+  selectedPath,
+  depth = 0,
+}: TreeNodeProps) {
   const isDirectory = entry.type === "directory";
   const loading = loadingPaths.has(entry.path);
   const children = useMemo(
@@ -450,9 +457,40 @@ function TreeNode({
       ) : null}
     </div>
   );
+}, areTreeNodePropsEqual);
+
+function areTreeNodePropsEqual(previous: TreeNodeProps, next: TreeNodeProps): boolean {
+  if (
+    previous.entry !== next.entry ||
+    previous.entriesByPath !== next.entriesByPath ||
+    previous.errorsByPath !== next.errorsByPath ||
+    previous.expandedPaths !== next.expandedPaths ||
+    previous.filterQuery !== next.filterQuery ||
+    previous.loadingPaths !== next.loadingPaths ||
+    previous.onSelectFile !== next.onSelectFile ||
+    previous.onToggleDirectory !== next.onToggleDirectory ||
+    previous.depth !== next.depth
+  ) {
+    return false;
+  }
+  if (previous.selectedPath === next.selectedPath) {
+    return true;
+  }
+  return !treeEntryContainsPath(previous.entry, previous.selectedPath) &&
+    !treeEntryContainsPath(next.entry, next.selectedPath);
 }
 
-function SearchResultNode({
+function treeEntryContainsPath(entry: WorkspaceEntry, path: string | null): boolean {
+  if (!path) {
+    return false;
+  }
+  if (entry.path === path) {
+    return true;
+  }
+  return entry.type === "directory" && path.startsWith(`${entry.path}/`);
+}
+
+const SearchResultNode = memo(function SearchResultNode({
   entry,
   onOpenDirectory,
   onSelectFile,
@@ -486,9 +524,9 @@ function SearchResultNode({
       </button>
     </div>
   );
-}
+});
 
-function EllipsizedEntryName({ name }: { name: string }) {
+const EllipsizedEntryName = memo(function EllipsizedEntryName({ name }: { name: string }) {
   const labelRef = useRef<HTMLSpanElement | null>(null);
   const showTimerRef = useRef<number | null>(null);
   const [tooltip, setTooltip] = useState<{ left: number; top: number; text: string } | null>(null);
@@ -563,7 +601,7 @@ function EllipsizedEntryName({ name }: { name: string }) {
         : null}
     </>
   );
-}
+});
 
 function AnimatedTreeGroup({ children, expanded }: { children: ReactNode; expanded: boolean }) {
   const [mounted, setMounted] = useState(expanded);
@@ -625,7 +663,7 @@ function AnimatedTreeGroup({ children, expanded }: { children: ReactNode; expand
   );
 }
 
-function MaterialEntryIcon({ path, type }: { path: string; type: WorkspaceEntry["type"] }) {
+const MaterialEntryIcon = memo(function MaterialEntryIcon({ path, type }: { path: string; type: WorkspaceEntry["type"] }) {
   const icon = useMaterialEntryIcon(path, type === "directory" ? "directory" : "file");
   return (
     <img
@@ -637,7 +675,7 @@ function MaterialEntryIcon({ path, type }: { path: string; type: WorkspaceEntry[
       src={icon.src}
     />
   );
-}
+});
 
 function filterEntries(entries: WorkspaceEntry[], entriesByPath: EntryMap, query: string): WorkspaceEntry[] {
   if (!query) {

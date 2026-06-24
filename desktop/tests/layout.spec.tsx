@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -127,6 +127,41 @@ describe("Layout", () => {
     expect(shell.dataset.rightSidebarMode).toBe("split");
     expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
+  });
+
+  it("marks the right sidebar as resizing only during pointer drag", async () => {
+    renderLayout(
+      <Layout>
+        <div>content</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    const openButton = document.querySelector<HTMLButtonElement>("[data-icon='panel-right-open']");
+    if (!openButton) {
+      throw new Error("Right sidebar open button not found");
+    }
+    fireEvent.click(openButton);
+
+    const handle = screen.getAllByRole("separator").find((element) => element.getAttribute("aria-valuemax") === "80");
+    if (!handle) {
+      throw new Error("Right sidebar resize handle not found");
+    }
+    act(() => {
+      dispatchPointer(handle, "pointerdown", { button: 0, pointerId: 4, clientX: 400 });
+    });
+
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBe("true");
+    });
+
+    act(() => {
+      dispatchPointer(window, "pointerup", { pointerId: 4, clientX: 400 });
+    });
+
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBeUndefined();
+    });
   });
 
   it("swaps the conversation area and side panel across the split handle", () => {
@@ -409,4 +444,12 @@ function message(
     createdAt: "2026-06-17T10:00:00Z",
     updatedAt: "2026-06-17T10:01:00Z",
   };
+}
+
+function dispatchPointer(target: EventTarget, type: string, props: Record<string, number>) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [key, value] of Object.entries(props)) {
+    Object.defineProperty(event, key, { configurable: true, value });
+  }
+  target.dispatchEvent(event);
 }

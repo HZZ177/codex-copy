@@ -136,6 +136,7 @@
 }
 
 .treePane {
+  position: relative;
   grid-column: 1;
   background: var(--sidebar-bg);
   opacity: 1;
@@ -203,8 +204,58 @@
 }
 
 .previewPane {
+  position: relative;
   grid-column: 3;
   background: var(--color-bg-elevated);
+}
+
+.browser[data-resizing="true"] .previewPane [data-file-preview-root="true"] {
+  content-visibility: hidden;
+  contain-intrinsic-size: 720px;
+  pointer-events: none;
+}
+
+.previewResizeSkeleton {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(260px, 78%);
+  z-index: 8;
+  display: none;
+  gap: 8px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.previewResizeSkeleton span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
+    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
+  );
+  background-size: 220% 100%;
+  animation: workspaceFilePreviewSkeleton 1.2s ease-in-out infinite;
+}
+
+.previewResizeSkeleton span:nth-child(2) {
+  width: 88%;
+}
+
+.previewResizeSkeleton span:nth-child(3) {
+  width: 72%;
+}
+
+.previewResizeSkeleton span:nth-child(4) {
+  width: 54%;
+}
+
+.browser[data-resizing="true"] .previewResizeSkeleton,
+:global([data-right-sidebar-resizing="true"]) .previewResizeSkeleton {
+  display: grid;
 }
 
 .collapsedEmptyState {
@@ -272,6 +323,16 @@
   }
 }
 
+@keyframes workspaceFilePreviewSkeleton {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .browserBody,
   .treePane,
@@ -282,4 +343,7 @@
     transition: none;
   }
 
+  .previewResizeSkeleton span {
+    animation: none;
+  }
 }

@@ -142,6 +142,17 @@ export function Layout({
     },
     [getRightSidebarAvailableWidth],
   );
+  const setRightSidebarResizing = useCallback((resizing: boolean) => {
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+    if (resizing) {
+      shell.dataset.rightSidebarResizing = "true";
+      return;
+    }
+    delete shell.dataset.rightSidebarResizing;
+  }, []);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -379,6 +390,7 @@ export function Layout({
           getAvailableWidth={getRightSidebarAvailableWidth}
           onResizePreview={previewRightSidebarRatio}
           onResize={actions.setRightSidebarRatio}
+          onResizeDragChange={setRightSidebarResizing}
           onSwapPlacement={swapRightSidebarPlacement}
         />
         <RightSidebarPanel
@@ -899,6 +911,7 @@ function RightSidebarPanel({
             </div>
           ) : activeRequest ? (
             <div className={styles.rightSidebarBody} data-content="preview">
+              <ResizePreviewSkeleton className={styles.rightSidebarResizeSkeleton} />
               <Suspense fallback={<RightSidebarLoading label="正在加载预览" />}>
                 <LazyFilePreview
                   breadcrumbRootLabel={
@@ -937,6 +950,17 @@ function RightSidebarLoading({ label }: { label: string }) {
         <span />
       </div>
       <span>{label}</span>
+    </div>
+  );
+}
+
+function ResizePreviewSkeleton({ className }: { className: string }) {
+  return (
+    <div className={className} aria-hidden="true" data-resize-preview-skeleton="true">
+      <span />
+      <span />
+      <span />
+      <span />
     </div>
   );
 }

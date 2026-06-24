@@ -12,103 +12,290 @@ export interface TextSelectionOptions {
   excludeSelector?: string;
 }
 
+interface TextSelectionSnapshot {
+  selectedText: string;
+  selectionPosition: SelectionPosition | null;
+  selectionRange: Range | null;
+}
+
+interface SelectionSubscriber {
+  containerRef: RefObject<HTMLElement | null>;
+  excludeSelector?: string;
+  setSnapshot: (snapshot: TextSelectionSnapshot) => void;
+}
+
+const EMPTY_SELECTION: TextSelectionSnapshot = {
+  selectedText: "",
+  selectionPosition: null,
+  selectionRange: null,
+};
+
+const selectionSubscribers = new Set<SelectionSubscriber>();
+let activeSelectionSubscriber: SelectionSubscriber | null = null;
+let globalSelectionListenersAttached = false;
+let deferredSelectionUpdateId: number | null = null;
+let scheduledActiveSelectionUpdateId: number | null = null;
+
 export function useTextSelection(
   containerRef: RefObject<HTMLElement | null>,
   enabledOrOptions: boolean | TextSelectionOptions = true,
 ) {
   const enabled = typeof enabledOrOptions === "boolean" ? enabledOrOptions : enabledOrOptions.enabled ?? true;
   const excludeSelector = typeof enabledOrOptions === "boolean" ? undefined : enabledOrOptions.excludeSelector;
-  const [selectedText, setSelectedText] = useState("");
-  const [selectionPosition, setSelectionPosition] = useState<SelectionPosition | null>(null);
-  const [selectionRange, setSelectionRange] = useState<Range | null>(null);
-  const deferredUpdateRef = useRef<number | null>(null);
+  const [snapshot, setSnapshotState] = useState<TextSelectionSnapshot>(EMPTY_SELECTION);
 
-  const clearSelection = useCallback(() => {
-    setSelectedText("");
-    setSelectionPosition(null);
-    setSelectionRange(null);
-    window.getSelection()?.removeAllRanges();
+  const setSnapshot = useCallback((nextSnapshot: TextSelectionSnapshot) => {
+    setSnapshotState((current) => {
+      return textSelectionSnapshotsEqual(current, nextSnapshot) ? current : nextSnapshot;
+    });
   }, []);
 
-  const updateSelection = useCallback(() => {
-    const selection = window.getSelection();
-    const text = selection?.toString().trim() ?? "";
-    const container = containerRef.current;
+  const subscriberRef = useRef<SelectionSubscriber | null>(null);
+  if (subscriberRef.current === null) {
+    subscriberRef.current = {
+      containerRef,
+      excludeSelector,
+      setSnapshot,
+    };
+  }
+  subscriberRef.current.containerRef = containerRef;
+  subscriberRef.current.excludeSelector = excludeSelector;
+  subscriberRef.current.setSnapshot = setSnapshot;
 
-    if (!container || !selection || selection.rangeCount === 0 || !text) {
-      setSelectedText("");
-      setSelectionPosition(null);
-      setSelectionRange(null);
-      return;
+  const clearSelection = useCallback(() => {
+    const subscriber = subscriberRef.current;
+    if (activeSelectionSubscriber === subscriber) {
+      activeSelectionSubscriber = null;
     }
-
-    const range = selection.getRangeAt(0);
-    if (
-      !container.contains(range.commonAncestorContainer) ||
-      rangeTouchesExcludedElement(range, container, excludeSelector)
-    ) {
-      setSelectedText("");
-      setSelectionPosition(null);
-      setSelectionRange(null);
-      return;
-    }
-
-    const rect = selectionRect(range);
-    const x = rect.width > 0 ? rect.left + rect.width / 2 : rect.left;
-    const y = rect.top;
-    setSelectedText(text);
-    setSelectionPosition({
-      x,
-      y,
-      width: rect.width,
-      height: rect.height,
-    });
-    setSelectionRange(typeof range.cloneRange === "function" ? range.cloneRange() : null);
-  }, [containerRef, excludeSelector]);
+    setSnapshot(EMPTY_SELECTION);
+    window.getSelection()?.removeAllRanges();
+  }, [setSnapshot]);
 
   useEffect(() => {
+    const subscriber = subscriberRef.current;
     if (!enabled) {
-      setSelectedText("");
-      setSelectionPosition(null);
-      setSelectionRange(null);
+      if (activeSelectionSubscriber === subscriber) {
+        activeSelectionSubscriber = null;
+      }
+      setSnapshot(EMPTY_SELECTION);
       return;
     }
 
-    const hideSelectionToolbar = () => {
-      setSelectedText("");
-      setSelectionPosition(null);
-      setSelectionRange(null);
-    };
-
-    const deferredUpdate = () => {
-      if (deferredUpdateRef.current !== null) {
-        window.clearTimeout(deferredUpdateRef.current);
-      }
-      deferredUpdateRef.current = window.setTimeout(() => {
-        deferredUpdateRef.current = null;
-        updateSelection();
-      }, 0);
-    };
-    document.addEventListener("mousedown", hideSelectionToolbar);
-    document.addEventListener("mouseup", deferredUpdate);
-    document.addEventListener("keyup", updateSelection);
-    window.addEventListener("resize", updateSelection);
-    window.addEventListener("scroll", updateSelection, true);
+    selectionSubscribers.add(subscriber);
+    ensureGlobalSelectionListeners();
 
     return () => {
-      if (deferredUpdateRef.current !== null) {
-        window.clearTimeout(deferredUpdateRef.current);
-        deferredUpdateRef.current = null;
+      selectionSubscribers.delete(subscriber);
+      if (activeSelectionSubscriber === subscriber) {
+        activeSelectionSubscriber = null;
       }
-      document.removeEventListener("mousedown", hideSelectionToolbar);
-      document.removeEventListener("mouseup", deferredUpdate);
-      document.removeEventListener("keyup", updateSelection);
-      window.removeEventListener("resize", updateSelection);
-      window.removeEventListener("scroll", updateSelection, true);
+      if (selectionSubscribers.size === 0) {
+        removeGlobalSelectionListeners();
+      }
     };
-  }, [enabled, updateSelection]);
+  }, [enabled, setSnapshot]);
 
-  return { selectedText, selectionPosition, selectionRange, clearSelection };
+  return {
+    selectedText: snapshot.selectedText,
+    selectionPosition: snapshot.selectionPosition,
+    selectionRange: snapshot.selectionRange,
+    clearSelection,
+  };
+}
+
+function ensureGlobalSelectionListeners(): void {
+  if (globalSelectionListenersAttached || typeof document === "undefined" || typeof window === "undefined") {
+    return;
+  }
+  document.addEventListener("mousedown", handleDocumentMouseDown);
+  document.addEventListener("mouseup", handleDocumentMouseUp);
+  document.addEventListener("keyup", handleDocumentKeyUp);
+  window.addEventListener("resize", scheduleActiveSelectionUpdate);
+  window.addEventListener("scroll", scheduleActiveSelectionUpdate, true);
+  globalSelectionListenersAttached = true;
+}
+
+function removeGlobalSelectionListeners(): void {
+  if (!globalSelectionListenersAttached || typeof document === "undefined" || typeof window === "undefined") {
+    return;
+  }
+  document.removeEventListener("mousedown", handleDocumentMouseDown);
+  document.removeEventListener("mouseup", handleDocumentMouseUp);
+  document.removeEventListener("keyup", handleDocumentKeyUp);
+  window.removeEventListener("resize", scheduleActiveSelectionUpdate);
+  window.removeEventListener("scroll", scheduleActiveSelectionUpdate, true);
+  globalSelectionListenersAttached = false;
+  clearScheduledSelectionUpdates();
+}
+
+function handleDocumentMouseDown(): void {
+  clearActiveSelectionSubscriber();
+}
+
+function handleDocumentMouseUp(): void {
+  scheduleDeferredSelectionUpdate();
+}
+
+function handleDocumentKeyUp(): void {
+  updateGlobalSelection({ activeOnly: false });
+}
+
+function scheduleDeferredSelectionUpdate(): void {
+  if (deferredSelectionUpdateId !== null) {
+    window.clearTimeout(deferredSelectionUpdateId);
+  }
+  deferredSelectionUpdateId = window.setTimeout(() => {
+    deferredSelectionUpdateId = null;
+    updateGlobalSelection({ activeOnly: false });
+  }, 0);
+}
+
+function scheduleActiveSelectionUpdate(): void {
+  if (scheduledActiveSelectionUpdateId !== null) {
+    return;
+  }
+  scheduledActiveSelectionUpdateId = window.setTimeout(() => {
+    scheduledActiveSelectionUpdateId = null;
+    updateGlobalSelection({ activeOnly: true });
+  }, 16);
+}
+
+function clearScheduledSelectionUpdates(): void {
+  if (deferredSelectionUpdateId !== null) {
+    window.clearTimeout(deferredSelectionUpdateId);
+    deferredSelectionUpdateId = null;
+  }
+  if (scheduledActiveSelectionUpdateId !== null) {
+    window.clearTimeout(scheduledActiveSelectionUpdateId);
+    scheduledActiveSelectionUpdateId = null;
+  }
+}
+
+function updateGlobalSelection({ activeOnly }: { activeOnly: boolean }): void {
+  if (selectionSubscribers.size === 0) {
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    clearActiveSelectionSubscriber();
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  const target = findSelectionSubscriber(range, activeOnly);
+  if (!target) {
+    clearActiveSelectionSubscriber();
+    return;
+  }
+
+  const text = selection.toString().trim();
+  if (!text) {
+    const targetWasActive = activeSelectionSubscriber === target;
+    clearActiveSelectionSubscriber();
+    if (!targetWasActive) {
+      target.setSnapshot(EMPTY_SELECTION);
+    }
+    return;
+  }
+
+  const rect = selectionRect(range);
+  const snapshot: TextSelectionSnapshot = {
+    selectedText: text,
+    selectionPosition: {
+      x: rect.width > 0 ? rect.left + rect.width / 2 : rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    },
+    selectionRange: typeof range.cloneRange === "function" ? range.cloneRange() : null,
+  };
+
+  if (activeSelectionSubscriber && activeSelectionSubscriber !== target) {
+    activeSelectionSubscriber.setSnapshot(EMPTY_SELECTION);
+  }
+  activeSelectionSubscriber = target;
+  target.setSnapshot(snapshot);
+}
+
+function findSelectionSubscriber(range: Range, activeOnly: boolean): SelectionSubscriber | null {
+  if (
+    activeSelectionSubscriber &&
+    selectionSubscribers.has(activeSelectionSubscriber) &&
+    subscriberOwnsRange(activeSelectionSubscriber, range)
+  ) {
+    return activeSelectionSubscriber;
+  }
+  if (activeOnly) {
+    return null;
+  }
+
+  let match: SelectionSubscriber | null = null;
+  for (const subscriber of selectionSubscribers) {
+    if (!subscriberOwnsRange(subscriber, range)) {
+      continue;
+    }
+    const container = subscriber.containerRef.current;
+    const matchContainer = match?.containerRef.current;
+    if (!match || (container && matchContainer?.contains(container))) {
+      match = subscriber;
+    }
+  }
+  return match;
+}
+
+function subscriberOwnsRange(subscriber: SelectionSubscriber, range: Range): boolean {
+  const container = subscriber.containerRef.current;
+  if (!container || !container.contains(range.commonAncestorContainer)) {
+    return false;
+  }
+  return !rangeTouchesExcludedElement(range, container, subscriber.excludeSelector);
+}
+
+function clearActiveSelectionSubscriber(): void {
+  const subscriber = activeSelectionSubscriber;
+  if (!subscriber) {
+    return;
+  }
+  activeSelectionSubscriber = null;
+  subscriber.setSnapshot(EMPTY_SELECTION);
+}
+
+function textSelectionSnapshotsEqual(a: TextSelectionSnapshot, b: TextSelectionSnapshot): boolean {
+  return (
+    a.selectedText === b.selectedText &&
+    selectionPositionsEqual(a.selectionPosition, b.selectionPosition) &&
+    rangesEquivalent(a.selectionRange, b.selectionRange)
+  );
+}
+
+function selectionPositionsEqual(a: SelectionPosition | null, b: SelectionPosition | null): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function rangesEquivalent(a: Range | null, b: Range | null): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  try {
+    return (
+      a.startContainer === b.startContainer &&
+      a.startOffset === b.startOffset &&
+      a.endContainer === b.endContainer &&
+      a.endOffset === b.endOffset &&
+      a.collapsed === b.collapsed
+    );
+  } catch {
+    return false;
+  }
 }
 
 function rangeTouchesExcludedElement(

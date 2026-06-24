@@ -416,11 +416,18 @@ describe("WorkspacePanel", () => {
     }));
     const handle = await screen.findByRole("separator", { name: "调整文件树宽度" });
 
+    const previewPane = await screen.findByTestId("workspace-file-browser-preview");
+
+    expect(previewPane.getAttribute("data-workspace-file-preview-pane")).toBe("true");
+    expect(browser.querySelector("[data-resize-tree-skeleton]")).toBeNull();
+
     dispatchPointer(handle, "pointerdown", { button: 0, pointerId: 1, clientX: 260 });
+    expect(browser.getAttribute("data-resizing")).toBe("true");
     dispatchPointer(handle, "pointermove", { pointerId: 1, clientX: 700 });
     dispatchPointer(handle, "pointerup", { pointerId: 1, clientX: 700 });
 
     expect(browser.style.getPropertyValue("--workspace-file-tree-width")).toBe("620px");
+    expect(browser.getAttribute("data-resizing")).toBeNull();
     raf.mockRestore();
     cancelRaf.mockRestore();
   });
