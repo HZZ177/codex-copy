@@ -79,7 +79,7 @@ def test_workspace_bound_tree_read_and_search(tmp_path) -> None:
     ]
 
 
-def test_workspace_search_skips_generated_and_secret_paths(tmp_path) -> None:
+def test_workspace_search_skips_generated_paths_but_includes_env_files(tmp_path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
     (root / "src").mkdir()
@@ -103,8 +103,31 @@ def test_workspace_search_skips_generated_and_secret_paths(tmp_path) -> None:
     assert "src/env_reader.py" in paths
     assert "node_modules/env-package.js" not in paths
     assert ".venv/env_tool.py" not in paths
-    assert ".env" not in paths
-    assert ".env.local" not in paths
+    assert ".env" in paths
+    assert ".env.local" in paths
+
+
+def test_workspace_search_still_skips_remaining_sensitive_file_names(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / ".npmrc").write_text("//registry.example/:_authToken=ignored\n", encoding="utf-8")
+    (root / "id_rsa").write_text("PRIVATE KEY", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        npmrc_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "npmrc", "limit": 20},
+        )
+        key_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "id_rsa", "limit": 20},
+        )
+
+    assert npmrc_response.status_code == 200
+    assert key_response.status_code == 200
+    assert ".npmrc" not in [entry["path"] for entry in npmrc_response.json()]
+    assert "id_rsa" not in [entry["path"] for entry in key_response.json()]
 
 
 def test_workspace_search_matches_only_entry_names_not_parent_paths(tmp_path) -> None:
@@ -127,6 +150,84 @@ def test_workspace_search_matches_only_entry_names_not_parent_paths(tmp_path) ->
     assert "frontend/backend_notes.md" in paths
     assert "backend/app" not in paths
     assert "backend/app/core/config.py" not in paths
+
+
+def test_workspace_search_includes_image_file_suffixes(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    assets = root / "docs" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "pixel.png").write_bytes(PNG_BYTES)
+    (assets / "cover.jpg").write_bytes(b"jpg")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        png_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "png", "limit": 20},
+        )
+        dotted_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": ".png", "limit": 20},
+        )
+        jpg_response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "jpg", "limit": 20},
+        )
+
+    assert png_response.status_code == 200
+    assert dotted_response.status_code == 200
+    assert jpg_response.status_code == 200
+    assert "docs/assets/pixel.png" in [entry["path"] for entry in png_response.json()]
+    assert "docs/assets/pixel.png" in [entry["path"] for entry in dotted_response.json()]
+    assert "docs/assets/cover.jpg" in [entry["path"] for entry in jpg_response.json()]
+
+
+def test_workspace_search_includes_requested_binary_archive_and_pdf_suffixes(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    expected_by_query = {
+        "exe": "tool.exe",
+        "jar": "plugin.jar",
+        "zip": "bundle.zip",
+        "tar": "source.tar",
+        "gz": "dump.gz",
+        "7z": "dataset.7z",
+        "rar": "photos.rar",
+        "pdf": "manual.pdf",
+    }
+    for path in expected_by_query.values():
+        (root / path).write_bytes(b"binary")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        responses = {
+            query: client.get(
+                f"/api/workspaces/{workspace['id']}/search",
+                params={"q": query, "limit": 20},
+            )
+            for query in expected_by_query
+        }
+
+    for query, response in responses.items():
+        assert response.status_code == 200
+        assert expected_by_query[query] in [entry["path"] for entry in response.json()]
+
+
+def test_workspace_search_default_limit_returns_fifty_results(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    for index in range(55):
+        (root / f"match-{index:02d}.txt").write_text("x", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "match"},
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 50
 
 
 def test_session_bound_workspace_tree_read_and_search(tmp_path) -> None:

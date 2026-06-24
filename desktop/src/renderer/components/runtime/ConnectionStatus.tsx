@@ -13,9 +13,10 @@ export interface ConnectionStatusProps {
   state: RuntimeState;
   onClearError?: (id: string) => void;
   onClearAll?: () => void;
+  onRetry?: () => void;
 }
 
-export function ConnectionStatus({ state, onClearError, onClearAll }: ConnectionStatusProps) {
+export function ConnectionStatus({ state, onClearError, onClearAll, onRetry }: ConnectionStatusProps) {
   const summary = selectConnectionSummary(state);
   const errors = selectVisibleErrors(state);
   const Icon = summary.status === "connected" ? CheckCircle2 : summary.status === "error" ? AlertCircle : LoaderCircle;
@@ -47,6 +48,12 @@ export function ConnectionStatus({ state, onClearError, onClearAll }: Connection
       {errors.length > 1 && onClearAll ? (
         <button className={styles.clearAllButton} type="button" onClick={onClearAll}>
           清除全部
+        </button>
+      ) : null}
+
+      {summary.status === "error" && onRetry ? (
+        <button className={styles.retryButton} type="button" onClick={onRetry}>
+          重试
         </button>
       ) : null}
     </div>

@@ -170,6 +170,12 @@ pnpm run test:e2e:settings-usage
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1
 ```
 
+快速迭代打包会跳过依赖安装、测试和 Rust 预检查，并在后端输入未变化时复用已有 sidecar：
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Fast
+```
+
 查看打包脚本说明，不触发打包：
 
 ```powershell

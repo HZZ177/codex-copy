@@ -78,6 +78,7 @@ describe("WorkspacePanel", () => {
     render(<WorkspacePanel chrome="panel" sessionId="ses-1" label="D:/repo" runtime={runtime} />);
 
     expect(await screen.findByRole("searchbox", { name: "筛选文件" })).not.toBeNull();
+    expect(screen.getByText("最多返回 50 项 · 最多搜索 2.5 秒")).not.toBeNull();
     expect(screen.getByText("desktop")).not.toBeNull();
     expect(screen.getByText("package.json")).not.toBeNull();
 

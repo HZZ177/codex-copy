@@ -5,7 +5,7 @@
   height: 100%;
   min-width: var(--app-min-width);
   display: grid;
-  grid-template-rows: var(--titlebar-height) minmax(0, 1fr);
+  grid-template-rows: var(--titlebar-height) auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--app-bg);
   color: var(--color-text-1);
@@ -512,6 +512,62 @@
   padding: 0;
 }
 
+.rightSidebarLoading {
+  display: grid;
+  min-width: 0;
+  height: 100%;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.rightSidebarLoadingSkeleton {
+  display: grid;
+  width: min(300px, 76%);
+  gap: 8px;
+}
+
+.rightSidebarLoadingSkeleton span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
+    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
+  );
+  background-size: 220% 100%;
+  animation: rightSidebarLoadingSkeleton 1.2s ease-in-out infinite;
+}
+
+.rightSidebarLoadingSkeleton span:nth-child(2) {
+  width: 88%;
+}
+
+.rightSidebarLoadingSkeleton span:nth-child(3) {
+  width: 72%;
+}
+
+.rightSidebarLoadingSkeleton span:nth-child(4) {
+  width: 56%;
+}
+
+@keyframes rightSidebarLoadingSkeleton {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 .rightSidebarIconButton {
   display: inline-grid;
   width: 28px;
@@ -551,6 +607,10 @@
   .rightSidebarTab,
   .rightSidebarAddTab {
     transition: none;
+  }
+
+  .rightSidebarLoadingSkeleton span {
+    animation: none;
   }
 
   .contentRightSidebarToggle:active,

@@ -102,6 +102,9 @@ export function selectConnectionSummary(state: RuntimeState): ConnectionSummary 
   }
 
   const statuses = Object.values(state.statusBySource);
+  if (state.statusBySource.health === "checking" || state.statusBySource.health === "connecting") {
+    return { status: "connecting", label: "正在启动本地服务", hasError: false, activeError: null };
+  }
   if (statuses.includes("reconnecting")) {
     return { status: "reconnecting", label: "正在重连", hasError: false, activeError: null };
   }

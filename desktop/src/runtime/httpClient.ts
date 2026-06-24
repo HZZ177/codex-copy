@@ -16,7 +16,6 @@ export interface RequestOptions {
 }
 
 const SENSITIVE_KEY_PATTERN = /api[_-]?key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|secret/i;
-export const AGENT_BASE_URL_STORAGE_KEY = "keydex:agent-base-url";
 
 export class HttpClient {
   private baseUrl: string;
@@ -24,7 +23,7 @@ export class HttpClient {
   private readonly logger?: Pick<Console, "debug" | "error">;
 
   constructor(options: HttpClientOptions = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? defaultBaseUrl());
+    this.baseUrl = options.baseUrl === undefined ? "" : normalizeBaseUrl(options.baseUrl);
     this.fetcher = options.fetcher ?? fetch.bind(globalThis);
     this.logger = options.logger;
   }
@@ -34,7 +33,7 @@ export class HttpClient {
   }
 
   getBaseUrl() {
-    return this.baseUrl;
+    return requireBaseUrl(this.baseUrl);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -56,7 +55,7 @@ export class HttpClient {
       init.signal = options.signal;
     }
 
-    const response = await this.fetcher(`${this.baseUrl}${path}`, init);
+    const response = await this.fetcher(`${this.getBaseUrl()}${path}`, init);
 
     if (!response.ok) {
       const { body, rawText } = await readResponseBody(response);
@@ -169,12 +168,16 @@ async function readSuccessBody<T>(response: Response): Promise<T> {
 }
 
 function normalizeBaseUrl(baseUrl: string) {
-  return baseUrl.replace(/\/$/, "");
+  const url = baseUrl.trim().replace(/\/$/, "");
+  if (!url) {
+    throw new Error("Keydex 后端地址未配置");
+  }
+  return url;
 }
 
-function defaultBaseUrl() {
-  if (typeof window === "undefined") {
-    return "http://127.0.0.1:8765";
+function requireBaseUrl(baseUrl: string) {
+  if (!baseUrl) {
+    throw new Error("Keydex 后端地址未配置");
   }
-  return window.localStorage.getItem(AGENT_BASE_URL_STORAGE_KEY) || "http://127.0.0.1:8765";
+  return baseUrl;
 }

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit && vite build",
+    "icons": "node tools/generate-keydex-icons.mjs",
     "test": "vitest run",
     "tauri:build": "tauri build"
   },

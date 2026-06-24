@@ -56,6 +56,7 @@ export type {
   WorkspaceAnnotationListOptions,
   WorkspaceEntry,
   WorkspaceFileAnnotation,
+  WorkspaceFileAnnotationAnchorV2,
   WorkspaceFileAnnotationAnchorType,
   WorkspaceFileAnnotationInput,
   WorkspaceFileAnnotationUpdate,

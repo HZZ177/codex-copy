@@ -55,3 +55,44 @@ button:disabled {
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+
+.bootstrap-shell {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--color-text-1);
+  background: var(--app-bg);
+  user-select: none;
+}
+
+.bootstrap-panel {
+  width: fit-content;
+  max-width: min(420px, 100%);
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+.bootstrap-mark {
+  width: 42px;
+  height: 42px;
+  display: block;
+  border-radius: 9px;
+}
+
+.bootstrap-panel h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.bootstrap-panel p {
+  margin: 6px 0 0;
+  color: var(--color-text-3);
+  font-size: 13px;
+  line-height: 1.55;
+}

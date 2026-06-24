@@ -5,8 +5,22 @@ import { ConnectionStatus } from "@/renderer/components/runtime";
 import { createInitialRuntimeState, runtimeReducer } from "@/renderer/stores/runtimeStore";
 
 describe("ConnectionStatus", () => {
+  it("shows local service startup as an in-app connection status", () => {
+    const state = runtimeReducer(createInitialRuntimeState(), {
+      type: "connection/setStatus",
+      source: "health",
+      status: "checking",
+    });
+
+    render(<ConnectionStatus state={state} />);
+
+    expect(screen.getByTestId("connection-status").dataset.status).toBe("connecting");
+    expect(screen.getByText("正在启动本地服务")).not.toBeNull();
+  });
+
   it("renders the active runtime error and clears it", () => {
     const onClearError = vi.fn();
+    const onRetry = vi.fn();
     const state = runtimeReducer(createInitialRuntimeState(), {
       type: "error/record",
       source: "model",
@@ -15,7 +29,7 @@ describe("ConnectionStatus", () => {
       error: { code: "provider_error", message: "模型服务返回 400" },
     });
 
-    render(<ConnectionStatus state={state} onClearError={onClearError} />);
+    render(<ConnectionStatus state={state} onClearError={onClearError} onRetry={onRetry} />);
 
     expect(screen.getByTestId("connection-status").dataset.status).toBe("error");
     expect(screen.getByText("模型异常")).not.toBeNull();
@@ -23,5 +37,8 @@ describe("ConnectionStatus", () => {
 
     fireEvent.click(screen.getByLabelText("清除当前错误"));
     expect(onClearError).toHaveBeenCalledWith("err-model");
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

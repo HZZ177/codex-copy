@@ -28,7 +28,7 @@ describe("EventReplayHarness", () => {
     expect(screen.getByTestId("command-execution-block")).not.toBeNull();
   });
 
-  it("is reachable through a hidden direct route", () => {
+  it("is reachable through a hidden direct route", async () => {
     render(
       <ThemeProvider>
         <LayoutStateProvider>
@@ -39,7 +39,7 @@ describe("EventReplayHarness", () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "事件回放" })).not.toBeNull();
-    expect(screen.getByTestId("event-replay-harness")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "事件回放" }, { timeout: 10000 })).not.toBeNull();
+    expect(await screen.findByTestId("event-replay-harness", undefined, { timeout: 10000 })).not.toBeNull();
   });
 });

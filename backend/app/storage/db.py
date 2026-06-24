@@ -113,6 +113,7 @@ create table if not exists workspace_file_annotations (
   column_start integer,
   column_end integer,
   content_hash text,
+  anchor_json text,
   created_at text not null,
   updated_at text not null,
   is_deleted integer not null default 0,
@@ -337,6 +338,7 @@ class Database:
             )
             self._ensure_column(conn, "llm_request_logs", "gateway_thread_id", "text")
             self._ensure_column(conn, "llm_request_logs", "gateway_trace_id", "text")
+            self._ensure_column(conn, "workspace_file_annotations", "anchor_json", "text")
             conn.executescript(SCHEMA_UPGRADE_SQL)
             if should_migrate_legacy_sessions:
                 self._migrate_legacy_sessions_to_default_workspace(

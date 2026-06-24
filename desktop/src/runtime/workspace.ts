@@ -38,6 +38,21 @@ export interface WorkspaceSearchOptions {
 
 export type WorkspaceFileAnnotationAnchorType = "file" | "selection";
 
+export interface WorkspaceFileAnnotationAnchorV2 {
+  version: 2;
+  kind: "source-range";
+  sourceStart: number;
+  sourceEnd: number;
+  selectedText: string;
+  sourceText: string;
+  contentHash: string;
+  lineStart: number;
+  lineEnd: number;
+  columnStart: number;
+  columnEnd: number;
+  createdInView: "preview" | "source";
+}
+
 export interface WorkspaceFileAnnotation {
   id: string;
   scope_type: "session" | "workspace";
@@ -52,6 +67,7 @@ export interface WorkspaceFileAnnotation {
   column_start?: number | null;
   column_end?: number | null;
   content_hash?: string | null;
+  anchor_json?: WorkspaceFileAnnotationAnchorV2 | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +82,7 @@ export interface WorkspaceFileAnnotationInput {
   column_start?: number | null;
   column_end?: number | null;
   content_hash?: string | null;
+  anchor_json?: WorkspaceFileAnnotationAnchorV2 | null;
 }
 
 export interface WorkspaceFileAnnotationUpdate {
@@ -77,6 +94,7 @@ export interface WorkspaceFileAnnotationUpdate {
   column_start?: number | null;
   column_end?: number | null;
   content_hash?: string | null;
+  anchor_json?: WorkspaceFileAnnotationAnchorV2 | null;
 }
 
 export interface WorkspaceAnnotationListOptions {

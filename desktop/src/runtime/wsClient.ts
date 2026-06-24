@@ -19,7 +19,7 @@ export interface WebSocketLike {
 export type WebSocketConstructor = new (url: string) => WebSocketLike;
 
 export interface WsClientOptions {
-  baseUrl?: string;
+  baseUrl: string;
   WebSocketImpl?: WebSocketConstructor;
   reconnectDelayMs?: number;
   maxReconnectAttempts?: number;
@@ -44,7 +44,7 @@ export class RuntimeWsClient {
   private readonly maxReconnectAttempts: number;
 
   constructor(private readonly options: WsClientOptions) {
-    this.baseUrl = (options.baseUrl ?? "ws://127.0.0.1:8765").replace(/\/$/, "");
+    this.baseUrl = normalizeWsBaseUrl(options.baseUrl);
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 500;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
@@ -244,6 +244,14 @@ export function toWebSocketBaseUrl(httpBaseUrl: string) {
   const url = new URL(httpBaseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString().replace(/\/$/, "");
+}
+
+function normalizeWsBaseUrl(baseUrl: string) {
+  const url = baseUrl.trim().replace(/\/$/, "");
+  if (!url) {
+    throw new Error("Keydex WebSocket 地址未配置");
+  }
+  return url;
 }
 
 function isAgentEnvelope(value: unknown): value is AgentActionEnvelope<AgentChatAction> {

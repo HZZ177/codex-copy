@@ -40,6 +40,16 @@
   white-space: nowrap;
 }
 
+.budgetHint {
+  flex: 0 0 auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 46%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 96%, var(--surface-muted));
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+  padding: 5px 10px 6px 36px;
+}
+
 .body {
   min-height: 0;
   overflow: auto;

@@ -277,8 +277,10 @@ function TurnPlanPill({ summary }: { summary: TurnPlanSummary }) {
             <CircleX size={13} />
           ) : activeStatus === "completed" ? (
             <CircleCheck size={13} />
+          ) : activeStatus === "in_progress" ? (
+            <LoaderCircle className={styles.planStatusLoading} size={13} />
           ) : (
-            <span className={styles.planSpinner} data-status={activeStatus} />
+            <Circle size={13} />
           )}
         </span>
         <span className={styles.planSummaryText}>
@@ -289,7 +291,7 @@ function TurnPlanPill({ summary }: { summary: TurnPlanSummary }) {
       <div className={styles.planHoverCard} role="tooltip" data-testid="plan-summary-card">
         <ol className={styles.planList} aria-label="当前计划">
           {summary.entries.map((entry, index) => (
-            <TurnPlanRow entry={entry} index={index} key={`${entry.status}-${index}-${entry.content}`} />
+            <TurnPlanRow entry={entry} key={`${entry.status}-${index}-${entry.content}`} />
           ))}
         </ol>
       </div>
@@ -297,22 +299,21 @@ function TurnPlanPill({ summary }: { summary: TurnPlanSummary }) {
   );
 }
 
-function TurnPlanRow({ entry, index }: { entry: TurnPlanEntry; index: number }) {
+function TurnPlanRow({ entry }: { entry: TurnPlanEntry }) {
   return (
     <li className={styles.planRow} data-status={entry.status}>
       <span className={styles.planStatusIcon} aria-hidden="true">
         {entry.status === "completed" ? (
-          <CircleCheck size={16} />
+          <CircleCheck size={14} />
         ) : entry.status === "in_progress" ? (
-          <LoaderCircle className={styles.planStatusLoading} size={16} />
+          <LoaderCircle className={styles.planStatusLoading} size={14} />
         ) : entry.status === "failed" ? (
-          <CircleX size={16} />
+          <CircleX size={14} />
         ) : (
-          <Circle size={16} />
+          <Circle size={14} />
         )}
       </span>
       <span className={styles.planRowText}>
-        <span className={styles.planRowIndex}>{index + 1}.</span>
         <span className={styles.planRowContent}>{entry.content}</span>
       </span>
     </li>

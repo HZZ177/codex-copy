@@ -6,6 +6,7 @@ import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { subscribeSessionCreated } from "@/renderer/events/sessionEvents";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
+import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { useTheme } from "@/renderer/providers/ThemeProvider";
 import type { AgentSession } from "@/types/protocol";
 
@@ -62,6 +63,9 @@ export function Sider({
   const { theme, toggleTheme } = useTheme();
   const notifications = useNotifications();
   const optionalAgentRuntime = useOptionalAgentSessionRuntime();
+  const runtimeConnection = useOptionalRuntimeConnection();
+  const backendReady = runtimeConnection?.ready ?? true;
+  const backendError = runtimeConnection?.status === "error";
   const sharedSessionState =
     optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime.state.sessionStateById : {};
   const ThemeIcon = theme === "dark" ? Sun : Moon;
@@ -80,6 +84,18 @@ export function Sider({
     () => (conversations ? buildControlledGroups(projects, conversations) : loadedGroups),
     [conversations, loadedGroups, projects],
   );
+  const historyEmptyText = useMemo(() => {
+    if (controlled) {
+      return "暂无会话";
+    }
+    if (backendError) {
+      return "本地服务连接失败";
+    }
+    if (!backendReady) {
+      return "正在连接本地服务";
+    }
+    return loadingHistory ? "正在加载会话" : "暂无会话";
+  }, [backendError, backendReady, controlled, loadingHistory]);
   const historyItems = useMemo(() => historyGroups.flatMap((group) => group.items), [historyGroups]);
   const searchResults = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -112,6 +128,10 @@ export function Sider({
     if (controlled) {
       return;
     }
+    if (!backendReady) {
+      setLoadingHistory(false);
+      return;
+    }
     let active = true;
     setLoadingHistory(true);
     void runtime.conversation
@@ -134,7 +154,7 @@ export function Sider({
     return () => {
       active = false;
     };
-  }, [controlled, notifications, runtime]);
+  }, [backendReady, controlled, notifications, runtime]);
 
   useEffect(() => {
     if (controlled) {
@@ -206,7 +226,7 @@ export function Sider({
 
       <div className={styles.history} aria-label="会话历史">
         {historyGroups.length === 0 && !collapsed ? (
-          <SiderSection title="对话" items={[]} collapsed={collapsed} emptyText={loadingHistory ? "正在加载会话" : "暂无会话"} />
+          <SiderSection title="对话" items={[]} collapsed={collapsed} emptyText={historyEmptyText} />
         ) : null}
         {historyGroups.map((group) => (
           <SiderSection
@@ -214,7 +234,7 @@ export function Sider({
             kind={group.kind}
             items={group.items}
             collapsed={collapsed}
-            emptyText={loadingHistory ? "正在加载会话" : "暂无会话"}
+            emptyText={historyEmptyText}
             activePath={activePath}
             editing={editing}
             confirmDeleteId={confirmDeleteId}

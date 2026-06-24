@@ -6,7 +6,7 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -22,9 +22,9 @@ RepositoriesDep = Depends(get_repositories)
 
 MAX_READ_BYTES = 512 * 1024
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
-DEFAULT_SEARCH_LIMIT = 30
+DEFAULT_SEARCH_LIMIT = 50
 MAX_SEARCH_VISITED_PATHS = 50_000
-MAX_SEARCH_SECONDS = 1.2
+MAX_SEARCH_SECONDS = 2.5
 IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -55,7 +55,6 @@ IGNORED_DIRS = {
     ".idea",
 }
 IGNORED_FILE_NAMES = {
-    ".env",
     ".npmrc",
     ".pypirc",
     ".netrc",
@@ -71,22 +70,8 @@ IGNORED_FILE_SUFFIXES = {
     ".o",
     ".obj",
     ".dll",
-    ".exe",
     ".so",
     ".dylib",
-    ".jar",
-    ".zip",
-    ".tar",
-    ".gz",
-    ".7z",
-    ".rar",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".ico",
-    ".pdf",
     ".map",
 }
 
@@ -123,6 +108,21 @@ class WorkspaceSearchResult(BaseModel):
     type: str
 
 
+class WorkspaceFileAnnotationAnchorV2(BaseModel):
+    version: Literal[2]
+    kind: Literal["source-range"]
+    sourceStart: int
+    sourceEnd: int
+    selectedText: str
+    sourceText: str
+    contentHash: str
+    lineStart: int
+    lineEnd: int
+    columnStart: int
+    columnEnd: int
+    createdInView: Literal["preview", "source"]
+
+
 class WorkspaceFileAnnotationPayload(BaseModel):
     path: str
     anchor_type: str = "file"
@@ -133,6 +133,7 @@ class WorkspaceFileAnnotationPayload(BaseModel):
     column_start: int | None = None
     column_end: int | None = None
     content_hash: str | None = None
+    anchor_json: WorkspaceFileAnnotationAnchorV2 | None = None
 
 
 class WorkspaceFileAnnotationUpdatePayload(BaseModel):
@@ -144,6 +145,7 @@ class WorkspaceFileAnnotationUpdatePayload(BaseModel):
     column_start: int | None = None
     column_end: int | None = None
     content_hash: str | None = None
+    anchor_json: WorkspaceFileAnnotationAnchorV2 | None = None
 
 
 class WorkspaceFileAnnotationResponse(BaseModel):
@@ -160,6 +162,7 @@ class WorkspaceFileAnnotationResponse(BaseModel):
     column_start: int | None = None
     column_end: int | None = None
     content_hash: str | None = None
+    anchor_json: WorkspaceFileAnnotationAnchorV2 | None = None
     created_at: str
     updated_at: str
 
@@ -441,6 +444,7 @@ def _create_annotation(
             column_start=payload.column_start,
             column_end=payload.column_end,
             content_hash=payload.content_hash,
+            anchor_json=_annotation_anchor_payload(payload.anchor_json),
         )
     except ValueError as exc:
         raise _workspace_error(
@@ -486,6 +490,11 @@ def _update_annotation(
             column_start=payload.column_start if "column_start" in fields else existing.column_start,
             column_end=payload.column_end if "column_end" in fields else existing.column_end,
             content_hash=payload.content_hash if "content_hash" in fields else existing.content_hash,
+            anchor_json=(
+                _annotation_anchor_payload(payload.anchor_json)
+                if "anchor_json" in fields
+                else existing.anchor_json
+            ),
         )
     except ValueError as exc:
         raise _workspace_error(
@@ -550,6 +559,12 @@ def _payload_field_set(payload: BaseModel) -> set[str]:
     return set(getattr(payload, "__fields_set__", set()))
 
 
+def _annotation_anchor_payload(anchor: WorkspaceFileAnnotationAnchorV2 | None) -> dict[str, Any] | None:
+    if anchor is None:
+        return None
+    return anchor.model_dump()
+
+
 def _annotation_response(record: Any) -> WorkspaceFileAnnotationResponse:
     return WorkspaceFileAnnotationResponse(
         id=record.id,
@@ -565,6 +580,7 @@ def _annotation_response(record: Any) -> WorkspaceFileAnnotationResponse:
         column_start=record.column_start,
         column_end=record.column_end,
         content_hash=record.content_hash,
+        anchor_json=record.anchor_json,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -756,7 +772,7 @@ def _should_skip_search_dir(name: str) -> bool:
 
 def _should_skip_search_file(name: str) -> bool:
     lower = name.lower()
-    if lower in IGNORED_FILE_NAMES or lower.startswith(".env."):
+    if lower in IGNORED_FILE_NAMES:
         return True
     return any(lower.endswith(suffix) for suffix in IGNORED_FILE_SUFFIXES)
 

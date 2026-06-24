@@ -94,6 +94,19 @@ describe("WorkspaceSelector", () => {
     expect(screen.queryByRole("dialog", { name: "工作区选择" })).toBeNull();
   });
 
+  it("keeps the add-project submenu open when clicking the add button again", () => {
+    render(<WorkspaceSelector value={{ type: "chat" }} workspaces={[]} onAddWorkspace={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+    const addButton = screen.getByRole("button", { name: "添加新项目" });
+
+    fireEvent.click(addButton);
+    expect(screen.getByRole("menu", { name: "添加新项目" })).not.toBeNull();
+
+    fireEvent.click(addButton);
+    expect(screen.getByRole("menu", { name: "添加新项目" })).not.toBeNull();
+  });
+
   it("closes the add-project submenu when the pointer leaves that menu area", async () => {
     render(<WorkspaceSelector value={{ type: "chat" }} workspaces={[]} onAddWorkspace={vi.fn()} />);
 

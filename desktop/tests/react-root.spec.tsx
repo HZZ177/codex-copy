@@ -1,18 +1,22 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { AppProviders } from "@/renderer/providers/AppProviders";
 
 describe("React root", () => {
-  it("renders the app through the provider tree", () => {
+  it("renders the app shell through the provider tree before runtime startup completes", async () => {
+    const starter = vi.fn(() => new Promise<never>(() => undefined));
+
     render(
-      <AppProviders>
+      <AppProviders runtimeConnection={{ starter }}>
         <App />
       </AppProviders>,
     );
 
-    expect(screen.getByTestId("home-page")).not.toBeNull();
+    expect(await screen.findByTestId("home-page")).not.toBeNull();
     expect(screen.getByLabelText("输入需求")).not.toBeNull();
+    expect(screen.getByTestId("connection-status").textContent).toContain("正在启动本地服务");
+    expect(starter).toHaveBeenCalledTimes(1);
   });
 });

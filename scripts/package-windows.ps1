@@ -1,6 +1,10 @@
 ﻿param(
     [switch]$SkipInstall,
     [switch]$SkipTests,
+    [switch]$SkipRustChecks,
+    [switch]$RebuildSidecar,
+    [switch]$CleanSidecar,
+    [switch]$Fast,
     [switch]$NoSign = $true,
     [switch]$Help
 )
@@ -8,12 +12,16 @@
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-SkipInstall] [-SkipTests] [-NoSign]"
+    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-Fast] [-SkipInstall] [-SkipTests] [-SkipRustChecks] [-RebuildSidecar] [-CleanSidecar] [-NoSign]"
     Write-Host ""
     Write-Host "说明："
     Write-Host "- 仅在需要 Windows exe 时执行。日常开发不要默认打包。"
-    Write-Host "- 默认会安装依赖、运行测试、构建 sidecar 和 Tauri 应用。"
+    Write-Host "- 默认会安装依赖、运行测试、构建或复用 sidecar，并构建 Tauri 安装包。"
+    Write-Host "- Tauri build 会按 tauri.conf.json 的 beforeBuildCommand 构建前端资源，脚本不再重复执行前端 build。"
+    Write-Host "- -Fast 跳过依赖安装、测试和 Rust 预检查；sidecar 输入未变化时直接复用。"
     Write-Host "- -SkipInstall 跳过依赖安装；-SkipTests 跳过测试。"
+    Write-Host "- -SkipRustChecks 跳过 cargo fmt/check 预检查；Tauri release build 仍会编译 Rust。"
+    Write-Host "- -RebuildSidecar 强制重建 sidecar；-CleanSidecar 清理 PyInstaller 缓存后重建。"
     return
 }
 
@@ -26,6 +34,12 @@ $Installer = Join-Path $Root "desktop\src-tauri\target\release\bundle\nsis\Keyde
 $ReleaseApp = Join-Path $Root "desktop\src-tauri\target\release\keydex-desktop.exe"
 $ReleaseSidecar = Join-Path $Root "desktop\src-tauri\target\release\agent-server.exe"
 $ArtifactDir = Join-Path $Root "artifacts\windows"
+
+if ($Fast) {
+    $SkipInstall = $true
+    $SkipTests = $true
+    $SkipRustChecks = $true
+}
 
 function Invoke-Step {
     param(
@@ -132,30 +146,29 @@ if (-not $SkipTests) {
 Invoke-Step "构建 Python sidecar" {
     Push-Location $Root
     try {
-        & $BackendPython backend\packaging\build_agent_server.py
+        $sidecarArgs = @("backend\packaging\build_agent_server.py")
+        if (-not $RebuildSidecar -and -not $CleanSidecar) {
+            $sidecarArgs += "--reuse-if-current"
+        }
+        if ($CleanSidecar) {
+            $sidecarArgs += "--clean"
+        }
+        & $BackendPython @sidecarArgs
     } finally {
         Pop-Location
     }
 }
 Assert-Path $Sidecar "未生成 sidecar 二进制文件：$Sidecar。"
 
-Invoke-Step "构建桌面端前端资源" {
-    Push-Location $DesktopDir
-    try {
-        npm.cmd run build
-    } finally {
-        Pop-Location
-    }
-}
-
-Invoke-Step "检查 Tauri Rust 代码" {
-    Push-Location $TauriDir
-    try {
-        cargo fmt --check
-        cargo check
-        cargo build
-    } finally {
-        Pop-Location
+if (-not $SkipRustChecks) {
+    Invoke-Step "检查 Tauri Rust 代码" {
+        Push-Location $TauriDir
+        try {
+            cargo fmt --check
+            cargo check
+        } finally {
+            Pop-Location
+        }
     }
 }
 

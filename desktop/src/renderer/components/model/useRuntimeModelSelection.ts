@@ -13,10 +13,16 @@ export interface RuntimeModelSelection {
   setSelectedModel: (model: string) => void;
 }
 
+export interface RuntimeModelSelectionOptions {
+  enabled?: boolean;
+}
+
 export function useRuntimeModelSelection(
   runtime: RuntimeBridge = runtimeBridge,
   initialModel = "",
+  options: RuntimeModelSelectionOptions = {},
 ): RuntimeModelSelection {
+  const enabled = options.enabled ?? true;
   const [selectedModel, setSelectedModel] = useState(() => initialModel.trim());
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [modelLoadState, setModelLoadState] = useState<ModelLoadState>("idle");
@@ -30,6 +36,13 @@ export function useRuntimeModelSelection(
   }, [initialModel]);
 
   useEffect(() => {
+    if (!enabled) {
+      setModelLoadState("idle");
+      setModelError(null);
+      setAvailableModels([]);
+      return;
+    }
+
     let active = true;
     setModelLoadState("loading");
     setModelError(null);
@@ -67,7 +80,7 @@ export function useRuntimeModelSelection(
     return () => {
       active = false;
     };
-  }, [runtime]);
+  }, [enabled, runtime]);
 
   const modelOptions = useMemo(
     () => buildModelOptions(availableModels, selectedModel),

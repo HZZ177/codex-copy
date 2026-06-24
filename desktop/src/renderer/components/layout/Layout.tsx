@@ -27,6 +27,8 @@ import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
 import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
+import { ConnectionStatus } from "@/renderer/components/runtime";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
 import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
@@ -90,7 +92,7 @@ export interface LayoutProps extends PropsWithChildren {
 
 export function Layout({
   children,
-  title = "Codex",
+  title = "Keydex",
   projects,
   conversations,
   activePath,
@@ -107,6 +109,7 @@ export function Layout({
   const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   const { state, actions } = useLayoutState();
   const previewContext = useOptionalPreview();
+  const runtimeConnection = useOptionalRuntimeConnection();
   const collapsed = state.sidebarCollapsed;
   const { sidebarMotion, toggleSidebar } = useSidebarCollapseMotion(actions.toggleSidebar);
   const {
@@ -296,6 +299,7 @@ export function Layout({
   const rightSidebarOnLeft = state.rightSidebarPlacement === "left";
   const openRightSidebarLabel = rightSidebarOnLeft ? "展开左侧栏" : "展开右侧栏";
   const OpenRightSidebarIcon = rightSidebarOnLeft ? PanelLeftOpen : PanelRightOpen;
+  const showRuntimeStatus = Boolean(runtimeConnection && runtimeConnection.status !== "ready");
 
   return (
     <div
@@ -325,6 +329,15 @@ export function Layout({
         sidebarCollapsed={collapsed}
         onToggleSidebar={toggleSidebar}
       />
+
+      {showRuntimeStatus && runtimeConnection ? (
+        <ConnectionStatus
+          state={runtimeConnection.runtimeState}
+          onClearAll={runtimeConnection.clearAllErrors}
+          onClearError={runtimeConnection.clearError}
+          onRetry={runtimeConnection.retry}
+        />
+      ) : null}
 
       <div className={styles.body}>
         <Sider
@@ -399,6 +412,8 @@ function RightSidebarPanel({
   const previewContext = useOptionalPreview();
   const activeScopeKey = previewContext?.activeScopeKey ?? GLOBAL_RIGHT_SIDEBAR_SCOPE;
   const syncedPreviewOpenStampsRef = useRef<Set<string>>(new Set());
+  const previousFilePanelScopeRef = useRef(activeScopeKey);
+  const previousScopeHadFilePanelRef = useRef(false);
   const request = previewContext?.open ? previewContext.request : null;
   const renderContext = previewContext?.activeRenderContext;
   const rawFilePanelRequest = previewContext?.filePanelRequest ?? null;
@@ -453,6 +468,17 @@ function RightSidebarPanel({
   useEffect(() => {
     previewContext?.setPreviewPanelOpen(open, panelActivePreviewEntryId);
   }, [open, panelActivePreviewEntryId, previewContext]);
+
+  useEffect(() => {
+    const scopeChanged = previousFilePanelScopeRef.current !== activeScopeKey;
+    const previousScopeHadFilePanel = previousScopeHadFilePanelRef.current;
+    previousFilePanelScopeRef.current = activeScopeKey;
+    previousScopeHadFilePanelRef.current = filePanelIds.length > 0;
+    if (!scopeChanged || !previousScopeHadFilePanel || !open || !canOpenFiles || filePanelIds.length > 0) {
+      return;
+    }
+    updateActiveScopePanelState((current) => activateOrCreateFilePanel(current));
+  }, [activeScopeKey, canOpenFiles, filePanelIds.length, open, updateActiveScopePanelState]);
 
   useEffect(() => {
     const activeEntry = previewContext?.activeEntry;
@@ -834,9 +860,11 @@ function RightSidebarPanel({
               {controls}
             </div>
           </div>
-          {showFilesPanel && filePanelRenderContext?.runtime && (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
+          {showFilesPanel &&
+          filePanelRenderContext?.runtime &&
+          (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
             <div className={styles.rightSidebarBody} data-content="files">
-              <Suspense fallback={null}>
+              <Suspense fallback={<RightSidebarLoading label="正在加载文件" />}>
                 <LazyWorkspaceFileBrowser
                   key={`${activeScopeKey}:${activeFilePanel?.id ?? "files"}`}
                   label={filePanelRenderContext.workspaceLabel}
@@ -853,7 +881,7 @@ function RightSidebarPanel({
             </div>
           ) : activeRequest ? (
             <div className={styles.rightSidebarBody} data-content="preview">
-              <Suspense fallback={null}>
+              <Suspense fallback={<RightSidebarLoading label="正在加载预览" />}>
                 <LazyFilePreview
                   breadcrumbRootLabel={
                     activeRequest.type === "content" && !activeRequest.sourcePath
@@ -878,6 +906,20 @@ function RightSidebarPanel({
         </>
       ) : null}
     </aside>
+  );
+}
+
+function RightSidebarLoading({ label }: { label: string }) {
+  return (
+    <div className={styles.rightSidebarLoading} role="status" aria-label={label}>
+      <div className={styles.rightSidebarLoadingSkeleton} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <span>{label}</span>
+    </div>
   );
 }
 

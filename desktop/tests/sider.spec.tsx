@@ -6,6 +6,7 @@ import type { ChatChannel, RuntimeBridge, WsConnectionStatus } from "@/runtime";
 import { Sider } from "@/renderer/components/layout/Sider";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
+import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import type { AgentActionEnvelope, AgentSession, Workspace } from "@/types/protocol";
 
@@ -156,6 +157,42 @@ describe("Sider", () => {
 
     fireEvent.click(within(dialog).getByText("修复按钮"));
     expect(onNavigate).toHaveBeenCalledWith("/conversation/thread-b");
+  });
+
+  it("does not load backend history before the runtime connection is ready", async () => {
+    const deferred = createDeferred<{
+      host: string;
+      port: number;
+      base_url: string;
+      data_dir: string;
+    }>();
+    const runtime = fakeRuntime([thread({ id: "thread-a", title: "启动后会话" })]);
+
+    renderSider(
+      <RuntimeConnectionProvider
+        runtime={runtime}
+        starter={() => deferred.promise}
+        isDesktopRuntime={() => true}
+      >
+        <Sider runtime={runtime} />
+      </RuntimeConnectionProvider>,
+    );
+
+    expect(screen.getByText("正在连接本地服务")).not.toBeNull();
+    expect(runtime.conversation.listSessions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      deferred.resolve({
+        host: "127.0.0.1",
+        port: 9234,
+        base_url: "http://127.0.0.1:9234",
+        data_dir: "D:/Keydex",
+      });
+      await deferred.promise;
+    });
+
+    expect(await screen.findByText("启动后会话")).not.toBeNull();
+    expect(runtime.conversation.listSessions).toHaveBeenCalledTimes(1);
   });
 
   it("groups loaded sessions by their real workspace and pure chat bucket", async () => {
@@ -522,4 +559,14 @@ function workspace(id: string, name: string): Workspace {
     last_opened_at: null,
     is_deleted: false,
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }

@@ -89,6 +89,12 @@ export function WorkspaceSelector({
     }, 140);
   };
 
+  const handleAddProjectClick = () => {
+    setAddError(null);
+    setManualPathOpen(false);
+    openAddMenu();
+  };
+
   useEffect(() => {
     if (!open) {
       return;
@@ -298,13 +304,7 @@ export function WorkspaceSelector({
                 aria-haspopup="menu"
                 aria-expanded={addMenuOpen ? "true" : "false"}
                 disabled={adding || picking}
-                onClick={() => {
-                  if (addMenuOpen) {
-                    closeAddMenu();
-                  } else {
-                    openAddMenu();
-                  }
-                }}
+                onClick={handleAddProjectClick}
                 onFocus={openAddMenu}
               >
                 <FolderPlus size={15} strokeWidth={1.9} aria-hidden="true" />

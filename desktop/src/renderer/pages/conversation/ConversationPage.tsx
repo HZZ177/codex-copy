@@ -126,6 +126,8 @@ export function ConversationPage({
               name: fileName(request.path),
               lineStart: request.lineStart ?? null,
               lineEnd: request.lineEnd ?? null,
+              sourceStart: request.sourceStart ?? null,
+              sourceEnd: request.sourceEnd ?? null,
             },
           });
     if (!quote) {
@@ -152,6 +154,8 @@ export function ConversationPage({
             name: fileName(path),
             lineStart: request.lineStart ?? null,
             lineEnd: request.lineEnd ?? null,
+            sourceStart: request.sourceStart ?? null,
+            sourceEnd: request.sourceEnd ?? null,
           },
         })
       : null;

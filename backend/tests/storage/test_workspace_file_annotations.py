@@ -11,6 +11,25 @@ def _repositories(tmp_path) -> StorageRepositories:
     return StorageRepositories(init_database(tmp_path / "app.db"))
 
 
+def _anchor(**overrides):
+    anchor = {
+        "version": 2,
+        "kind": "source-range",
+        "sourceStart": 0,
+        "sourceEnd": 11,
+        "selectedText": "print('ok')",
+        "sourceText": "print('ok')",
+        "contentHash": "abc123",
+        "lineStart": 2,
+        "lineEnd": 2,
+        "columnStart": 1,
+        "columnEnd": 12,
+        "createdInView": "source",
+    }
+    anchor.update(overrides)
+    return anchor
+
+
 def test_workspace_file_annotations_create_update_delete_and_order(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     workspace_root = tmp_path / "workspace"
@@ -44,6 +63,7 @@ def test_workspace_file_annotations_create_update_delete_and_order(tmp_path) -> 
         column_end=12,
         comment="Explain this line",
         content_hash="abc123",
+        anchor_json=_anchor(),
     )
 
     listed = repositories.workspace_file_annotations.list(
@@ -55,6 +75,7 @@ def test_workspace_file_annotations_create_update_delete_and_order(tmp_path) -> 
     assert second.selected_text == "print('ok')"
     assert second.line_start == 2
     assert second.content_hash == "abc123"
+    assert second.anchor_json == _anchor()
 
     time.sleep(0.01)
     updated = repositories.workspace_file_annotations.update(
@@ -93,6 +114,34 @@ def test_workspace_file_annotations_create_update_delete_and_order(tmp_path) -> 
             path="src/main.py",
         )
     ] == [second.id]
+
+    updated_selection = repositories.workspace_file_annotations.update(
+        second.id,
+        scope_type="session",
+        scope_id="ses_1",
+        anchor_type="selection",
+        selected_text="print('done')",
+        line_start=3,
+        line_end=3,
+        column_start=1,
+        column_end=13,
+        content_hash="def456",
+        anchor_json=_anchor(
+            sourceStart=12,
+            sourceEnd=25,
+            selectedText="print('done')",
+            sourceText="print('done')",
+            contentHash="def456",
+            lineStart=3,
+            lineEnd=3,
+            columnEnd=13,
+        ),
+        comment="Updated selection",
+    )
+    assert updated_selection is not None
+    assert updated_selection.anchor_json is not None
+    assert updated_selection.anchor_json["sourceStart"] == 12
+    assert updated_selection.selected_text == "print('done')"
 
 
 def test_workspace_file_annotations_are_isolated_by_scope_and_path(tmp_path) -> None:
@@ -165,6 +214,20 @@ def test_workspace_file_annotations_are_isolated_by_scope_and_path(tmp_path) -> 
             "line_start": 3,
             "line_end": 2,
             "comment": "bad range",
+        },
+        {
+            "path": "src/main.py",
+            "anchor_type": "selection",
+            "selected_text": "print('ok')",
+            "comment": "bad anchor",
+            "anchor_json": _anchor(sourceEnd=0),
+        },
+        {
+            "path": "src/main.py",
+            "anchor_type": "selection",
+            "selected_text": "different",
+            "comment": "mismatched anchor",
+            "anchor_json": _anchor(),
         },
     ],
 )

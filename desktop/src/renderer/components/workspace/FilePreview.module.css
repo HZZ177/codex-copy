@@ -271,6 +271,56 @@
   font-size: 11px;
 }
 
+.previewLoading {
+  display: grid;
+  min-height: 180px;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 24px;
+  text-align: center;
+}
+
+.preview[data-chrome="panel"] .previewLoading {
+  height: 100%;
+  min-height: 0;
+}
+
+.previewLoadingSkeleton {
+  display: grid;
+  width: min(300px, 76%);
+  gap: 8px;
+}
+
+.previewLoadingSkeleton span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
+    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
+  );
+  background-size: 220% 100%;
+  animation: filePreviewSkeleton 1.2s ease-in-out infinite;
+}
+
+.previewLoadingSkeleton span:nth-child(2) {
+  width: 88%;
+}
+
+.previewLoadingSkeleton span:nth-child(3) {
+  width: 72%;
+}
+
+.previewLoadingSkeleton span:nth-child(4) {
+  width: 56%;
+}
+
 .error {
   display: grid;
   min-height: 180px;
@@ -305,6 +355,22 @@
   border-radius: 0;
   background: var(--color-bg-elevated);
   animation: none;
+}
+
+.selectionAnnotationError {
+  position: absolute;
+  z-index: 5;
+  right: 14px;
+  bottom: 14px;
+  max-width: min(360px, calc(100% - 28px));
+  border: 1px solid color-mix(in srgb, var(--color-danger-6) 34%, var(--color-border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-elevated) 94%, var(--color-danger-6));
+  box-shadow: var(--shadow-floating);
+  color: var(--color-danger-6);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px 10px;
 }
 
 .annotationPanel {
@@ -779,6 +845,11 @@
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--color-warning) 72%, var(--color-border-default));
 }
 
+.annotationItem[data-anchor-type="file"] {
+  gap: 0 8px;
+  padding-block: 5px;
+}
+
 .annotationItemHeader {
   grid-column: 1;
   grid-row: 1 / span 2;
@@ -788,6 +859,12 @@
   align-self: center;
   justify-content: center;
   gap: 4px;
+}
+
+.annotationItem[data-anchor-type="file"] .annotationItemHeader {
+  grid-row: 1;
+  flex-direction: row;
+  align-items: center;
 }
 
 .annotationStale {
@@ -823,9 +900,20 @@
   white-space: normal;
 }
 
+.annotationItem[data-anchor-type="file"] .annotationComment {
+  display: block;
+  grid-row: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .annotationEdit {
   grid-column: 2 / 4;
   grid-row: 1 / span 2;
+}
+
+.annotationItem[data-anchor-type="file"] .annotationEdit {
+  grid-row: 1;
 }
 
 .annotationActions {
@@ -836,6 +924,10 @@
   gap: 4px;
   opacity: 0.56;
   transition: opacity var(--motion-fast) var(--motion-ease-standard);
+}
+
+.annotationItem[data-anchor-type="file"] .annotationActions {
+  grid-row: 1;
 }
 
 .annotationItem:hover .annotationActions,
@@ -1296,38 +1388,115 @@
 }
 
 .imagePane {
+  position: relative;
   display: grid;
+  min-width: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
   margin: 0;
-  place-items: center;
-  background:
-    linear-gradient(45deg, var(--surface-muted) 25%, transparent 25%),
-    linear-gradient(-45deg, var(--surface-muted) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, var(--surface-muted) 75%),
-    linear-gradient(-45deg, transparent 75%, var(--surface-muted) 75%);
-  background-color: var(--color-bg-elevated);
-  background-position:
-    0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
-  background-size: 16px 16px;
+  place-items: stretch;
+  overflow: hidden;
+  background: #fff;
   padding: 18px;
+}
+
+.imageCanvas {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.imageCanvas[data-draggable="true"] {
+  cursor: grab;
+}
+
+.imageCanvas[data-dragging="true"] {
+  cursor: grabbing;
 }
 
 .imageFrame {
   display: block;
   max-width: 100%;
-  max-height: min(620px, calc(100vh - 290px));
+  max-height: 100%;
   border-radius: var(--radius-sm);
   object-fit: contain;
   box-shadow: var(--shadow-soft);
+  transform: translate(var(--image-offset-x, 0), var(--image-offset-y, 0)) scale(var(--image-scale, 1));
+  transform-origin: center;
+  transition: transform 120ms var(--motion-ease-standard);
+  user-select: none;
+}
+
+.imageCanvas[data-dragging="true"] .imageFrame {
+  transition: none;
+}
+
+.imageControls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 76%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
+  box-shadow: var(--shadow-popover);
+  padding: 3px;
+  backdrop-filter: blur(14px);
+}
+
+.imageControls button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+}
+
+.imageControls button:hover:not(:disabled),
+.imageControls button:focus-visible {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.imageControls button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.imageControls button:focus-visible {
+  outline: none;
+}
+
+.imageScaleValue {
+  display: inline-flex;
+  width: 46px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  user-select: none;
 }
 
 .imageMeta {
   display: inline-flex;
   align-items: center;
+  justify-self: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 0;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
   color: var(--color-text-tertiary);
@@ -1435,12 +1604,25 @@
   }
 }
 
+@keyframes filePreviewSkeleton {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .body,
   .annotationPanel,
   .annotationPopover,
-  .splitPanel {
+  .splitPanel,
+  .imageFrame,
+  .previewLoadingSkeleton span {
     animation: none;
+    transition: none;
   }
 
   .tab {

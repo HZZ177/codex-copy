@@ -27,6 +27,9 @@ export function createDesktopPickerRuntime(options: DesktopPickerRuntimeOptions 
       const dialogApi =
         options.dialogApi ?? resolveGlobalDialogApi(options.getTauriGlobal) ?? (await loadDialogApi(options));
       if (!dialogApi?.open) {
+        if (isLikelyTauriRuntime(options)) {
+          throw new Error("文件夹选择器不可用：Tauri dialog API 未加载");
+        }
         return null;
       }
       const result = await dialogApi.open({
@@ -47,10 +50,7 @@ async function loadDialogApi(options: DesktopPickerRuntimeOptions): Promise<Opti
     return null;
   }
   try {
-    const dynamicImport = new Function("specifier", "return import(specifier)") as (
-      specifier: string,
-    ) => Promise<OptionalDialogApi>;
-    return await dynamicImport("@tauri-apps/plugin-dialog");
+    return await import("@tauri-apps/plugin-dialog");
   } catch {
     return null;
   }

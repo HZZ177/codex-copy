@@ -35,9 +35,15 @@ export async function configureAgentConnection(
   options: AgentConnectionOptions = {},
 ): Promise<AgentConnection> {
   const runtime = options.runtime ?? runtimeBridge;
-  const connection = await resolveAgentConnection(options);
+  const isTauri = (options.isTauriRuntime ?? isTauriRuntime)();
+  const connection = await resolveAgentConnection({
+    ...options,
+    isTauriRuntime: () => isTauri,
+  });
   runtime.setBaseUrl(connection.base_url);
-  await waitForAgentHealth(runtime, options);
+  if (!isTauri) {
+    await waitForAgentHealth(runtime, options);
+  }
   return connection;
 }
 
@@ -48,14 +54,16 @@ export async function resolveAgentConnection(
     return DEV_AGENT_CONNECTION;
   }
 
-  const invoke = await resolveInvoke(options);
-  if (!invoke) {
-    return DEV_AGENT_CONNECTION;
-  }
+  let invoke: TauriInvoke | null = null;
+  let connection: AgentConnection | null = null;
 
   try {
+    invoke = await resolveInvoke(options);
+    if (!invoke) {
+      throw new Error("Tauri API 不可用");
+    }
     const port = await invoke<number>("allocate_port");
-    const connection = await invoke<AgentConnection>("start_sidecar", { port });
+    connection = await invoke<AgentConnection>("start_sidecar", { port });
     await invoke<void>("wait_for_health", {
       host: connection.host,
       port: connection.port,
@@ -63,6 +71,9 @@ export async function resolveAgentConnection(
     });
     return connection;
   } catch (error) {
+    if (connection && invoke) {
+      await invoke<void>("stop_sidecar").catch(() => undefined);
+    }
     throw new Error(`启动 Keydex 本地服务失败：${formatErrorMessage(error)}`);
   }
 }

@@ -1,5 +1,6 @@
 .panel {
   display: grid;
+  grid-template-rows: auto auto auto minmax(180px, 1fr);
   gap: 12px;
   color: var(--color-text-primary);
 }
@@ -7,7 +8,7 @@
 .panel[data-chrome="panel"] {
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
   padding: 8px 8px 12px;
   box-sizing: border-box;
@@ -135,17 +136,95 @@
   color: var(--color-text-tertiary);
 }
 
-.tree {
+.searchHint {
+  margin: -2px 2px 0;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.content {
+  position: relative;
   display: grid;
-  gap: 2px;
+  min-width: 0;
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.panel[data-chrome="panel"] .content {
   min-height: 0;
 }
 
-.panel[data-chrome="panel"] .tree {
+.tree {
+  display: grid;
   align-content: start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
   padding: 1px 0 12px;
   scrollbar-width: thin;
+}
+
+.panel[data-chrome="panel"] .tree {
+  height: 100%;
+}
+
+.loadingState,
+.centerState {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 24px;
+  text-align: center;
+}
+
+.centerState {
+  place-items: center;
+}
+
+.centerState[data-tone="danger"] {
+  color: var(--color-danger);
+}
+
+.skeletonStack {
+  display: grid;
+  width: min(260px, 78%);
+  gap: 8px;
+}
+
+.skeletonStack span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
+    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
+    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
+  );
+  background-size: 220% 100%;
+  animation: workspacePanelSkeleton 1.2s ease-in-out infinite;
+}
+
+.skeletonStack span:nth-child(2) {
+  width: 88%;
+}
+
+.skeletonStack span:nth-child(3) {
+  width: 72%;
+}
+
+.skeletonStack span:nth-child(4) {
+  width: 54%;
 }
 
 .node {
@@ -292,10 +371,22 @@
   }
 }
 
+@keyframes workspacePanelSkeleton {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nodeGroup,
-  .chevron {
+  .chevron,
+  .skeletonStack span {
     transition: none;
+    animation: none;
   }
 
   .nodeGroup {

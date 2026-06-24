@@ -293,6 +293,71 @@ describe("SendBox", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("keeps quote hover cards inside a narrowed composer", () => {
+    const quote = selectedQuoteFromText(
+      "README.md 引用片段在窄输入框里需要自动换行并保持可见",
+      {
+        source: "annotation",
+        file: {
+          path: "README.md",
+          name: "README.md",
+          lineStart: 69,
+          lineEnd: 73,
+          sourceStart: 120,
+          sourceEnd: 180,
+        },
+      },
+    );
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getRect(
+      this: HTMLElement,
+    ) {
+      const element = this as HTMLElement;
+      if (element.dataset.sendboxRoot === "true") {
+        return rect({ x: 32, y: 300, width: 220, height: 124 });
+      }
+      if (element.dataset.sendboxHoverAnchor === "quote") {
+        return rect({ x: 48, y: 318, width: 152, height: 30 });
+      }
+      if (element.dataset.quoteHoverCard === "true") {
+        return rect({ x: -60, y: 120, width: 280, height: 180 });
+      }
+      return rect({ x: 0, y: 0, width: 0, height: 0 });
+    });
+    vi.useFakeTimers();
+    try {
+      render(
+        <SendBox
+          value="测试"
+          runtimeState="idle"
+          canSend
+          canStop={false}
+          externalQuoteRequest={{ requestId: 1, quote }}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />,
+      );
+
+      fireEvent.mouseOver(screen.getByText("README.md · L69-L73"));
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      const card = document.querySelector<HTMLElement>("[data-quote-hover-card='true']");
+      expect(card).not.toBeNull();
+      expect(card?.style.left).toBe("-4px");
+      expect(card?.style.maxWidth).toBe("196px");
+      expect(card?.style.getPropertyValue("--sendbox-hover-card-translate-x")).toBe("0px");
+      expect(card?.style.getPropertyValue("--sendbox-hover-card-arrow-left")).toBe("80px");
+    } finally {
+      vi.useRealTimers();
+      rectSpy.mockRestore();
+    }
+  });
+
   it("submits explicit quote context without hidden composer text", async () => {
     const quote = selectedQuoteFromText("这是一段选中的历史内容");
     if (!quote) {
@@ -490,3 +555,27 @@ describe("SendBox", () => {
     expect(screen.queryByText("main.ts")).toBeNull();
   });
 });
+
+function rect({
+  x,
+  y,
+  width,
+  height,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    x,
+    y,
+    width,
+    height,
+    top: y,
+    left: x,
+    right: x + width,
+    bottom: y + height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}

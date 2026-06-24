@@ -87,6 +87,20 @@ describe("RuntimeBridge", () => {
   });
 
   it("routes workspace annotation CRUD calls to scoped backend endpoints", async () => {
+    const anchor = {
+      version: 2,
+      kind: "source-range",
+      sourceStart: 10,
+      sourceEnd: 22,
+      selectedText: "if (enabled)",
+      sourceText: "if (enabled)",
+      contentHash: "hash-1",
+      lineStart: 3,
+      lineEnd: 4,
+      columnStart: 1,
+      columnEnd: 14,
+      createdInView: "source",
+    } as const;
     const annotation = {
       id: "ann 1",
       scope_type: "session",
@@ -101,6 +115,7 @@ describe("RuntimeBridge", () => {
       column_start: 1,
       column_end: 14,
       content_hash: "hash-1",
+      anchor_json: anchor,
       created_at: "2026-06-24T00:00:00Z",
       updated_at: "2026-06-24T00:00:00Z",
     };
@@ -124,7 +139,7 @@ describe("RuntimeBridge", () => {
       }
       return jsonResponse(404, { detail: "not found" });
     });
-    const runtime = createRuntimeBridge({ fetcher });
+    const runtime = createRuntimeBridge({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(runtime.workspace.listAnnotations({ sessionId: "ses 1" }, "src/main.ts", { signal })).resolves.toEqual([
       annotation,
@@ -142,12 +157,17 @@ describe("RuntimeBridge", () => {
           column_start: 1,
           column_end: 14,
           content_hash: "hash-1",
+          anchor_json: anchor,
         },
       ),
     ).resolves.toEqual(annotation);
     await expect(
-      runtime.workspace.updateAnnotation({ workspaceId: "ws 1" }, "ann 1", { comment: "Updated comment" }),
-    ).resolves.toMatchObject({ comment: "Check this branch", scope_type: "workspace" });
+      runtime.workspace.updateAnnotation(
+        { workspaceId: "ws 1" },
+        "ann 1",
+        { comment: "Updated comment", anchor_json: anchor },
+      ),
+    ).resolves.toMatchObject({ anchor_json: anchor, comment: "Check this branch", scope_type: "workspace" });
     await expect(runtime.workspace.deleteAnnotation({ sessionId: "ses 1" }, "ann 1")).resolves.toBeUndefined();
 
     expect(fetcher).toHaveBeenNthCalledWith(
@@ -170,6 +190,7 @@ describe("RuntimeBridge", () => {
           column_start: 1,
           column_end: 14,
           content_hash: "hash-1",
+          anchor_json: anchor,
         }),
       }),
     );
@@ -178,7 +199,7 @@ describe("RuntimeBridge", () => {
       "http://127.0.0.1:8765/api/workspaces/ws%201/annotations/ann%201",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ comment: "Updated comment" }),
+        body: JSON.stringify({ comment: "Updated comment", anchor_json: anchor }),
       }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(
@@ -219,7 +240,7 @@ describe("RuntimeBridge", () => {
       }
       return jsonResponse(404, { detail: "not found" });
     });
-    const runtime = createRuntimeBridge({ fetcher });
+    const runtime = createRuntimeBridge({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(runtime.workspaces.list()).resolves.toMatchObject({ total: 1, list: [{ id: "ws-1" }] });
     await expect(
@@ -323,7 +344,7 @@ describe("RuntimeBridge", () => {
       }
       return jsonResponse(404, { detail: "not found" });
     });
-    const runtime = createRuntimeBridge({ fetcher });
+    const runtime = createRuntimeBridge({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(
       runtime.conversation.listSessions({
@@ -457,7 +478,7 @@ describe("RuntimeBridge", () => {
       }
       return jsonResponse(404, { detail: "not found" });
     });
-    const runtime = createRuntimeBridge({ fetcher });
+    const runtime = createRuntimeBridge({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(
       runtime.usage.getSummary({
@@ -590,7 +611,7 @@ describe("RuntimeBridge", () => {
       }
       return jsonResponse(404, { detail: "not found" });
     });
-    const runtime = createRuntimeBridge({ fetcher });
+    const runtime = createRuntimeBridge({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(runtime.models.listProviders()).resolves.toEqual([provider]);
     await expect(

@@ -5,6 +5,7 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
+  type CSSProperties,
   type ReactNode,
   lazy,
   Suspense,
@@ -445,6 +446,7 @@ export function SendBox({
   return (
     <form
       className={styles.root}
+      data-sendbox-root="true"
       data-focused={focused ? "true" : "false"}
       data-dragging={fileSelection.dragging ? "true" : "false"}
       data-state={runtimeState}
@@ -569,6 +571,7 @@ function QuoteContextChip({
   const hideTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const hoverPlacement = useHoverCardPlacement(open, QUOTE_HOVER_CARD_MAX_WIDTH);
 
   const clearShowTimer = useCallback(() => {
     if (showTimerRef.current === null) {
@@ -623,7 +626,9 @@ function QuoteContextChip({
 
   return (
     <span
+      ref={hoverPlacement.wrapperRef}
       className={styles.quoteChipWrapper}
+      data-sendbox-hover-anchor="quote"
       onBlur={(event) => {
         const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
         if (!event.currentTarget.contains(relatedTarget)) {
@@ -657,8 +662,10 @@ function QuoteContextChip({
       </span>
       {open ? (
         <span
+          ref={hoverPlacement.cardRef}
           className={styles.quoteHoverCard}
           data-quote-hover-card="true"
+          style={hoverPlacement.style}
           onMouseDown={(event) => event.preventDefault()}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleClose}
@@ -716,6 +723,7 @@ function FileContextChip({
   const showTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
+  const hoverPlacement = useHoverCardPlacement(open, FILE_HOVER_CARD_MAX_WIDTH);
   const fileKindLabel = file.type === "directory" ? "工作区目录" : "工作区文件";
   const chipLabel = fileName(file.name || file.path);
 
@@ -763,7 +771,9 @@ function FileContextChip({
 
   return (
     <span
+      ref={hoverPlacement.wrapperRef}
       className={styles.fileChipWrapper}
+      data-sendbox-hover-anchor="file"
       onBlur={(event) => {
         const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
         if (!event.currentTarget.contains(relatedTarget)) {
@@ -795,8 +805,10 @@ function FileContextChip({
       </span>
       {open ? (
         <span
+          ref={hoverPlacement.cardRef}
           className={styles.filePathHoverCard}
           data-file-path-hover-card="true"
+          style={hoverPlacement.style}
           onMouseDown={(event) => event.preventDefault()}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleClose}
@@ -809,6 +821,82 @@ function FileContextChip({
       ) : null}
     </span>
   );
+}
+
+interface HoverCardPlacement {
+  wrapperRef: (node: HTMLSpanElement | null) => void;
+  cardRef: (node: HTMLSpanElement | null) => void;
+  style: CSSProperties | undefined;
+}
+
+function useHoverCardPlacement(open: boolean, preferredMaxWidth: number): HoverCardPlacement {
+  const wrapperRef = useRef<HTMLSpanElement | null>(null);
+  const cardRef = useRef<HTMLSpanElement | null>(null);
+  const [style, setStyle] = useState<CSSProperties | undefined>();
+
+  const setWrapperRef = useCallback((node: HTMLSpanElement | null) => {
+    wrapperRef.current = node;
+  }, []);
+
+  const setCardRef = useCallback((node: HTMLSpanElement | null) => {
+    cardRef.current = node;
+  }, []);
+
+  const updatePlacement = useCallback(() => {
+    const wrapper = wrapperRef.current;
+    const card = cardRef.current;
+    if (!wrapper || !card) {
+      return;
+    }
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const rootRect = wrapper.closest<HTMLElement>("[data-sendbox-root='true']")?.getBoundingClientRect();
+    const boundaryLeft = Math.max(HOVER_CARD_EDGE_GAP, (rootRect?.left ?? 0) + HOVER_CARD_EDGE_GAP);
+    const boundaryRight = Math.min(
+      window.innerWidth - HOVER_CARD_EDGE_GAP,
+      (rootRect?.right ?? window.innerWidth) - HOVER_CARD_EDGE_GAP,
+    );
+    const boundaryWidth = Math.max(96, boundaryRight - boundaryLeft);
+    const maxWidth = Math.min(preferredMaxWidth, boundaryWidth);
+    const measuredWidth = Math.min(Math.max(96, card.getBoundingClientRect().width || maxWidth), maxWidth);
+    const anchorCenter = wrapperRect.left + wrapperRect.width / 2;
+    const leftInViewport = clamp(anchorCenter - measuredWidth / 2, boundaryLeft, boundaryRight - measuredWidth);
+    const arrowLeft = clamp(
+      anchorCenter - leftInViewport,
+      Math.min(HOVER_CARD_ARROW_PADDING, measuredWidth / 2),
+      Math.max(HOVER_CARD_ARROW_PADDING, measuredWidth - HOVER_CARD_ARROW_PADDING),
+    );
+
+    setStyle({
+      left: `${leftInViewport - wrapperRect.left}px`,
+      maxWidth: `${maxWidth}px`,
+      "--sendbox-hover-card-arrow-left": `${arrowLeft}px`,
+      "--sendbox-hover-card-translate-x": "0px",
+    } as CSSProperties);
+  }, [preferredMaxWidth]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(undefined);
+      return;
+    }
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [open, updatePlacement]);
+
+  return { wrapperRef: setWrapperRef, cardRef: setCardRef, style };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (max < min) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, value));
 }
 
 interface ContentEditableInputProps {
@@ -888,6 +976,10 @@ function ContentEditableInput({
 }
 
 const QUOTE_CARD_SHOW_DELAY_MS = 200;
+const QUOTE_HOVER_CARD_MAX_WIDTH = 280;
+const FILE_HOVER_CARD_MAX_WIDTH = 420;
+const HOVER_CARD_EDGE_GAP = 12;
+const HOVER_CARD_ARROW_PADDING = 16;
 
 function renderEditorValue(editor: HTMLDivElement, value: string) {
   editor.replaceChildren(...(value ? [document.createTextNode(value)] : []));

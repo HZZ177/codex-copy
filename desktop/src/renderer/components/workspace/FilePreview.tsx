@@ -55,14 +55,22 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 
-import type { RuntimeBridge, WorkspaceFileAnnotation, WorkspaceMediaResponse, WorkspaceScope } from "@/runtime";
+import type {
+  RuntimeBridge,
+  WorkspaceFileAnnotation,
+  WorkspaceFileAnnotationAnchorV2,
+  WorkspaceMediaResponse,
+  WorkspaceScope,
+} from "@/runtime";
 import { MarkdownImage } from "@/renderer/pages/conversation/messages/MarkdownImage";
 import { MarkdownTable } from "@/renderer/pages/conversation/messages/MarkdownTable";
 import { SelectionToolbar } from "@/renderer/pages/conversation/messages/SelectionToolbar";
@@ -82,6 +90,7 @@ import type { PreviewContentKind, PreviewRequest } from "@/renderer/providers/pr
 import { formatMermaidCssPixels, normalizeMermaidSvgDimensions, type SvgDimensions } from "@/renderer/utils/mermaidSvg";
 import { parseUnifiedDiffDisplayLines } from "@/renderer/utils/unifiedDiff";
 
+import { createSourceRangeAnchor, validateSourceRangeAnchor } from "./filePreviewAnnotations";
 import styles from "./FilePreview.module.css";
 
 export type FilePreviewRequest = PreviewRequest;
@@ -169,6 +178,8 @@ export function FilePreview({
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
   const [flashAnnotationId, setFlashAnnotationId] = useState<string | null>(null);
   const [selectionDraftPopover, setSelectionDraftPopover] = useState<AnnotationDraftPopoverState | null>(null);
+  const [selectionMappingError, setSelectionMappingError] = useState<string | null>(null);
+  const [locateError, setLocateError] = useState<string | null>(null);
   const annotationPanelCloseTimerRef = useRef<number | null>(null);
   const annotationFlashTimerRef = useRef<number | null>(null);
   const annotationPopoverFrameRef = useRef<number | null>(null);
@@ -221,7 +232,7 @@ export function FilePreview({
   }, [hasAnchoredAnnotationPopover]);
 
   useEffect(() => {
-    if (!activeAnnotationPopover) {
+    if (!hasAnchoredAnnotationPopover) {
       return;
     }
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
@@ -230,11 +241,13 @@ export function FilePreview({
         return;
       }
       setActiveAnnotationPopover(null);
+      setSelectionDraft(null);
+      setSelectionDraftPopover(null);
       setFocusedAnnotationId(null);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointerDown, true);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointerDown, true);
-  }, [activeAnnotationPopover]);
+  }, [hasAnchoredAnnotationPopover]);
 
   const openAnnotationPanel = useCallback(() => {
     if (annotationPanelCloseTimerRef.current !== null) {
@@ -471,18 +484,31 @@ export function FilePreview({
 
   const startSelectionAnnotation = useCallback(
     (selectedText: string) => {
-      if (!selectedText.trim()) {
+      const text = selectedText.trim();
+      if (!text) {
         return;
       }
-      const preciseSelection = resolveSourceSelection(formatSource(previewContent, kind), sourceSelection, selectedText);
+      const anchor = selectionAnchorFromCurrentSelection(
+        formatSource(previewContent, kind),
+        kind === "markdown" ? "preview" : "source",
+        text,
+        sourceSelection,
+        selection.selectionRange,
+        bodyRef.current,
+      );
+      if (!anchor) {
+        setSelectionMappingError("当前选区无法映射到文件源码，不能添加批注。");
+        return;
+      }
       const selectionPosition = selection.selectionPosition;
       setSelectionDraft({
-        selectedText,
+        anchor,
+        selectedText: text,
         comment: "",
-        lineStart: preciseSelection?.lineStart ?? null,
-        lineEnd: preciseSelection?.lineEnd ?? null,
-        columnStart: preciseSelection?.columnStart ?? null,
-        columnEnd: preciseSelection?.columnEnd ?? null,
+        lineStart: anchor.lineStart,
+        lineEnd: anchor.lineEnd,
+        columnStart: anchor.columnStart,
+        columnEnd: anchor.columnEnd,
       });
       setSelectionDraftPopover({
         ...createPopoverState(
@@ -499,8 +525,9 @@ export function FilePreview({
       setActiveAnnotationPopover(null);
       closeAnnotationPanel();
       setAnnotationMutationError(null);
+      setSelectionMappingError(null);
     },
-    [closeAnnotationPanel, kind, previewContent, selection.selectionPosition, sourceSelection],
+    [closeAnnotationPanel, kind, previewContent, selection.selectionPosition, selection.selectionRange, sourceSelection],
   );
 
   const quotePreviewSelection = useCallback(
@@ -509,15 +536,24 @@ export function FilePreview({
       if (!text || !annotationPath) {
         return;
       }
-      const preciseSelection = resolveSourceSelection(formatSource(previewContent, kind), sourceSelection, text);
+      const anchor = selectionAnchorFromCurrentSelection(
+        formatSource(previewContent, kind),
+        kind === "markdown" ? "preview" : "source",
+        text,
+        sourceSelection,
+        selection.selectionRange,
+        bodyRef.current,
+      );
       onQuoteSelection?.({
         path: annotationPath,
         selectedText: text,
-        lineStart: preciseSelection?.lineStart ?? null,
-        lineEnd: preciseSelection?.lineEnd ?? null,
+        lineStart: anchor?.lineStart ?? null,
+        lineEnd: anchor?.lineEnd ?? null,
+        sourceStart: anchor?.sourceStart ?? null,
+        sourceEnd: anchor?.sourceEnd ?? null,
       });
     },
-    [annotationPath, kind, onQuoteSelection, previewContent, sourceSelection],
+    [annotationPath, kind, onQuoteSelection, previewContent, selection.selectionRange, sourceSelection],
   );
 
   const createSelectionAnnotation = useCallback(async () => {
@@ -537,11 +573,13 @@ export function FilePreview({
         line_end: selectionDraft.lineEnd,
         column_start: selectionDraft.columnStart,
         column_end: selectionDraft.columnEnd,
-        content_hash: currentContentHash,
+        content_hash: selectionDraft.anchor.contentHash,
+        anchor_json: selectionDraft.anchor,
       });
       setAnnotations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setSelectionDraft(null);
       setSelectionDraftPopover(null);
+      setSelectionMappingError(null);
     } catch (reason) {
       setAnnotationMutationError(errorMessage(reason));
     } finally {
@@ -549,11 +587,26 @@ export function FilePreview({
     }
   }, [annotationAvailable, annotationPath, annotationRuntime, currentContentHash, scope, selectionDraft]);
 
-  const beginEditAnnotation = useCallback((annotation: WorkspaceFileAnnotation) => {
-    setEditingAnnotationId(annotation.id);
-    setEditingComment(annotation.comment);
-    setAnnotationMutationError(null);
-  }, []);
+  const beginEditAnnotation = useCallback(
+    (annotation: WorkspaceFileAnnotation) => {
+      const element = findAnnotationElement(bodyRef.current, annotation.id);
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        activateAnnotation(annotation, {
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top,
+          width: rect.width,
+          height: rect.height,
+          anchorElement: element,
+        });
+        return;
+      }
+      setEditingAnnotationId(annotation.id);
+      setEditingComment(annotation.comment);
+      setAnnotationMutationError(null);
+    },
+    [activateAnnotation],
+  );
 
   const saveAnnotationComment = useCallback(
     async (annotation: WorkspaceFileAnnotation, value: string) => {
@@ -619,6 +672,8 @@ export function FilePreview({
         selectedText: annotation.selected_text,
         lineStart: annotation.line_start,
         lineEnd: annotation.line_end,
+        sourceStart: annotation.anchor_json?.sourceStart ?? null,
+        sourceEnd: annotation.anchor_json?.sourceEnd ?? null,
       });
     },
     [onStartChatFromAnnotation],
@@ -640,14 +695,13 @@ export function FilePreview({
 
   const revealAnnotationLine = useCallback(
     (annotation: WorkspaceFileAnnotation) => {
-      const line = annotationSourceLine(formatSource(previewContent, kind), annotation);
-      if (!line) {
+      const range = annotationSourceRange(formatSource(previewContent, kind), annotation);
+      if (!range) {
         return false;
       }
-      setViewMode("source");
       setLineRevealRequest((current) => ({
         requestId: (current?.requestId ?? 0) + 1,
-        line,
+        position: range.from,
       }));
       setFocusedAnnotationId(annotation.id);
       flashAnnotation(annotation.id);
@@ -671,27 +725,30 @@ export function FilePreview({
         return;
       }
       setFocusedAnnotationId(annotation.id);
-      const existingElement = findAnnotationElement(bodyRef.current, annotation.id);
+      const existingElement = !splitMode ? findAnnotationElement(bodyRef.current, annotation.id) : null;
       if (existingElement) {
         scrollAnnotationElementIntoView(annotation, existingElement);
+        setLocateError(null);
         return;
+      }
+      let located = false;
+      if (viewMode === "preview" || splitMode) {
+        const previewElement = findPreviewAnnotationElement(bodyRef.current, annotation.id);
+        if (previewElement) {
+          scrollAnnotationElementIntoView(annotation, previewElement);
+          located = true;
+        }
       }
       if (viewMode === "source" || splitMode) {
-        revealAnnotationLine(annotation);
+        located = revealAnnotationLine(annotation) || located;
+      }
+      if (located) {
+        setLocateError(null);
         return;
       }
-      if (kind === "markdown") {
-        setViewMode("preview");
-        setSplitMode(false);
-        setPreviewRevealRequest((current) => ({
-          requestId: (current?.requestId ?? 0) + 1,
-          annotationId: annotation.id,
-        }));
-        return;
-      }
-      revealAnnotationLine(annotation);
+      setLocateError("当前视图无法定位该批注片段。");
     },
-    [kind, revealAnnotationLine, scrollAnnotationElementIntoView, splitMode, viewMode],
+    [revealAnnotationLine, scrollAnnotationElementIntoView, splitMode, viewMode],
   );
 
   useEffect(() => {
@@ -931,7 +988,7 @@ export function FilePreview({
         {renderActions()}
       </header>
 
-      {previewLoading ? <p className={styles.muted}>正在读取文件</p> : null}
+      {previewLoading ? <FilePreviewLoading label="正在读取文件" /> : null}
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       {!previewLoading && !error ? (
         <div className={styles.body} data-chrome={chrome} aria-label="预览内容" ref={bodyRef}>
@@ -944,6 +1001,24 @@ export function FilePreview({
               onAnnotate={annotationAvailable ? startSelectionAnnotation : undefined}
               onClear={selection.clearSelection}
             />
+          ) : null}
+          {selectionMappingError ? (
+            <div
+              className={styles.selectionAnnotationError}
+              role="alert"
+              data-file-preview-selection-excluded="true"
+            >
+              {selectionMappingError}
+            </div>
+          ) : null}
+          {locateError ? (
+            <div
+              className={styles.selectionAnnotationError}
+              role="alert"
+              data-file-preview-selection-excluded="true"
+            >
+              {locateError}
+            </div>
           ) : null}
           {activeAnnotation && activeAnnotationPopover ? (
             <AnnotationPopover
@@ -970,6 +1045,7 @@ export function FilePreview({
                 setSelectionDraft(null);
                 setSelectionDraftPopover(null);
                 setAnnotationMutationError(null);
+                setSelectionMappingError(null);
               }}
               onChange={setSelectionDraft}
               onCreate={createSelectionAnnotation}
@@ -1014,6 +1090,20 @@ export function FilePreview({
   );
 }
 
+function FilePreviewLoading({ label }: { label: string }) {
+  return (
+    <div className={styles.previewLoading} role="status" aria-label={label}>
+      <div className={styles.previewLoadingSkeleton} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 type PreviewKind = "markdown" | "html" | "diff" | "json" | "code" | "text" | "mermaid" | "image";
 const HIGHLIGHT_MAX_CHARS = 120_000;
 const HIGHLIGHT_MAX_LINES = 2_000;
@@ -1027,6 +1117,7 @@ const FILE_PREVIEW_SELECTION_EXCLUDE_SELECTOR = "[data-file-preview-selection-ex
 const FILE_PREVIEW_ANNOTATION_POPOVER_SELECTOR = "[data-file-preview-annotation-popover='true']";
 
 interface SelectionAnnotationDraft {
+  anchor: WorkspaceFileAnnotationAnchorV2;
   selectedText: string;
   comment: string;
   lineStart: number | null;
@@ -1037,6 +1128,8 @@ interface SelectionAnnotationDraft {
 
 interface SourceSelection {
   selectedText: string;
+  sourceStart: number;
+  sourceEnd: number;
   lineStart: number;
   lineEnd: number;
   columnStart: number;
@@ -1045,7 +1138,7 @@ interface SourceSelection {
 
 interface SourceLineRevealRequest {
   requestId: number;
-  line: number;
+  position: number;
 }
 
 interface PreviewAnnotationRevealRequest {
@@ -1083,6 +1176,7 @@ interface AnnotationPopoverAnchor {
   y: number;
   width: number;
   height: number;
+  anchorElement: HTMLElement | null;
   scrollElement: HTMLElement | null;
   scrollLeft: number;
   scrollTop: number;
@@ -1145,6 +1239,16 @@ function AnnotationPopover({
   const changed = comment.trim() !== annotation.comment.trim();
   const placement = popoverPlacement(position);
   const style = popoverStyle(position, placement);
+  const canSave = Boolean(comment.trim()) && changed && !saving;
+  const saveCurrentComment = async () => {
+    if (!canSave) {
+      return;
+    }
+    const saved = await onSave(annotation, comment);
+    if (saved) {
+      onClose();
+    }
+  };
 
   return createPortal(
     <aside
@@ -1167,6 +1271,13 @@ function AnnotationPopover({
         rows={3}
         aria-label="编辑批注"
         onChange={(event) => setComment(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (!shouldConfirmAnnotationTextarea(event)) {
+            return;
+          }
+          event.preventDefault();
+          void saveCurrentComment();
+        }}
       />
       <div className={styles.annotationPopoverActions} data-layout="annotation">
         <div className={styles.annotationPopoverActionGroup}>
@@ -1186,14 +1297,9 @@ function AnnotationPopover({
         <div className={styles.annotationPopoverActionGroup}>
           <button
             type="button"
-            disabled={!comment.trim() || !changed || saving}
+            disabled={!canSave}
             aria-label="保存批注"
-            onClick={async () => {
-              const saved = await onSave(annotation, comment);
-              if (saved) {
-                onClose();
-              }
-            }}
+            onClick={() => void saveCurrentComment()}
           >
             <Check size={12} />
             <span>{saving ? "保存中" : "保存"}</span>
@@ -1240,10 +1346,18 @@ function AnnotationDraftPopover({
 }) {
   const placement = popoverPlacement(position);
   const style = popoverStyle(position, placement);
+  const canCreate = Boolean(draft.comment.trim()) && !mutating;
+  const createCurrentComment = () => {
+    if (!canCreate) {
+      return;
+    }
+    onCreate();
+  };
 
   return createPortal(
     <aside
       className={styles.annotationPopover}
+      data-file-preview-annotation-popover="true"
       data-file-preview-selection-excluded="true"
       data-placement={placement}
       style={style}
@@ -1264,10 +1378,17 @@ function AnnotationDraftPopover({
         aria-label="添加选区批注"
         autoFocus
         onChange={(event) => onChange({ ...draft, comment: event.currentTarget.value })}
+        onKeyDown={(event) => {
+          if (!shouldConfirmAnnotationTextarea(event)) {
+            return;
+          }
+          event.preventDefault();
+          createCurrentComment();
+        }}
       />
       {error ? <p className={styles.annotationPopoverError}>{error}</p> : null}
       <div className={styles.annotationPopoverActions}>
-        <button type="button" disabled={!draft.comment.trim() || mutating} onClick={onCreate}>
+        <button type="button" disabled={!canCreate} onClick={createCurrentComment}>
           <MessageSquarePlus size={12} />
           <span>{mutating ? "保存中" : "保存批注"}</span>
         </button>
@@ -1282,6 +1403,14 @@ function AnnotationDraftPopover({
 
 type AnnotationPopoverPlacement = "top" | "bottom";
 
+function shouldConfirmAnnotationTextarea(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
+  if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+    return false;
+  }
+  const nativeEvent = event.nativeEvent as globalThis.KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+  return !nativeEvent.isComposing && nativeEvent.keyCode !== 229;
+}
+
 function createPopoverState(
   position: Pick<AnnotationPopoverState, "x" | "y" | "width" | "height">,
   anchorElement: HTMLElement | null,
@@ -1292,6 +1421,7 @@ function createPopoverState(
     ...position,
     anchor: {
       ...position,
+      anchorElement,
       scrollElement,
       scrollLeft: scrollElement?.scrollLeft ?? 0,
       scrollTop: scrollElement?.scrollTop ?? 0,
@@ -1317,6 +1447,15 @@ function repositionPopoverState<T extends Pick<AnnotationPopoverState, "anchor" 
 }
 
 function resolvePopoverPosition(anchor: AnnotationPopoverAnchor): Pick<AnnotationPopoverState, "x" | "y" | "width" | "height"> {
+  if (anchor.anchorElement?.isConnected) {
+    const rect = anchor.anchorElement.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
   const scrollDeltaX = anchor.scrollElement ? anchor.scrollLeft - anchor.scrollElement.scrollLeft : 0;
   const scrollDeltaY = anchor.scrollElement ? anchor.scrollTop - anchor.scrollElement.scrollTop : 0;
   return {
@@ -1448,11 +1587,13 @@ function AnnotationPanel({
         {annotations.map((annotation) => {
           const editing = editingAnnotationId === annotation.id;
           const stale = isAnnotationStale(annotation, currentContentHash);
+          const statusLabel = annotationAnchorStatusLabel(annotation, currentContentHash);
           return (
             <article
               className={styles.annotationItem}
               key={annotation.id}
               data-active={activeAnnotationId === annotation.id ? "true" : "false"}
+              data-anchor-type={annotation.anchor_type}
               data-stale={stale ? "true" : "false"}
             >
               <div className={styles.annotationItemHeader}>
@@ -1468,7 +1609,7 @@ function AnnotationPanel({
                 ) : (
                   <span className={styles.annotationBadge}>{formatAnnotationBadge(annotation)}</span>
                 )}
-                {stale ? <span className={styles.annotationStale}>内容可能已变化</span> : null}
+                {statusLabel ? <span className={styles.annotationStale}>{statusLabel}</span> : null}
               </div>
 
               {annotation.selected_text ? (
@@ -1581,8 +1722,41 @@ function AnnotationPanel({
   );
 }
 
-function matchingSourceSelection(sourceSelection: SourceSelection | null, selectedText: string): SourceSelection | null {
-  if (!sourceSelection) {
+function selectionAnchorFromCurrentSelection(
+  source: string,
+  createdInView: WorkspaceFileAnnotationAnchorV2["createdInView"],
+  selectedText: string,
+  sourceSelection: SourceSelection | null,
+  selectionRange: Range | null,
+  boundary: HTMLElement | null,
+): WorkspaceFileAnnotationAnchorV2 | null {
+  const sourceRange = matchingSourceSelection(sourceSelection, selectedText, selectionRange, boundary);
+  if (sourceRange) {
+    return createSourceRangeAnchor(source, sourceRange.sourceStart, sourceRange.sourceEnd, "source", selectedText);
+  }
+  if (!selectionRange || !boundary || !boundary.contains(selectionRange.commonAncestorContainer)) {
+    return null;
+  }
+  const previewRange = previewSourceRangeFromSelection(selectionRange, boundary);
+  return previewRange
+    ? createSourceRangeAnchor(source, previewRange.sourceStart, previewRange.sourceEnd, createdInView, selectedText)
+    : null;
+}
+
+function matchingSourceSelection(
+  sourceSelection: SourceSelection | null,
+  selectedText: string,
+  selectionRange: Range | null,
+  boundary: HTMLElement | null,
+): SourceSelection | null {
+  if (!sourceSelection || !selectionRange || !boundary) {
+    return null;
+  }
+  const startElement = selectionRange.startContainer instanceof Element
+    ? selectionRange.startContainer
+    : selectionRange.startContainer.parentElement;
+  const sourceViewer = startElement?.closest("[data-testid='file-source-viewer']");
+  if (!sourceViewer || !boundary.contains(sourceViewer)) {
     return null;
   }
   return normalizeSelectionText(sourceSelection.selectedText) === normalizeSelectionText(selectedText)
@@ -1590,17 +1764,91 @@ function matchingSourceSelection(sourceSelection: SourceSelection | null, select
     : null;
 }
 
-function resolveSourceSelection(
-  source: string,
-  sourceSelection: SourceSelection | null,
-  selectedText: string,
-): SourceSelection | null {
-  return matchingSourceSelection(sourceSelection, selectedText) ?? sourceSelectionFromText(source, selectedText);
+function previewSourceRangeFromSelection(
+  selectionRange: Range,
+  boundary: HTMLElement,
+): { sourceStart: number; sourceEnd: number } | null {
+  const allSegments = Array.from(
+    boundary.querySelectorAll<HTMLElement>("[data-preview-source-start][data-preview-source-end]"),
+  );
+  const startSegment = previewSourceSegmentForNode(selectionRange.startContainer, boundary);
+  const endSegment = previewSourceSegmentForNode(selectionRange.endContainer, boundary);
+  if (!startSegment || !endSegment) {
+    return null;
+  }
+  const startIndex = allSegments.indexOf(startSegment);
+  const endIndex = allSegments.indexOf(endSegment);
+  if (startIndex < 0 || endIndex < 0) {
+    return null;
+  }
+  const firstIndex = Math.min(startIndex, endIndex);
+  const lastIndex = Math.max(startIndex, endIndex);
+  const segments = allSegments.slice(firstIndex, lastIndex + 1);
+  let sourceStart: number | null = null;
+  let sourceEnd: number | null = null;
+  for (const segment of segments) {
+    const segmentStart = dataInteger(segment.dataset.previewSourceStart);
+    const segmentEnd = dataInteger(segment.dataset.previewSourceEnd);
+    const textLength = segment.textContent?.length ?? 0;
+    if (segmentStart === null || segmentEnd === null || segmentEnd <= segmentStart || textLength <= 0) {
+      continue;
+    }
+    const localStart = segment === startSegment
+      ? textOffsetWithinElement(segment, selectionRange.startContainer, selectionRange.startOffset)
+      : 0;
+    const localEnd = segment === endSegment
+      ? textOffsetWithinElement(segment, selectionRange.endContainer, selectionRange.endOffset)
+      : textLength;
+    const start = Math.max(0, Math.min(localStart, textLength));
+    const end = Math.max(start, Math.min(localEnd, textLength));
+    if (end <= start) {
+      continue;
+    }
+    const currentStart = segmentStart + start;
+    const currentEnd = Math.min(segmentStart + end, segmentEnd);
+    sourceStart = sourceStart === null ? currentStart : Math.min(sourceStart, currentStart);
+    sourceEnd = sourceEnd === null ? currentEnd : Math.max(sourceEnd, currentEnd);
+  }
+  return sourceStart !== null && sourceEnd !== null && sourceEnd > sourceStart
+    ? { sourceStart, sourceEnd }
+    : null;
 }
 
-function sourceSelectionFromText(source: string, selectedText: string): SourceSelection | null {
-  const range = sourceTextRange(source, selectedText);
-  return range ? sourceSelectionFromRange(source, selectedText, range) : null;
+function previewSourceSegmentForNode(node: Node, boundary: HTMLElement): HTMLElement | null {
+  const element = node instanceof Element ? node : node.parentElement;
+  const segment = element?.closest<HTMLElement>("[data-preview-source-start][data-preview-source-end]") ?? null;
+  return segment && boundary.contains(segment) ? segment : null;
+}
+
+function dataInteger(value: string | undefined): number | null {
+  if (value == null || !/^\d+$/.test(value)) {
+    return null;
+  }
+  return Number(value);
+}
+
+function textOffsetWithinElement(element: HTMLElement, container: Node, offset: number): number {
+  let total = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const length = node.textContent?.length ?? 0;
+    if (node === container) {
+      return total + Math.max(0, Math.min(offset, length));
+    }
+    total += length;
+  }
+  if (container === element) {
+    let child: ChildNode | null = element.firstChild;
+    let childIndex = 0;
+    while (child && childIndex < offset) {
+      total += child.textContent?.length ?? 0;
+      child = child.nextSibling;
+      childIndex += 1;
+    }
+    return total;
+  }
+  return total;
 }
 
 function normalizeSelectionText(text: string): string {
@@ -1630,6 +1878,22 @@ function isAnnotationStale(annotation: WorkspaceFileAnnotation, currentContentHa
   return Boolean(annotation.content_hash && currentContentHash && annotation.content_hash !== currentContentHash);
 }
 
+function annotationAnchorStatusLabel(
+  annotation: WorkspaceFileAnnotation,
+  currentContentHash: string | null,
+): string | null {
+  if (annotation.anchor_type !== "selection") {
+    return null;
+  }
+  if (!annotation.anchor_json) {
+    return "无法定位";
+  }
+  if (isAnnotationStale(annotation, currentContentHash)) {
+    return "内容可能已变化";
+  }
+  return null;
+}
+
 function findAnnotationElement(container: HTMLElement | null, annotationId: string): HTMLElement | null {
   if (!container) {
     return null;
@@ -1640,6 +1904,14 @@ function findAnnotationElement(container: HTMLElement | null, annotationId: stri
       element.dataset.previewAnnotationId === annotationId ||
       element.dataset.fileAnnotationId === annotationId,
   ) ?? null;
+}
+
+function findPreviewAnnotationElement(container: HTMLElement | null, annotationId: string): HTMLElement | null {
+  if (!container) {
+    return null;
+  }
+  const elements = container.querySelectorAll<HTMLElement>("[data-preview-annotation-id]");
+  return Array.from(elements).find((element) => element.dataset.previewAnnotationId === annotationId) ?? null;
 }
 
 function isAbortError(reason: unknown): boolean {
@@ -1662,8 +1934,8 @@ function AnnotatedMarkdownPreview({
   onAnnotationActivate: (annotation: WorkspaceFileAnnotation, position: AnnotationClientPosition) => void;
 }) {
   const annotationPlugin = useMemo(
-    () => createMarkdownAnnotationPlugin(annotations, activeAnnotationId, flashAnnotationId),
-    [activeAnnotationId, annotations, flashAnnotationId],
+    () => createMarkdownAnnotationPlugin(content, annotations, activeAnnotationId, flashAnnotationId),
+    [activeAnnotationId, annotations, content, flashAnnotationId],
   );
   const handleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1707,26 +1979,27 @@ function AnnotatedMarkdownPreview({
 }
 
 function createMarkdownAnnotationPlugin(
+  source: string,
   annotations: WorkspaceFileAnnotation[],
   activeAnnotationId: string | null,
   flashAnnotationId: string | null,
 ) {
   const candidates = annotations
-    .map((annotation) => ({
-      annotation,
-      texts: annotationCandidateTexts(annotation.selected_text || ""),
-    }))
-    .filter((candidate) => candidate.texts.length > 0);
+    .map((annotation) => {
+      const validation = validateSourceRangeAnchor(source, annotation.anchor_json);
+      return validation.valid && validation.anchor
+        ? { annotation, anchor: validation.anchor }
+        : null;
+    })
+    .filter((candidate): candidate is MarkdownAnnotationCandidate => Boolean(candidate));
 
   return () => (tree: unknown) => {
-    if (!candidates.length) {
-      return;
-    }
-    annotateMarkdownTextNodes(tree, candidates, activeAnnotationId, flashAnnotationId);
+    annotateMarkdownTextNodes(source, tree, candidates, activeAnnotationId, flashAnnotationId);
   };
 }
 
 function annotateMarkdownTextNodes(
+  source: string,
   tree: unknown,
   candidates: MarkdownAnnotationCandidate[],
   activeAnnotationId: string | null,
@@ -1736,38 +2009,16 @@ function annotateMarkdownTextNodes(
     return;
   }
   const refs: MarkdownTextRef[] = [];
-  collectMarkdownTextRefs(tree, null, refs);
-  const index = markdownTextIndex(refs);
-  if (!index.text) {
-    return;
-  }
-  const used = new Set<string>();
-  const occupied: Array<{ start: number; end: number }> = [];
+  collectMarkdownTextRefs(source, tree, null, refs);
   const rangesByRef = new Map<number, MarkdownTextAnnotationRange[]>();
   for (const candidate of candidates) {
-    if (used.has(candidate.annotation.id)) {
-      continue;
-    }
-    const match = firstAvailableCandidateMatch(index.text, candidate.texts, occupied);
-    if (!match) {
-      continue;
-    }
-    addMarkdownAnnotationRanges(index.map, match.start, match.end, candidate, rangesByRef);
-    occupied.push(match);
-    used.add(candidate.annotation.id);
+    addMarkdownAnnotationRanges(refs, candidate, rangesByRef);
   }
   applyMarkdownAnnotationRanges(refs, rangesByRef, activeAnnotationId, flashAnnotationId);
 }
 
-function annotationCandidateTexts(selectedText: string): string[] {
-  const candidates = [
-    normalizeSelectionText(selectedText),
-    sourceNormalizedText(selectedText, "markdown"),
-  ].filter(Boolean);
-  return Array.from(new Set(candidates));
-}
-
 function collectMarkdownTextRefs(
+  source: string,
   node: MarkdownAnnotationNode,
   block: MarkdownAnnotationNode | null,
   refs: MarkdownTextRef[],
@@ -1781,116 +2032,136 @@ function collectMarkdownTextRefs(
   const currentBlock = markdownBlockTagNames.has(node.tagName || "") ? node : block;
   node.children.forEach((child, index) => {
     if (isMarkdownTextNode(child)) {
-      refs.push({ block: currentBlock, index, node: child, parent: node });
+      const sourceRange = markdownTextSourceRange(source, child, node, currentBlock);
+      if (sourceRange) {
+        refs.push({ block: currentBlock, index, node: child, parent: node, ...sourceRange });
+      }
       return;
     }
     if (isMarkdownAnnotationNode(child)) {
-      collectMarkdownTextRefs(child, currentBlock, refs);
+      collectMarkdownTextRefs(source, child, currentBlock, refs);
     }
   });
 }
 
-function markdownTextIndex(refs: MarkdownTextRef[]): MarkdownNormalizedIndex {
-  const parts: string[] = [];
-  const map: MarkdownNormalizedMapEntry[] = [];
-  let previousRef: MarkdownTextRef | null = null;
-  refs.forEach((ref, refIndex) => {
-    if (previousRef && previousRef.block !== ref.block) {
-      appendNormalizedSeparator(parts, map);
-    }
-    appendNormalizedText(ref.node.value, refIndex, parts, map);
-    previousRef = ref;
-  });
-  return { map, text: parts.join("") };
-}
-
-function appendNormalizedText(
-  value: string,
-  refIndex: number,
-  parts: string[],
-  map: MarkdownNormalizedMapEntry[],
+function addMarkdownAnnotationRanges(
+  refs: MarkdownTextRef[],
+  candidate: MarkdownAnnotationCandidate,
+  rangesByRef: Map<number, MarkdownTextAnnotationRange[]>,
 ): void {
-  for (let offset = 0; offset < value.length; offset += 1) {
-    const char = value[offset];
-    if (/\s/.test(char)) {
-      if (parts.length > 0 && parts[parts.length - 1] !== " ") {
-        parts.push(" ");
-        map.push({ offset, refIndex });
-      }
-      continue;
+  refs.forEach((ref, refIndex) => {
+    const overlapStart = Math.max(ref.sourceStart, candidate.anchor.sourceStart);
+    const overlapEnd = Math.min(ref.sourceEnd, candidate.anchor.sourceEnd);
+    if (overlapEnd <= overlapStart) {
+      return;
     }
-    parts.push(char);
-    map.push({ offset, refIndex });
-  }
+    const range = {
+      start: Math.max(0, overlapStart - ref.sourceStart),
+      end: Math.min(ref.node.value.length, overlapEnd - ref.sourceStart),
+    };
+    if (range.end <= range.start) {
+      return;
+    }
+    const list = rangesByRef.get(refIndex) ?? [];
+    list.push({ ...range, candidate });
+    rangesByRef.set(refIndex, list);
+  });
 }
 
-function appendNormalizedSeparator(parts: string[], map: MarkdownNormalizedMapEntry[]): void {
-  if (parts.length > 0 && parts[parts.length - 1] !== " ") {
-    parts.push(" ");
-    map.push(null);
+function markdownTextSourceRange(
+  source: string,
+  node: MarkdownAnnotationNode,
+  parent: MarkdownAnnotationNode | null,
+  block: MarkdownAnnotationNode | null,
+): { sourceEnd: number; sourceStart: number } | null {
+  const value = typeof node.value === "string" ? node.value : "";
+  if (!value || !value.trim()) {
+    return null;
   }
-}
-
-function firstAvailableNormalizedMatch(
-  text: string,
-  candidate: string,
-  occupied: Array<{ start: number; end: number }>,
-): number {
-  let cursor = 0;
-  while (cursor < text.length) {
-    const index = text.indexOf(candidate, cursor);
-    if (index < 0) {
-      return -1;
+  const ranges = [node.position, parent?.position, block?.position]
+    .map(markdownPositionOffsets)
+    .filter((range): range is { end: number; start: number } => Boolean(range));
+  for (const range of ranges) {
+    const direct = normalizeOffsetRange(source, range.start, range.end);
+    if (direct && source.slice(direct.from, direct.to) === value) {
+      return { sourceStart: direct.from, sourceEnd: direct.to };
     }
-    const end = index + candidate.length;
-    if (!occupied.some((range) => index < range.end && end > range.start)) {
-      return index;
-    }
-    cursor = index + 1;
-  }
-  return -1;
-}
-
-function firstAvailableCandidateMatch(
-  text: string,
-  candidates: string[],
-  occupied: Array<{ start: number; end: number }>,
-): { end: number; start: number } | null {
-  for (const candidate of candidates) {
-    const start = firstAvailableNormalizedMatch(text, candidate, occupied);
-    if (start >= 0) {
-      return { start, end: start + candidate.length };
+    const start = source.indexOf(value, range.start);
+    if (start >= 0 && start + value.length <= range.end) {
+      return { sourceStart: start, sourceEnd: start + value.length };
     }
   }
   return null;
 }
 
-function addMarkdownAnnotationRanges(
-  map: MarkdownNormalizedMapEntry[],
-  start: number,
-  end: number,
-  candidate: MarkdownAnnotationCandidate,
-  rangesByRef: Map<number, MarkdownTextAnnotationRange[]>,
-): void {
-  const ranges = new Map<number, { end: number; start: number }>();
-  for (let index = start; index < end; index += 1) {
-    const entry = map[index];
-    if (!entry) {
-      continue;
-    }
-    const current = ranges.get(entry.refIndex);
-    if (!current) {
-      ranges.set(entry.refIndex, { start: entry.offset, end: entry.offset + 1 });
-      continue;
-    }
-    current.start = Math.min(current.start, entry.offset);
-    current.end = Math.max(current.end, entry.offset + 1);
+function markdownPositionOffsets(
+  position: MarkdownNodePosition | undefined,
+): { end: number; start: number } | null {
+  const start = position?.start?.offset;
+  const end = position?.end?.offset;
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    end <= start
+  ) {
+    return null;
   }
-  for (const [refIndex, range] of ranges) {
-    const list = rangesByRef.get(refIndex) ?? [];
-    list.push({ ...range, candidate });
-    rangesByRef.set(refIndex, list);
+  return { start, end };
+}
+
+function markdownNodeLanguage(node: MarkdownAnnotationNode): string | null {
+  const className = node.properties?.className;
+  const values = Array.isArray(className) ? className : typeof className === "string" ? [className] : [];
+  for (const value of values) {
+    const match = /^language-([\w+-]+)$/.exec(String(value));
+    if (match) {
+      return match[1].toLowerCase();
+    }
   }
+  return null;
+}
+
+function shouldSkipMarkdownAnnotationNode(node: MarkdownAnnotationNode): boolean {
+  if (node.tagName === "script" || node.tagName === "style") {
+    return true;
+  }
+  if (node.tagName === "code" && markdownNodeLanguage(node) === "mermaid") {
+    return true;
+  }
+  return false;
+}
+
+function isMarkdownTextNode(node: unknown): node is MarkdownAnnotationNode & { type: "text"; value: string } {
+  return isMarkdownAnnotationNode(node) && node.type === "text" && typeof node.value === "string";
+}
+
+function isMarkdownAnnotationNode(node: unknown): node is MarkdownAnnotationNode {
+  return Boolean(node && typeof node === "object");
+}
+
+interface MarkdownAnnotationCandidate {
+  annotation: WorkspaceFileAnnotation;
+  anchor: WorkspaceFileAnnotationAnchorV2;
+}
+
+interface MarkdownAnnotationNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  position?: MarkdownNodePosition;
+  properties?: Record<string, unknown>;
+  children?: unknown[];
+}
+
+interface MarkdownNodePosition {
+  start?: {
+    offset?: number;
+  };
+  end?: {
+    offset?: number;
+  };
 }
 
 function applyMarkdownAnnotationRanges(
@@ -1900,16 +2171,16 @@ function applyMarkdownAnnotationRanges(
   flashAnnotationId: string | null,
 ): void {
   const replacementsByParent = new Map<MarkdownAnnotationNode, Array<{ index: number; nodes: unknown[] }>>();
-  for (const [refIndex, ranges] of rangesByRef) {
-    const ref = refs[refIndex];
-    const nodes = splitMarkdownTextNodeByRanges(ref.node.value, ranges, activeAnnotationId, flashAnnotationId);
+  refs.forEach((ref, refIndex) => {
+    const ranges = rangesByRef.get(refIndex) ?? [];
+    const nodes = splitMarkdownTextNodeByRanges(ref, ranges, activeAnnotationId, flashAnnotationId);
     if (nodes.length === 1 && nodes[0] === ref.node) {
-      continue;
+      return;
     }
     const replacements = replacementsByParent.get(ref.parent) ?? [];
     replacements.push({ index: ref.index, nodes });
     replacementsByParent.set(ref.parent, replacements);
-  }
+  });
   for (const [parent, replacements] of replacementsByParent) {
     if (!Array.isArray(parent.children)) {
       continue;
@@ -1923,11 +2194,12 @@ function applyMarkdownAnnotationRanges(
 }
 
 function splitMarkdownTextNodeByRanges(
-  value: string,
+  ref: MarkdownTextRef,
   ranges: MarkdownTextAnnotationRange[],
   activeAnnotationId: string | null,
   flashAnnotationId: string | null,
 ): unknown[] {
+  const value = ref.node.value;
   const nodes: unknown[] = [];
   let cursor = 0;
   const orderedRanges = ranges
@@ -1943,23 +2215,37 @@ function splitMarkdownTextNodeByRanges(
       continue;
     }
     if (range.start > cursor) {
-      nodes.push({ type: "text", value: value.slice(cursor, range.start) });
+      nodes.push(markdownSourceSpanNode(value.slice(cursor, range.start), ref.sourceStart + cursor, ref.sourceStart + range.start));
     }
     nodes.push(markdownAnnotationMarkNode(
       value.slice(range.start, range.end),
       range.candidate,
       activeAnnotationId,
       flashAnnotationId,
+      ref.sourceStart + range.start,
+      ref.sourceStart + range.end,
     ));
     cursor = range.end;
   }
   if (!nodes.length) {
-    return [{ type: "text", value }];
+    return [markdownSourceSpanNode(value, ref.sourceStart, ref.sourceEnd)];
   }
   if (cursor < value.length) {
-    nodes.push({ type: "text", value: value.slice(cursor) });
+    nodes.push(markdownSourceSpanNode(value.slice(cursor), ref.sourceStart + cursor, ref.sourceEnd));
   }
   return nodes;
+}
+
+function markdownSourceSpanNode(value: string, sourceStart: number, sourceEnd: number): unknown {
+  return {
+    type: "element",
+    tagName: "span",
+    properties: {
+      "data-preview-source-start": sourceStart,
+      "data-preview-source-end": sourceEnd,
+    },
+    children: [{ type: "text", value }],
+  };
 }
 
 function markdownAnnotationMarkNode(
@@ -1967,6 +2253,8 @@ function markdownAnnotationMarkNode(
   candidate: MarkdownAnnotationCandidate,
   activeAnnotationId: string | null,
   flashAnnotationId: string | null,
+  sourceStart: number,
+  sourceEnd: number,
 ): unknown {
   return {
     type: "element",
@@ -1974,6 +2262,8 @@ function markdownAnnotationMarkNode(
     properties: {
       className: [styles.previewAnnotationMark],
       "data-preview-annotation-id": candidate.annotation.id,
+      "data-preview-source-start": sourceStart,
+      "data-preview-source-end": sourceEnd,
       "data-active": activeAnnotationId === candidate.annotation.id ? "true" : "false",
       "data-flash": flashAnnotationId === candidate.annotation.id ? "true" : "false",
       title: candidate.annotation.comment,
@@ -2002,13 +2292,6 @@ const markdownBlockTagNames = new Set([
   "ul",
 ]);
 
-type MarkdownNormalizedMapEntry = { offset: number; refIndex: number } | null;
-
-interface MarkdownNormalizedIndex {
-  map: MarkdownNormalizedMapEntry[];
-  text: string;
-}
-
 interface MarkdownTextAnnotationRange {
   candidate: MarkdownAnnotationCandidate;
   end: number;
@@ -2020,179 +2303,15 @@ interface MarkdownTextRef {
   index: number;
   node: { type: "text"; value: string };
   parent: MarkdownAnnotationNode;
-}
-
-function sourceTextRange(source: string, selectedText: string): Pick<AnnotationTextRange, "from" | "to"> | null {
-  const exactText = selectedText.trim();
-  if (!exactText) {
-    return null;
-  }
-  const index = source.indexOf(exactText);
-  if (index >= 0) {
-    return { from: index, to: index + exactText.length };
-  }
-  return sourceNormalizedRange(source, exactText, "plain") ?? sourceNormalizedRange(source, exactText, "markdown");
-}
-
-function sourceSelectionFromRange(
-  source: string,
-  selectedText: string,
-  range: Pick<AnnotationTextRange, "from" | "to">,
-): SourceSelection {
-  const start = sourceLineColumnAtOffset(source, range.from);
-  const end = sourceLineColumnAtOffset(source, range.to);
-  return {
-    selectedText,
-    lineStart: start.line,
-    lineEnd: end.line,
-    columnStart: start.column,
-    columnEnd: end.column,
-  };
-}
-
-type SourceNormalizeMode = "plain" | "markdown";
-
-function sourceNormalizedRange(
-  source: string,
-  selectedText: string,
-  mode: SourceNormalizeMode,
-): Pick<AnnotationTextRange, "from" | "to"> | null {
-  const candidate = sourceNormalizedText(selectedText, mode);
-  if (!candidate) {
-    return null;
-  }
-  const index = sourceNormalizedIndex(source, mode);
-  const matchStart = index.text.indexOf(candidate);
-  if (matchStart < 0) {
-    return null;
-  }
-  const from = index.map[matchStart];
-  const to = (index.map[matchStart + candidate.length - 1] ?? from) + 1;
-  return normalizeOffsetRange(source, from, to);
-}
-
-function sourceNormalizedText(text: string, mode: SourceNormalizeMode): string {
-  return sourceNormalizedIndex(text, mode).text.trim();
-}
-
-function sourceNormalizedIndex(source: string, mode: SourceNormalizeMode): SourceNormalizedIndex {
-  const parts: string[] = [];
-  const map: number[] = [];
-  for (let offset = 0; offset < source.length; offset += 1) {
-    const char = source[offset];
-    if (mode === "markdown" && shouldSkipMarkdownSourceSyntax(source, offset)) {
-      continue;
-    }
-    if (/\s/.test(char)) {
-      if (parts.length > 0 && parts[parts.length - 1] !== " ") {
-        parts.push(" ");
-        map.push(offset);
-      }
-      continue;
-    }
-    parts.push(char);
-    map.push(offset);
-  }
-  return { map, text: parts.join("") };
-}
-
-function sourceLineColumnAtOffset(source: string, offset: number): { column: number; line: number } {
-  const starts = lineStartOffsets(source);
-  const clampedOffset = Math.max(0, Math.min(offset, source.length));
-  let lineIndex = 0;
-  for (let index = 0; index < starts.length; index += 1) {
-    if (starts[index] > clampedOffset) {
-      break;
-    }
-    lineIndex = index;
-  }
-  return {
-    line: lineIndex + 1,
-    column: clampedOffset - starts[lineIndex] + 1,
-  };
-}
-
-function shouldSkipMarkdownSourceSyntax(source: string, offset: number): boolean {
-  const char = source[offset];
-  if (char === "*" || char === "_" || char === "~" || char === "`" || char === "[" || char === "]") {
-    return true;
-  }
-  if (char === "#" && isHeadingMarkdownMarker(source, offset)) {
-    return true;
-  }
-  if (char === ">" && isLinePrefixMarkdownMarker(source, offset)) {
-    return true;
-  }
-  if ((char === "-" || char === "+") && isLinePrefixMarkdownMarker(source, offset) && source[offset + 1] === " ") {
-    return true;
-  }
-  return false;
-}
-
-function isLinePrefixMarkdownMarker(source: string, offset: number): boolean {
-  for (let index = offset - 1; index >= 0; index -= 1) {
-    const char = source[index];
-    if (char === "\n") {
-      return true;
-    }
-    if (char !== " " && char !== "\t") {
-      return false;
-    }
-  }
-  return true;
-}
-
-function isHeadingMarkdownMarker(source: string, offset: number): boolean {
-  let lineStart = offset;
-  while (lineStart > 0 && source[lineStart - 1] !== "\n") {
-    lineStart -= 1;
-  }
-  let cursor = lineStart;
-  while (source[cursor] === " " || source[cursor] === "\t") {
-    cursor += 1;
-  }
-  if (offset < cursor) {
-    return false;
-  }
-  while (source[cursor] === "#") {
-    cursor += 1;
-  }
-  return offset < cursor && (source[cursor] === " " || source[cursor] === "\t");
-}
-
-interface SourceNormalizedIndex {
-  map: number[];
-  text: string;
-}
-
-function shouldSkipMarkdownAnnotationNode(node: MarkdownAnnotationNode): boolean {
-  return node.tagName === "code" || node.tagName === "pre" || node.tagName === "script" || node.tagName === "style";
-}
-
-function isMarkdownTextNode(node: unknown): node is { type: "text"; value: string } {
-  return isMarkdownAnnotationNode(node) && node.type === "text" && typeof node.value === "string";
-}
-
-function isMarkdownAnnotationNode(node: unknown): node is MarkdownAnnotationNode {
-  return Boolean(node && typeof node === "object");
-}
-
-interface MarkdownAnnotationCandidate {
-  annotation: WorkspaceFileAnnotation;
-  texts: string[];
-}
-
-interface MarkdownAnnotationNode {
-  type?: string;
-  tagName?: string;
-  value?: string;
-  children?: unknown[];
+  sourceEnd: number;
+  sourceStart: number;
 }
 
 function PreviewMarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const codeChild = getCodeChild(children);
   const language = codeBlockLanguage(codeChild?.props?.className);
-  const text = stripTrailingNewline(extractMarkdownText(codeChild?.props?.children ?? children));
+  const codeChildren = codeChild?.props?.children ?? children;
+  const text = stripTrailingNewline(extractMarkdownText(codeChildren));
 
   if (language === "mermaid") {
     return <NativeMermaidPreview code={text} layout="document" />;
@@ -2200,7 +2319,7 @@ function PreviewMarkdownCodeBlock({ children }: { children?: ReactNode }) {
 
   return (
     <pre className={styles.markdownCodeBlock} data-language={language}>
-      <code>{text || " "}</code>
+      <code>{codeChildren || " "}</code>
     </pre>
   );
 }
@@ -2321,6 +2440,8 @@ function CodeMirrorSourceView({
         const endLine = update.state.doc.lineAt(to);
         onSelectionChange?.({
           selectedText,
+          sourceStart: from,
+          sourceEnd: to,
           lineStart: startLine.number,
           lineEnd: endLine.number,
           columnStart: from - startLine.from + 1,
@@ -2366,8 +2487,7 @@ function CodeMirrorSourceView({
     if (!view || !revealLineRequest) {
       return;
     }
-    const lineNumber = Math.max(1, Math.min(revealLineRequest.line, view.state.doc.lines));
-    const position = view.state.doc.line(lineNumber).from;
+    const position = Math.max(0, Math.min(revealLineRequest.position, view.state.doc.length));
     smoothScrollCodeMirrorPositionIntoView(view, position);
   }, [revealLineRequest]);
 
@@ -2382,7 +2502,11 @@ function smoothScrollCodeMirrorPositionIntoView(view: EditorView, position: numb
       return Math.max(0, line.top - (scroll.clientHeight - line.height) / 2);
     },
     write(top) {
-      view.scrollDOM.scrollTo({ top, behavior: "smooth" });
+      if (typeof view.scrollDOM.scrollTo === "function") {
+        view.scrollDOM.scrollTo({ top, behavior: "smooth" });
+        return;
+      }
+      view.scrollDOM.scrollTop = top;
     },
   });
 }
@@ -2456,93 +2580,10 @@ function annotationSourceRange(
   source: string,
   annotation: WorkspaceFileAnnotation,
 ): Pick<AnnotationTextRange, "from" | "to"> | null {
-  const lineStart = annotation.line_start;
-  const lineEnd = annotation.line_end;
-  const columnStart = annotation.column_start;
-  const columnEnd = annotation.column_end;
-  if (
-    positiveInteger(lineStart) &&
-    positiveInteger(lineEnd) &&
-    positiveInteger(columnStart) &&
-    positiveInteger(columnEnd)
-  ) {
-    const range = lineColumnRangeToOffsets(source, lineStart, lineEnd, columnStart, columnEnd);
-    if (range) {
-      return range;
-    }
-  }
-
-  const selectedText = annotation.selected_text?.trim();
-  if (selectedText) {
-    const range = sourceTextRange(source, selectedText);
-    if (range) {
-      return range;
-    }
-  }
-
-  if (positiveInteger(lineStart) && positiveInteger(lineEnd)) {
-    const range = lineRangeToOffsets(source, lineStart, lineEnd);
-    if (range) {
-      return range;
-    }
-  }
-
-  return null;
-}
-
-function annotationSourceLine(source: string, annotation: WorkspaceFileAnnotation): number | null {
-  if (positiveInteger(annotation.line_start)) {
-    return annotation.line_start;
-  }
-  const selectedText = annotation.selected_text?.trim();
-  if (!selectedText) {
-    return null;
-  }
-  const range = sourceTextRange(source, selectedText);
-  if (!range) {
-    return null;
-  }
-  return source.slice(0, range.from).split("\n").length;
-}
-
-function lineColumnRangeToOffsets(
-  source: string,
-  lineStart: number,
-  lineEnd: number,
-  columnStart: number,
-  columnEnd: number,
-): Pick<AnnotationTextRange, "from" | "to"> | null {
-  const starts = lineStartOffsets(source);
-  if (lineStart < 1 || lineEnd < lineStart || lineStart > starts.length || lineEnd > starts.length) {
-    return null;
-  }
-  const startOffset = starts[lineStart - 1] + Math.max(0, columnStart - 1);
-  const endOffset = starts[lineEnd - 1] + Math.max(0, columnEnd - 1);
-  return normalizeOffsetRange(source, startOffset, endOffset);
-}
-
-function lineRangeToOffsets(
-  source: string,
-  lineStart: number,
-  lineEnd: number,
-): Pick<AnnotationTextRange, "from" | "to"> | null {
-  const starts = lineStartOffsets(source);
-  if (lineStart < 1 || lineEnd < lineStart || lineStart > starts.length || lineEnd > starts.length) {
-    return null;
-  }
-  const from = starts[lineStart - 1];
-  const nextLineStart = starts[lineEnd] ?? source.length;
-  return normalizeOffsetRange(source, from, nextLineStart);
-}
-
-function lineStartOffsets(source: string): number[] {
-  const starts = [0];
-  for (let index = 0; index < source.length; index += 1) {
-    if (source[index] === "\n" && index + 1 < source.length) {
-      starts.push(index + 1);
-    }
-  }
-  return starts;
+  const validation = validateSourceRangeAnchor(source, annotation.anchor_json);
+  return validation.valid && validation.anchor
+    ? { from: validation.anchor.sourceStart, to: validation.anchor.sourceEnd }
+    : null;
 }
 
 function normalizeOffsetRange(
@@ -3497,6 +3538,23 @@ function lineNumbersText(lineCount: number): string {
   return Array.from({ length: Math.max(1, lineCount) }, (_, index) => String(index + 1)).join("\n");
 }
 
+const IMAGE_MIN_SCALE = 0.25;
+const IMAGE_MAX_SCALE = 5;
+const IMAGE_SCALE_STEP = 0.25;
+
+interface ImagePanOffset {
+  x: number;
+  y: number;
+}
+
+interface ImageDragState {
+  offsetX: number;
+  offsetY: number;
+  pointerId: number;
+  startX: number;
+  startY: number;
+}
+
 function ImagePreview({
   media,
   title,
@@ -3506,19 +3564,145 @@ function ImagePreview({
   title: string;
   sourceLabel: string;
 }) {
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState<ImagePanOffset>({ x: 0, y: 0 });
+  const dragRef = useRef<ImageDragState | null>(null);
+
   if (!media) {
     return <div className={styles.imageStatus}>图片未加载</div>;
   }
 
+  const setClampedScale = (value: number | ((current: number) => number)) => {
+    setScale((current) => {
+      const next = clampImageScale(typeof value === "function" ? value(current) : value);
+      if (next <= 1) {
+        setOffset({ x: 0, y: 0 });
+      }
+      return next;
+    });
+  };
+
+  const zoomBy = (delta: number) => {
+    setClampedScale((current) => current + delta);
+  };
+
+  const resetView = () => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (Math.abs(event.deltaY) === 0) {
+      return;
+    }
+    event.preventDefault();
+    zoomBy(event.deltaY < 0 ? IMAGE_SCALE_STEP : -IMAGE_SCALE_STEP);
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button > 0 || scale <= 1) {
+      return;
+    }
+    dragRef.current = {
+      pointerId: pointerIdValue(event),
+      startX: pointerCoordinate(event.clientX),
+      startY: pointerCoordinate(event.clientY),
+      offsetX: offset.x,
+      offsetY: offset.y,
+    };
+    event.currentTarget.dataset.dragging = "true";
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== pointerIdValue(event)) {
+      return;
+    }
+    setOffset({
+      x: drag.offsetX + pointerCoordinate(event.clientX) - drag.startX,
+      y: drag.offsetY + pointerCoordinate(event.clientY) - drag.startY,
+    });
+  };
+
+  const clearDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== pointerIdValue(event)) {
+      return;
+    }
+    dragRef.current = null;
+    delete event.currentTarget.dataset.dragging;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const scaleLabel = formatImageScale(scale);
+  const imageStyle = {
+    "--image-scale": scale,
+    "--image-offset-x": `${offset.x}px`,
+    "--image-offset-y": `${offset.y}px`,
+  } as CSSProperties;
+
   return (
     <figure className={styles.imagePane}>
-      <img className={styles.imageFrame} src={media.data_url} alt={title || sourceLabel} />
+      <div
+        className={styles.imageControls}
+        aria-label="图片视图控制"
+        data-file-preview-selection-excluded="true"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          aria-label="缩小图片"
+          title="缩小图片"
+          disabled={scale <= IMAGE_MIN_SCALE}
+          onClick={() => zoomBy(-IMAGE_SCALE_STEP)}
+        >
+          <ZoomOut size={15} />
+        </button>
+        <span className={styles.imageScaleValue} aria-label={`当前缩放 ${scaleLabel}`}>
+          {scaleLabel}
+        </span>
+        <button
+          type="button"
+          aria-label="放大图片"
+          title="放大图片"
+          disabled={scale >= IMAGE_MAX_SCALE}
+          onClick={() => zoomBy(IMAGE_SCALE_STEP)}
+        >
+          <ZoomIn size={15} />
+        </button>
+        <button type="button" aria-label="重置图片视图" title="重置图片视图" onClick={resetView}>
+          <RotateCcw size={15} />
+        </button>
+      </div>
+      <div
+        className={styles.imageCanvas}
+        aria-label="图片预览画布"
+        data-draggable={scale > 1 ? "true" : "false"}
+        style={imageStyle}
+        onPointerCancel={clearDrag}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={clearDrag}
+        onWheel={handleWheel}
+      >
+        <img className={styles.imageFrame} src={media.data_url} alt={title || sourceLabel} draggable={false} />
+      </div>
       <figcaption className={styles.imageMeta}>
         <span>{media.media_type}</span>
         <span>{formatBytes(media.size)}</span>
       </figcaption>
     </figure>
   );
+}
+
+function clampImageScale(value: number): number {
+  return Math.min(IMAGE_MAX_SCALE, Math.max(IMAGE_MIN_SCALE, Math.round(value * 100) / 100));
+}
+
+function formatImageScale(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function formatBytes(size: number): string {

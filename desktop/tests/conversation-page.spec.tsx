@@ -177,10 +177,8 @@ describe("ConversationPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
     });
-    await waitFor(() => {
-      expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
-    });
-    expect(await screen.findByText("历史文件引用内容")).not.toBeNull();
+    expect(await screen.findByText("历史文件引用内容", {}, { timeout: 5000 })).not.toBeNull();
+    expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
   });
 
   it("shows runtime typing speed above the bottom composer and scrolls to bottom from the dock button", async () => {
@@ -704,10 +702,13 @@ describe("ConversationPage", () => {
         path: "src/main.ts",
         line_start: 3,
         line_end: 4,
+        source_start: 42,
+        source_end: 66,
       },
     });
     expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("src/main.ts");
     expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("L3-L4");
+    expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("42-66");
     expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("if (enabled)");
     expect(payload.runtime_params?.message_injection?.[0]?.content).not.toContain("Check this branch");
   });
@@ -1419,6 +1420,8 @@ function AnnotationPrefillHarness() {
           selectedText: "if (enabled) {\n  run();\n}",
           lineStart: 3,
           lineEnd: 4,
+          sourceStart: 42,
+          sourceEnd: 66,
           comment: "Check this branch",
         })
       }

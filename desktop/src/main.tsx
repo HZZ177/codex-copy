@@ -16,7 +16,9 @@ if (!rootElement) {
   throw new Error("应用挂载节点 #app 不存在");
 }
 
-createRoot(rootElement).render(
+const root = createRoot(rootElement);
+
+root.render(
   <AppProviders>
     <App />
   </AppProviders>,

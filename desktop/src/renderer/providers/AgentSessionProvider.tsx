@@ -18,6 +18,7 @@ import {
   type RuntimeBridge,
   type WsConnectionStatus,
 } from "@/runtime";
+import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import {
   agentConversationReducer,
   createInitialAgentConversationState,
@@ -50,6 +51,9 @@ export function AgentSessionProvider({
   const channelRef = useRef<ChatChannel | null>(null);
   const pendingBindSessionIdsRef = useRef(new Set<string>());
   const requestedStatusRef = useRef(false);
+  const runtimeConnection = useOptionalRuntimeConnection();
+  const backendReady = runtimeConnection?.ready ?? true;
+  const setRuntimeWsStatus = runtimeConnection?.setWsStatus;
 
   const flushPendingBinds = useCallback(() => {
     const channel = channelRef.current;
@@ -75,6 +79,11 @@ export function AgentSessionProvider({
   );
 
   useEffect(() => {
+    if (!backendReady) {
+      setWsStatus("idle");
+      setRuntimeDetail(null);
+      return;
+    }
     const channel = runtime.conversation.openChatChannel(
       (event) => dispatch({ type: "event/receive", event }),
       {
@@ -92,7 +101,11 @@ export function AgentSessionProvider({
         channelRef.current = null;
       }
     };
-  }, [runtime]);
+  }, [backendReady, runtime]);
+
+  useEffect(() => {
+    setRuntimeWsStatus?.(wsStatus);
+  }, [setRuntimeWsStatus, wsStatus]);
 
   useEffect(() => {
     if (wsStatus === "open") {

@@ -11,6 +11,8 @@ export interface SelectedQuoteFileSource {
   name?: string | null;
   lineStart?: number | null;
   lineEnd?: number | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
 }
 
 export interface SelectedQuoteOptions {
@@ -67,7 +69,13 @@ export function selectedQuoteFromText(
   const file = normalizeSelectedQuoteFileSource(options.file ?? null);
   const idParts = ["quote", source, normalized];
   if (file) {
-    idParts.push(file.path, String(file.lineStart ?? ""), String(file.lineEnd ?? ""));
+    idParts.push(
+      file.path,
+      String(file.lineStart ?? ""),
+      String(file.lineEnd ?? ""),
+      String(file.sourceStart ?? ""),
+      String(file.sourceEnd ?? ""),
+    );
   }
   return {
     id: `quote:${source}:${hashText(idParts.join("\n"))}`,
@@ -83,16 +91,26 @@ function normalizeSelectedQuoteFileSource(file: SelectedQuoteFileSource | null):
   if (!path) {
     return null;
   }
+  const sourceStart = nonNegativeInteger(file?.sourceStart) ? file.sourceStart : null;
+  const sourceEnd = positiveInteger(file?.sourceEnd) && sourceStart !== null && file.sourceEnd > sourceStart
+    ? file.sourceEnd
+    : null;
   return {
     path,
     name: file?.name?.trim() || fileName(path),
     lineStart: positiveInteger(file?.lineStart) ? file.lineStart : null,
     lineEnd: positiveInteger(file?.lineEnd) ? file.lineEnd : null,
+    sourceStart: sourceEnd !== null ? sourceStart : null,
+    sourceEnd,
   };
 }
 
 function positiveInteger(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function nonNegativeInteger(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function fileName(path: string): string {

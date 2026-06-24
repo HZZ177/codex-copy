@@ -38,12 +38,13 @@ describe("AtFileMenu", () => {
     );
 
     await screen.findByText("main.ts");
+    expect(screen.getByText("最多返回 50 项 · 最多搜索 2.5 秒")).not.toBeNull();
     expectWorkspaceSearch(onSearchWorkspace, "ma");
 
     fireEvent.keyDown(screen.getByLabelText("继续输入"), { key: "Enter" });
 
     expect(onChange).toHaveBeenCalledWith("");
-    expect(screen.getByLabelText("已添加上下文").textContent).toContain("src/main.ts");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("main.ts");
     fireEvent.click(screen.getByRole("button", { name: "移除文件引用 src/main.ts" }));
     expect(screen.queryByLabelText("移除文件引用 src/main.ts")).toBeNull();
   });
@@ -231,7 +232,7 @@ describe("AtFileMenu", () => {
     });
 
     expect(onChange).toHaveBeenCalledWith("");
-    expect(screen.getByLabelText("已添加上下文").textContent).toContain("src/main.ts");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("main.ts");
   });
 
   it("shows real workspace search errors", async () => {

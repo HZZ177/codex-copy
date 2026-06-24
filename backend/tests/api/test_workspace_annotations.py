@@ -23,6 +23,25 @@ def _create_workspace_session(client: TestClient, workspace_id: str) -> dict:
     ).json()["session"]
 
 
+def _anchor(**overrides) -> dict:
+    anchor = {
+        "version": 2,
+        "kind": "source-range",
+        "sourceStart": 0,
+        "sourceEnd": 11,
+        "selectedText": "print('ok')",
+        "sourceText": "print('ok')",
+        "contentHash": "hash-1",
+        "lineStart": 1,
+        "lineEnd": 1,
+        "columnStart": 1,
+        "columnEnd": 12,
+        "createdInView": "source",
+    }
+    anchor.update(overrides)
+    return anchor
+
+
 def test_session_workspace_annotation_crud(tmp_path) -> None:
     root = tmp_path / "workspace"
     src = root / "src"
@@ -44,6 +63,7 @@ def test_session_workspace_annotation_crud(tmp_path) -> None:
                 "column_end": 12,
                 "comment": "Please explain this print",
                 "content_hash": "hash-1",
+                "anchor_json": _anchor(),
             },
         )
         annotation_id = create_response.json()["id"]
@@ -75,6 +95,7 @@ def test_session_workspace_annotation_crud(tmp_path) -> None:
     assert created["column_end"] == 12
     assert created["comment"] == "Please explain this print"
     assert create_response.json()["content_hash"] == "hash-1"
+    assert created["anchor_json"] == _anchor()
 
     assert list_response.status_code == 200
     assert [item["id"] for item in list_response.json()] == [annotation_id]
@@ -82,6 +103,7 @@ def test_session_workspace_annotation_crud(tmp_path) -> None:
     assert update_response.status_code == 200
     assert update_response.json()["comment"] == "Updated comment"
     assert update_response.json()["selected_text"] == "print('ok')"
+    assert update_response.json()["anchor_json"] == _anchor()
 
     assert delete_response.status_code == 204
     assert list_after_delete_response.status_code == 200
@@ -147,6 +169,32 @@ def test_workspace_annotation_api_validates_paths_and_payloads(tmp_path) -> None
                 "comment": "bad range",
             },
         )
+        bad_anchor = client.post(
+            f"/api/workspaces/{workspace['id']}/annotations",
+            json={
+                "path": "note.md",
+                "anchor_type": "selection",
+                "selected_text": "note",
+                "comment": "bad anchor",
+                "anchor_json": _anchor(
+                    sourceEnd=0,
+                    selectedText="note",
+                    sourceText="note",
+                    lineStart=1,
+                    lineEnd=1,
+                    columnEnd=5,
+                ),
+            },
+        )
+        legacy_selection = client.post(
+            f"/api/workspaces/{workspace['id']}/annotations",
+            json={
+                "path": "note.md",
+                "anchor_type": "selection",
+                "selected_text": "note",
+                "comment": "legacy selection",
+            },
+        )
 
     assert forbidden.status_code == 403
     assert forbidden.json()["detail"]["code"] == "workspace_path_forbidden"
@@ -154,6 +202,10 @@ def test_workspace_annotation_api_validates_paths_and_payloads(tmp_path) -> None
     assert empty_comment.json()["detail"]["code"] == "workspace_annotation_invalid"
     assert bad_range.status_code == 400
     assert bad_range.json()["detail"]["code"] == "workspace_annotation_invalid"
+    assert bad_anchor.status_code == 400
+    assert bad_anchor.json()["detail"]["code"] == "workspace_annotation_invalid"
+    assert legacy_selection.status_code == 201
+    assert legacy_selection.json()["anchor_json"] is None
 
 
 def test_session_annotation_api_requires_workspace_session(tmp_path) -> None:

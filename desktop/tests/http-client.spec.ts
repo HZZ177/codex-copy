@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  AGENT_BASE_URL_STORAGE_KEY,
   HttpClient,
   normalizeErrorEnvelope,
   redactForLog,
@@ -9,13 +8,11 @@ import {
 import { RuntimeHttpError, isRuntimeHttpError } from "@/runtime/errors";
 
 describe("HttpClient", () => {
-  it("uses the local E2E base URL override when present", () => {
-    window.localStorage.setItem(AGENT_BASE_URL_STORAGE_KEY, "http://127.0.0.1:18765/");
-
+  it("requires an explicit backend base URL", async () => {
     const client = new HttpClient({ fetcher: vi.fn() as unknown as typeof fetch });
 
-    expect(client.getBaseUrl()).toBe("http://127.0.0.1:18765");
-    window.localStorage.removeItem(AGENT_BASE_URL_STORAGE_KEY);
+    expect(() => client.getBaseUrl()).toThrow("Keydex 后端地址未配置");
+    await expect(client.request("/api/health")).rejects.toThrow("Keydex 后端地址未配置");
   });
 
   it("returns JSON for successful responses", async () => {
@@ -40,7 +37,7 @@ describe("HttpClient", () => {
         },
       }),
     );
-    const client = new HttpClient({ fetcher });
+    const client = new HttpClient({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     await expect(client.request("/api/threads")).rejects.toMatchObject({
       name: "RuntimeHttpError",
@@ -53,7 +50,7 @@ describe("HttpClient", () => {
 
   it("keeps non-json error text", async () => {
     const fetcher = vi.fn().mockResolvedValue(textResponse(500, "upstream exploded"));
-    const client = new HttpClient({ fetcher });
+    const client = new HttpClient({ baseUrl: "http://127.0.0.1:8765", fetcher });
 
     try {
       await client.request("/api/models/refresh", { method: "POST" });

@@ -3,6 +3,23 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const API_BASE = "http://127.0.0.1:8765";
 const SESSION_ID = "ses-e2e-sidebar-file-viewer";
 const APP_BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
+const README_CONTENT = [
+  "# E2E File",
+  "",
+  "This file is rendered from Playwright.",
+  "",
+  "**Cross alpha**",
+  "",
+  "Cross omega",
+  "",
+  "```ts",
+  "const e2eCodeTarget = 7;",
+  "console.log(e2eCodeTarget);",
+  "```",
+  "",
+  "Repeated anchor first.",
+  "Repeated anchor second.",
+].join("\n");
 
 test("right sidebar files tab opens and resizes a read-only file preview", async ({ page }) => {
   await installWebSocketMock(page);
@@ -142,13 +159,17 @@ test("file preview annotations can be created edited deleted and used to prefill
   await selectVisibleText(page, "This file is rendered");
   await page.getByRole("button", { name: "为选中文本添加批注" }).click();
   await page.getByRole("textbox", { name: "添加选区批注" }).fill("Selected E2E note");
-  await page.getByRole("button", { name: "添加选区批注" }).click();
+  await page.getByRole("button", { name: "保存批注" }).click();
+  await page.getByRole("button", { name: /文件批注/ }).click();
+  await expect(panel).toBeVisible();
   await expect(panel).toContainText("Selected E2E note");
   await expect(panel).toContainText("This file is rendered");
 
   const selectionAnnotation = panel.locator("article").filter({ hasText: "Selected E2E note" });
   await selectionAnnotation.getByRole("button", { name: "基于此批注发起对话" }).click();
-  await expect(page.getByRole("button", { name: "打开文件引用 README.md" })).toBeVisible();
+  const quoteChip = page.locator("[data-quote-index='0'][data-source-quote='true']");
+  await expect(quoteChip).toBeVisible();
+  await expect(quoteChip).toContainText("README.md · L3");
   await expect(input).toHaveText("Selected E2E note");
 
   const chatCount = await page.evaluate(() => {
@@ -163,6 +184,105 @@ test("file preview annotations can be created edited deleted and used to prefill
 
   if (process.env.E2E_ANNOTATION_EVIDENCE_PATH) {
     await page.screenshot({ path: process.env.E2E_ANNOTATION_EVIDENCE_PATH, fullPage: true });
+  }
+});
+
+test("file preview annotations project source ranges across preview source and split locate", async ({ page }) => {
+  const annotations: E2EAnnotation[] = [];
+  await installWebSocketMock(page);
+  await mockBackend(page, annotations);
+
+  await page.goto(`${APP_BASE}/#/conversation/${SESSION_ID}`);
+
+  await expect(page.getByLabel("继续输入")).toBeVisible();
+  await page.getByLabel("展开右侧栏").click();
+  await page.getByRole("button", { name: "文件" }).click();
+  await page.getByRole("button", { name: "选择文件 README.md" }).click();
+  await page.getByRole("button", { name: "收起文件树" }).click();
+
+  await selectVisibleTextRange(page, "Cross alpha", "Cross omega");
+  await page.getByRole("button", { name: "为选中文本添加批注" }).click();
+  await page.getByRole("textbox", { name: "添加选区批注" }).fill("Cross-block E2E note");
+  await page.getByRole("button", { name: "保存批注" }).click();
+  await expect.poll(() => annotations.length).toBe(1);
+  const crossBlockAnnotation = annotations.find((annotation) => annotation.comment === "Cross-block E2E note");
+  expect(crossBlockAnnotation?.anchor_json).toMatchObject({
+    version: 2,
+    kind: "source-range",
+    createdInView: "preview",
+  });
+  await expect(page.locator(`[data-preview-annotation-id="${crossBlockAnnotation?.id}"]`).first()).toBeVisible();
+
+  await page.getByRole("button", { name: /源码/ }).click();
+  await expect(page.getByTestId("file-source-viewer")).toBeVisible();
+  await expect(page.locator(`[data-file-annotation-id="${crossBlockAnnotation?.id}"]`).first()).toBeVisible();
+
+  await dragSelectSourceLine(page, "const e2eCodeTarget = 7;");
+  await page.getByRole("button", { name: "为选中文本添加批注" }).click();
+  await page.getByRole("textbox", { name: "添加选区批注" }).fill("Code block E2E note");
+  await page.getByRole("button", { name: "保存批注" }).click();
+  await expect.poll(() => annotations.length).toBe(2);
+  const codeAnnotation = annotations.find((annotation) => annotation.comment === "Code block E2E note");
+  expect(codeAnnotation?.anchor_json).toMatchObject({
+    version: 2,
+    kind: "source-range",
+    createdInView: "source",
+  });
+
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await expect(
+    page.locator(`[data-preview-annotation-id="${codeAnnotation?.id}"]`).filter({ hasText: "const e2eCodeTarget" }).first(),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /分屏/ }).click();
+  await expect(page.getByTestId("preview-split-pane")).toBeVisible();
+  await page.getByRole("button", { name: /文件批注/ }).click();
+  const panel = page.getByRole("complementary", { name: "文件批注" });
+  const codeAnnotationRow = panel.locator("article").filter({ hasText: "Code block E2E note" });
+  await codeAnnotationRow.getByRole("button", { name: "定位批注片段" }).click();
+  await expect(page.locator(`[data-preview-annotation-id="${codeAnnotation?.id}"][data-flash="true"]`).first()).toBeVisible();
+  await expect(page.locator(`[data-file-annotation-id="${codeAnnotation?.id}"][data-flash="true"]`).first()).toBeVisible();
+
+  if (process.env.E2E_ANNOTATION_PROJECTION_EVIDENCE_PATH) {
+    await page.screenshot({ path: process.env.E2E_ANNOTATION_PROJECTION_EVIDENCE_PATH, fullPage: true });
+  }
+});
+
+test("file preview annotations expose invalid anchor state without fallback locate", async ({ page }) => {
+  const annotations: E2EAnnotation[] = [
+    makeAnnotation({
+      id: "ann-legacy-selection",
+      anchor_type: "selection",
+      comment: "Legacy selection E2E note",
+      selected_text: "This file is rendered",
+      line_start: 3,
+      line_end: 3,
+      column_start: 1,
+      column_end: 22,
+      content_hash: null,
+      anchor_json: null,
+    }),
+  ];
+  await installWebSocketMock(page);
+  await mockBackend(page, annotations);
+
+  await page.goto(`${APP_BASE}/#/conversation/${SESSION_ID}`);
+
+  await expect(page.getByLabel("继续输入")).toBeVisible();
+  await page.getByLabel("展开右侧栏").click();
+  await page.getByRole("button", { name: "文件" }).click();
+  await page.getByRole("button", { name: "选择文件 README.md" }).click();
+  await page.getByRole("button", { name: /文件批注/ }).click();
+
+  const panel = page.getByRole("complementary", { name: "文件批注" });
+  const legacyRow = panel.locator("article").filter({ hasText: "Legacy selection E2E note" });
+  await expect(legacyRow).toContainText("无法定位");
+  await legacyRow.getByRole("button", { name: "定位批注片段" }).click();
+  await expect(page.getByRole("alert")).toContainText("当前视图无法定位该批注片段。");
+  await expect(page.getByTestId("file-source-viewer")).toHaveCount(0);
+
+  if (process.env.E2E_ANNOTATION_INVALID_EVIDENCE_PATH) {
+    await page.screenshot({ path: process.env.E2E_ANNOTATION_INVALID_EVIDENCE_PATH, fullPage: true });
   }
 });
 
@@ -273,13 +393,35 @@ async function mockBackend(page: Page, annotations: E2EAnnotation[] = []) {
   await page.route(`${API_BASE}/api/sessions/${SESSION_ID}/workspace/read?path=README.md`, (route) =>
     fulfillJson(route, {
       path: "README.md",
-      content: "# E2E File\n\nThis file is rendered from Playwright.",
+      content: README_CONTENT,
       encoding: "utf-8",
     }),
   );
   await page.route(`${API_BASE}/api/sessions/${SESSION_ID}/workspace/annotations**`, async (route) =>
     fulfillAnnotationRoute(route, annotations),
   );
+}
+
+function makeAnnotation(overrides: Partial<E2EAnnotation> & { id: string; comment: string }): E2EAnnotation {
+  const now = "2026-06-24T00:00:00Z";
+  return {
+    id: overrides.id,
+    scope_type: "session",
+    scope_id: SESSION_ID,
+    workspace_id: "ws-e2e",
+    path: overrides.path ?? "README.md",
+    anchor_type: overrides.anchor_type ?? "file",
+    comment: overrides.comment,
+    selected_text: overrides.selected_text ?? null,
+    line_start: overrides.line_start ?? null,
+    line_end: overrides.line_end ?? null,
+    column_start: overrides.column_start ?? null,
+    column_end: overrides.column_end ?? null,
+    content_hash: overrides.content_hash ?? null,
+    anchor_json: overrides.anchor_json ?? null,
+    created_at: overrides.created_at ?? now,
+    updated_at: overrides.updated_at ?? now,
+  };
 }
 
 interface E2EAnnotation {
@@ -296,6 +438,7 @@ interface E2EAnnotation {
   column_start?: number | null;
   column_end?: number | null;
   content_hash?: string | null;
+  anchor_json?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -327,6 +470,7 @@ async function fulfillAnnotationRoute(route: Route, annotations: E2EAnnotation[]
       column_start: payload.column_start ?? null,
       column_end: payload.column_end ?? null,
       content_hash: payload.content_hash ?? null,
+      anchor_json: payload.anchor_json ?? null,
       created_at: now,
       updated_at: now,
     };
@@ -380,6 +524,66 @@ async function selectVisibleText(page: Page, text: string) {
     }
     throw new Error(`Text not found: ${needle}`);
   }, text);
+}
+
+async function selectVisibleTextRange(page: Page, startNeedle: string, endNeedle: string) {
+  await page.evaluate(
+    ({ startNeedle: startValue, endNeedle: endValue }) => {
+      const startMatch = findTextNode(startValue);
+      const endMatch = findTextNode(endValue);
+      if (!startMatch || !endMatch) {
+        throw new Error(`Text range not found: ${startValue} -> ${endValue}`);
+      }
+      const range = document.createRange();
+      range.setStart(startMatch.node, startMatch.offset);
+      range.setEnd(endMatch.node, endMatch.offset + endValue.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+      function findTextNode(needle: string): { node: Text; offset: number } | null {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let current = walker.nextNode();
+        while (current) {
+          const value = current.textContent ?? "";
+          const offset = value.indexOf(needle);
+          if (offset >= 0) {
+            return { node: current as Text, offset };
+          }
+          current = walker.nextNode();
+        }
+        return null;
+      }
+    },
+    { startNeedle, endNeedle },
+  );
+}
+
+async function dragSelectSourceLine(page: Page, text: string) {
+  const points = await page.evaluate((needle) => {
+    const sourceViewer = document.querySelector<HTMLElement>("[data-testid='file-source-viewer']");
+    if (!sourceViewer) {
+      throw new Error("Source viewer not found");
+    }
+    const line = Array.from(sourceViewer.querySelectorAll<HTMLElement>(".cm-line")).find((element) =>
+      (element.textContent ?? "").includes(needle),
+    );
+    if (!line) {
+      throw new Error(`Source line not found: ${needle}`);
+    }
+    const rect = line.getBoundingClientRect();
+    return {
+      startX: rect.left + 4,
+      startY: rect.top + rect.height / 2,
+      endX: rect.right - 4,
+      endY: rect.top + rect.height / 2,
+    };
+  }, text);
+  await page.mouse.move(points.startX, points.startY);
+  await page.mouse.down();
+  await page.mouse.move(points.endX, points.endY, { steps: 12 });
+  await page.mouse.up();
 }
 
 function workspaceSession() {

@@ -139,6 +139,7 @@ describe("RuntimeWsClient", () => {
     const onError = vi.fn();
     const onStatus = vi.fn();
     const client = new RuntimeWsClient({
+      baseUrl: "ws://127.0.0.1:8765",
       WebSocketImpl: FakeWebSocket,
       onEvent: vi.fn(),
       onStatus,

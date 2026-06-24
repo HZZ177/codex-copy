@@ -26,6 +26,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "externalBin": ["binaries/agent-server"]
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/agent-server"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
   }
 }

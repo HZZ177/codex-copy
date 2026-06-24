@@ -9,6 +9,7 @@ import type {
   WorkspaceSearchResult,
 } from "@/runtime";
 import { useWorkspaceFileSearch } from "@/renderer/hooks/useWorkspaceFileSearch";
+import { WORKSPACE_FILE_SEARCH_BUDGET_HINT } from "@/renderer/utils/workspaceFileSearchBudget";
 
 import { useMaterialEntryIcon } from "./materialIconTheme";
 import styles from "./WorkspacePanel.module.css";
@@ -108,6 +109,15 @@ export function WorkspacePanel({
   const rootError = errorsByPath[""];
   const effectiveSelectedPath = controlledSelectedPath ?? selectedPath;
   const selectedLabel = effectiveSelectedPath ?? "未选择文件";
+  const initialLoading = !searchActive && rootLoading && !rootEntries.length;
+  const searchLoading = searchActive && searchState.loading;
+  const panelError = searchActive ? searchState.error : rootError;
+  const emptyMessage =
+    !searchActive && !rootLoading && !rootError && !rootEntries.length
+      ? "工作区为空"
+      : searchActive && !searchLoading && !searchState.error && !searchState.results.length
+        ? "没有匹配的文件"
+        : null;
 
   async function loadDirectory(path: string, force = false) {
     if (!force && entriesByPath[path]) {
@@ -188,50 +198,82 @@ export function WorkspacePanel({
             onChange={(event) => setFilterQuery(event.target.value)}
           />
         </label>
+        <p className={styles.searchHint}>{WORKSPACE_FILE_SEARCH_BUDGET_HINT}</p>
       </div>
 
-      {rootError ? <div className={styles.error} role="alert">{rootError}</div> : null}
-      {!searchActive && rootLoading && !rootEntries.length ? <p className={styles.muted}>正在读取工作区</p> : null}
-      {searchActive && searchState.loading ? <p className={styles.muted}>正在搜索工作区</p> : null}
-      {searchActive && searchState.error ? <div className={styles.error} role="alert">{searchState.error}</div> : null}
-
-      <div
-        className={styles.tree}
-        data-mode={searchActive ? "search" : "tree"}
-        role="tree"
-        aria-label={searchActive ? "工作区搜索结果" : "工作区目录"}
-      >
-        {searchActive
-          ? searchState.results.map((entry) => (
-              <SearchResultNode
-                entry={entry}
-                key={entry.path}
-                onOpenDirectory={(path) => void openSearchDirectory(path)}
-                onSelectFile={selectFile}
-                selectedPath={effectiveSelectedPath}
-              />
-            ))
-          : visibleRootEntries.map((entry) => (
-              <TreeNode
-                entriesByPath={entriesByPath}
-                entry={entry}
-                errorsByPath={errorsByPath}
-                expandedPaths={expandedPaths}
-                filterQuery={normalizedFilter}
-                key={entry.path}
-                loadingPaths={loadingPaths}
-                onSelectFile={selectFile}
-                onToggleDirectory={(path) => void toggleDirectory(path)}
-                selectedPath={effectiveSelectedPath}
-              />
-            ))}
+      <div className={styles.content}>
+        {initialLoading || searchLoading ? (
+          <WorkspacePanelLoading label={searchActive ? "正在搜索工作区" : "正在读取工作区"} />
+        ) : null}
+        {panelError ? <WorkspacePanelState message={panelError} role="alert" tone="danger" /> : null}
+        {!initialLoading && !searchLoading && !panelError ? (
+          <div
+            className={styles.tree}
+            data-mode={searchActive ? "search" : "tree"}
+            role="tree"
+            aria-label={searchActive ? "工作区搜索结果" : "工作区目录"}
+          >
+            {searchActive
+              ? searchState.results.map((entry) => (
+                  <SearchResultNode
+                    entry={entry}
+                    key={entry.path}
+                    onOpenDirectory={(path) => void openSearchDirectory(path)}
+                    onSelectFile={selectFile}
+                    selectedPath={effectiveSelectedPath}
+                  />
+                ))
+              : visibleRootEntries.map((entry) => (
+                  <TreeNode
+                    entriesByPath={entriesByPath}
+                    entry={entry}
+                    errorsByPath={errorsByPath}
+                    expandedPaths={expandedPaths}
+                    filterQuery={normalizedFilter}
+                    key={entry.path}
+                    loadingPaths={loadingPaths}
+                    onSelectFile={selectFile}
+                    onToggleDirectory={(path) => void toggleDirectory(path)}
+                    selectedPath={effectiveSelectedPath}
+                  />
+                ))}
+          </div>
+        ) : null}
+        {!initialLoading && !searchLoading && !panelError && emptyMessage ? (
+          <WorkspacePanelState message={emptyMessage} />
+        ) : null}
       </div>
-
-      {!searchActive && !rootLoading && !rootError && !rootEntries.length ? <p className={styles.muted}>工作区为空</p> : null}
-      {searchActive && !searchState.loading && !searchState.error && !searchState.results.length ? (
-        <p className={styles.muted}>没有匹配的文件</p>
-      ) : null}
     </section>
+  );
+}
+
+function WorkspacePanelLoading({ label }: { label: string }) {
+  return (
+    <div className={styles.loadingState} role="status" aria-label={label}>
+      <div className={styles.skeletonStack} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function WorkspacePanelState({
+  message,
+  role,
+  tone = "muted",
+}: {
+  message: string;
+  role?: "alert" | "status";
+  tone?: "danger" | "muted";
+}) {
+  return (
+    <div className={styles.centerState} data-tone={tone} role={role}>
+      {message}
+    </div>
   );
 }
 

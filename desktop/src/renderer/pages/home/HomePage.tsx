@@ -7,6 +7,7 @@ import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/component
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
 import type { AgentContextItem, Workspace } from "@/types/protocol";
 import styles from "./HomePage.module.css";
@@ -35,7 +36,10 @@ export function HomePage({
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>({ type: "chat" });
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const selectionTouchedRef = useRef(false);
-  const modelSelection = useRuntimeModelSelection(runtime);
+  const runtimeConnection = useOptionalRuntimeConnection();
+  const backendReady = runtimeConnection?.ready ?? true;
+  const backendError = runtimeConnection?.status === "error";
+  const modelSelection = useRuntimeModelSelection(runtime, "", { enabled: backendReady });
   const notifications = useNotifications();
   const previewContext = useOptionalPreview();
   const setPreviewHostContext = previewContext?.setPreviewHostContext;
@@ -64,6 +68,11 @@ export function HomePage({
   );
 
   useEffect(() => {
+    if (!backendReady) {
+      setWorkspaceLoading(false);
+      setWorkspaces([]);
+      return;
+    }
     let active = true;
     setWorkspaceLoading(true);
     void runtime.workspaces
@@ -93,10 +102,19 @@ export function HomePage({
     return () => {
       active = false;
     };
-  }, [initialWorkspaceId, notifications, runtime]);
+  }, [backendReady, initialWorkspaceId, notifications, runtime]);
 
   const canSubmit =
-    draft.trim().length > 0 && !submitting && !workspaceLoading && modelSelection.modelLoadState !== "loading";
+    backendReady &&
+    draft.trim().length > 0 &&
+    !submitting &&
+    !workspaceLoading &&
+    modelSelection.modelLoadState !== "loading";
+  const runtimeStatusText = backendReady
+    ? ""
+    : backendError
+      ? "本地服务连接失败，请重试"
+      : "正在启动本地服务";
   const title =
     workspaceSelection.type === "workspace"
       ? `我们应该在 ${workspaceSelection.workspace.name} 中构建什么？`
@@ -147,6 +165,10 @@ export function HomePage({
 
     setSubmitting(true);
     try {
+      if (!backendReady) {
+        notifications.warning("本地服务尚未就绪");
+        return false;
+      }
       const model = modelSelection.selectedModel.trim();
       if (!model) {
         notifications.error("请先在设置中选择模型");
@@ -203,8 +225,8 @@ export function HomePage({
           ariaLabel="新对话输入"
           inputLabel="输入需求"
           placeholder="随心输入"
-          statusText={submitting ? "正在创建对话" : ""}
-          disabled={submitting}
+          statusText={submitting ? "正在创建对话" : runtimeStatusText}
+          disabled={submitting || !backendReady}
           variant="codex"
           allowFileSelection={workspaceSelection.type === "workspace"}
           onListWorkspaceDirectory={listWorkspaceDirectory}
@@ -213,8 +235,8 @@ export function HomePage({
             <WorkspaceSelector
               value={workspaceSelection}
               workspaces={workspaces}
-              loading={workspaceLoading}
-              disabled={submitting}
+              loading={workspaceLoading || !backendReady}
+              disabled={submitting || !backendReady}
               onSelectChat={() => {
                 selectionTouchedRef.current = true;
                 setWorkspaceSelection({ type: "chat" });
@@ -238,7 +260,7 @@ export function HomePage({
               modelOptions={modelSelection.modelOptions}
               modelLoadState={modelSelection.modelLoadState}
               modelError={modelSelection.modelError}
-              disabled={submitting}
+              disabled={submitting || !backendReady}
               onModelChange={modelSelection.setSelectedModel}
               onOpenModelSettings={onOpenModelSettings}
             />

@@ -20,11 +20,13 @@ export function useTextSelection(
   const excludeSelector = typeof enabledOrOptions === "boolean" ? undefined : enabledOrOptions.excludeSelector;
   const [selectedText, setSelectedText] = useState("");
   const [selectionPosition, setSelectionPosition] = useState<SelectionPosition | null>(null);
+  const [selectionRange, setSelectionRange] = useState<Range | null>(null);
   const deferredUpdateRef = useRef<number | null>(null);
 
   const clearSelection = useCallback(() => {
     setSelectedText("");
     setSelectionPosition(null);
+    setSelectionRange(null);
     window.getSelection()?.removeAllRanges();
   }, []);
 
@@ -36,6 +38,7 @@ export function useTextSelection(
     if (!container || !selection || selection.rangeCount === 0 || !text) {
       setSelectedText("");
       setSelectionPosition(null);
+      setSelectionRange(null);
       return;
     }
 
@@ -46,6 +49,7 @@ export function useTextSelection(
     ) {
       setSelectedText("");
       setSelectionPosition(null);
+      setSelectionRange(null);
       return;
     }
 
@@ -59,18 +63,21 @@ export function useTextSelection(
       width: rect.width,
       height: rect.height,
     });
+    setSelectionRange(typeof range.cloneRange === "function" ? range.cloneRange() : null);
   }, [containerRef, excludeSelector]);
 
   useEffect(() => {
     if (!enabled) {
       setSelectedText("");
       setSelectionPosition(null);
+      setSelectionRange(null);
       return;
     }
 
     const hideSelectionToolbar = () => {
       setSelectedText("");
       setSelectionPosition(null);
+      setSelectionRange(null);
     };
 
     const deferredUpdate = () => {
@@ -101,7 +108,7 @@ export function useTextSelection(
     };
   }, [enabled, updateSelection]);
 
-  return { selectedText, selectionPosition, clearSelection };
+  return { selectedText, selectionPosition, selectionRange, clearSelection };
 }
 
 function rangeTouchesExcludedElement(

@@ -38,16 +38,6 @@ struct AgentConnection {
 }
 
 #[tauri::command]
-fn dev_agent_connection() -> AgentConnection {
-    AgentConnection {
-        host: "127.0.0.1".to_string(),
-        port: 8765,
-        base_url: "http://127.0.0.1:8765".to_string(),
-        data_dir: "".to_string(),
-    }
-}
-
-#[tauri::command]
 fn allocate_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     listener
@@ -57,7 +47,13 @@ fn allocate_port() -> Result<u16, String> {
 }
 
 #[tauri::command]
-fn wait_for_health(host: String, port: u16, timeout_ms: u64) -> Result<(), String> {
+async fn wait_for_health(host: String, port: u16, timeout_ms: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || wait_for_health_blocking(host, port, timeout_ms))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn wait_for_health_blocking(host: String, port: u16, timeout_ms: u64) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     while Instant::now() < deadline {
         if health_probe(&host, port).is_ok() {
@@ -142,12 +138,6 @@ fn start_sidecar(
     command.creation_flags(CREATE_NO_WINDOW);
     let child = command.spawn().map_err(|err| err.to_string())?;
     *state.child.lock().map_err(|err| err.to_string())? = Some(child);
-    if let Err(err) = wait_for_health("127.0.0.1".to_string(), port, 10_000) {
-        if let Some(mut child) = state.child.lock().map_err(|err| err.to_string())?.take() {
-            kill_child(&mut child);
-        }
-        return Err(err);
-    }
     Ok(AgentConnection {
         host: "127.0.0.1".to_string(),
         port,
@@ -172,7 +162,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             allocate_port,
-            dev_agent_connection,
             start_sidecar,
             stop_sidecar,
             wait_for_health

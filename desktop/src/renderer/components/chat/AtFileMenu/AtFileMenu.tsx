@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 
 import type { WorkspaceSearchResult } from "@/runtime";
 import { useMaterialEntryIcon } from "@/renderer/components/workspace/materialIconTheme";
+import { WORKSPACE_FILE_SEARCH_BUDGET_HINT } from "@/renderer/utils/workspaceFileSearchBudget";
 
 import styles from "./AtFileMenu.module.css";
 
@@ -67,6 +68,8 @@ export function AtFileMenu({
         )}
         <span>{headerLabel}</span>
       </div>
+
+      <div className={styles.budgetHint}>{WORKSPACE_FILE_SEARCH_BUDGET_HINT}</div>
 
       <div ref={bodyRef} className={styles.body}>
         {loading ? <div className={styles.empty}>{loadingText}</div> : null}

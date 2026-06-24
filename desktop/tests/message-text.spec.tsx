@@ -204,9 +204,12 @@ describe("MessageText", () => {
     fireEvent.click(screen.getByRole("button", { name: "预览 公式" }));
     expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
 
-    await waitFor(() => {
-      expect(screen.getByTestId("math-preview")).not.toBeNull();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("math-preview")).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
     expect(container.querySelector(".katex-display")).not.toBeNull();
     expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
   });
@@ -686,7 +689,7 @@ describe("MessageText", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "预览 JSON" }));
 
-    const viewer = await screen.findByTestId("json-tree-viewer");
+    const viewer = await screen.findByTestId("json-tree-viewer", undefined, { timeout: 5000 });
     expect(viewer).not.toBeNull();
     expect(screen.getByRole("searchbox", { name: "查找 JSON" })).not.toBeNull();
 

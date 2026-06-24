@@ -154,6 +154,7 @@ class WorkspaceFileAnnotationRecord:
     column_start: int | None = None
     column_end: int | None = None
     content_hash: str | None = None
+    anchor_json: dict[str, Any] | None = None
     is_deleted: bool = False
 
 
@@ -842,6 +843,7 @@ class WorkspaceFileAnnotationsRepository:
         column_start: int | None = None,
         column_end: int | None = None,
         content_hash: str | None = None,
+        anchor_json: dict[str, Any] | None = None,
         annotation_id: str | None = None,
     ) -> WorkspaceFileAnnotationRecord:
         values = self._validate_values(
@@ -856,6 +858,7 @@ class WorkspaceFileAnnotationsRepository:
             column_start=column_start,
             column_end=column_end,
             content_hash=content_hash,
+            anchor_json=anchor_json,
         )
         resolved_id = annotation_id or new_id()
         now = to_iso_z(utc_now())
@@ -865,8 +868,8 @@ class WorkspaceFileAnnotationsRepository:
                 insert into workspace_file_annotations (
                   id, scope_type, scope_id, workspace_id, path, anchor_type, comment,
                   selected_text, line_start, line_end, column_start, column_end,
-                  content_hash, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  content_hash, anchor_json, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     resolved_id,
@@ -882,6 +885,7 @@ class WorkspaceFileAnnotationsRepository:
                     values["column_start"],
                     values["column_end"],
                     values["content_hash"],
+                    _json_dumps(values["anchor_json"]) if values["anchor_json"] is not None else None,
                     now,
                     now,
                 ),
@@ -952,6 +956,7 @@ class WorkspaceFileAnnotationsRepository:
         column_start: int | None = None,
         column_end: int | None = None,
         content_hash: str | None = None,
+        anchor_json: dict[str, Any] | None = None,
     ) -> WorkspaceFileAnnotationRecord | None:
         values = self._validate_values(
             scope_type=scope_type,
@@ -965,6 +970,7 @@ class WorkspaceFileAnnotationsRepository:
             column_start=column_start,
             column_end=column_end,
             content_hash=content_hash,
+            anchor_json=anchor_json,
         )
         now = to_iso_z(utc_now())
         with self.db.transaction() as conn:
@@ -980,6 +986,7 @@ class WorkspaceFileAnnotationsRepository:
                   column_start = ?,
                   column_end = ?,
                   content_hash = ?,
+                  anchor_json = ?,
                   updated_at = ?
                 where id = ?
                   and scope_type = ?
@@ -995,6 +1002,7 @@ class WorkspaceFileAnnotationsRepository:
                     values["column_start"],
                     values["column_end"],
                     values["content_hash"],
+                    _json_dumps(values["anchor_json"]) if values["anchor_json"] is not None else None,
                     now,
                     annotation_id,
                     values["scope_type"],
@@ -1046,6 +1054,7 @@ class WorkspaceFileAnnotationsRepository:
         column_start: int | None,
         column_end: int | None,
         content_hash: str | None,
+        anchor_json: dict[str, Any] | None,
     ) -> dict[str, Any]:
         normalized_scope_type, normalized_scope_id = cls._validate_scope(scope_type, scope_id)
         normalized_path = cls._normalize_path(path)
@@ -1066,6 +1075,31 @@ class WorkspaceFileAnnotationsRepository:
             line_end = None
             column_start = None
             column_end = None
+            anchor_json = None
+
+        normalized_anchor_json = cls._validate_anchor_json(anchor_json)
+        if normalized_anchor_json is not None:
+            if normalized_anchor_type != "selection":
+                raise ValueError("Only selection annotations can include anchor_json")
+            anchor_selected_text = normalized_anchor_json["selectedText"]
+            if resolved_selected_text and resolved_selected_text != anchor_selected_text:
+                raise ValueError("Annotation selected_text must match anchor_json.selectedText")
+            resolved_selected_text = anchor_selected_text
+            line_start = cls._same_or_default(line_start, normalized_anchor_json["lineStart"], "line_start")
+            line_end = cls._same_or_default(line_end, normalized_anchor_json["lineEnd"], "line_end")
+            column_start = cls._same_or_default(
+                column_start,
+                normalized_anchor_json["columnStart"],
+                "column_start",
+            )
+            column_end = cls._same_or_default(column_end, normalized_anchor_json["columnEnd"], "column_end")
+            anchor_content_hash = normalized_anchor_json["contentHash"]
+            if content_hash and str(content_hash).strip() != anchor_content_hash:
+                raise ValueError("Annotation content_hash must match anchor_json.contentHash")
+            content_hash = anchor_content_hash
+
+        if normalized_anchor_type == "selection" and not (resolved_selected_text or "").strip():
+            raise ValueError("Selection annotation requires selected_text")
 
         cls._validate_range(
             line_start=line_start,
@@ -1086,6 +1120,7 @@ class WorkspaceFileAnnotationsRepository:
             "column_start": column_start,
             "column_end": column_end,
             "content_hash": str(content_hash).strip() if content_hash else None,
+            "anchor_json": normalized_anchor_json,
         }
 
     @classmethod
@@ -1133,6 +1168,96 @@ class WorkspaceFileAnnotationsRepository:
             if line_start == line_end and column_end < column_start:
                 raise ValueError("Annotation column range is invalid")
 
+    @classmethod
+    def _validate_anchor_json(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("Annotation anchor_json must be an object")
+
+        required = {
+            "version",
+            "kind",
+            "sourceStart",
+            "sourceEnd",
+            "selectedText",
+            "sourceText",
+            "contentHash",
+            "lineStart",
+            "lineEnd",
+            "columnStart",
+            "columnEnd",
+            "createdInView",
+        }
+        missing = sorted(required - set(value))
+        if missing:
+            raise ValueError(f"Annotation anchor_json missing fields: {', '.join(missing)}")
+        if value["version"] != 2 or value["kind"] != "source-range":
+            raise ValueError("Annotation anchor_json version or kind is unsupported")
+        if value["createdInView"] not in {"preview", "source"}:
+            raise ValueError("Annotation anchor_json.createdInView is invalid")
+
+        source_start = cls._positive_or_zero_int(value["sourceStart"], "sourceStart")
+        source_end = cls._positive_or_zero_int(value["sourceEnd"], "sourceEnd")
+        if source_end <= source_start:
+            raise ValueError("Annotation anchor_json source range is invalid")
+
+        line_start = cls._positive_int(value["lineStart"], "lineStart")
+        line_end = cls._positive_int(value["lineEnd"], "lineEnd")
+        column_start = cls._positive_int(value["columnStart"], "columnStart")
+        column_end = cls._positive_int(value["columnEnd"], "columnEnd")
+        cls._validate_range(
+            line_start=line_start,
+            line_end=line_end,
+            column_start=column_start,
+            column_end=column_end,
+        )
+
+        selected_text = str(value["selectedText"])
+        source_text = str(value["sourceText"])
+        content_hash = str(value["contentHash"]).strip()
+        if not selected_text.strip():
+            raise ValueError("Annotation anchor_json.selectedText cannot be empty")
+        if not source_text:
+            raise ValueError("Annotation anchor_json.sourceText cannot be empty")
+        if len(source_text) != source_end - source_start:
+            raise ValueError("Annotation anchor_json.sourceText length must match source range")
+        if not content_hash:
+            raise ValueError("Annotation anchor_json.contentHash cannot be empty")
+
+        return {
+            "version": 2,
+            "kind": "source-range",
+            "sourceStart": source_start,
+            "sourceEnd": source_end,
+            "selectedText": selected_text,
+            "sourceText": source_text,
+            "contentHash": content_hash,
+            "lineStart": line_start,
+            "lineEnd": line_end,
+            "columnStart": column_start,
+            "columnEnd": column_end,
+            "createdInView": value["createdInView"],
+        }
+
+    @staticmethod
+    def _positive_or_zero_int(value: Any, field_name: str) -> int:
+        if type(value) is not int or value < 0:
+            raise ValueError(f"Annotation anchor_json.{field_name} must be a non-negative integer")
+        return value
+
+    @staticmethod
+    def _positive_int(value: Any, field_name: str) -> int:
+        if type(value) is not int or value < 1:
+            raise ValueError(f"Annotation anchor_json.{field_name} must be a positive integer")
+        return value
+
+    @staticmethod
+    def _same_or_default(value: int | None, expected: int, field_name: str) -> int:
+        if value is not None and value != expected:
+            raise ValueError(f"Annotation {field_name} must match anchor_json")
+        return expected
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> WorkspaceFileAnnotationRecord:
         return WorkspaceFileAnnotationRecord(
@@ -1149,6 +1274,7 @@ class WorkspaceFileAnnotationsRepository:
             column_start=row["column_start"],
             column_end=row["column_end"],
             content_hash=row["content_hash"],
+            anchor_json=_json_loads(row["anchor_json"], None),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_deleted=bool(row["is_deleted"]),

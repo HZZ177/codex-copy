@@ -71,6 +71,8 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
             fileType: "file",
             line_start: quote.file.lineStart ?? null,
             line_end: quote.file.lineEnd ?? null,
+            source_start: quote.file.sourceStart ?? null,
+            source_end: quote.file.sourceEnd ?? null,
           },
         },
       ];
@@ -143,8 +145,10 @@ function injectionContent(item: AgentContextItem): string {
   }
   if (item.type === "source_quote") {
     const lineRange = metadataLineRange(item.metadata);
-    const location = lineRange ? `位置：${lineRange}\n` : "";
-    return `用户引用了工作区文件中的一个自洽片段。\n文件：${item.path || item.label}\n${location}引用内容：\n${item.content}\n\n请把这条消息视为一个完整的文件来源片段，不要和其他文件或其他引用片段混淆。如需更多上下文，请使用文件工具读取该文件。`;
+    const sourceRange = metadataSourceRange(item.metadata);
+    const lineLocation = lineRange ? `行位置：${lineRange}\n` : "";
+    const sourceLocation = sourceRange ? `源码范围：${sourceRange}\n` : "";
+    return `用户引用了工作区文件中的一个自洽片段。\n文件：${item.path || item.label}\n${lineLocation}${sourceLocation}引用内容：\n${item.content}\n\n请把这条消息视为一个完整的文件来源片段，不要和其他文件或其他引用片段混淆。如需更多上下文，请使用文件工具读取该文件。`;
   }
   if (item.type === "quote") {
     return `用户添加了以下引用片段作为上下文：\n${item.content}`;
@@ -162,6 +166,15 @@ function metadataLineRange(metadata: Record<string, unknown> | undefined): strin
   const start = numberValue(metadata?.line_start);
   const end = numberValue(metadata?.line_end);
   return sourceQuoteLineRange(start, end);
+}
+
+function metadataSourceRange(metadata: Record<string, unknown> | undefined): string | null {
+  const start = numberValue(metadata?.source_start);
+  const end = numberValue(metadata?.source_end);
+  if (start === null || end === null || end <= start) {
+    return null;
+  }
+  return `${start}-${end}`;
 }
 
 function sourceQuoteLineRange(start?: number | null, end?: number | null): string | null {

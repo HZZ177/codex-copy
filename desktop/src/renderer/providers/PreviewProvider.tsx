@@ -23,6 +23,8 @@ export interface PreviewQuoteSelectionRequest {
   selectedText: string;
   lineStart?: number | null;
   lineEnd?: number | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
 }
 
 export interface PreviewAnnotationChatRequest {
@@ -31,6 +33,8 @@ export interface PreviewAnnotationChatRequest {
   selectedText?: string | null;
   lineStart?: number | null;
   lineEnd?: number | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
 }
 
 export interface PreviewEntry {

@@ -148,7 +148,7 @@ describe("style foundation", () => {
     });
     expect(commandBlock).not.toContain("max-height: 280px");
     expect(fileChangeBlock).not.toContain("max-height: 320px");
-    expect(messageGroup).toContain("border-left");
+    expect(messageGroup).toContain("border: 0");
     [messageGroup, commandBlock, toolBlock].forEach((css) => {
       expect(css).not.toContain("background: var(--inline-block-bg)");
       expect(css).toContain("animation:");

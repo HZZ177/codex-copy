@@ -3,7 +3,7 @@ import type { RuntimeEvent } from "@/types/protocol";
 export type EventConnectionStatus = "idle" | "connecting" | "open" | "closed" | "error";
 
 export interface RuntimeEventClientOptions {
-  baseUrl?: string;
+  baseUrl: string;
   WebSocketImpl?: typeof WebSocket;
   onStatus?: (status: EventConnectionStatus) => void;
   onEvent: (event: RuntimeEvent) => void;
@@ -16,7 +16,7 @@ export class RuntimeEventClient {
   private readonly baseUrl: string;
 
   constructor(private readonly options: RuntimeEventClientOptions) {
-    this.baseUrl = (options.baseUrl ?? "ws://127.0.0.1:8765").replace(/\/$/, "");
+    this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
   }
 
@@ -46,4 +46,12 @@ export class RuntimeEventClient {
     }
     this.socket = null;
   }
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  const url = baseUrl.trim().replace(/\/$/, "");
+  if (!url) {
+    throw new Error("Keydex 事件流地址未配置");
+  }
+  return url;
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider
 import { HomePage } from "@/renderer/pages/home";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
+import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import type { AgentSession, ModelInfo, Workspace } from "@/types/protocol";
 
@@ -154,7 +155,7 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByLabelText("展开右侧栏"));
     fireEvent.click(await screen.findByRole("button", { name: "文件" }));
 
-    expect(await screen.findByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    expect(await screen.findByRole("tree", { name: "工作区目录" }, { timeout: 5000 })).not.toBeNull();
     await waitFor(() => {
       expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ workspaceId: "ws-1" }, "");
     });
@@ -352,6 +353,56 @@ describe("HomePage", () => {
     expect(screen.getByLabelText("选择工作区").textContent).toContain("picked-project");
   });
 
+  it("renders the new chat surface while backend-dependent controls wait for runtime readiness", async () => {
+    const deferred = createDeferred<{
+      host: string;
+      port: number;
+      base_url: string;
+      data_dir: string;
+    }>();
+    const runtime = fakeRuntime({ model: "qwen-coder" });
+
+    render(
+      <RuntimeConnectionProvider
+        runtime={runtime}
+        starter={() => deferred.promise}
+        isDesktopRuntime={() => true}
+      >
+        <HomePage
+          runtime={runtime}
+          onNavigateToConversation={vi.fn()}
+          onOpenModelSettings={vi.fn()}
+        />
+      </RuntimeConnectionProvider>,
+    );
+
+    expect(screen.getByTestId("home-page")).not.toBeNull();
+    expect(screen.getByText("正在启动本地服务")).not.toBeNull();
+    expect(screen.getByLabelText("输入需求").getAttribute("aria-disabled")).toBe("true");
+    expect((screen.getByRole("button", { name: "选择工作区" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("选择模型") as HTMLButtonElement).disabled).toBe(true);
+    expect(runtime.workspaces.list).not.toHaveBeenCalled();
+    expect(runtime.settings.getSettings).not.toHaveBeenCalled();
+    expect(runtime.models.listModels).not.toHaveBeenCalled();
+
+    await act(async () => {
+      deferred.resolve({
+        host: "127.0.0.1",
+        port: 9234,
+        base_url: "http://127.0.0.1:9234",
+        data_dir: "D:/Keydex",
+      });
+      await deferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("选择模型").textContent).toContain("qwen-coder");
+    });
+    expect(screen.queryByText("正在启动本地服务")).toBeNull();
+    expect((screen.getByRole("button", { name: "选择工作区" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(runtime.workspaces.list).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the folder picker button visible and falls back to manual path input when unsupported", async () => {
     const runtime = fakeRuntime({ model: "qwen-coder", workspaces: [] });
 
@@ -472,6 +523,16 @@ function renderHomeInLayout(ui: ReactElement) {
       </LayoutStateProvider>
     </ThemeProvider>,
   );
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function fakeRuntime({

@@ -69,6 +69,8 @@ describe("message injection composer helpers", () => {
         name: "README.md",
         lineStart: 3,
         lineEnd: 4,
+        sourceStart: 18,
+        sourceEnd: 31,
       },
     });
     if (!quote) {
@@ -89,6 +91,8 @@ describe("message injection composer helpers", () => {
         kind: "source_quote",
         line_start: 3,
         line_end: 4,
+        source_start: 18,
+        source_end: 31,
       },
     });
     expect(prepared.runtimeParams?.message_injection).toHaveLength(1);
@@ -100,10 +104,13 @@ describe("message injection composer helpers", () => {
         path: "README.md",
         line_start: 3,
         line_end: 4,
+        source_start: 18,
+        source_end: 31,
       },
     });
     expect(prepared.runtimeParams?.message_injection[0]?.content).toContain("README.md");
     expect(prepared.runtimeParams?.message_injection[0]?.content).toContain("L3-L4");
+    expect(prepared.runtimeParams?.message_injection[0]?.content).toContain("18-31");
     expect(prepared.runtimeParams?.message_injection[0]?.content).toContain("selected text");
     expect(prepared.runtimeParams?.message_injection[0]?.content).not.toContain("comment stays visible");
   });

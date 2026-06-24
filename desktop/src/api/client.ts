@@ -37,15 +37,18 @@ export class ApiClient {
   private readonly fetcher: typeof fetch;
 
   constructor(options: ApiClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8765").replace(/\/$/, "");
+    this.baseUrl = options.baseUrl === undefined ? "" : normalizeBaseUrl(options.baseUrl);
     this.fetcher = options.fetcher ?? fetch.bind(globalThis);
   }
 
   setBaseUrl(baseUrl: string): void {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
   getBaseUrl(): string {
+    if (!this.baseUrl) {
+      throw new Error("Keydex 后端地址未配置");
+    }
     return this.baseUrl;
   }
 
@@ -123,7 +126,7 @@ export class ApiClient {
   }
 
   private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-    const response = await this.fetcher(`${this.baseUrl}${path}`, {
+    const response = await this.fetcher(`${this.getBaseUrl()}${path}`, {
       method: init.method ?? "GET",
       headers: init.body === undefined ? undefined : { "Content-Type": "application/json" },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -134,6 +137,14 @@ export class ApiClient {
     }
     return (await response.json()) as T;
   }
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  const url = baseUrl.trim().replace(/\/$/, "");
+  if (!url) {
+    throw new Error("Keydex 后端地址未配置");
+  }
+  return url;
 }
 
 function formatApiError(status: number, payload: unknown): string {

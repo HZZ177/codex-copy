@@ -39,4 +39,15 @@ describe("DesktopPickerRuntime", () => {
     expect(runtime.isDirectoryPickerAvailable()).toBe(true);
     await expect(runtime.pickDirectory()).resolves.toBe("D:\\lazy-repo");
   });
+
+  it("reports a broken Tauri dialog API instead of silently doing nothing", async () => {
+    const runtime = createDesktopPickerRuntime({
+      getTauriGlobal: () => ({}),
+      isTauriRuntime: () => true,
+      importDialogApi: async () => null,
+    });
+
+    expect(runtime.isDirectoryPickerAvailable()).toBe(true);
+    await expect(runtime.pickDirectory()).rejects.toThrow("文件夹选择器不可用");
+  });
 });

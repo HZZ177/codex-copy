@@ -55,7 +55,7 @@ describe("SendBox file selection", () => {
     expect(form.getAttribute("data-dragging")).toBe("true");
     fireEvent.drop(form, { dataTransfer: { types: ["Files"], files: [file] } });
 
-    expect(screen.getByLabelText("已添加上下文").textContent).toContain("src/main.ts");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("main.ts");
     fireEvent.click(screen.getByRole("button", { name: "移除文件引用 src/main.ts" }));
     expect(screen.queryByLabelText("移除文件引用 src/main.ts")).toBeNull();
   });

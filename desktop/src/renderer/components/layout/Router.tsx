@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { lazy, Suspense, useCallback, type PropsWithChildren } from "react";
 
+import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
 
 import { Layout } from "./Layout";
@@ -28,16 +29,20 @@ const UsageStatsPage = lazy(() =>
   })),
 );
 
-export function AppRouter() {
+export interface AppRouterProps {
+  runtime?: RuntimeBridge;
+}
+
+export function AppRouter({ runtime = runtimeBridge }: AppRouterProps = {}) {
   return (
     <Suspense fallback={null}>
       <Routes>
         <Route path="/" element={<Navigate to="/guid" replace />} />
-        <Route path="/guid" element={<HomeRoute />} />
-        <Route path="/conversation/:threadId" element={<ConversationRoute />} />
+        <Route path="/guid" element={<HomeRoute runtime={runtime} />} />
+        <Route path="/conversation/:threadId" element={<ConversationRoute runtime={runtime} />} />
         <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
-        <Route path="/settings/model" element={<ModelSettingsRoute />} />
-        <Route path="/settings/usage" element={<UsageSettingsRoute />} />
+        <Route path="/settings/model" element={<ModelSettingsRoute runtime={runtime} />} />
+        <Route path="/settings/usage" element={<UsageSettingsRoute runtime={runtime} />} />
         <Route path="/settings/general" element={<Navigate to="/settings/model" replace />} />
         <Route path="*" element={<Navigate to="/guid" replace />} />
       </Routes>
@@ -83,7 +88,7 @@ function RoutedLayout({
   );
 }
 
-function HomeRoute() {
+function HomeRoute({ runtime }: { runtime: RuntimeBridge }) {
   const navigate = useNavigate();
   const location = useLocation();
   const initialWorkspaceId = new URLSearchParams(location.search).get("workspaceId") ?? undefined;
@@ -92,6 +97,7 @@ function HomeRoute() {
     <RoutedLayout title="新对话" contentMode="full" resetRightSidebarOnEnter>
       <HomePage
         key={initialWorkspaceId ?? "default"}
+        runtime={runtime}
         initialWorkspaceId={initialWorkspaceId}
         onNavigateToConversation={(threadId, initialModel, initialMessage, options) => {
           const quickSend = queueQuickChatSend({
@@ -111,7 +117,7 @@ function HomeRoute() {
   );
 }
 
-function ConversationRoute() {
+function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -133,6 +139,7 @@ function ConversationRoute() {
     <RoutedLayout title="" contentMode="full">
       <ConversationPage
         threadId={threadId ?? ""}
+        runtime={runtime}
         initialModel={initialModel}
         quickSendId={quickSendId}
         onQuickSendConsumed={clearQuickSend}
@@ -142,18 +149,18 @@ function ConversationRoute() {
   );
 }
 
-function ModelSettingsRoute() {
+function ModelSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
   return (
     <SettingsShell activeSection="model">
-      <ModelSettingsPage />
+      <ModelSettingsPage runtime={runtime} />
     </SettingsShell>
   );
 }
 
-function UsageSettingsRoute() {
+function UsageSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
   return (
     <SettingsShell activeSection="usage">
-      <UsageStatsPage />
+      <UsageStatsPage runtime={runtime} />
     </SettingsShell>
   );
 }

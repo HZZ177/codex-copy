@@ -206,7 +206,7 @@ describe("Layout", () => {
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
   });
 
-  it("renders preview entries as top-level closable right sidebar tabs", () => {
+  it("renders preview entries as top-level closable right sidebar tabs", async () => {
     renderLayoutWithPreview(
       <>
         <RightSidebarPreviewHarness />
@@ -223,13 +223,15 @@ describe("Layout", () => {
     expect(shell.dataset.rightSidebar).toBe("open");
     expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
     expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
-    expect((screen.getByTitle("HTML 文件预览") as HTMLIFrameElement).getAttribute("srcdoc")).toContain("HTML 窗口");
+    expect(((await screen.findByTitle("HTML 文件预览")) as HTMLIFrameElement).getAttribute("srcdoc")).toContain(
+      "HTML 窗口",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "打开 Markdown 窗口" }));
 
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "新建侧边栏页面" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "新建侧边栏页面" }));
@@ -246,12 +248,14 @@ describe("Layout", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "HTML 窗口" }));
 
     expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("aria-selected")).toBe("true");
-    expect((screen.getByTitle("HTML 文件预览") as HTMLIFrameElement).getAttribute("srcdoc")).toContain("HTML 窗口");
+    expect(((await screen.findByTitle("HTML 文件预览")) as HTMLIFrameElement).getAttribute("srcdoc")).toContain(
+      "HTML 窗口",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 HTML 窗口" }));
 

@@ -5,18 +5,31 @@ import { PreviewProvider } from "./PreviewProvider";
 import { ThemeProvider } from "./ThemeProvider";
 import { AgentSessionProvider } from "./AgentSessionProvider";
 import { NotificationProvider } from "./NotificationProvider";
+import { RuntimeConnectionProvider, type RuntimeConnectionProviderProps } from "./RuntimeConnectionProvider";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 
-export function AppProviders({ children }: PropsWithChildren) {
+export interface AppProvidersProps extends PropsWithChildren {
+  runtime?: RuntimeBridge;
+  runtimeConnection?: Omit<RuntimeConnectionProviderProps, "children" | "runtime">;
+}
+
+export function AppProviders({
+  children,
+  runtime = runtimeBridge,
+  runtimeConnection,
+}: AppProvidersProps) {
   return (
     <ThemeProvider>
       <NotificationProvider>
         <LayoutStateProvider>
-          <AgentSessionProvider>
-            <PreviewProvider>
-              <HashRouter>{children}</HashRouter>
-            </PreviewProvider>
-          </AgentSessionProvider>
+          <RuntimeConnectionProvider runtime={runtime} {...runtimeConnection}>
+            <AgentSessionProvider runtime={runtime}>
+              <PreviewProvider>
+                <HashRouter>{children}</HashRouter>
+              </PreviewProvider>
+            </AgentSessionProvider>
+          </RuntimeConnectionProvider>
         </LayoutStateProvider>
       </NotificationProvider>
     </ThemeProvider>
