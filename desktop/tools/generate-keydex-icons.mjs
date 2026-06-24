@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +14,22 @@ const appleTouchPath = resolve(root, "public/apple-touch-icon.png");
 
 const icoSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const faviconSizes = [16, 32, 48, 64];
-const smallIconSizes = new Set([16, 20, 24, 32, 40]);
+const forceGeneratedIcons = process.argv.includes("--force");
+
+if (existsSync(tauriIconPath) && !forceGeneratedIcons) {
+  await mkdir(dirname(faviconIcoPath), { recursive: true });
+  const manualIcon = await readFile(tauriIconPath);
+  const normalizedIcon = ensureIcoFirstLayer(manualIcon, 32);
+  if (normalizedIcon !== manualIcon) {
+    await writeFile(tauriIconPath, normalizedIcon);
+    console.log("Normalized manual Windows icon: moved the 32px layer to the first ICO entry.");
+  }
+  await writeFile(faviconIcoPath, normalizedIcon);
+  console.log(`Kept manual Windows icon: ${tauriIconPath}`);
+  console.log(`Synced web favicon: ${faviconIcoPath}`);
+  console.log("Pass --force to regenerate all icon assets from the built-in SVG.");
+  process.exit(0);
+}
 
 const pngBySize = new Map();
 
@@ -47,7 +62,6 @@ async function renderIconPng(browser, size) {
 }
 
 function iconMarkup(size) {
-  const svg = smallIconSizes.has(size) ? smallIconSvg(size) : largeIconSvg();
   return `<!doctype html>
 <html>
   <head>
@@ -71,35 +85,9 @@ function iconMarkup(size) {
     </style>
   </head>
   <body>
-    ${svg}
+    ${largeIconSvg()}
   </body>
 </html>`;
-}
-
-function smallIconSvg(size) {
-  const scale = size / 24;
-  const n = (value) => Math.round(value * scale);
-  const radius = Math.max(3, n(5));
-  const barX = n(5);
-  const barY = n(4);
-  const barWidth = Math.max(4, n(6));
-  const barHeight = size - barY * 2;
-  const barRadius = Math.max(1, Math.round(scale * 2));
-  const jointX = n(11);
-  const upperTipX = size - n(3);
-  const upperTopY = n(5);
-  const upperMidY = n(10);
-  const upperLowY = n(14);
-  const lowerTipX = size - n(4);
-  const lowerBottomY = size - n(3);
-  const lowerMidY = n(14);
-
-  return `<svg viewBox="0 0 ${size} ${size}" fill="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
-      <rect width="${size}" height="${size}" rx="${radius}" fill="#F1E8D9" />
-      <path d="M${jointX} ${upperMidY}L${upperTipX} ${upperTopY}C${size - n(1)} ${upperTopY} ${size} ${upperTopY + n(2)} ${size} ${upperTopY + n(4)}V${upperMidY}C${size} ${upperMidY + n(1)} ${size - n(1)} ${upperMidY + n(2)} ${size - n(2)} ${upperMidY + n(3)}L${jointX} ${upperLowY}V${upperMidY}Z" fill="#D8C09D" />
-      <path d="M${jointX} ${lowerMidY}L${lowerTipX} ${lowerBottomY}C${size - n(3)} ${size - n(1)} ${size - n(4)} ${size} ${size - n(6)} ${size}H${size - n(10)}C${size - n(11)} ${size} ${size - n(12)} ${size - n(1)} ${size - n(13)} ${size - n(2)}L${barX + barWidth - 1} ${size - n(8)}V${size - n(10)}L${jointX} ${lowerMidY}Z" fill="#B84A40" />
-      <rect x="${barX}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="${barRadius}" fill="#20242A" />
-    </svg>`;
 }
 
 function largeIconSvg() {
@@ -156,4 +144,50 @@ function buildIco(entries) {
   });
 
   return ico;
+}
+
+function ensureIcoFirstLayer(ico, preferredSize) {
+  if (ico.length < 6 || ico.readUInt16LE(0) !== 0 || ico.readUInt16LE(2) !== 1) {
+    return ico;
+  }
+
+  const count = ico.readUInt16LE(4);
+  const directorySize = 6 + count * 16;
+  if (count < 2 || ico.length < directorySize) {
+    return ico;
+  }
+
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    const directoryOffset = 6 + index * 16;
+    const width = ico[directoryOffset] === 0 ? 256 : ico[directoryOffset];
+    const height = ico[directoryOffset + 1] === 0 ? 256 : ico[directoryOffset + 1];
+    const size = ico.readUInt32LE(directoryOffset + 8);
+    const imageOffset = ico.readUInt32LE(directoryOffset + 12);
+    if (imageOffset + size > ico.length) {
+      return ico;
+    }
+    entries.push({ directoryOffset, width, height, size, imageOffset });
+  }
+
+  const preferredIndex = entries.findIndex((entry) => entry.width === preferredSize && entry.height === preferredSize);
+  if (preferredIndex <= 0) {
+    return ico;
+  }
+
+  const orderedEntries = [entries[preferredIndex], ...entries.filter((_, index) => index !== preferredIndex)];
+  const totalSize = directorySize + orderedEntries.reduce((sum, entry) => sum + entry.size, 0);
+  const normalized = Buffer.alloc(totalSize);
+  ico.copy(normalized, 0, 0, 6);
+
+  let imageOffset = directorySize;
+  orderedEntries.forEach((entry, index) => {
+    const directoryEntry = Buffer.from(ico.subarray(entry.directoryOffset, entry.directoryOffset + 16));
+    directoryEntry.writeUInt32LE(imageOffset, 12);
+    directoryEntry.copy(normalized, 6 + index * 16);
+    ico.copy(normalized, imageOffset, entry.imageOffset, entry.imageOffset + entry.size);
+    imageOffset += entry.size;
+  });
+
+  return normalized;
 }
