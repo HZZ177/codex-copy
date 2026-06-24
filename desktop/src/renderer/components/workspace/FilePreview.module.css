@@ -1137,30 +1137,139 @@
   padding: 14px;
 }
 
-.markdownCodeBlock {
+.markdownCodeFrame {
   position: relative;
-  overflow: auto;
+  overflow: hidden;
   margin: 12px 0;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--code-bg);
-  color: var(--color-text-secondary);
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 84%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 58%, var(--surface-muted));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 70%),
+    0 8px 22px rgb(15 23 42 / 5%),
+    0 1px 2px rgb(15 23 42 / 5%);
+}
+
+:global(html[data-theme="dark"]) .markdownCodeFrame {
+  background: color-mix(in srgb, var(--color-bg-elevated) 90%, var(--surface-muted));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    0 10px 26px rgb(0 0 0 / 18%);
+}
+
+.markdownCodeHeader {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px 0 12px;
+}
+
+.markdownCodeLanguage {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.markdownCodeButton {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-standard),
+    color var(--motion-fast) var(--motion-ease-standard);
+}
+
+.markdownCodeButton:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated) 12%, var(--surface-hover));
+  color: var(--color-text-primary);
+}
+
+.markdownCodeButton:focus-visible {
+  outline: none;
+}
+
+.markdownCodeBlock {
+  overflow-x: auto;
+  overflow-y: visible;
+  margin: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 22%, var(--surface-muted));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 44%);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 1.55;
-  padding: 28px 12px 12px;
+  padding: 10px 14px 12px;
   white-space: pre;
 }
 
-.markdownCodeBlock::before {
+:global(html[data-theme="dark"]) .markdownCodeBlock {
+  background: color-mix(in srgb, var(--color-bg-elevated) 74%, var(--surface-muted));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+}
+
+.markdownCodeBlock code {
+  font: inherit;
+}
+
+.markdownCodeCopyError {
   position: absolute;
-  top: 7px;
-  left: 12px;
-  color: var(--color-text-tertiary);
-  content: attr(data-language);
-  font-size: 10px;
+  top: 10px;
+  right: 42px;
+  color: var(--color-danger-6);
+  font-size: 11px;
   line-height: 1;
-  text-transform: uppercase;
+}
+
+.markdownCodeTokenKeyword {
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+.markdownCodeTokenLiteral {
+  color: #2563eb;
+}
+
+.markdownCodeTokenNumber {
+  color: #0f766e;
+}
+
+.markdownCodeTokenString {
+  color: #15803d;
+}
+
+.markdownCodeTokenComment {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.markdownCodeTokenFunction {
+  color: #0f68a8;
+}
+
+.markdownCodeTokenProperty,
+.markdownCodeTokenAttribute {
+  color: #1d4ed8;
+}
+
+.markdownCodeTokenTag {
+  color: #b45309;
+  font-weight: 600;
 }
 
 .splitPane {

@@ -514,7 +514,7 @@ describe("FilePreview", () => {
     addEventListener.mockRestore();
   });
 
-  it("renders markdown code fences in panel chrome without message code-block controls", async () => {
+  it("renders markdown code fences in panel chrome with enhanced code-block controls", async () => {
     render(
       <FilePreview
         chrome="panel"
@@ -529,9 +529,11 @@ describe("FilePreview", () => {
 
     expect(screen.getByTitle("消息内容")).not.toBeNull();
     expect(screen.queryByRole("heading", { level: 2, name: "Markdown 片段" })).toBeNull();
-    expect(await screen.findByText("console.log('panel')")).not.toBeNull();
+    const codeViewport = await screen.findByTestId("markdown-code-viewport");
+    expect(codeViewport.textContent).toContain("console.log('panel')");
     expect(screen.getByRole("button", { name: "复制预览内容" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "复制代码" })).toBeNull();
+    expect(screen.getByRole("button", { name: "复制代码" })).not.toBeNull();
+    expect(codeViewport.getAttribute("data-scroll-axis")).toBe("x");
     expect(screen.queryByRole("button", { name: /在预览面板打开/ })).toBeNull();
   });
 

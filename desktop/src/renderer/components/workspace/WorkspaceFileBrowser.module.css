@@ -4,7 +4,12 @@
   --workspace-file-open-motion: 230ms;
   --workspace-file-close-motion: 180ms;
   --workspace-file-motion: var(--workspace-file-close-motion);
-  --workspace-file-tree-current-width: min(var(--workspace-file-tree-width), calc(100% - 287px));
+  --workspace-file-min-preview-width: 280px;
+  --workspace-file-tree-current-width: min(
+    var(--workspace-file-tree-width),
+    70%,
+    calc(100% - var(--workspace-file-min-preview-width) - var(--workspace-file-divider-width))
+  );
   position: relative;
   display: grid;
   grid-template-rows: 40px minmax(0, 1fr);
@@ -132,6 +137,7 @@
 
 .treePane {
   grid-column: 1;
+  background: var(--sidebar-bg);
   opacity: 1;
   transition:
     opacity 140ms var(--motion-ease-standard),
@@ -165,9 +171,9 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 3px;
-  width: 1px;
-  background: color-mix(in srgb, var(--color-border-subtle) 78%, transparent);
+  left: 2px;
+  width: 2px;
+  background: color-mix(in srgb, var(--color-border-default) 78%, transparent);
   content: "";
 }
 
@@ -180,7 +186,7 @@
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before,
 .browser[data-resizing="true"] .resizeHandle::before {
-  background: color-mix(in srgb, var(--color-text-3) 34%, transparent);
+  background: color-mix(in srgb, var(--color-text-3) 48%, transparent);
 }
 
 .resizeHandle:focus-visible {

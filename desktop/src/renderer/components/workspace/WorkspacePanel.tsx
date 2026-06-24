@@ -1,5 +1,6 @@
 import { ChevronRight, Crosshair, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   RuntimeBridge,
@@ -27,6 +28,7 @@ export interface WorkspacePanelProps {
 type EntryMap = Record<string, WorkspaceEntry[]>;
 type ErrorMap = Record<string, string>;
 const TREE_GROUP_TRANSITION_MS = 340;
+const ENTRY_NAME_TOOLTIP_DELAY_MS = 500;
 
 export function WorkspacePanel({
   workspaceId,
@@ -169,6 +171,24 @@ export function WorkspacePanel({
     }
   }
 
+  async function openSearchFile(path: string) {
+    setFilterQuery("");
+    selectFile(path);
+    const paths = directoryAncestorPaths(path);
+    setExpandedPaths((expanded) => {
+      const next = new Set(expanded);
+      paths.forEach((entryPath) => next.add(entryPath));
+      return next;
+    });
+    for (const entryPath of paths) {
+      await loadDirectory(entryPath);
+    }
+    setLocateRequest((current) => ({
+      id: (current?.id ?? 0) + 1,
+      path,
+    }));
+  }
+
   async function locateCurrentFile() {
     const path = effectiveSelectedPath?.trim();
     if (!path) {
@@ -267,7 +287,7 @@ export function WorkspacePanel({
                     entry={entry}
                     key={entry.path}
                     onOpenDirectory={(path) => void openSearchDirectory(path)}
-                    onSelectFile={selectFile}
+                    onSelectFile={(path) => void openSearchFile(path)}
                     selectedPath={effectiveSelectedPath}
                   />
                 ))
@@ -386,7 +406,7 @@ function TreeNode({
         >
           <ChevronRight className={styles.chevron} data-expanded={expanded ? "true" : "false"} size={14} />
           <MaterialEntryIcon path={entry.path || entry.name} type="directory" />
-          <span className={styles.nodeLabel}>{entry.name}</span>
+          <EllipsizedEntryName name={entry.name} />
           {loading ? <em>读取中</em> : null}
         </button>
       ) : (
@@ -401,7 +421,7 @@ function TreeNode({
         >
           <span className={styles.fileSpacer} />
           <MaterialEntryIcon path={entry.path || entry.name} type="file" />
-          <span className={styles.nodeLabel}>{entry.name}</span>
+          <EllipsizedEntryName name={entry.name} />
           {typeof entry.size === "number" ? <em>{formatSize(entry.size)}</em> : null}
         </button>
       )}
@@ -461,10 +481,87 @@ function SearchResultNode({
           <span className={styles.fileSpacer} />
         )}
         <MaterialEntryIcon path={entry.path || entry.name} type={entry.type} />
-        <span className={styles.nodeLabel}>{entry.name}</span>
+        <EllipsizedEntryName name={entry.name} />
         <em title={entry.path}>{entry.path}</em>
       </button>
     </div>
+  );
+}
+
+function EllipsizedEntryName({ name }: { name: string }) {
+  const labelRef = useRef<HTMLSpanElement | null>(null);
+  const showTimerRef = useRef<number | null>(null);
+  const [tooltip, setTooltip] = useState<{ left: number; top: number; text: string } | null>(null);
+
+  const clearShowTimer = useCallback(() => {
+    if (showTimerRef.current !== null) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+  }, []);
+
+  const hideTooltip = useCallback(() => {
+    clearShowTimer();
+    setTooltip(null);
+  }, [clearShowTimer]);
+
+  const scheduleTooltip = useCallback(() => {
+    clearShowTimer();
+    showTimerRef.current = window.setTimeout(() => {
+      showTimerRef.current = null;
+      const label = labelRef.current;
+      if (!label || !isElementEllipsized(label)) {
+        setTooltip(null);
+        return;
+      }
+      const rect = label.getBoundingClientRect();
+      setTooltip({
+        left: rect.right + 10,
+        top: rect.top + rect.height / 2,
+        text: name,
+      });
+    }, ENTRY_NAME_TOOLTIP_DELAY_MS);
+  }, [clearShowTimer, name]);
+
+  useEffect(() => {
+    if (!tooltip) {
+      return;
+    }
+    const close = () => hideTooltip();
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [hideTooltip, tooltip]);
+
+  useEffect(() => hideTooltip, [hideTooltip]);
+
+  return (
+    <>
+      <span
+        ref={labelRef}
+        className={styles.nodeLabel}
+        onClick={hideTooltip}
+        onMouseEnter={scheduleTooltip}
+        onMouseLeave={hideTooltip}
+      >
+        {name}
+      </span>
+      {tooltip
+        ? createPortal(
+            <div
+              className={styles.nodeNameTooltip}
+              role="tooltip"
+              style={{ left: tooltip.left, top: tooltip.top }}
+            >
+              {tooltip.text}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -605,6 +702,10 @@ function findTreeEntryButton(root: HTMLElement | null, path: string): HTMLElemen
       (element) => element.dataset.entryPath === path,
     ) ?? null
   );
+}
+
+function isElementEllipsized(element: HTMLElement): boolean {
+  return element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
 }
 
 function formatSize(size: number): string {

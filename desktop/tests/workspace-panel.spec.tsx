@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
@@ -93,8 +93,16 @@ describe("WorkspacePanel", () => {
       );
     });
     expect(screen.getByRole("tree", { name: "工作区搜索结果" })).not.toBeNull();
-    expect(await screen.findByRole("button", { name: "选择文件 package.json" })).not.toBeNull();
+    const result = await screen.findByRole("button", { name: "选择文件 package.json" });
+    expect(result).not.toBeNull();
     expect(screen.queryByText("desktop")).toBeNull();
+
+    fireEvent.click(result);
+
+    expect(screen.getByRole("tree", { name: "工作区目录" })).not.toBeNull();
+    expect((screen.getByRole("searchbox", { name: "筛选文件" }) as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "选择文件 package.json" }).getAttribute("data-selected")).toBe("true");
+    expect(screen.getByText("desktop")).not.toBeNull();
   });
 
   it("supports parent-controlled file selection and type icons", async () => {
@@ -116,6 +124,79 @@ describe("WorkspacePanel", () => {
     expect(entryIconId(selected)).toBe("nodejs");
     expect(entryIconId(screen.getByRole("button", { name: "选择文件 pnpm-lock.yaml" }))).toBe("pnpm");
     expect(entryIconId(screen.getByRole("button", { name: "选择文件 README.md" }))).toBe("readme");
+  });
+
+  it("shows full entry names after a delayed hover only when labels are ellipsized", async () => {
+    const longName = "very-long-file-name-that-is-truncated-in-the-tree.ts";
+    const runtime = fakeRuntime({
+      "": [
+        entry(longName, longName, "file", 12),
+        entry("README.md", "README.md", "file", 12),
+      ],
+    });
+    const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
+    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get() {
+        return this.textContent === longName ? 220 : 80;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get() {
+        return this.textContent === longName ? 120 : 120;
+      },
+    });
+
+    try {
+      render(<WorkspacePanel chrome="panel" sessionId="ses-1" label="D:/repo" runtime={runtime} />);
+
+      const longLabel = await screen.findByText(longName);
+      longLabel.getBoundingClientRect = vi.fn(() => ({
+        x: 20,
+        y: 30,
+        left: 20,
+        top: 30,
+        right: 120,
+        bottom: 48,
+        width: 100,
+        height: 18,
+        toJSON: () => ({}),
+      }));
+      vi.useFakeTimers();
+      fireEvent.mouseEnter(longLabel);
+      await act(async () => {
+        vi.advanceTimersByTime(499);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip.textContent).toBe(longName);
+      expect(tooltip.style.left).toBe("130px");
+      expect(tooltip.style.top).toBe("39px");
+
+      fireEvent.mouseLeave(longLabel);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      fireEvent.mouseEnter(screen.getByText("README.md"));
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      if (originalScrollWidth) {
+        Object.defineProperty(HTMLElement.prototype, "scrollWidth", originalScrollWidth);
+      }
+      if (originalClientWidth) {
+        Object.defineProperty(HTMLElement.prototype, "clientWidth", originalClientWidth);
+      }
+    }
   });
 
   it("locates the current file by expanding its parent directories", async () => {
@@ -336,10 +417,10 @@ describe("WorkspacePanel", () => {
     const handle = await screen.findByRole("separator", { name: "调整文件树宽度" });
 
     dispatchPointer(handle, "pointerdown", { button: 0, pointerId: 1, clientX: 260 });
-    dispatchPointer(handle, "pointermove", { pointerId: 1, clientX: 340 });
-    dispatchPointer(handle, "pointerup", { pointerId: 1, clientX: 340 });
+    dispatchPointer(handle, "pointermove", { pointerId: 1, clientX: 700 });
+    dispatchPointer(handle, "pointerup", { pointerId: 1, clientX: 700 });
 
-    expect(browser.style.getPropertyValue("--workspace-file-tree-width")).toBe("340px");
+    expect(browser.style.getPropertyValue("--workspace-file-tree-width")).toBe("620px");
     raf.mockRestore();
     cancelRaf.mockRestore();
   });

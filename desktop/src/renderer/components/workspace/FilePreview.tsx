@@ -54,10 +54,13 @@ import {
   useMemo,
   useRef,
   useState,
+  cloneElement,
+  isValidElement,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactElement,
   type ReactNode,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -2308,20 +2311,422 @@ interface MarkdownTextRef {
 }
 
 function PreviewMarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const codeChild = getCodeChild(children);
   const language = codeBlockLanguage(codeChild?.props?.className);
   const codeChildren = codeChild?.props?.children ?? children;
   const text = stripTrailingNewline(extractMarkdownText(codeChildren));
+  const highlightedChildren = useMemo(
+    () => highlightMarkdownCodeChildren(codeChildren, text, language),
+    [codeChildren, language, text],
+  );
+
+  useEffect(() => {
+    setCopyState("idle");
+  }, [text]);
 
   if (language === "mermaid") {
     return <NativeMermaidPreview code={text} layout="document" />;
   }
 
+  const handleCopy = async () => {
+    try {
+      await copyText(text);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  };
+
   return (
-    <pre className={styles.markdownCodeBlock} data-language={language}>
-      <code>{codeChildren || " "}</code>
-    </pre>
+    <div className={styles.markdownCodeFrame} data-language={language}>
+      <div className={styles.markdownCodeHeader}>
+        <span className={styles.markdownCodeLanguage}>{language || "text"}</span>
+        <button
+          type="button"
+          className={styles.markdownCodeButton}
+          aria-label="复制代码"
+          title="复制代码"
+          onClick={handleCopy}
+        >
+          {copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      </div>
+      <pre className={styles.markdownCodeBlock} data-scroll-axis="x" data-testid="markdown-code-viewport">
+        <code>{highlightedChildren || " "}</code>
+      </pre>
+      {copyState === "failed" ? <span className={styles.markdownCodeCopyError}>复制失败</span> : null}
+    </div>
   );
+}
+
+type MarkdownCodeTokenKind =
+  | "attribute"
+  | "comment"
+  | "function"
+  | "keyword"
+  | "literal"
+  | "number"
+  | "property"
+  | "string"
+  | "tag";
+
+interface MarkdownCodeTokenRange {
+  end: number;
+  kind: MarkdownCodeTokenKind;
+  priority: number;
+  start: number;
+}
+
+const MARKDOWN_CODE_HIGHLIGHT_LIMIT = 180_000;
+const markdownCodeKeywordGroups: Record<string, string[]> = {
+  css: ["@media", "@keyframes", "@supports", "and", "from", "important", "not", "only", "to"],
+  html: ["DOCTYPE"],
+  javascript: [
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "of",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+  ],
+  python: [
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
+  ],
+  sql: [
+    "alter",
+    "and",
+    "as",
+    "by",
+    "case",
+    "create",
+    "delete",
+    "desc",
+    "distinct",
+    "drop",
+    "else",
+    "end",
+    "from",
+    "group",
+    "having",
+    "in",
+    "insert",
+    "into",
+    "join",
+    "left",
+    "limit",
+    "not",
+    "null",
+    "on",
+    "or",
+    "order",
+    "right",
+    "select",
+    "set",
+    "table",
+    "then",
+    "update",
+    "values",
+    "when",
+    "where",
+  ],
+  typescript: [
+    "abstract",
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "namespace",
+    "new",
+    "of",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "return",
+    "satisfies",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "type",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+  ],
+};
+
+function highlightMarkdownCodeChildren(children: ReactNode, text: string, language: string): ReactNode {
+  if (!text || text.length > MARKDOWN_CODE_HIGHLIGHT_LIMIT) {
+    return children;
+  }
+  const tokens = markdownCodeTokenRanges(text, language);
+  if (!tokens.length) {
+    return children;
+  }
+  const cursor = { current: 0 };
+  return highlightMarkdownCodeNode(children, tokens, cursor);
+}
+
+function highlightMarkdownCodeNode(
+  node: ReactNode,
+  tokens: MarkdownCodeTokenRange[],
+  cursor: { current: number },
+): ReactNode {
+  if (typeof node === "string" || typeof node === "number") {
+    const value = String(node);
+    const start = cursor.current;
+    cursor.current += value.length;
+    return highlightMarkdownCodeText(value, start, tokens);
+  }
+  if (Array.isArray(node)) {
+    return node.map((child) => highlightMarkdownCodeNode(child, tokens, cursor));
+  }
+  if (isValidElement(node)) {
+    const element = node as ReactElement<{ children?: ReactNode }>;
+    const nextChildren = highlightMarkdownCodeNode(element.props.children, tokens, cursor);
+    return cloneElement(element, undefined, nextChildren);
+  }
+  return node;
+}
+
+function highlightMarkdownCodeText(value: string, absoluteStart: number, tokens: MarkdownCodeTokenRange[]): ReactNode {
+  if (!value) {
+    return value;
+  }
+  const absoluteEnd = absoluteStart + value.length;
+  const overlaps = tokens.filter((token) => token.end > absoluteStart && token.start < absoluteEnd);
+  if (!overlaps.length) {
+    return value;
+  }
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  overlaps.forEach((token, index) => {
+    const start = Math.max(0, token.start - absoluteStart);
+    const end = Math.min(value.length, token.end - absoluteStart);
+    if (end <= start || start < cursor) {
+      return;
+    }
+    if (start > cursor) {
+      nodes.push(value.slice(cursor, start));
+    }
+    nodes.push(
+      <span className={markdownCodeTokenClass(token.kind)} key={`${absoluteStart}-${index}-${start}-${end}`}>
+        {value.slice(start, end)}
+      </span>,
+    );
+    cursor = end;
+  });
+  if (cursor < value.length) {
+    nodes.push(value.slice(cursor));
+  }
+  return nodes;
+}
+
+function markdownCodeTokenRanges(text: string, language: string): MarkdownCodeTokenRange[] {
+  const normalizedLanguage = normalizeMarkdownCodeLanguage(language);
+  const candidates: MarkdownCodeTokenRange[] = [];
+  addMarkdownCodeMatches(candidates, text, /<!--[\s\S]*?-->/g, "comment", 10);
+  addMarkdownCodeMatches(candidates, text, /\/\*[\s\S]*?\*\//g, "comment", 10);
+  addMarkdownCodeMatches(candidates, text, /\/\/[^\n\r]*/g, "comment", 10);
+  if (["bash", "python", "shell", "sh", "yaml"].includes(normalizedLanguage)) {
+    addMarkdownCodeMatches(candidates, text, /(^|[\s{[(;])#[^\n\r]*/gm, "comment", 10, 1);
+  }
+  addMarkdownCodeMatches(candidates, text, /`(?:\\[\s\S]|[^`\\])*`|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, "string", 9);
+  addMarkdownCodeMatches(candidates, text, /\b(?:0x[\da-f]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)\b/gi, "number", 4);
+  addMarkdownCodeMatches(candidates, text, /\b(?:true|false|null|undefined|none)\b/gi, "literal", 5);
+  addMarkdownCodeMatches(candidates, text, /\b[A-Za-z_$][\w$-]*(?=\s*\()/g, "function", 2);
+  if (["css", "javascript", "json", "typescript", "yaml"].includes(normalizedLanguage)) {
+    addMarkdownCodeMatches(candidates, text, /\b[A-Za-z_$][\w$-]*(?=\s*:)/g, "property", 2);
+  }
+  if (["html", "xml"].includes(normalizedLanguage)) {
+    addMarkdownCodeMatches(candidates, text, /<\/?([A-Za-z][\w:-]*)/g, "tag", 6, 1);
+    addMarkdownCodeMatches(candidates, text, /\s([A-Za-z_:][\w:.-]*)(?=\s*=)/g, "attribute", 5, 1);
+  }
+  const keywords = markdownCodeKeywords(normalizedLanguage);
+  if (keywords.length) {
+    const keywordPattern = new RegExp(`\\b(?:${keywords.map(escapeRegExp).join("|")})\\b`, "gi");
+    addMarkdownCodeMatches(candidates, text, keywordPattern, "keyword", 6);
+  }
+  return selectNonOverlappingMarkdownCodeTokens(candidates);
+}
+
+function addMarkdownCodeMatches(
+  tokens: MarkdownCodeTokenRange[],
+  text: string,
+  pattern: RegExp,
+  kind: MarkdownCodeTokenKind,
+  priority: number,
+  captureIndex = 0,
+): void {
+  for (const match of text.matchAll(pattern)) {
+    const matched = captureIndex === 0 ? match[0] : match[captureIndex];
+    if (!matched) {
+      continue;
+    }
+    const matchIndex = match.index ?? 0;
+    const captureOffset = captureIndex === 0 ? 0 : match[0].indexOf(matched);
+    const start = matchIndex + Math.max(0, captureOffset);
+    const end = start + matched.length;
+    if (end > start) {
+      tokens.push({ end, kind, priority, start });
+    }
+  }
+}
+
+function selectNonOverlappingMarkdownCodeTokens(candidates: MarkdownCodeTokenRange[]): MarkdownCodeTokenRange[] {
+  const accepted: MarkdownCodeTokenRange[] = [];
+  candidates
+    .sort((left, right) => right.priority - left.priority || left.start - right.start || right.end - left.end)
+    .forEach((candidate) => {
+      if (accepted.some((token) => token.start < candidate.end && candidate.start < token.end)) {
+        return;
+      }
+      accepted.push(candidate);
+    });
+  return accepted.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function markdownCodeKeywords(language: string): string[] {
+  if (["js", "jsx", "mjs", "cjs"].includes(language)) {
+    return markdownCodeKeywordGroups.javascript;
+  }
+  if (["ts", "tsx"].includes(language)) {
+    return markdownCodeKeywordGroups.typescript;
+  }
+  if (["py"].includes(language)) {
+    return markdownCodeKeywordGroups.python;
+  }
+  if (["htm"].includes(language)) {
+    return markdownCodeKeywordGroups.html;
+  }
+  if (["scss", "sass", "less"].includes(language)) {
+    return markdownCodeKeywordGroups.css;
+  }
+  return markdownCodeKeywordGroups[language] ?? [];
+}
+
+function normalizeMarkdownCodeLanguage(language: string): string {
+  return language.trim().toLowerCase() || "text";
+}
+
+function markdownCodeTokenClass(kind: MarkdownCodeTokenKind): string {
+  switch (kind) {
+    case "attribute":
+      return styles.markdownCodeTokenAttribute;
+    case "comment":
+      return styles.markdownCodeTokenComment;
+    case "function":
+      return styles.markdownCodeTokenFunction;
+    case "keyword":
+      return styles.markdownCodeTokenKeyword;
+    case "literal":
+      return styles.markdownCodeTokenLiteral;
+    case "number":
+      return styles.markdownCodeTokenNumber;
+    case "property":
+      return styles.markdownCodeTokenProperty;
+    case "string":
+      return styles.markdownCodeTokenString;
+    case "tag":
+      return styles.markdownCodeTokenTag;
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function SourceViewer({

@@ -33,7 +33,7 @@ export interface WorkspaceFileBrowserProps {
 
 const DEFAULT_TREE_WIDTH = 260;
 const MIN_TREE_WIDTH = 180;
-const MAX_TREE_WIDTH = 520;
+const MAX_TREE_WIDTH_RATIO = 0.7;
 const MIN_PREVIEW_WIDTH = 280;
 const FILE_PREVIEW_CLOSE_MS = 180;
 
@@ -221,7 +221,9 @@ export function WorkspaceFileBrowser({
     if (!drag || drag.pointerId !== pointerIdValue(event)) {
       return;
     }
-    const maxWidth = Math.max(MIN_TREE_WIDTH, Math.min(MAX_TREE_WIDTH, drag.rootWidth - MIN_PREVIEW_WIDTH));
+    const ratioMaxWidth = Math.floor(drag.rootWidth * MAX_TREE_WIDTH_RATIO);
+    const previewMaxWidth = drag.rootWidth - MIN_PREVIEW_WIDTH;
+    const maxWidth = Math.max(MIN_TREE_WIDTH, Math.min(ratioMaxWidth, previewMaxWidth));
     const nextWidth = clamp(event.clientX - drag.rootLeft, MIN_TREE_WIDTH, maxWidth);
     schedulePreviewWidth(nextWidth);
   };
