@@ -1,6 +1,21 @@
-import { Check, ChevronDown, Folder, FolderOpen, MessageCircle, Moon, Pencil, Search, Settings, SquarePen, Sun, Trash2, X } from "lucide-react";
-import type { CSSProperties } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  Folder,
+  FolderOpen,
+  LoaderCircle,
+  MessageCircle,
+  Moon,
+  Pencil,
+  Search,
+  Settings,
+  SquarePen,
+  Sun,
+  Trash2,
+  X,
+} from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { subscribeSessionCreated } from "@/renderer/events/sessionEvents";
@@ -48,7 +63,7 @@ export interface SiderProps {
 }
 
 const mainEntries = [
-  { key: "quick-chat", label: "新对话", path: "/guid", icon: SquarePen },
+  { key: "quick-chat", label: "新对话", path: newPromptConversationPath(), icon: SquarePen },
   { key: "search", label: "搜索", path: "/search", icon: Search },
 ];
 
@@ -75,6 +90,8 @@ export function Sider({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
+  const [showFooterFeather, setShowFooterFeather] = useState(false);
   const canMutateConversations =
     typeof runtime.conversation.updateSession === "function" && typeof runtime.conversation.deleteSession === "function";
 
@@ -91,11 +108,16 @@ export function Sider({
     if (backendError) {
       return "本地服务连接失败";
     }
-    if (!backendReady) {
-      return "正在连接本地服务";
+    if (!backendReady || loadingHistory) {
+      return "";
     }
-    return loadingHistory ? "正在加载会话" : "暂无会话";
+    return "暂无会话";
   }, [backendError, backendReady, controlled, loadingHistory]);
+  const historyEmptyLoading = !controlled && !backendError && (!backendReady || loadingHistory);
+  const workspaceGroups = useMemo(() => historyGroups.filter((group) => group.kind === "workspace"), [historyGroups]);
+  const chatGroup = useMemo(() => historyGroups.find((group) => group.kind === "chat") ?? null, [historyGroups]);
+  const chatItems = chatGroup?.items ?? [];
+  const firstWorkspaceId = workspaceGroups.find((group) => group.workspaceId)?.workspaceId ?? projects[0]?.id;
   const historyItems = useMemo(() => historyGroups.flatMap((group) => group.items), [historyGroups]);
   const searchResults = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -123,6 +145,37 @@ export function Sider({
     setSearchOpen(false);
     onNavigate?.(path);
   };
+
+  const updateFooterFeather = useCallback(() => {
+    const history = historyRef.current;
+    if (!history) {
+      setShowFooterFeather(false);
+      return;
+    }
+    const hasContentBelow = history.scrollHeight - history.scrollTop - history.clientHeight > 2;
+    setShowFooterFeather((current) => (current === hasContentBelow ? current : hasContentBelow));
+  }, []);
+
+  useLayoutEffect(() => {
+    updateFooterFeather();
+    const history = historyRef.current;
+    if (!history) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(updateFooterFeather);
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(updateFooterFeather);
+      resizeObserver.observe(history);
+      Array.from(history.children).forEach((child) => resizeObserver?.observe(child));
+    }
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+    };
+  }, [collapsed, confirmDeleteId, editing, historyGroups, loadingHistory, updateFooterFeather]);
 
   useEffect(() => {
     if (controlled) {
@@ -204,7 +257,12 @@ export function Sider({
   }
 
   return (
-    <aside className={styles.sider} aria-label="侧边栏" data-collapsed={collapsed ? "true" : "false"}>
+    <aside
+      className={styles.sider}
+      aria-label="侧边栏"
+      data-collapsed={collapsed ? "true" : "false"}
+      data-footer-feather={showFooterFeather ? "true" : "false"}
+    >
       <nav className={styles.nav} aria-label="主导航">
         {mainEntries.map((item) => {
           const Icon = item.icon;
@@ -224,34 +282,115 @@ export function Sider({
         })}
       </nav>
 
-      <div className={styles.history} aria-label="会话历史">
-        {historyGroups.length === 0 && !collapsed ? (
-          <SiderSection title="对话" items={[]} collapsed={collapsed} emptyText={historyEmptyText} />
-        ) : null}
-        {historyGroups.map((group) => (
-          <SiderSection
-            title={group.title}
-            kind={group.kind}
-            items={group.items}
-            collapsed={collapsed}
-            emptyText={historyEmptyText}
-            activePath={activePath}
-            editing={editing}
-            confirmDeleteId={confirmDeleteId}
-            canMutate={canMutateConversations}
-            sessionIndicators={sessionIndicators}
-            workspaceId={group.workspaceId}
-            key={group.id}
-            onDelete={(id) => void deleteConversation(id)}
-            onCancelDelete={() => setConfirmDeleteId(null)}
-            onCancelRename={() => setEditing(null)}
-            onConfirmDelete={setConfirmDeleteId}
-            onRename={(id, title) => void renameConversation(id, title)}
-            onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
-            onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
-            onNavigate={navigateTo}
-          />
-        ))}
+      <div
+        className={styles.history}
+        aria-label="会话历史"
+        ref={historyRef}
+        onScroll={updateFooterFeather}
+        onTransitionEnd={updateFooterFeather}
+      >
+        {collapsed ? (
+          <>
+            {historyGroups.length === 0 ? (
+              <SiderSection
+                title="对话"
+                items={[]}
+                collapsed={collapsed}
+                emptyText={historyEmptyText}
+                emptyLoading={historyEmptyLoading}
+              />
+            ) : null}
+            {historyGroups.map((group) => (
+              <SiderSection
+                title={group.title}
+                kind={group.kind}
+                items={group.items}
+                collapsed={collapsed}
+                emptyText={historyEmptyText}
+                emptyLoading={historyEmptyLoading}
+                activePath={activePath}
+                editing={editing}
+                confirmDeleteId={confirmDeleteId}
+                canMutate={canMutateConversations}
+                sessionIndicators={sessionIndicators}
+                workspaceId={group.workspaceId}
+                key={group.id}
+                onDelete={(id) => void deleteConversation(id)}
+                onCancelDelete={() => setConfirmDeleteId(null)}
+                onCancelRename={() => setEditing(null)}
+                onConfirmDelete={setConfirmDeleteId}
+                onRename={(id, title) => void renameConversation(id, title)}
+                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                onNavigate={navigateTo}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            <HistoryBucket
+              title="项目"
+              kind="workspace"
+              newConversationPath={newWorkspaceConversationPath(firstWorkspaceId)}
+              onNavigate={navigateTo}
+            >
+              {workspaceGroups.map((group) => (
+                <SiderSection
+                  title={group.title}
+                  kind={group.kind}
+                  items={group.items}
+                  collapsed={collapsed}
+                  emptyText={historyEmptyText}
+                  emptyLoading={false}
+                  activePath={activePath}
+                  editing={editing}
+                  confirmDeleteId={confirmDeleteId}
+                  canMutate={canMutateConversations}
+                  sessionIndicators={sessionIndicators}
+                  workspaceId={group.workspaceId}
+                  key={group.id}
+                  onDelete={(id) => void deleteConversation(id)}
+                  onCancelDelete={() => setConfirmDeleteId(null)}
+                  onCancelRename={() => setEditing(null)}
+                  onConfirmDelete={setConfirmDeleteId}
+                  onRename={(id, title) => void renameConversation(id, title)}
+                  onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                  onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                  onNavigate={navigateTo}
+                />
+              ))}
+            </HistoryBucket>
+            <HistoryBucket
+              title="对话"
+              kind="chat"
+              newConversationPath={newChatConversationPath()}
+              onNavigate={navigateTo}
+            >
+              <SiderSection
+                title="对话"
+                kind="chat"
+                items={chatItems}
+                collapsed={collapsed}
+                emptyText={historyEmptyText}
+                emptyLoading={historyEmptyLoading}
+                activePath={activePath}
+                editing={editing}
+                confirmDeleteId={confirmDeleteId}
+                canMutate={canMutateConversations}
+                sessionIndicators={sessionIndicators}
+                hideTitle
+                onDelete={(id) => void deleteConversation(id)}
+                onCancelDelete={() => setConfirmDeleteId(null)}
+                onCancelRename={() => setEditing(null)}
+                onConfirmDelete={setConfirmDeleteId}
+                onRename={(id, title) => void renameConversation(id, title)}
+                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                onNavigate={navigateTo}
+              />
+            </HistoryBucket>
+          </>
+        )}
       </div>
 
       <div className={styles.footer}>
@@ -270,7 +409,7 @@ export function Sider({
           type="button"
           title={collapsed ? "设置" : ""}
           data-active={activePath.startsWith("/settings") ? "true" : "false"}
-          onClick={() => onNavigate?.("/settings/model")}
+          onClick={() => onNavigate?.("/settings/general")}
         >
           <Settings size={17} strokeWidth={2} />
           <span>设置</span>
@@ -331,7 +470,7 @@ function SessionSearchDialog({
         </header>
 
         <div className={styles.searchQuickActions}>
-          <button type="button" onClick={() => onNavigate("/guid")}>
+          <button type="button" onClick={() => onNavigate(newPromptConversationPath())}>
             <SquarePen size={15} />
             <span>新建对话</span>
           </button>
@@ -365,6 +504,8 @@ interface SiderSectionProps {
   items: SiderEntry[];
   collapsed: boolean;
   emptyText: string;
+  emptyLoading?: boolean;
+  hideTitle?: boolean;
   activePath?: string;
   editing?: { id: string; title: string } | null;
   confirmDeleteId?: string | null;
@@ -381,12 +522,67 @@ interface SiderSectionProps {
   onUpdateRename?: (title: string) => void;
 }
 
+function HistoryBucket({
+  title,
+  kind,
+  newConversationPath,
+  onNavigate,
+  children,
+}: {
+  title: string;
+  kind: "workspace" | "chat";
+  newConversationPath: string;
+  onNavigate: (path: string) => void;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const bucketItemsId = useId();
+  const newLabel = kind === "workspace" ? "新建项目对话" : "新建无项目对话";
+
+  return (
+    <section className={styles.historyBucket} data-kind={kind} aria-label={title}>
+      <div className={styles.historyBucketHeader}>
+        <button
+          className={styles.historyBucketTitle}
+          type="button"
+          aria-controls={bucketItemsId}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "收起" : "展开"}${title}区域`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <span>{title}</span>
+          <ChevronDown className={styles.historyBucketChevron} size={14} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+        <button
+          className={styles.historyBucketNewButton}
+          type="button"
+          aria-label={newLabel}
+          title={newLabel}
+          onClick={() => onNavigate(newConversationPath)}
+        >
+          <SquarePen size={14} strokeWidth={1.8} aria-hidden="true" />
+        </button>
+      </div>
+      <div
+        className={styles.historyBucketItems}
+        aria-hidden={!expanded}
+        data-expanded={expanded ? "true" : "false"}
+        id={bucketItemsId}
+      >
+        <div className={styles.historyBucketBody}>{children}</div>
+      </div>
+    </section>
+  );
+}
+
 function SiderSection({
   title,
   kind = "chat",
   items,
   collapsed,
   emptyText,
+  emptyLoading = false,
+  hideTitle = false,
   activePath = "",
   editing,
   confirmDeleteId,
@@ -522,8 +718,8 @@ function SiderSection({
   }
 
   return (
-    <section className={styles.section} aria-label={title} data-kind={kind}>
-      {canToggleSection ? (
+    <section className={styles.section} aria-label={hideTitle ? `${title}列表` : title} data-kind={kind}>
+      {hideTitle ? null : canToggleSection ? (
         <div className={styles.sectionTitleRow} data-kind={kind}>
           <button
             className={styles.sectionTitle}
@@ -567,7 +763,13 @@ function SiderSection({
       >
         <div className={styles.sectionItemsInner}>
           {items.length === 0 ? (
-            <div className={styles.empty}>{emptyText}</div>
+            emptyLoading ? (
+              <div className={styles.emptyLoading} aria-label="正在加载会话" role="status">
+                <LoaderCircle size={14} />
+              </div>
+            ) : (
+              <div className={styles.empty}>{emptyText}</div>
+            )
           ) : (
             items.map((item) => {
               const path = conversationPath(item.id);
@@ -600,11 +802,11 @@ function SiderSection({
                   ) : confirmDeleteId === item.id ? (
                     <div className={styles.confirmRow}>
                       <span>确认删除？</span>
-                      <button onClick={() => onDelete?.(item.id)} type="button">
-                        确认
-                      </button>
                       <button onClick={onCancelDelete} type="button">
                         取消
+                      </button>
+                      <button onClick={() => onDelete?.(item.id)} type="button">
+                        确认
                       </button>
                     </div>
                   ) : (
@@ -844,8 +1046,27 @@ function conversationPath(id: string): string {
   return `/conversation/${encodeURIComponent(id)}`;
 }
 
-function newWorkspaceConversationPath(workspaceId: string): string {
-  return `/guid?workspaceId=${encodeURIComponent(workspaceId)}`;
+function newWorkspaceConversationPath(workspaceId?: string): string {
+  if (!workspaceId) {
+    return newPromptConversationPath({ sessionType: "workspace" });
+  }
+  return newPromptConversationPath({ workspaceId });
+}
+
+function newChatConversationPath(): string {
+  return newPromptConversationPath({ sessionType: "chat" });
+}
+
+function newPromptConversationPath(params: { sessionType?: string; workspaceId?: string } = {}): string {
+  const query = new URLSearchParams();
+  if (params.sessionType) {
+    query.set("sessionType", params.sessionType);
+  }
+  if (params.workspaceId) {
+    query.set("workspaceId", params.workspaceId);
+  }
+  query.set("focus", "prompt");
+  return `/guid?${query.toString()}`;
 }
 
 function formatRelativeTime(value: string): string {
@@ -865,16 +1086,16 @@ function formatRelativeTime(value: string): string {
     return "刚刚";
   }
   if (diffMs < hour) {
-    return `${Math.max(1, Math.floor(diffMs / minute))}分`;
+    return `${Math.max(1, Math.floor(diffMs / minute))} 分`;
   }
   if (diffMs < day) {
-    return `${Math.floor(diffMs / hour)}小时`;
+    return `${Math.floor(diffMs / hour)} 小时`;
   }
   if (diffMs < week) {
-    return `${Math.floor(diffMs / day)}天`;
+    return `${Math.floor(diffMs / day)} 天`;
   }
   if (diffMs < 6 * week) {
-    return `${Math.floor(diffMs / week)}周`;
+    return `${Math.floor(diffMs / week)} 周`;
   }
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
 }
@@ -888,7 +1109,11 @@ function sessionInitial(title: string): string {
 }
 
 function isActivePath(activePath: string, path: string): boolean {
-  return activePath === path;
+  return stripQuery(activePath) === stripQuery(path);
+}
+
+function stripQuery(path: string): string {
+  return path.split(/[?#]/, 1)[0] ?? path;
 }
 
 function errorMessage(reason: unknown): string {

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -12,14 +12,21 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 RepositoriesDep = Depends(get_repositories)
 
 MODEL_SETTINGS_KEY = "model_settings"
+APPEARANCE_SETTINGS_KEY = "appearance_settings"
+
+
+class AppearanceSettings(BaseModel):
+    font_family: Literal["system", "maple-mono"] = "system"
 
 
 class SettingsResponse(BaseModel):
     model: dict[str, Any]
+    appearance: AppearanceSettings
 
 
 class UpdateSettingsRequest(BaseModel):
     model: ModelSettings | None = None
+    appearance: AppearanceSettings | None = None
 
 
 def merge_model_settings(
@@ -36,6 +43,13 @@ def merge_model_settings(
 
 def load_model_settings(repositories: StorageRepositories) -> ModelSettings:
     return ModelSettings(**repositories.settings.get(MODEL_SETTINGS_KEY, default={}))
+
+
+def load_appearance_settings(repositories: StorageRepositories) -> AppearanceSettings:
+    settings = repositories.settings.get(APPEARANCE_SETTINGS_KEY, default={})
+    if isinstance(settings, dict) and settings.get("font_family") == "segoe-ui":
+        settings = {**settings, "font_family": "system"}
+    return AppearanceSettings(**settings)
 
 
 def load_effective_model_settings(repositories: StorageRepositories) -> ModelSettings:
@@ -73,7 +87,8 @@ async def get_settings(
         "[SettingsAPI] 读取模型设置 | "
         f"base_url={settings.get('base_url', '')} | model={settings.get('model', '')}"
     )
-    return SettingsResponse(model=settings)
+    appearance = load_appearance_settings(repositories)
+    return SettingsResponse(model=settings, appearance=appearance)
 
 
 @router.put("", response_model=SettingsResponse)
@@ -90,5 +105,12 @@ async def put_settings(
             f"base_url={merged.base_url} | model={merged.model} | "
             f"api_key_set={bool(merged.api_key)}"
         )
+    if request.appearance is not None:
+        repositories.settings.set(APPEARANCE_SETTINGS_KEY, request.appearance.model_dump(mode="json"))
+        logger.info(
+            "[SettingsAPI] 更新外观设置 | "
+            f"font_family={request.appearance.font_family}"
+        )
     settings = load_model_settings(repositories).public_dict()
-    return SettingsResponse(model=settings)
+    appearance = load_appearance_settings(repositories)
+    return SettingsResponse(model=settings, appearance=appearance)

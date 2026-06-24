@@ -14,7 +14,7 @@ describe("style foundation", () => {
     const themeScheme = readFileSync(resolve(stylesDir, "themes/default-color-scheme.css"), "utf8");
     const themes = `${themeBase}\n${themeScheme}`;
 
-    [".codex-app-shell", ".codex-scrollable", ".codex-inline-block"].forEach(
+    [".keydex-app-shell", ".keydex-scrollable", ".keydex-inline-block"].forEach(
       (selector) => expect(layout).toContain(selector),
     );
 
@@ -28,12 +28,12 @@ describe("style foundation", () => {
     const markdown = readFileSync(resolve(stylesDir, "markdown.css"), "utf8");
     const globalStyles = readFileSync(resolve(srcDir, "styles.css"), "utf8");
 
-    expect(layout).toContain(".codex-app-shell");
-    expect(layout).toContain(".codex-scrollable::-webkit-scrollbar-thumb");
-    expect(layout).toContain(".codex-inline-block");
+    expect(layout).toContain(".keydex-app-shell");
+    expect(layout).toContain(".keydex-scrollable::-webkit-scrollbar-thumb");
+    expect(layout).toContain(".keydex-inline-block");
     expect(globalStyles).toContain(":where(button, input, textarea, select, a, [role=\"button\"], [tabindex]):focus");
     expect(globalStyles).toContain("outline: none");
-    expect(markdown).toContain(".codex-markdown");
+    expect(markdown).toContain(".keydex-markdown");
     expect(markdown).toContain("var(--font-mono)");
     expect(markdown).toContain("overflow-x: auto");
     expect(markdown).toContain("overflow-y: visible");
@@ -79,7 +79,7 @@ describe("style foundation", () => {
     expect(chatLayout).toMatch(/\.composerDock::before\s*{[^}]*bottom:\s*100%/s);
     expect(chatLayout).toMatch(/\.composerDock::before\s*{[^}]*right:\s*var\(--conversation-scrollbar-gutter-width\)/s);
     expect(chatLayout).toMatch(/\.composerDock::before\s*{[^}]*linear-gradient/s);
-    expect(chatLayout).toMatch(/--composer-fade-height:\s*30px/);
+    expect(chatLayout).toMatch(/--composer-fade-height:\s*44px/);
     expect(chatLayout).toMatch(/\.composerAccessory\s*{[^}]*position:\s*absolute/s);
     expect(chatLayout).toMatch(
       /\.composerAccessory\s*{[^}]*bottom:\s*calc\(100% \+ var\(--composer-accessory-gap\)\)/s,
@@ -137,7 +137,15 @@ describe("style foundation", () => {
     expect(sider).toMatch(/\.sectionItems\s*{[^}]*grid-template-rows:\s*1fr/s);
     expect(sider).toMatch(/\.sectionItems\[data-expanded="false"\]\s*{[^}]*grid-template-rows:\s*0fr/s);
     expect(sider).toMatch(/\.section\[data-kind="workspace"\]\s+\.historyItem\s*{[^}]*padding-left:\s*31px/s);
-    expect(sendBox).toMatch(/\.root\[data-variant="codex"\]\s*{[^}]*overflow:\s*visible/s);
+    expect(sider).toMatch(/--sidebar-footer-feather-height:\s*38px/);
+    expect(sider).not.toMatch(/\.history\s*{[^}]*mask-image/s);
+    expect(sider).toMatch(/\.footer\s*{[^}]*margin-top:\s*-6px/s);
+    expect(sider).toMatch(/\.footer::before\s*{[^}]*right:\s*12px/s);
+    expect(sider).toMatch(/\.footer::before\s*{[^}]*bottom:\s*100%/s);
+    expect(sider).toMatch(/\.footer::before\s*{[^}]*linear-gradient/s);
+    expect(sider).toMatch(/\.footer::before\s*{[^}]*opacity:\s*0/s);
+    expect(sider).toMatch(/\.sider\[data-footer-feather="true"\]\s+\.footer::before\s*{[^}]*opacity:\s*1/s);
+    expect(sendBox).toMatch(/\.root\[data-variant="keydex"\]\s*{[^}]*overflow:\s*visible/s);
     expect(sendBox).toMatch(/\.contextBar\s*{[^}]*overflow:\s*visible/s);
     expect(sendBox).toMatch(/\.contextBar\s*{[^}]*border-bottom-left-radius:\s*19px/s);
     expect(sendBox).toMatch(/\.contextBar\s*{[^}]*inset 0 -1px 0/s);
@@ -155,7 +163,7 @@ describe("style foundation", () => {
     });
   });
 
-  it("keeps settings workspace on its own Codex-like layout baseline", () => {
+  it("keeps settings workspace on its own Keydex-like layout baseline", () => {
     const mainLayout = readSource("renderer/components/layout/Layout.module.css");
     const sider = readSource("renderer/components/layout/Sider/Sider.module.css");
     const resizeHandle = readSource("renderer/components/layout/SidebarResizeHandle.module.css");

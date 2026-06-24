@@ -1,4 +1,4 @@
-import { ArrowUp, SendHorizontal, Square, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, SendHorizontal, Square, X } from "lucide-react";
 import {
   type ClipboardEvent,
   type CompositionEvent,
@@ -60,12 +60,15 @@ export interface SendBoxProps {
   placeholder?: string;
   ariaLabel?: string;
   inputLabel?: string;
+  className?: string;
   statusText?: string;
   controls?: ReactNode;
   rightControls?: ReactNode;
   contextBar?: ReactNode;
   disabled?: boolean;
-  variant?: "conversation" | "codex";
+  sendLoading?: boolean;
+  variant?: "conversation" | "keydex";
+  autoFocusKey?: string;
   allowFileSelection?: boolean;
   externalFileRequest?: SendBoxExternalFileRequest | null;
   externalQuoteRequest?: SendBoxExternalQuoteRequest | null;
@@ -97,12 +100,15 @@ export function SendBox({
   placeholder = "要求后续变更",
   ariaLabel = "继续对话输入",
   inputLabel = "继续输入",
+  className = "",
   statusText = "回车发送",
   controls,
   rightControls,
   contextBar,
   disabled = false,
+  sendLoading = false,
   variant = "conversation",
+  autoFocusKey,
   allowFileSelection = true,
   externalFileRequest = null,
   externalQuoteRequest = null,
@@ -140,6 +146,7 @@ export function SendBox({
   const busy = isBusy(runtimeState);
   const inputDisabled = disabled || (busy && runtimeState !== "running");
   const canSubmit = !busy && (canSend || fileSelection.files.length > 0 || quoteSelection.quotes.length > 0);
+  const showSendLoading = sendLoading && !busy;
   const requestSend = useCallback(() => {
     const result = onSend(fileSelection.files, quoteSelection.quotes);
     void Promise.resolve(result).then((sent) => {
@@ -149,7 +156,7 @@ export function SendBox({
       }
     });
   }, [fileSelection.files, onSend, quoteSelection.quotes]);
-  const SendIcon = variant === "codex" ? ArrowUp : SendHorizontal;
+  const SendIcon = variant === "keydex" ? ArrowUp : SendHorizontal;
   const slashQuery = getSlashQuery(editorValue);
   const slashCommands = useMemo(
     () => (slashQuery === null ? [] : filterSlashCommands(defaultSlashCommands, slashQuery)),
@@ -276,6 +283,14 @@ export function SendBox({
     }
     resizeEditableInput(input);
   }, [editorValue]);
+
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!autoFocusKey || inputDisabled || !input) {
+      return;
+    }
+    focusEditableInput(input);
+  }, [autoFocusKey, inputDisabled]);
 
   const selectSlashCommand = (command: SlashCommand) => {
     onSlashCommand?.(command);
@@ -445,7 +460,7 @@ export function SendBox({
 
   return (
     <form
-      className={styles.root}
+      className={[styles.root, className].filter(Boolean).join(" ")}
       data-sendbox-root="true"
       data-focused={focused ? "true" : "false"}
       data-dragging={fileSelection.dragging ? "true" : "false"}
@@ -532,11 +547,17 @@ export function SendBox({
           {rightControls}
           {busy ? (
             <button className={styles.stopButton} type="button" aria-label="停止" disabled={!canStop} onClick={onStop}>
-              <Square size={variant === "codex" ? 12 : 13} />
+              <Square size={variant === "keydex" ? 12 : 13} />
             </button>
           ) : (
-            <button className={styles.sendButton} type="submit" aria-label="发送" disabled={!canSubmit}>
-              <SendIcon size={17} />
+            <button
+              className={styles.sendButton}
+              type="submit"
+              aria-label={showSendLoading ? "正在准备发送" : "发送"}
+              data-loading={showSendLoading ? "true" : "false"}
+              disabled={showSendLoading || !canSubmit}
+            >
+              {showSendLoading ? <LoaderCircle className={styles.sendSpinner} size={17} /> : <SendIcon size={17} />}
             </button>
           )}
         </div>
@@ -1047,6 +1068,19 @@ function scrollEditableToBottom(input: HTMLElement) {
   window.requestAnimationFrame(() => {
     input.scrollTop = input.scrollHeight;
   });
+}
+
+function focusEditableInput(input: HTMLElement) {
+  input.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(input);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function pastePlainText(event: ClipboardEvent<HTMLElement>) {

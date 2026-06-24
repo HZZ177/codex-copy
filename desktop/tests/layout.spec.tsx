@@ -1,4 +1,4 @@
-﻿import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -28,7 +28,7 @@ function renderLayoutWithPreview(ui: ReactElement) {
 }
 
 describe("Layout", () => {
-  it("renders the Codex-like shell without removed product entries", () => {
+  it("renders the Keydex-like shell without removed product entries", () => {
     renderLayout(
       <Layout title="测试会话">
         <div>内容区</div>
@@ -201,7 +201,7 @@ describe("Layout", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "新对话" }));
 
-    expect(onNavigate).toHaveBeenCalledWith("/guid");
+    expect(onNavigate).toHaveBeenCalledWith("/guid?focus=prompt");
     expect(shell.dataset.rightSidebar).toBe("closed");
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
   });

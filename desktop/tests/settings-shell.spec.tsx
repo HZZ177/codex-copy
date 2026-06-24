@@ -6,7 +6,7 @@ import { SettingsShell } from "@/renderer/pages/settings/SettingsShell";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 
-function renderShell(activeSection: "model" | "usage" = "model") {
+function renderShell(activeSection: "general" | "model" | "usage" = "model") {
   return render(
     <ThemeProvider>
       <LayoutStateProvider>
@@ -26,6 +26,7 @@ describe("SettingsShell", () => {
 
     expect(screen.getByRole("button", { name: "返回应用" })).not.toBeNull();
     expect(screen.getByLabelText("搜索设置")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "常规配置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "模型配置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "切换主题" })).not.toBeNull();
@@ -38,6 +39,7 @@ describe("SettingsShell", () => {
     renderShell("usage");
 
     expect(screen.getByRole("button", { name: "用量统计" }).getAttribute("data-active")).toBe("true");
+    expect(screen.getByRole("button", { name: "常规配置" }).getAttribute("data-active")).toBe("false");
     expect(screen.getByRole("button", { name: "模型配置" }).getAttribute("data-active")).toBe("false");
   });
 
@@ -46,6 +48,7 @@ describe("SettingsShell", () => {
 
     fireEvent.change(screen.getByLabelText("搜索设置"), { target: { value: "用量" } });
 
+    expect(screen.queryByRole("button", { name: "常规配置" })).toBeNull();
     expect(screen.queryByRole("button", { name: "模型配置" })).toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
   });

@@ -86,7 +86,7 @@
 .searchRow {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
   gap: 6px;
 }
@@ -136,7 +136,40 @@
   color: var(--color-text-tertiary);
 }
 
+.locateButton {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--surface-muted));
+  color: var(--color-text-tertiary);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-standard),
+    background-color var(--motion-fast) var(--motion-ease-standard),
+    color var(--motion-fast) var(--motion-ease-standard);
+}
+
+.locateButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-border-default) 86%, var(--color-text-tertiary));
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.locateButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.locateButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent, #2563eb) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .searchHint {
+  grid-column: 1 / -1;
   margin: -2px 2px 0;
   color: var(--color-text-tertiary);
   font-size: 11px;

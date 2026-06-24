@@ -147,8 +147,15 @@ export interface PublicModelSettings {
   api_key_preview: string | null;
 }
 
+export type AppFontFamily = "system" | "maple-mono";
+
+export interface AppearanceSettings {
+  font_family: AppFontFamily;
+}
+
 export interface SettingsResponse {
   model: PublicModelSettings;
+  appearance: AppearanceSettings;
 }
 
 export interface ModelInfo {

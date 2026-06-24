@@ -4,28 +4,47 @@
   min-height: calc(100vh - var(--titlebar-height));
   align-items: center;
   justify-content: center;
-  padding: clamp(60px, 8vh, 96px) 0 clamp(72px, 10vh, 128px);
+  padding: clamp(52px, 7vh, 84px) 0 clamp(64px, 9vh, 112px);
   color: var(--color-text-primary);
 }
 
 .canvas {
   display: grid;
-  width: min(880px, calc(100% - 96px));
+  width: min(728px, calc(100% - 112px));
   min-width: min(100%, 320px);
   align-items: center;
   justify-items: center;
-  gap: 46px;
+  gap: 38px;
   transform: translateY(-1vh);
 }
 
 .title {
   margin: 0;
   color: var(--color-text-primary);
-  font-size: 33px;
+  font-size: 27px;
   font-weight: 500;
   letter-spacing: 0;
-  line-height: 1.18;
+  line-height: 1.2;
   text-align: center;
+}
+
+.compactComposer {
+  --home-composer-radius: 17px;
+  --sendbox-keydex-action-gap: 6px;
+  --sendbox-keydex-context-margin-inline: -14px;
+  --sendbox-keydex-context-min-height: 38px;
+  --sendbox-keydex-context-padding: 0 13px;
+  --sendbox-keydex-context-radius: calc(var(--home-composer-radius) - 1px);
+  --sendbox-keydex-input-font-size: 13px;
+  --sendbox-keydex-input-line-height: 1.48;
+  --sendbox-keydex-input-min-height: 38px;
+  --sendbox-keydex-min-height: 102px;
+  --sendbox-keydex-padding: 12px 14px 0;
+  --sendbox-keydex-radius: var(--home-composer-radius);
+  --sendbox-keydex-send-button-size: 30px;
+  --sendbox-keydex-shadow: 0 1px 2px rgb(15 23 42 / 3%), 0 14px 36px rgb(15 23 42 / 5%);
+  --sendbox-keydex-toolbar-min-height: 34px;
+  --sendbox-keydex-toolbar-padding-bottom: 6px;
 }
 
 .composer {
@@ -122,17 +141,17 @@
   }
 
   .canvas {
-    width: min(100%, 720px);
-    gap: 36px;
+    width: min(100%, 680px);
+    gap: 32px;
   }
 
   .title {
-    font-size: 27px;
+    font-size: 24px;
   }
 }
 
 @media (max-width: 520px) {
   .title {
-    font-size: 23px;
+    font-size: 22px;
   }
 }

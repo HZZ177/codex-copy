@@ -19,17 +19,20 @@
   --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
-  --font-sans:
+  --font-sans-system:
     "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif,
     system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
     sans-serif;
-  --font-reading:
+  --font-reading-system:
     "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
     sans-serif;
-  --font-mono:
+  --font-mono-system:
     "SFMono-Regular", Consolas, "Liberation Mono", "Cascadia Mono", Menlo, monospace;
+  --font-sans: var(--font-sans-system);
+  --font-reading: var(--font-reading-system);
+  --font-mono: var(--font-mono-system);
 }
 
 html,

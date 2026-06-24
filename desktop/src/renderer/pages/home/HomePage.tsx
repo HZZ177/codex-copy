@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WorkspaceEntry, type WorkspaceSearchResult } from "@/runtime";
-import { SendBox, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
+import {
+  SendBox,
+  selectedQuoteFromText,
+  type SelectedFile,
+  type SelectedQuote,
+} from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
 import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace/WorkspaceSelector";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
-import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { useOptionalPreview, type PreviewQuoteSelectionRequest } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
 import type { AgentContextItem, Workspace } from "@/types/protocol";
@@ -15,6 +20,8 @@ import styles from "./HomePage.module.css";
 export interface HomePageProps {
   runtime?: RuntimeBridge;
   initialWorkspaceId?: string;
+  initialSessionType?: "chat";
+  autoFocusInputKey?: string;
   onNavigateToConversation: (
     sessionId: string,
     initialModel: string,
@@ -24,18 +31,27 @@ export interface HomePageProps {
   onOpenModelSettings: () => void;
 }
 
+interface PendingWorkspaceRegistration {
+  rootPath: string;
+  promise: Promise<Workspace>;
+}
+
 export function HomePage({
   runtime = runtimeBridge,
   initialWorkspaceId,
+  initialSessionType,
+  autoFocusInputKey,
   onNavigateToConversation,
   onOpenModelSettings,
 }: HomePageProps) {
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [quoteChipRequest, setQuoteChipRequest] = useState<{ requestId: number; quote: SelectedQuote } | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>({ type: "chat" });
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const selectionTouchedRef = useRef(false);
+  const pendingWorkspaceRegistrationRef = useRef<PendingWorkspaceRegistration | null>(null);
   const runtimeConnection = useOptionalRuntimeConnection();
   const backendReady = runtimeConnection?.ready ?? true;
   const backendError = runtimeConnection?.status === "error";
@@ -43,6 +59,57 @@ export function HomePage({
   const notifications = useNotifications();
   const previewContext = useOptionalPreview();
   const setPreviewHostContext = previewContext?.setPreviewHostContext;
+
+  const upsertWorkspace = useCallback((workspace: Workspace) => {
+    setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
+  }, []);
+
+  const selectWorkspaceIfStillPending = useCallback((rootPath: string, workspace: Workspace) => {
+    setWorkspaceSelection((current) =>
+      current.type === "pending" && current.rootPath === rootPath ? { type: "workspace", workspace } : current,
+    );
+  }, []);
+
+  const registerWorkspacePath = useCallback(
+    async (rootPath: string) => {
+      const activeRegistration = pendingWorkspaceRegistrationRef.current;
+      if (activeRegistration?.rootPath === rootPath) {
+        return activeRegistration.promise;
+      }
+
+      const promise = runtime.workspaces.create({ rootPath });
+      pendingWorkspaceRegistrationRef.current = { rootPath, promise };
+      try {
+        return await promise;
+      } finally {
+        if (pendingWorkspaceRegistrationRef.current?.promise === promise) {
+          pendingWorkspaceRegistrationRef.current = null;
+        }
+      }
+    },
+    [runtime],
+  );
+
+  const quoteSelection = useCallback((request: PreviewQuoteSelectionRequest) => {
+    const quote = selectedQuoteFromText(request.selectedText, {
+      source: "selection",
+      file: {
+        path: request.path,
+        name: fileName(request.path),
+        lineStart: request.lineStart ?? null,
+        lineEnd: request.lineEnd ?? null,
+        sourceStart: request.sourceStart ?? null,
+        sourceEnd: request.sourceEnd ?? null,
+      },
+    });
+    if (!quote) {
+      return;
+    }
+    setQuoteChipRequest((current) => ({
+      requestId: (current?.requestId ?? 0) + 1,
+      quote,
+    }));
+  }, []);
 
   useEffect(() => {
     if (!setPreviewHostContext) {
@@ -57,8 +124,9 @@ export function HomePage({
       workspaceAvailable: true,
       workspaceLabel: workspaceSelection.workspace.root_path ?? workspaceSelection.workspace.name,
       runtime,
+      onQuoteSelection: quoteSelection,
     });
-  }, [runtime, setPreviewHostContext, workspaceSelection]);
+  }, [quoteSelection, runtime, setPreviewHostContext, workspaceSelection]);
 
   useEffect(
     () => () => {
@@ -82,6 +150,10 @@ export function HomePage({
           return;
         }
         setWorkspaces(response.list);
+        if (!selectionTouchedRef.current && initialSessionType === "chat") {
+          setWorkspaceSelection({ type: "chat" });
+          return;
+        }
         if (!selectionTouchedRef.current && response.list.length) {
           const initialWorkspace = initialWorkspaceId
             ? response.list.find((workspace) => workspace.id === initialWorkspaceId)
@@ -102,22 +174,53 @@ export function HomePage({
     return () => {
       active = false;
     };
-  }, [backendReady, initialWorkspaceId, notifications, runtime]);
+  }, [backendReady, initialSessionType, initialWorkspaceId, notifications, runtime]);
+
+  useEffect(() => {
+    if (!backendReady || workspaceSelection.type !== "pending") {
+      return;
+    }
+
+    let active = true;
+    const { rootPath } = workspaceSelection;
+    void registerWorkspacePath(rootPath)
+      .then((workspace) => {
+        if (!active) {
+          return;
+        }
+        upsertWorkspace(workspace);
+        selectWorkspaceIfStillPending(rootPath, workspace);
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          notifications.error(errorMessage(reason));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    backendReady,
+    notifications,
+    registerWorkspacePath,
+    selectWorkspaceIfStillPending,
+    upsertWorkspace,
+    workspaceSelection,
+  ]);
 
   const canSubmit =
     backendReady &&
     draft.trim().length > 0 &&
     !submitting &&
-    !workspaceLoading &&
     modelSelection.modelLoadState !== "loading";
-  const runtimeStatusText = backendReady
-    ? ""
-    : backendError
-      ? "本地服务连接失败，请重试"
-      : "正在启动本地服务";
+  const sendLoading =
+    !backendError && (!backendReady || workspaceSelection.type === "pending" || modelSelection.modelLoadState === "loading");
   const title =
     workspaceSelection.type === "workspace"
       ? `我们应该在 ${workspaceSelection.workspace.name} 中构建什么？`
+      : workspaceSelection.type === "pending"
+        ? `我们应该在 ${workspaceSelection.name} 中构建什么？`
       : "我们应该聊些什么？";
   const searchWorkspace =
     workspaceSelection.type === "workspace"
@@ -152,6 +255,7 @@ export function HomePage({
             workspaceAvailable: true,
             workspaceLabel: workspaceSelection.workspace.root_path ?? workspaceSelection.workspace.name,
             runtime,
+            onQuoteSelection: quoteSelection,
           });
         }
       : undefined;
@@ -176,13 +280,24 @@ export function HomePage({
         return false;
       }
 
+      let sessionWorkspace: Workspace | null = null;
+      if (workspaceSelection.type === "workspace") {
+        sessionWorkspace = workspaceSelection.workspace;
+      } else if (workspaceSelection.type === "pending") {
+        const { rootPath } = workspaceSelection;
+        const workspace = await registerWorkspacePath(rootPath);
+        upsertWorkspace(workspace);
+        selectWorkspaceIfStillPending(rootPath, workspace);
+        sessionWorkspace = workspace;
+      }
+
       const sessionPayload =
-        workspaceSelection.type === "workspace"
+        sessionWorkspace
           ? {
               title: sessionTitleFromPreparedMessage(text, prepared.contextItems),
               session_tag: "chat",
               sessionType: "workspace" as const,
-              workspaceId: workspaceSelection.workspace.id,
+              workspaceId: sessionWorkspace.id,
             }
           : {
               title: sessionTitleFromPreparedMessage(text, prepared.contextItems),
@@ -225,9 +340,12 @@ export function HomePage({
           ariaLabel="新对话输入"
           inputLabel="输入需求"
           placeholder="随心输入"
-          statusText={submitting ? "正在创建对话" : runtimeStatusText}
-          disabled={submitting || !backendReady}
-          variant="codex"
+          statusText={submitting ? "正在创建对话" : ""}
+          disabled={submitting}
+          sendLoading={sendLoading}
+          variant="keydex"
+          autoFocusKey={autoFocusInputKey}
+          className={styles.compactComposer}
           allowFileSelection={workspaceSelection.type === "workspace"}
           onListWorkspaceDirectory={listWorkspaceDirectory}
           onSearchWorkspace={searchWorkspace}
@@ -235,8 +353,8 @@ export function HomePage({
             <WorkspaceSelector
               value={workspaceSelection}
               workspaces={workspaces}
-              loading={workspaceLoading || !backendReady}
-              disabled={submitting || !backendReady}
+              loading={backendReady && workspaceLoading}
+              disabled={submitting}
               onSelectChat={() => {
                 selectionTouchedRef.current = true;
                 setWorkspaceSelection({ type: "chat" });
@@ -246,9 +364,17 @@ export function HomePage({
                 setWorkspaceSelection({ type: "workspace", workspace });
               }}
               onAddWorkspace={async (rootPath) => {
-                const workspace = await runtime.workspaces.create({ rootPath });
                 selectionTouchedRef.current = true;
-                setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
+                if (!backendReady) {
+                  setWorkspaceSelection({
+                    type: "pending",
+                    rootPath,
+                    name: workspaceNameFromPath(rootPath),
+                  });
+                  return;
+                }
+                const workspace = await registerWorkspacePath(rootPath);
+                upsertWorkspace(workspace);
                 setWorkspaceSelection({ type: "workspace", workspace });
               }}
               onPickWorkspacePath={pickWorkspacePath}
@@ -258,7 +384,7 @@ export function HomePage({
             <RuntimeModelSelector
               model={modelSelection.selectedModel}
               modelOptions={modelSelection.modelOptions}
-              modelLoadState={modelSelection.modelLoadState}
+              modelLoadState={!backendReady && !backendError ? "loading" : modelSelection.modelLoadState}
               modelError={modelSelection.modelError}
               disabled={submitting || !backendReady}
               onModelChange={modelSelection.setSelectedModel}
@@ -269,6 +395,7 @@ export function HomePage({
           onSend={submit}
           onStop={() => undefined}
           onOpenFileReference={openFileReference}
+          externalQuoteRequest={quoteChipRequest}
         />
       </section>
     </main>
@@ -286,6 +413,15 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
 function sessionTitleFromPreparedMessage(text: string, contextItems: AgentContextItem[]): string {
   const title = text.trim() || contextItems[0]?.label || "新对话";
   return title.slice(0, 32);
+}
+
+function workspaceNameFromPath(path: string): string {
+  const normalized = path.trim().replace(/[\\/]+$/, "");
+  return normalized.split(/[\\/]/).pop() || normalized || "新项目";
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function errorMessage(reason: unknown): string {

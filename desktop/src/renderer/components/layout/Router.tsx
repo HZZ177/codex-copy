@@ -18,6 +18,11 @@ const HomePage = lazy(() =>
 const SettingsShell = lazy(() =>
   import("@/renderer/pages/settings/SettingsShell").then((module) => ({ default: module.SettingsShell })),
 );
+const GeneralSettingsPage = lazy(() =>
+  import("@/renderer/pages/settings/general/GeneralSettingsPage").then((module) => ({
+    default: module.GeneralSettingsPage,
+  })),
+);
 const ModelSettingsPage = lazy(() =>
   import("@/renderer/pages/settings/model/ModelSettingsPage").then((module) => ({
     default: module.ModelSettingsPage,
@@ -43,7 +48,7 @@ export function AppRouter({ runtime = runtimeBridge }: AppRouterProps = {}) {
         <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
         <Route path="/settings/model" element={<ModelSettingsRoute runtime={runtime} />} />
         <Route path="/settings/usage" element={<UsageSettingsRoute runtime={runtime} />} />
-        <Route path="/settings/general" element={<Navigate to="/settings/model" replace />} />
+        <Route path="/settings/general" element={<GeneralSettingsRoute />} />
         <Route path="*" element={<Navigate to="/guid" replace />} />
       </Routes>
     </Suspense>
@@ -91,14 +96,19 @@ function RoutedLayout({
 function HomeRoute({ runtime }: { runtime: RuntimeBridge }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const initialWorkspaceId = new URLSearchParams(location.search).get("workspaceId") ?? undefined;
+  const routeParams = new URLSearchParams(location.search);
+  const initialWorkspaceId = routeParams.get("workspaceId") ?? undefined;
+  const initialSessionType = routeParams.get("sessionType") === "chat" ? "chat" : undefined;
+  const autoFocusInputKey = routeParams.get("focus") === "prompt" ? location.key : undefined;
 
   return (
     <RoutedLayout title="新对话" contentMode="full" resetRightSidebarOnEnter>
       <HomePage
-        key={initialWorkspaceId ?? "default"}
+        key={`${initialSessionType ?? "workspace"}:${initialWorkspaceId ?? "default"}`}
         runtime={runtime}
         initialWorkspaceId={initialWorkspaceId}
+        initialSessionType={initialSessionType}
+        autoFocusInputKey={autoFocusInputKey}
         onNavigateToConversation={(threadId, initialModel, initialMessage, options) => {
           const quickSend = queueQuickChatSend({
             sessionId: threadId,
@@ -146,6 +156,14 @@ function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
         onOpenModelSettings={() => void navigate("/settings/model", { state: { from: location.pathname } })}
       />
     </RoutedLayout>
+  );
+}
+
+function GeneralSettingsRoute() {
+  return (
+    <SettingsShell activeSection="general">
+      <GeneralSettingsPage />
+    </SettingsShell>
   );
 }
 

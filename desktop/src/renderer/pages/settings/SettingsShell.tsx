@@ -1,4 +1,4 @@
-import { ArrowLeft, BarChart3, Moon, Search, Settings2, Sun, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BarChart3, Moon, Search, Settings2, SlidersHorizontal, Sun, type LucideIcon } from "lucide-react";
 import type { CSSProperties, PropsWithChildren } from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -11,9 +11,10 @@ import { useTheme } from "@/renderer/providers/ThemeProvider";
 
 import styles from "./SettingsShell.module.css";
 
-export type SettingsSection = "model" | "usage";
+export type SettingsSection = "general" | "model" | "usage";
 
 const settingsItems = [
+  { id: "general", label: "常规配置", path: "/settings/general", icon: SlidersHorizontal },
   { id: "model", label: "模型配置", path: "/settings/model", icon: Settings2 },
   { id: "usage", label: "用量统计", path: "/settings/usage", icon: BarChart3 },
 ] satisfies Array<{ id: SettingsSection; label: string; path: string; icon: LucideIcon }>;

@@ -13,7 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
 import type {
@@ -28,9 +28,26 @@ import type {
 import styles from "./UsageStatsPage.module.css";
 
 type RangePreset = "today" | "7d" | "30d" | "custom";
+type TokenHeatBucket = "day" | "week";
 type TokenInputLike = {
   input_tokens?: number | null;
   cache_read_tokens?: number | null;
+};
+type TokenHeatWallCell = {
+  time: string;
+  column: number;
+  totalTokens: number;
+  weeklyTotalTokens: number;
+  level: number;
+  weeklyLevel: number;
+  tooltip: string;
+  weeklyTooltip: string;
+  weekLabel: string;
+  outsideRange: boolean;
+};
+type TokenHeatWallMarker = {
+  column: number;
+  label: string;
 };
 
 const PAGE_SIZE = 12;
@@ -62,16 +79,20 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
   const [customEnd, setCustomEnd] = useState(toDateTimeLocal(initialCustomRange.endTime));
   const [selectedModel, setSelectedModel] = useState("");
   const [trendBucket, setTrendBucket] = useState<UsageBucket>("hour");
+  const [heatBucket, setHeatBucket] = useState<TokenHeatBucket>("day");
   const [page, setPage] = useState(1);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [summary, setSummary] = useState<UsageSummary>(EMPTY_SUMMARY);
   const [trend, setTrend] = useState<UsageTrendPoint[]>([]);
+  const [heatTrend, setHeatTrend] = useState<UsageTrendPoint[]>([]);
   const [requests, setRequests] = useState<UsageRequestListResponse>(EMPTY_REQUESTS);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [detailId, setDetailId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [heatLoading, setHeatLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timezoneOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
+  const heatRange = useMemo(() => computeHeatWallRange(), [refreshNonce]);
 
   const range = useMemo(
     () =>
@@ -130,6 +151,39 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
     };
   }, [page, range, refreshNonce, runtime, selectedModel, timezoneOffsetMinutes, trendBucket]);
 
+  useEffect(() => {
+    let active = true;
+    setHeatLoading(true);
+    const query = {
+      ...heatRange,
+      model: selectedModel || undefined,
+    };
+    void runtime.usage
+      .getTrend({
+        ...query,
+        bucket: "day",
+        timezoneOffsetMinutes,
+      })
+      .then((nextTrend) => {
+        if (active) {
+          setHeatTrend(completeUsageTrendPoints(nextTrend.points, "day", heatRange, timezoneOffsetMinutes));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setHeatTrend([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setHeatLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [heatRange, runtime, selectedModel, timezoneOffsetMinutes]);
+
   const totalPages = Math.max(1, Math.ceil(requests.total / requests.page_size));
 
   function changeRange(next: RangePreset) {
@@ -166,135 +220,163 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
         </div>
       </header>
 
-      <section className={styles.rangeBar} aria-label="时间范围">
-        <CalendarDays size={16} />
-        {(["today", "7d", "30d", "custom"] as RangePreset[]).map((item) => (
-          <button
-            data-active={rangePreset === item ? "true" : "false"}
-            key={item}
-            onClick={() => changeRange(item)}
-            type="button"
-          >
-            {rangeLabel(item)}
-          </button>
-        ))}
-        {rangePreset === "custom" ? (
-          <div className={styles.customRange}>
-            <input
-              aria-label="开始时间"
-              onChange={(event) => {
-                setCustomStart(event.target.value);
-                setPage(1);
-              }}
-              type="datetime-local"
-              value={customStart}
-            />
-            <span>至</span>
-            <input
-              aria-label="结束时间"
-              onChange={(event) => {
-                setCustomEnd(event.target.value);
-                setPage(1);
-              }}
-              type="datetime-local"
-              value={customEnd}
-            />
-          </div>
-        ) : null}
-      </section>
-
-      {error ? (
-        <section className={styles.error} role="alert">
-          <span>{error}</span>
-          <button type="button" onClick={() => setRefreshNonce((value) => value + 1)}>
-            重试
-          </button>
-        </section>
-      ) : null}
-
-      <section className={styles.metrics} aria-label="用量指标" data-loading={loading ? "true" : "false"}>
-        <MetricCard
-          icon={<Zap size={18} />}
-          label="请求数量"
-          primary={formatNumber(summary.request_count)}
-          secondary={`成功 ${formatNumber(summary.success_count)} / 失败 ${formatNumber(summary.failed_count)}`}
-        />
-        <MetricCard
-          icon={<BarChart3 size={18} />}
-          label="非缓存命中输入 Token"
-          primary={formatNumber(nonCacheInputTokens(summary))}
-          secondary={`平均耗时 ${formatDuration(summary.avg_duration_ms)}`}
-        />
-        <MetricCard
-          icon={<Database size={18} />}
-          label="命中缓存 Token"
-          primary={formatNumber(summary.cache_read_tokens)}
-          secondary="平均缓存命中率"
-          progress={cacheHitRate(summary.cache_read_tokens, summary.input_tokens)}
-        />
-        <MetricCard
-          icon={<Upload size={18} />}
-          label="输出 Token"
-          primary={formatNumber(summary.output_tokens)}
-          secondary="模型输出"
-        />
-      </section>
-
       <section className={styles.chartPanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <h2>使用趋势</h2>
-            <p>
-              {formatRange(range.startTime, range.endTime)}
-              {selectedModel ? ` · ${selectedModel}` : ""}
-            </p>
-          </div>
+        <div className={styles.chartToolbar}>
+          <span className={styles.chartRange}>
+            最近 1 年
+            {selectedModel ? ` · ${selectedModel}` : ""}
+          </span>
           <div className={styles.panelHeaderActions}>
-            <div className={styles.bucketToggle} aria-label="趋势粒度">
+            <div className={styles.bucketToggle} aria-label="Token 热力粒度">
               <button
-                data-active={trendBucket === "hour" ? "true" : "false"}
-                onClick={() => changeTrendBucket("hour")}
+                data-active={heatBucket === "day" ? "true" : "false"}
+                onClick={() => setHeatBucket("day")}
                 type="button"
               >
-                按小时
+                每日
               </button>
               <button
-                data-active={trendBucket === "day" ? "true" : "false"}
-                onClick={() => changeTrendBucket("day")}
+                data-active={heatBucket === "week" ? "true" : "false"}
+                onClick={() => setHeatBucket("week")}
                 type="button"
               >
-                按天
+                每周
               </button>
             </div>
-            {loading ? <Loader2 className={styles.spin} size={16} /> : null}
+            {heatLoading ? <Loader2 className={styles.spin} size={16} /> : null}
           </div>
         </div>
-        <UsageTrendChart points={trend} />
+        <TokenHeatWall points={heatTrend} bucket={heatBucket} />
       </section>
 
-      <section className={styles.tablePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <h2>请求日志</h2>
-            <p>共 {formatNumber(requests.total)} 条记录</p>
+      <section className={styles.scopedStats} aria-label="时间范围统计">
+        <section className={styles.rangeBar} aria-label="时间范围">
+          <CalendarDays size={16} />
+          {(["today", "7d", "30d", "custom"] as RangePreset[]).map((item) => (
+            <button
+              data-active={rangePreset === item ? "true" : "false"}
+              key={item}
+              onClick={() => changeRange(item)}
+              type="button"
+            >
+              {rangeLabel(item)}
+            </button>
+          ))}
+          {rangePreset === "custom" ? (
+            <div className={styles.customRange}>
+              <input
+                aria-label="开始时间"
+                onChange={(event) => {
+                  setCustomStart(event.target.value);
+                  setPage(1);
+                }}
+                type="datetime-local"
+                value={customStart}
+              />
+              <span>至</span>
+              <input
+                aria-label="结束时间"
+                onChange={(event) => {
+                  setCustomEnd(event.target.value);
+                  setPage(1);
+                }}
+                type="datetime-local"
+                value={customEnd}
+              />
+            </div>
+          ) : null}
+        </section>
+
+        {error ? (
+          <section className={styles.error} role="alert">
+            <span>{error}</span>
+            <button type="button" onClick={() => setRefreshNonce((value) => value + 1)}>
+              重试
+            </button>
+          </section>
+        ) : null}
+
+        <section className={styles.metrics} aria-label="用量指标" data-loading={loading ? "true" : "false"}>
+          <MetricCard
+            icon={<Zap size={18} />}
+            label="请求数量"
+            primary={formatNumber(summary.request_count)}
+            secondary={`成功 ${formatNumber(summary.success_count)} / 失败 ${formatNumber(summary.failed_count)}`}
+          />
+          <MetricCard
+            icon={<BarChart3 size={18} />}
+            label="非缓存命中输入 Token"
+            primary={formatNumber(nonCacheInputTokens(summary))}
+            secondary={`平均耗时 ${formatDuration(summary.avg_duration_ms)}`}
+          />
+          <MetricCard
+            icon={<Database size={18} />}
+            label="命中缓存 Token"
+            primary={formatNumber(summary.cache_read_tokens)}
+            secondary="平均缓存命中率"
+            progress={cacheHitRate(summary.cache_read_tokens, summary.input_tokens)}
+          />
+          <MetricCard
+            icon={<Upload size={18} />}
+            label="输出 Token"
+            primary={formatNumber(summary.output_tokens)}
+            secondary="模型输出"
+          />
+        </section>
+
+        <section className={styles.chartPanel}>
+          <div className={styles.chartToolbar}>
+            <span className={styles.chartRange}>
+              {formatRange(range.startTime, range.endTime)}
+              {selectedModel ? ` · ${selectedModel}` : ""}
+            </span>
+            <div className={styles.panelHeaderActions}>
+              <div className={styles.bucketToggle} aria-label="趋势粒度">
+                <button
+                  data-active={trendBucket === "hour" ? "true" : "false"}
+                  onClick={() => changeTrendBucket("hour")}
+                  type="button"
+                >
+                  按小时
+                </button>
+                <button
+                  data-active={trendBucket === "day" ? "true" : "false"}
+                  onClick={() => changeTrendBucket("day")}
+                  type="button"
+                >
+                  按天
+                </button>
+              </div>
+              {loading ? <Loader2 className={styles.spin} size={16} /> : null}
+            </div>
           </div>
-        </div>
-        <UsageRequestTable rows={requests.list} loading={loading} onOpen={(id) => setDetailId(id)} />
-        <footer className={styles.pagination}>
-          <button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
-            上一页
-          </button>
-          <span>
-            第 {requests.page} / {totalPages} 页
-          </span>
-          <button
-            disabled={page >= totalPages}
-            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-            type="button"
-          >
-            下一页
-          </button>
-        </footer>
+          <UsageTrendChart points={trend} />
+        </section>
+
+        <section className={styles.tablePanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <h2>请求日志</h2>
+              <p>共 {formatNumber(requests.total)} 条记录</p>
+            </div>
+          </div>
+          <UsageRequestTable rows={requests.list} loading={loading} onOpen={(id) => setDetailId(id)} />
+          <footer className={styles.pagination}>
+            <button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
+              上一页
+            </button>
+            <span>
+              第 {requests.page} / {totalPages} 页
+            </span>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+              type="button"
+            >
+              下一页
+            </button>
+          </footer>
+        </section>
       </section>
 
       <UsageDetailLayer requestId={detailId} runtime={runtime} onClose={() => setDetailId("")} />
@@ -406,6 +488,90 @@ function MetricCard({
   );
 }
 
+export function TokenHeatWall({ points, bucket }: { points: UsageTrendPoint[]; bucket: TokenHeatBucket }) {
+  const [hoveredColumn, setHoveredColumn] = useState<number | null>(null);
+  const [hoveredTime, setHoveredTime] = useState<string | null>(null);
+  const heatWall = useMemo(() => buildTokenHeatWall(points), [points]);
+  const heatWallStyle = {
+    "--heat-columns": heatWall.columns,
+  } as CSSProperties;
+
+  return (
+    <div className={styles.heatWall} data-empty={points.length === 0 ? "true" : "false"} data-testid="usage-token-heatwall">
+      {points.length === 0 ? (
+        <div className={styles.heatWallEmpty}>暂无 Token 活动</div>
+      ) : (
+        <>
+          <div className={styles.heatWallViewport}>
+            <div className={styles.heatWallGrid} style={heatWallStyle}>
+              {heatWall.cells.map((cell) => {
+                const isWeekly = bucket === "week";
+                const label = isWeekly ? cell.weeklyTooltip : cell.tooltip;
+                const level = isWeekly ? cell.weeklyLevel : cell.level;
+                const value = isWeekly ? cell.weeklyTotalTokens : cell.totalTokens;
+                const active =
+                  isWeekly && hoveredColumn !== null
+                    ? hoveredColumn === cell.column
+                    : hoveredTime === cell.time;
+                return (
+                  <button
+                    aria-label={label}
+                    className={styles.heatCell}
+                    data-active={active ? "true" : "false"}
+                    data-level={level}
+                    data-outside={cell.outsideRange ? "true" : "false"}
+                    key={cell.time}
+                    onBlur={() => {
+                      setHoveredColumn(null);
+                      setHoveredTime(null);
+                    }}
+                    onFocus={() => {
+                      setHoveredColumn(cell.column);
+                      setHoveredTime(cell.time);
+                    }}
+                    onMouseEnter={() => {
+                      setHoveredColumn(cell.column);
+                      setHoveredTime(cell.time);
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredColumn(null);
+                      setHoveredTime(null);
+                    }}
+                    title={label}
+                    type="button"
+                  >
+                    <span className={styles.heatCellTooltip} role="tooltip">
+                      <strong>{isWeekly ? cell.weekLabel : formatHeatCellDate(cell.time)}</strong>
+                      <span>总 Token {formatNumber(value)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div aria-hidden="true" className={styles.heatWallAxis} style={heatWallStyle}>
+              {heatWall.markers.map((marker) => (
+                <span key={`${marker.column}-${marker.label}`} style={{ gridColumn: marker.column + 1 }}>
+                  {marker.label}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className={styles.heatWallLegend} aria-hidden="true">
+            <span>少</span>
+            <span className={styles.heatWallLegendLevels}>
+              {[0, 1, 2, 3, 4].map((level) => (
+                <i data-level={level} key={level} />
+              ))}
+            </span>
+            <span>多</span>
+            <strong className={styles.heatWallTotal}>{formatNumber(heatWall.totalTokens)} Token</strong>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function UsageTrendChart({ points }: { points: UsageTrendPoint[] }) {
   const chartRef = useRef<HTMLDivElement | null>(null);
 
@@ -505,6 +671,176 @@ function buildUsageLineSeries({
     yAxisIndex,
     data,
   };
+}
+
+function buildTokenHeatWall(points: UsageTrendPoint[]) {
+  if (points.length === 0) {
+    return { cells: [] as TokenHeatWallCell[], columns: 1, markers: [] as TokenHeatWallMarker[], totalTokens: 0 };
+  }
+
+  const pointByTime = new Map(points.map((point) => [formatHeatDateKey(parseHeatDate(point.time)), point]));
+  const rangeStart = parseHeatDate(points[0].time);
+  const rangeEnd = parseHeatDate(points[points.length - 1].time);
+  const paddedStart = addHeatDays(rangeStart, -heatDayRow(rangeStart));
+  const paddedEnd = addHeatDays(rangeEnd, 6 - heatDayRow(rangeEnd));
+  const baseCells: Array<Omit<TokenHeatWallCell, "weeklyTotalTokens" | "weeklyLevel" | "weeklyTooltip" | "weekLabel">> = [];
+  const cursor = new Date(paddedStart);
+
+  while (cursor.getTime() <= paddedEnd.getTime()) {
+    const time = formatHeatDateKey(cursor);
+    const point = pointByTime.get(time);
+    const column = Math.floor(baseCells.length / 7);
+    const outsideRange = cursor.getTime() < rangeStart.getTime() || cursor.getTime() > rangeEnd.getTime();
+    const totalTokens = outsideRange ? 0 : totalTokensForTrendPoint(point ?? emptyTrendPoint(time));
+    baseCells.push({
+      time,
+      column,
+      totalTokens,
+      level: 0,
+      tooltip: `${formatHeatCellDate(time)} · 总 Token ${formatNumber(totalTokens)}`,
+      outsideRange,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const maxTokens = Math.max(0, ...baseCells.map((cell) => cell.totalTokens));
+  const weeklyTotals = new Map<number, number>();
+  baseCells.forEach((cell) => {
+    weeklyTotals.set(cell.column, (weeklyTotals.get(cell.column) ?? 0) + cell.totalTokens);
+  });
+  const maxWeeklyTokens = Math.max(0, ...weeklyTotals.values());
+  const cells: TokenHeatWallCell[] = baseCells.map((cell) => {
+    const weeklyTotalTokens = weeklyTotals.get(cell.column) ?? 0;
+    const weekLabel = heatWeekLabel(baseCells, cell.column);
+    return {
+      ...cell,
+      level: tokenHeatLevel(cell.totalTokens, maxTokens),
+      weeklyTotalTokens,
+      weeklyLevel: tokenHeatLevel(weeklyTotalTokens, maxWeeklyTokens),
+      weeklyTooltip: `${weekLabel} · 总 Token ${formatNumber(weeklyTotalTokens)}`,
+      weekLabel,
+    };
+  });
+
+  return {
+    cells,
+    columns: Math.max(1, Math.ceil(cells.length / 7)),
+    markers: buildTokenHeatWallMarkers(cells),
+    totalTokens: cells.reduce((sum, cell) => sum + cell.totalTokens, 0),
+  };
+}
+
+function buildTokenHeatWallMarkers(cells: TokenHeatWallCell[]): TokenHeatWallMarker[] {
+  const markers: TokenHeatWallMarker[] = [];
+  let lastMarkerColumn = -Infinity;
+  let lastMarkerKey = "";
+  const minColumnGap = 3;
+
+  cells.forEach((cell) => {
+    const markerKey = tokenHeatMarkerKey(cell.time);
+    if (!markerKey || markerKey === lastMarkerKey) {
+      return;
+    }
+
+    const column = cell.column;
+    if (markers.length > 0 && column - lastMarkerColumn < minColumnGap) {
+      lastMarkerKey = markerKey;
+      return;
+    }
+
+    markers.push({
+      column,
+      label: formatTokenHeatMarkerLabel(cell.time),
+    });
+    lastMarkerColumn = column;
+    lastMarkerKey = markerKey;
+  });
+
+  return markers;
+}
+
+function totalTokensForTrendPoint(point: UsageTrendPoint) {
+  if (point.total_tokens > 0) {
+    return point.total_tokens;
+  }
+  return Math.max(0, (point.input_tokens ?? 0) + (point.output_tokens ?? 0));
+}
+
+function tokenHeatLevel(totalTokens: number, maxTokens: number) {
+  if (totalTokens <= 0 || maxTokens <= 0) {
+    return 0;
+  }
+  const ratio = totalTokens / maxTokens;
+  if (ratio >= 0.75) {
+    return 4;
+  }
+  if (ratio >= 0.45) {
+    return 3;
+  }
+  if (ratio >= 0.18) {
+    return 2;
+  }
+  return 1;
+}
+
+function parseHeatDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) {
+    const fallback = new Date(value);
+    if (!Number.isNaN(fallback.getTime())) {
+      return new Date(Date.UTC(fallback.getFullYear(), fallback.getMonth(), fallback.getDate()));
+    }
+    return new Date(Date.UTC(1970, 0, 1));
+  }
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+}
+
+function addHeatDays(value: Date, days: number) {
+  const next = new Date(value);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function heatDayRow(value: Date) {
+  return (value.getUTCDay() + 6) % 7;
+}
+
+function formatHeatDateKey(value: Date) {
+  return `${value.getUTCFullYear()}-${padDatePart(value.getUTCMonth() + 1)}-${padDatePart(value.getUTCDate())}`;
+}
+
+function formatHeatCellDate(value: string) {
+  const date = parseHeatDate(value);
+  return `${padDatePart(date.getUTCMonth() + 1)}/${padDatePart(date.getUTCDate())}`;
+}
+
+function heatWeekLabel(cells: Array<Pick<TokenHeatWallCell, "time" | "column">>, column: number) {
+  const weekCells = cells.filter((cell) => cell.column === column);
+  const first = weekCells[0];
+  const last = weekCells[weekCells.length - 1];
+  if (!first || !last) {
+    return "";
+  }
+  return `${formatHeatCellDate(first.time)} - ${formatHeatCellDate(last.time)}`;
+}
+
+function tokenHeatMarkerKey(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) {
+    return value;
+  }
+  const [, year, month] = match;
+  return `${year}-${month}`;
+}
+
+function formatTokenHeatMarkerLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) {
+    return value;
+  }
+  const [, , month] = match;
+  return `${Number(month)}月`;
 }
 
 export function completeUsageTrendPoints(
@@ -767,6 +1103,15 @@ function computeRange(preset: RangePreset) {
     start.setDate(start.getDate() - 6);
     start.setHours(0, 0, 0, 0);
   }
+  return { startTime: start.toISOString(), endTime: end.toISOString() };
+}
+
+function computeHeatWallRange() {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setFullYear(start.getFullYear() - 1);
+  start.setHours(0, 0, 0, 0);
   return { startTime: start.toISOString(), endTime: end.toISOString() };
 }
 

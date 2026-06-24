@@ -611,7 +611,7 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(container.querySelector(".codex-markdown-table-scroll")).not.toBeNull();
+    expect(container.querySelector(".keydex-markdown-table-scroll")).not.toBeNull();
     expect(screen.getByRole("table")).not.toBeNull();
   });
 

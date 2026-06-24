@@ -1,7 +1,7 @@
 .chatLayout {
   --conversation-edge-padding: 18px;
   --composer-accessory-gap: 8px;
-  --composer-fade-height: 30px;
+  --composer-fade-height: 44px;
   --conversation-scrollbar-gutter-width: 17px;
 
   position: relative;
@@ -193,9 +193,10 @@
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--shell-bg) 0%, transparent) 0%,
-    color-mix(in srgb, var(--shell-bg) 18%, transparent) 58%,
-    color-mix(in srgb, var(--shell-bg) 34%, transparent) 100%
+    color-mix(in srgb, var(--shell-bg) 26%, transparent) 46%,
+    color-mix(in srgb, var(--shell-bg) 78%, transparent) 100%
   );
+  backdrop-filter: blur(0.5px);
   content: "";
   pointer-events: none;
 }

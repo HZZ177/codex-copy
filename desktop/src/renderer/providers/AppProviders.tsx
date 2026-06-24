@@ -3,6 +3,7 @@ import type { PropsWithChildren } from "react";
 
 import { PreviewProvider } from "./PreviewProvider";
 import { ThemeProvider } from "./ThemeProvider";
+import { FontProvider } from "./FontProvider";
 import { AgentSessionProvider } from "./AgentSessionProvider";
 import { NotificationProvider } from "./NotificationProvider";
 import { RuntimeConnectionProvider, type RuntimeConnectionProviderProps } from "./RuntimeConnectionProvider";
@@ -24,11 +25,13 @@ export function AppProviders({
       <NotificationProvider>
         <LayoutStateProvider>
           <RuntimeConnectionProvider runtime={runtime} {...runtimeConnection}>
-            <AgentSessionProvider runtime={runtime}>
-              <PreviewProvider>
-                <HashRouter>{children}</HashRouter>
-              </PreviewProvider>
-            </AgentSessionProvider>
+            <FontProvider>
+              <AgentSessionProvider runtime={runtime}>
+                <PreviewProvider>
+                  <HashRouter>{children}</HashRouter>
+                </PreviewProvider>
+              </AgentSessionProvider>
+            </FontProvider>
           </RuntimeConnectionProvider>
         </LayoutStateProvider>
       </NotificationProvider>

@@ -19,14 +19,14 @@ describe("Sider", () => {
     const { container } = renderSider(
       <Sider
         projects={[{ id: "project-1", title: "keydex" }]}
-        conversations={[{ id: "thread-1", title: "研读文档与 Codex 源码" }]}
+        conversations={[{ id: "thread-1", title: "研读文档与 Keydex 源码" }]}
       />,
     );
 
     expect(screen.getByText("新对话")).not.toBeNull();
     expect(screen.getByText("搜索")).not.toBeNull();
     expect(screen.getByText("keydex")).not.toBeNull();
-    expect(screen.getByText("研读文档与 Codex 源码")).not.toBeNull();
+    expect(screen.getByText("研读文档与 Keydex 源码")).not.toBeNull();
     expect(screen.getByText("设置")).not.toBeNull();
     expect(screen.queryByText("Team")).toBeNull();
     expect(screen.queryByText("Cron")).toBeNull();
@@ -50,9 +50,9 @@ describe("Sider", () => {
     fireEvent.click(screen.getByText("设置"));
     fireEvent.click(screen.getByLabelText("切换主题"));
 
-    expect(onNavigate).toHaveBeenNthCalledWith(1, "/guid");
+    expect(onNavigate).toHaveBeenNthCalledWith(1, "/guid?focus=prompt");
     expect(onNavigate).toHaveBeenNthCalledWith(2, "/conversation/thread-1");
-    expect(onNavigate).toHaveBeenNthCalledWith(3, "/settings/model");
+    expect(onNavigate).toHaveBeenNthCalledWith(3, "/settings/general");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(screen.getByRole("button", { name: "会话 A" }).getAttribute("aria-current")).toBe("page");
   });
@@ -69,7 +69,7 @@ describe("Sider", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "在项目 keydex 中新建对话" }));
 
-    expect(onNavigate).toHaveBeenCalledWith("/guid?workspaceId=project-1");
+    expect(onNavigate).toHaveBeenCalledWith("/guid?workspaceId=project-1&focus=prompt");
     expect(screen.getByRole("button", { name: "收起项目 keydex" }).getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -107,6 +107,31 @@ describe("Sider", () => {
     expect(screen.getByTitle("搜索")).not.toBeNull();
     expect(screen.getByTitle("切换主题")).not.toBeNull();
     expect(screen.getByTitle("设置")).not.toBeNull();
+  });
+
+  it("hides the footer feather when the history list is scrolled to the bottom", () => {
+    renderSider(
+      <Sider
+        conversations={[
+          { id: "thread-1", title: "会话 A" },
+          { id: "thread-2", title: "会话 B" },
+          { id: "thread-3", title: "会话 C" },
+        ]}
+      />,
+    );
+
+    const sider = screen.getByLabelText("侧边栏");
+    const history = screen.getByLabelText("会话历史") as HTMLDivElement;
+    Object.defineProperty(history, "scrollHeight", { configurable: true, value: 300 });
+    Object.defineProperty(history, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(history, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.scroll(history);
+    expect(sider.getAttribute("data-footer-feather")).toBe("true");
+
+    history.scrollTop = 200;
+    fireEvent.scroll(history);
+    expect(sider.getAttribute("data-footer-feather")).toBe("false");
   });
 
   it("keeps collapsed sessions as center rail buttons with hover cards", () => {
@@ -178,7 +203,8 @@ describe("Sider", () => {
       </RuntimeConnectionProvider>,
     );
 
-    expect(screen.getByText("正在连接本地服务")).not.toBeNull();
+    expect(screen.getByRole("status", { name: "正在加载会话" })).not.toBeNull();
+    expect(screen.queryByText("正在连接本地服务")).toBeNull();
     expect(runtime.conversation.listSessions).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -218,7 +244,11 @@ describe("Sider", () => {
 
     expect(await screen.findByText("keydex")).not.toBeNull();
     expect(screen.getByText("kt-agent-framework")).not.toBeNull();
-    expect(screen.getByText("对话")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "项目" })).not.toBeNull();
+    expect(screen.getByRole("region", { name: "对话" })).not.toBeNull();
+    expect(screen.getByRole("region", { name: "对话列表" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "收起项目区域" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "收起对话区域" })).not.toBeNull();
     const keydexToggle = screen.getByRole("button", { name: "收起项目 keydex" });
     expect(keydexToggle.getAttribute("aria-expanded")).toBe("true");
     expect(keydexToggle.querySelector(".lucide-folder-open")).not.toBeNull();
@@ -238,6 +268,40 @@ describe("Sider", () => {
     fireEvent.click(collapsedKeydexToggle);
     expect(screen.getByRole("button", { name: "收起项目 keydex" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("button", { name: "项目会话 A" })).not.toBeNull();
+  });
+
+  it("collapses history buckets and starts the requested new chat type", async () => {
+    const onNavigate = vi.fn();
+    const runtime = fakeRuntime([
+      thread({
+        id: "workspace-a",
+        title: "项目会话 A",
+        session_type: "workspace",
+        workspace_id: "ws-1",
+        workspace: workspace("ws-1", "keydex"),
+      }),
+      thread({ id: "chat-a", title: "纯聊天" }),
+    ]);
+
+    renderSider(<Sider runtime={runtime} onNavigate={onNavigate} />);
+
+    expect(await screen.findByRole("button", { name: "项目会话 A" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "纯聊天" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建项目对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建无项目对话" }));
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, "/guid?workspaceId=ws-1&focus=prompt");
+    expect(onNavigate).toHaveBeenNthCalledWith(2, "/guid?sessionType=chat&focus=prompt");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起项目区域" }));
+    expect(screen.queryByRole("button", { name: "项目会话 A" })).toBeNull();
+    expect(screen.getByRole("button", { name: "展开项目区域" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "纯聊天" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起对话区域" }));
+    expect(screen.queryByRole("button", { name: "纯聊天" })).toBeNull();
+    expect(screen.getByRole("button", { name: "展开对话区域" })).not.toBeNull();
   });
 
   it("shows workspace ownership in collapsed session hover cards", async () => {
@@ -476,7 +540,12 @@ describe("Sider", () => {
 
     await screen.findByText("待删除会话");
     fireEvent.click(screen.getByRole("button", { name: "删除 待删除会话" }));
-    expect(screen.getByText("确认删除？")).not.toBeNull();
+    const confirmRow = screen.getByText("确认删除？").closest("div");
+    expect(confirmRow).not.toBeNull();
+    expect(within(confirmRow as HTMLElement).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "取消",
+      "确认",
+    ]);
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
 
     await waitFor(() => {

@@ -445,7 +445,7 @@ describe("MessageText", () => {
       <MessageText message={message("assistant", "| 很长的列 A | 很长的列 B |\n| --- | --- |\n| 内容 | 内容 |", "completed")} />,
     );
 
-    expect(container.querySelector(".codex-markdown-table-scroll")).not.toBeNull();
+    expect(container.querySelector(".keydex-markdown-table-scroll")).not.toBeNull();
     expect(screen.getByRole("table")).not.toBeNull();
   });
 
@@ -913,7 +913,7 @@ describe("MessageText", () => {
         onQuoteSelection={onQuoteSelection}
       />,
     );
-    const markdown = container.querySelector(".codex-markdown");
+    const markdown = container.querySelector(".keydex-markdown");
     if (!markdown) {
       throw new Error("markdown container not found");
     }

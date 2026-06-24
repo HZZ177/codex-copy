@@ -10,6 +10,7 @@ def test_settings_api_reads_and_writes_model_settings(tmp_path) -> None:
         initial = client.get("/api/settings")
         assert initial.status_code == 200
         assert initial.json()["model"]["api_key_set"] is False
+        assert initial.json()["appearance"]["font_family"] == "system"
 
         response = client.put(
             "/api/settings",
@@ -29,6 +30,33 @@ def test_settings_api_reads_and_writes_model_settings(tmp_path) -> None:
         assert payload["model"] == "qwen3-coder"
         assert payload["api_key_set"] is True
         assert payload["api_key_preview"] == "sk-1...7890"
+
+
+def test_settings_api_reads_and_writes_appearance_settings(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/settings",
+            json={"appearance": {"font_family": "maple-mono"}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["appearance"]["font_family"] == "maple-mono"
+
+        persisted = client.get("/api/settings")
+        assert persisted.status_code == 200
+        assert persisted.json()["appearance"]["font_family"] == "maple-mono"
+
+
+def test_settings_api_coerces_removed_segoe_ui_appearance_setting(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        app.state.repositories.settings.set("appearance_settings", {"font_family": "segoe-ui"})
+
+        response = client.get("/api/settings")
+
+        assert response.status_code == 200
+        assert response.json()["appearance"]["font_family"] == "system"
 
 
 def test_settings_api_allows_browser_preflight(tmp_path) -> None:

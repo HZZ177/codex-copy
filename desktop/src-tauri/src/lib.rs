@@ -2,7 +2,10 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -17,6 +20,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[derive(Default)]
 struct SidecarState {
     child: Mutex<Option<Child>>,
+    closing: AtomicBool,
 }
 
 impl Drop for SidecarState {
@@ -183,9 +187,23 @@ pub fn run() {
             wait_for_health
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<SidecarState>();
-                let _ = stop_sidecar(state);
+                if state.closing.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+
+                api.prevent_close();
+                let app = window.app_handle().clone();
+                let child = state.child.lock().ok().and_then(|mut child| child.take());
+                let _ = window.hide();
+
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Some(mut child) = child {
+                        kill_child(&mut child);
+                    }
+                    app.exit(0);
+                });
             }
         })
         .run(tauri::generate_context!())

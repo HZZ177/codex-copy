@@ -78,6 +78,7 @@ describe("WorkspacePanel", () => {
     render(<WorkspacePanel chrome="panel" sessionId="ses-1" label="D:/repo" runtime={runtime} />);
 
     expect(await screen.findByRole("searchbox", { name: "筛选文件" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "定位当前文件" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("最多返回 50 项 · 最多搜索 2.5 秒")).not.toBeNull();
     expect(screen.getByText("desktop")).not.toBeNull();
     expect(screen.getByText("package.json")).not.toBeNull();
@@ -115,6 +116,38 @@ describe("WorkspacePanel", () => {
     expect(entryIconId(selected)).toBe("nodejs");
     expect(entryIconId(screen.getByRole("button", { name: "选择文件 pnpm-lock.yaml" }))).toBe("pnpm");
     expect(entryIconId(screen.getByRole("button", { name: "选择文件 README.md" }))).toBe("readme");
+  });
+
+  it("locates the current file by expanding its parent directories", async () => {
+    const runtime = fakeRuntime({
+      "": [entry("src", "src", "directory")],
+      src: [entry("components", "src/components", "directory")],
+      "src/components": [entry("main.py", "src/components/main.py", "file", 24)],
+    });
+
+    render(
+      <WorkspacePanel
+        chrome="panel"
+        selectedPath="src/components/main.py"
+        sessionId="ses-1"
+        runtime={runtime}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "展开 src" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "选择文件 src/components/main.py" })).toBeNull();
+
+    const locateButton = screen.getByRole("button", { name: "定位当前文件" }) as HTMLButtonElement;
+    expect(locateButton.disabled).toBe(false);
+    fireEvent.click(locateButton);
+
+    const selected = await screen.findByRole("button", { name: "选择文件 src/components/main.py" });
+    expect(selected.getAttribute("data-selected")).toBe("true");
+    expect(document.activeElement).toBe(selected);
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "src");
+      expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "src/components");
+    });
   });
 
   it("opens selected files in a right-hand preview while keeping the tree visible", async () => {

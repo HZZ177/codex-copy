@@ -1,4 +1,4 @@
-import type { ModelSettings, SettingsResponse } from "@/types/protocol";
+import type { AppearanceSettings, ModelSettings, SettingsResponse } from "@/types/protocol";
 
 import type { HttpClient } from "./httpClient";
 
@@ -11,6 +11,7 @@ export interface SettingsRuntime {
   health(): Promise<HealthResponse>;
   getSettings(): Promise<SettingsResponse>;
   saveSettings(model: ModelSettings): Promise<SettingsResponse>;
+  saveAppearanceSettings(appearance: AppearanceSettings): Promise<SettingsResponse>;
 }
 
 export function createSettingsRuntime(http: HttpClient): SettingsRuntime {
@@ -25,6 +26,12 @@ export function createSettingsRuntime(http: HttpClient): SettingsRuntime {
       return http.request<SettingsResponse>("/api/settings", {
         method: "PUT",
         body: { model },
+      });
+    },
+    saveAppearanceSettings(appearance) {
+      return http.request<SettingsResponse>("/api/settings", {
+        method: "PUT",
+        body: { appearance },
       });
     },
   };

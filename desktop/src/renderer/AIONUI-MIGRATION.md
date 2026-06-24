@@ -1,6 +1,6 @@
 # AionUi 迁移边界
 
-本文件记录 Keydex 前端迁移时对 AionUi 的使用边界。AionUi 只作为成熟 React renderer 交互与组件实现参考，最终产品仍是本项目的本地个人型 Codex-like Windows 桌面 Agent。
+本文件记录 Keydex 前端迁移时对 AionUi 的使用边界。AionUi 只作为成熟 React renderer 交互与组件实现参考，最终产品仍是本项目的本地个人型 Keydex-like Windows 桌面 Agent。
 
 ## 来源
 
@@ -23,26 +23,26 @@ Modified for Keydex.
 | 能力 | AionUi 路径 | 使用方式 |
 |------|-------------|----------|
 | React 入口与 Provider | `packages/desktop/src/renderer/main.tsx` | 参考 Provider 组合方式；删除 Auth、Feedback、Sentry、PWA 和商业化入口 |
-| App Layout | `packages/desktop/src/renderer/components/layout/Layout.tsx` | 参考桌面壳组织方式；最终视觉对齐 Codex 极简布局 |
+| App Layout | `packages/desktop/src/renderer/components/layout/Layout.tsx` | 参考桌面壳组织方式；最终视觉对齐 Keydex 极简布局 |
 | 左侧栏 | `packages/desktop/src/renderer/components/layout/Sider/index.tsx` | 参考折叠、历史列表和导航交互；只保留快速对话、搜索、项目历史、设置、主题 |
 | 标题栏 | `packages/desktop/src/renderer/components/layout/Titlebar/index.tsx` | 参考窗口按钮与拖拽区域；Electron IPC 必须替换为 Tauri window API |
-| 快速对话启动页 | Codex 桌面快速对话页截图与 AionUi SendBox 交互经验 | 输入区居中，标题直指任务输入；当前只呈现真实可用的模型选择，不做伪工作区、伪权限模式、不可用附件按钮或重复审批提示 |
+| 快速对话启动页 | Keydex 桌面快速对话页截图与 AionUi SendBox 交互经验 | 输入区居中，标题直指任务输入；当前只呈现真实可用的模型选择，不做伪工作区、伪权限模式、不可用附件按钮或重复审批提示 |
 | 对话布局 | `packages/desktop/src/renderer/pages/conversation/components/ChatLayout/index.tsx` | 参考 chat 不卸载、preview/split 状态经验；默认不做常驻三栏 |
 | SendBox | `packages/desktop/src/renderer/components/chat/SendBox/index.tsx` | 参考自动高度、IME、发送/停止、slash、@ 文件菜单；删除语音、BTW、DOM snippet |
 | MessageList | `packages/desktop/src/renderer/pages/conversation/Messages/MessageList.tsx` | 参考自动滚动、手动上滚检测、滚动到底按钮、hover action row，以及多段 AI 回复只在末尾显示动作行；消息正文不再额外创建内部滚动条 |
 | Thinking | `packages/desktop/src/renderer/pages/conversation/Messages/components/MessageThinking.tsx` | 参考折叠、计时、running/done/failed 状态；按 runtime event 时序内联在正文流里，以幽灵面板呈现 |
-| 计划胶囊 | `packages/desktop/src/renderer/pages/conversation/ComposerAccessory.tsx` | 参考 Codex 胶囊 To do list 展开效果；本项目通过正式 `update_plan` 工具事件驱动，计划只在胶囊面板展示，不再占用正文消息流 |
+| 计划胶囊 | `packages/desktop/src/renderer/pages/conversation/ComposerAccessory.tsx` | 参考 Keydex 胶囊 To do list 展开效果；本项目通过正式 `update_plan` 工具事件驱动，计划只在胶囊面板展示，不再占用正文消息流 |
 | 工具组摘要 | `packages/desktop/src/renderer/pages/conversation/Messages/components/MessageToolGroupSummary.tsx` | 参考工具步骤列表、状态点、运行态 breathing 和详情展开；本项目从现有 runtime message payload 生成 compact summary |
 | Preview 面板 | `packages/desktop/src/renderer/pages/conversation/Preview/components/PreviewPanel`、`MarkdownViewer`、`HTMLViewer`、`DiffViewer` | 参考模式切换、源码/预览分屏、工具栏、Markdown/HTML/Diff 专用渲染和轻量多标签历史；删除快照版本、编辑保存、HTML inspect 等重功能 |
-| 右侧侧栏 | Codex 右侧工作区/预览面板与 AionUi PreviewPanel 经验 | 工作区和预览作为对话页右侧 in-flow side rail，不再使用窄小 fixed 弹窗 |
-| 会话搜索 | Codex 会话搜索入口与 AionUi 历史列表经验 | 左侧顶部搜索打开 session 搜索弹窗；侧栏内不保留重复搜索输入 |
+| 右侧侧栏 | Keydex 右侧工作区/预览面板与 AionUi PreviewPanel 经验 | 工作区和预览作为对话页右侧 in-flow side rail，不再使用窄小 fixed 弹窗 |
+| 会话搜索 | Keydex 会话搜索入口与 AionUi 历史列表经验 | 左侧顶部搜索打开 session 搜索弹窗；侧栏内不保留重复搜索输入 |
 | 图片预览 | `packages/desktop/src/renderer/pages/conversation/Preview/components/viewers/ImageViewer.tsx` | 参考图片居中、加载/失败状态和 object-contain；本项目通过 Python workspace media API 返回 data URL |
 | Markdown 图片 | `packages/desktop/src/renderer/pages/conversation/Preview/components/viewers/MarkdownViewer.tsx` | 参考相对图片解析和加载状态；本项目通过 Python workspace media API 返回 data URL |
 | 选中文本工具条 | `packages/desktop/src/renderer/hooks/ui/useTextSelection.ts`、`packages/desktop/src/renderer/pages/conversation/Preview/components/renderers/SelectionToolbar.tsx` | 参考选区检测和悬浮操作；本项目落成“添加到对话”，覆盖消息正文和 Preview 正文 |
 | Preview 打开事件 | `packages/desktop/src/renderer/components/Markdown/MermaidBlock.tsx` | 参考 `openPreview(...)` 交互；本项目用 `PreviewProvider` 承载消息富格式内容预览请求 |
 | 模型设置 | `packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent.tsx` | 裁剪为 OpenAI-compatible Provider 管理 |
 | HTTP bridge | `packages/desktop/src/renderer/common/adapter/httpBridge.ts` | 只参考 facade 思想；不得迁移 stub fallback |
-| 主题样式 | `packages/desktop/src/renderer/styles/themes/base.css`、`default-color-scheme.css` | 参考语义变量和 Arco override；最终色彩以 Codex 质感和 `.dev/prototype/img.png` 为准 |
+| 主题样式 | `packages/desktop/src/renderer/styles/themes/base.css`、`default-color-scheme.css` | 参考语义变量和 Arco override；最终色彩以 Keydex 质感和 `.dev/prototype/img.png` 为准 |
 
 ## 必须重写或替换
 
@@ -76,7 +76,7 @@ Modified for Keydex.
 
 ## 本项目保留目标
 
-- Codex-like 轻量桌面壳。
+- Keydex-like 轻量桌面壳。
 - 左侧项目和会话历史。
 - 文档式对话主画布。
 - 底部悬浮 SendBox。
@@ -109,4 +109,4 @@ Modified for Keydex.
 2. UI 组件可以参考 AionUi 结构，但默认优先重写为本项目语义。
 3. 任何后端、IPC、数据库、账号、商业化、远程服务代码都不得复制。
 4. 后端能力缺失时补正式 Python API，不允许前端伪造数据通过。
-5. 视觉最终以 `.dev/prototype/img.png` 和 Codex 桌面端质感为准，AionUi 不作为最终外观目标。
+5. 视觉最终以 `.dev/prototype/img.png` 和 Keydex 桌面端质感为准，AionUi 不作为最终外观目标。

@@ -1,5 +1,5 @@
 .page {
-  width: min(960px, calc(100% - 136px));
+  width: min(672px, calc(100% - 136px));
   min-height: 100%;
   margin: 0 auto;
   padding: 92px 0 128px;

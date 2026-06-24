@@ -161,7 +161,7 @@ export function MessageText({
         ) : null}
         {contextItems.length ? <MessageContextItems items={contextItems} onOpenFile={openContextFile} /> : null}
         {renderedContent || !contextItems.length ? (
-          <div className="codex-markdown" ref={contentRef}>
+          <div className="keydex-markdown" ref={contentRef}>
             <ReactMarkdown
               remarkPlugins={markdownRemarkPlugins}
               rehypePlugins={markdownRehypePlugins}

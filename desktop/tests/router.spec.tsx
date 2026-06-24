@@ -11,25 +11,28 @@ import { NotificationProvider } from "@/renderer/providers/NotificationProvider"
 import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
 import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
+import { FontProvider } from "@/renderer/providers/FontProvider";
 import type { AgentSession } from "@/types/protocol";
 
 function renderRouter(initialEntries: Array<string | { pathname: string; state?: unknown }>) {
   const runtime = fakeRuntime();
   return render(
     <ThemeProvider>
-      <NotificationProvider>
-        <LayoutStateProvider>
-          <RuntimeConnectionProvider runtime={runtime} starter={() => Promise.resolve(agentConnection())}>
-            <AgentSessionProvider runtime={runtime}>
-              <PreviewProvider>
-                <MemoryRouter initialEntries={initialEntries}>
-                  <AppRouter runtime={runtime} />
-                </MemoryRouter>
-              </PreviewProvider>
-            </AgentSessionProvider>
-          </RuntimeConnectionProvider>
-        </LayoutStateProvider>
-      </NotificationProvider>
+      <FontProvider>
+        <NotificationProvider>
+          <LayoutStateProvider>
+            <RuntimeConnectionProvider runtime={runtime} starter={() => Promise.resolve(agentConnection())}>
+              <AgentSessionProvider runtime={runtime}>
+                <PreviewProvider>
+                  <MemoryRouter initialEntries={initialEntries}>
+                    <AppRouter runtime={runtime} />
+                  </MemoryRouter>
+                </PreviewProvider>
+              </AgentSessionProvider>
+            </RuntimeConnectionProvider>
+          </LayoutStateProvider>
+        </NotificationProvider>
+      </FontProvider>
     </ThemeProvider>,
   );
 }
@@ -51,7 +54,7 @@ describe("AppRouter", () => {
     fireEvent.click(screen.getByText("设置"));
     expect(await screen.findByTestId("settings-shell", undefined, { timeout: 10000 })).not.toBeNull();
     expect(screen.getByTestId("settings-sidebar")).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "模型配置" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "常规配置" })).not.toBeNull();
     expect(screen.queryByLabelText("侧边栏")).toBeNull();
     expect(screen.queryByText("新对话")).toBeNull();
 
@@ -64,16 +67,17 @@ describe("AppRouter", () => {
 
     expect(await screen.findByTestId("settings-shell", undefined, { timeout: 10000 })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "用量统计" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "常规配置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "模型配置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
     fireEvent.click(screen.getByText("返回应用"));
     expect(await screen.findByTestId("home-page", undefined, { timeout: 10000 })).not.toBeNull();
   });
 
-  it("redirects legacy general settings route to model settings", async () => {
+  it("opens the general settings route", async () => {
     renderRouter(["/settings/general"]);
 
-    expect(await screen.findByRole("heading", { name: "模型配置" }, { timeout: 10000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "常规配置" }, { timeout: 10000 })).not.toBeNull();
     fireEvent.click(screen.getByText("返回应用"));
     expect(await screen.findByTestId("home-page", undefined, { timeout: 10000 })).not.toBeNull();
   });

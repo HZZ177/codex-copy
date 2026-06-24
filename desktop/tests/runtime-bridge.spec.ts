@@ -18,6 +18,23 @@ describe("RuntimeBridge", () => {
               api_key_set: true,
               api_key_preview: "sk-***",
             },
+            appearance: {
+              font_family: "maple-mono",
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/api/settings") && init.method === "PUT") {
+        return Promise.resolve(
+          jsonResponse(200, {
+            model: {
+              base_url: "https://api.example/v1",
+              model: "qwen-coder",
+              timeout_seconds: 60,
+              api_key_set: true,
+              api_key_preview: "sk-***",
+            },
+            appearance: JSON.parse(String(init.body)).appearance,
           }),
         );
       }
@@ -43,6 +60,10 @@ describe("RuntimeBridge", () => {
 
     await expect(runtime.settings.getSettings()).resolves.toMatchObject({
       model: { model: "qwen-coder", api_key_set: true },
+      appearance: { font_family: "maple-mono" },
+    });
+    await expect(runtime.settings.saveAppearanceSettings({ font_family: "system" })).resolves.toMatchObject({
+      appearance: { font_family: "system" },
     });
     await expect(runtime.models.refreshModels({ model: "qwen-coder" })).resolves.toEqual({
       models: [{ id: "qwen-coder" }],
@@ -61,13 +82,18 @@ describe("RuntimeBridge", () => {
       headers: {},
       body: undefined,
     });
-    expect(fetcher).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8765/api/models/refresh", {
+    expect(fetcher).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8765/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appearance: { font_family: "system" } }),
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(3, "http://127.0.0.1:8765/api/models/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: { model: "qwen-coder" } }),
     });
     expect(fetcher).toHaveBeenNthCalledWith(
-      3,
+      4,
       "http://127.0.0.1:8765/api/sessions/ses-1/workspace/search?q=main",
       {
         method: "GET",
@@ -76,7 +102,7 @@ describe("RuntimeBridge", () => {
       },
     );
     expect(fetcher).toHaveBeenNthCalledWith(
-      4,
+      5,
       "http://127.0.0.1:8765/api/workspaces/ws-1/media?path=docs%2Fassets%2Fpixel.png",
       {
         method: "GET",

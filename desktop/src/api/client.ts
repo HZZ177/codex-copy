@@ -1,4 +1,5 @@
 import type {
+  AppearanceSettings,
   ApprovalDecision,
   ModelInfo,
   ModelSettings,
@@ -64,6 +65,13 @@ export class ApiClient {
     return this.request("/api/settings", {
       method: "PUT",
       body: { model },
+    });
+  }
+
+  async updateAppearanceSettings(appearance: AppearanceSettings): Promise<SettingsResponse> {
+    return this.request("/api/settings", {
+      method: "PUT",
+      body: { appearance },
     });
   }
 

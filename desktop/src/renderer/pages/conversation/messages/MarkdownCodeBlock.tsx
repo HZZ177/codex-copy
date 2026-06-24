@@ -561,7 +561,7 @@ function FullscreenPreviewContent({
   if (contentType === "markdown") {
     return (
       <div className={styles.fullscreenMarkdown}>
-        <div className="codex-markdown">
+        <div className="keydex-markdown">
           <ReactMarkdown
             remarkPlugins={markdownRemarkPlugins}
             rehypePlugins={markdownRehypePlugins}

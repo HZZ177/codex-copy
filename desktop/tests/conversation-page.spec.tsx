@@ -718,7 +718,7 @@ describe("ConversationPage", () => {
     renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
-    expect(screen.getByRole("form", { name: "继续对话输入" }).getAttribute("data-variant")).toBe("codex");
+    expect(screen.getByRole("form", { name: "继续对话输入" }).getAttribute("data-variant")).toBe("keydex");
     expect(screen.getByLabelText("选择模型").textContent).toContain("qwen-coder");
     fireEvent.click(screen.getByLabelText("选择模型"));
     expect(screen.getByRole("listbox", { name: "模型" }).closest("[data-placement]")?.getAttribute("data-placement")).toBe("top");
@@ -910,7 +910,7 @@ describe("ConversationPage", () => {
     await screen.findByText("可以引用的回答");
 
     const message = screen.getByTestId("message-text");
-    const markdown = message.querySelector(".codex-markdown");
+    const markdown = message.querySelector(".keydex-markdown");
     if (!markdown) {
       throw new Error("markdown container not found");
     }
@@ -1212,6 +1212,44 @@ describe("ConversationPage", () => {
     expect(screen.queryByRole("tab", { name: "文件" })).toBeNull();
     expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("closed");
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+  });
+
+  it("restores the conversation area after quoting text from a maximized file preview", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("README.md", "README.md", "file", 64)],
+      },
+      workspaceFilesByPath: {
+        "README.md": "# 文件预览\n\n侧边栏 Markdown 内容",
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    fireEvent.click(await screen.findByRole("button", { name: "文件" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择文件 README.md" }));
+
+    expect(await screen.findByText("侧边栏 Markdown 内容")).not.toBeNull();
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByLabelText("展开右侧栏到对话区域"));
+    expect(shell.dataset.rightSidebarMode).toBe("maximized");
+
+    const selection = await showSelectionToolbar(await screen.findByLabelText("预览内容"), "侧边栏 Markdown 内容");
+    fireEvent.click(await screen.findByRole("button", { name: "添加选中文本到对话" }));
+
+    expect(shell.dataset.rightSidebarMode).toBe("split");
+    expect(screen.getByLabelText("已添加上下文").textContent).toContain("README.md");
+    expect(selection.removeAllRanges).toHaveBeenCalled();
+    selection.restore();
   });
 
   it("keeps the current tab order when a new tab opens the file page", async () => {
@@ -1614,6 +1652,21 @@ function workspaceEntry(
 
 function agentEvent(action: AgentActionEnvelope["action"], data: Record<string, unknown>): AgentActionEnvelope {
   return { action, data } as AgentActionEnvelope;
+}
+
+async function showSelectionToolbar(container: Element, text: string) {
+  const selection = mockSelection(container, text);
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+    document.dispatchEvent(new MouseEvent("mouseup"));
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+    document.dispatchEvent(new KeyboardEvent("keyup"));
+  });
+  return selection;
 }
 
 function mockSelection(container: Element, text: string) {

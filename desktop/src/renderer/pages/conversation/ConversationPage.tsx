@@ -650,7 +650,7 @@ function ConversationComposer({
       canSend={canSend}
       canStop={canStop}
       statusText={composerStatusText(runtimeState, connectionReady)}
-      variant="codex"
+      variant="keydex"
       rightControls={
         <RuntimeModelSelector
           model={modelSelection.selectedModel}

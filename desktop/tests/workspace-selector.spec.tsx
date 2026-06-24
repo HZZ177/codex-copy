@@ -5,7 +5,7 @@ import { WorkspaceSelector } from "@/renderer/components/workspace";
 import type { Workspace } from "@/types/protocol";
 
 describe("WorkspaceSelector", () => {
-  it("opens and closes the Codex style workspace menu", () => {
+  it("opens and closes the Keydex style workspace menu", () => {
     render(<WorkspaceSelector value={{ type: "chat" }} workspaces={[workspace("ws-1", "keydex")]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
@@ -86,7 +86,7 @@ describe("WorkspaceSelector", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
     fireEvent.click(screen.getByRole("button", { name: "添加新项目" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "使用现有文件夹" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "选择文件夹" }));
 
     await waitFor(() => {
       expect(onAddWorkspace).toHaveBeenCalledWith("D:\\picked-project");

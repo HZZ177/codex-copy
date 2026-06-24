@@ -1,4 +1,4 @@
-import { ChevronRight, RefreshCw, Search } from "lucide-react";
+import { ChevronRight, Crosshair, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type {
@@ -37,12 +37,14 @@ export function WorkspacePanel({
   selectedPath: controlledSelectedPath,
   onSelectFile,
 }: WorkspacePanelProps) {
+  const treeRef = useRef<HTMLDivElement | null>(null);
   const [entriesByPath, setEntriesByPath] = useState<EntryMap>({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([""]));
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
   const [errorsByPath, setErrorsByPath] = useState<ErrorMap>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
+  const [locateRequest, setLocateRequest] = useState<{ id: number; path: string } | null>(null);
   const scope = useMemo(() => workspaceScope({ workspaceId, sessionId }), [workspaceId, sessionId]);
   const scopeLabel = label ?? workspaceId ?? sessionId ?? "未绑定工作区";
   const searchWorkspace = useCallback(
@@ -109,6 +111,7 @@ export function WorkspacePanel({
   const rootError = errorsByPath[""];
   const effectiveSelectedPath = controlledSelectedPath ?? selectedPath;
   const selectedLabel = effectiveSelectedPath ?? "未选择文件";
+  const canLocateCurrentFile = Boolean(effectiveSelectedPath);
   const initialLoading = !searchActive && rootLoading && !rootEntries.length;
   const searchLoading = searchActive && searchState.loading;
   const panelError = searchActive ? searchState.error : rootError;
@@ -166,6 +169,40 @@ export function WorkspacePanel({
     }
   }
 
+  async function locateCurrentFile() {
+    const path = effectiveSelectedPath?.trim();
+    if (!path) {
+      return;
+    }
+    const paths = directoryAncestorPaths(path);
+    setFilterQuery("");
+    setExpandedPaths((expanded) => {
+      const next = new Set(expanded);
+      paths.forEach((entryPath) => next.add(entryPath));
+      return next;
+    });
+    for (const entryPath of paths) {
+      await loadDirectory(entryPath);
+    }
+    setLocateRequest((current) => ({
+      id: (current?.id ?? 0) + 1,
+      path,
+    }));
+  }
+
+  useEffect(() => {
+    if (!locateRequest) {
+      return;
+    }
+    const target = findTreeEntryButton(treeRef.current, locateRequest.path);
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView?.({ block: "center", inline: "nearest" });
+    target.focus({ preventScroll: true });
+    setLocateRequest(null);
+  }, [entriesByPath, expandedPaths, locateRequest, searchActive]);
+
   return (
     <section className={styles.panel} data-chrome={chrome} aria-label="工作区文件树">
       {chrome === "default" ? (
@@ -198,6 +235,16 @@ export function WorkspacePanel({
             onChange={(event) => setFilterQuery(event.target.value)}
           />
         </label>
+        <button
+          className={styles.locateButton}
+          type="button"
+          aria-label="定位当前文件"
+          title={canLocateCurrentFile ? "定位当前文件" : "没有打开的文件"}
+          disabled={!canLocateCurrentFile}
+          onClick={() => void locateCurrentFile()}
+        >
+          <Crosshair size={16} strokeWidth={1.8} />
+        </button>
         <p className={styles.searchHint}>{WORKSPACE_FILE_SEARCH_BUDGET_HINT}</p>
       </div>
 
@@ -210,6 +257,7 @@ export function WorkspacePanel({
           <div
             className={styles.tree}
             data-mode={searchActive ? "search" : "tree"}
+            ref={treeRef}
             role="tree"
             aria-label={searchActive ? "工作区搜索结果" : "工作区目录"}
           >
@@ -346,6 +394,7 @@ function TreeNode({
           aria-label={`选择文件 ${entry.path}`}
           className={styles.nodeButton}
           data-selected={selectedPath === entry.path ? "true" : "false"}
+          data-entry-path={entry.path}
           onClick={() => onSelectFile(entry.path)}
           style={{ paddingLeft }}
           type="button"
@@ -402,6 +451,7 @@ function SearchResultNode({
         aria-label={isDirectory ? `打开目录 ${entry.path}` : `选择文件 ${entry.path}`}
         className={styles.nodeButton}
         data-selected={!isDirectory && selectedPath === entry.path ? "true" : "false"}
+        data-entry-path={!isDirectory ? entry.path : undefined}
         onClick={() => (isDirectory ? onOpenDirectory(entry.path) : onSelectFile(entry.path))}
         type="button"
       >
@@ -539,6 +589,22 @@ function removeKey(values: ErrorMap, key: string): ErrorMap {
 function directoryRevealPaths(path: string): string[] {
   const parts = path.split("/").filter(Boolean);
   return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function directoryAncestorPaths(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function findTreeEntryButton(root: HTMLElement | null, path: string): HTMLElement | null {
+  if (!root) {
+    return null;
+  }
+  return (
+    Array.from(root.querySelectorAll<HTMLElement>("[data-entry-path]")).find(
+      (element) => element.dataset.entryPath === path,
+    ) ?? null
+  );
 }
 
 function formatSize(size: number): string {

@@ -7,7 +7,8 @@ import styles from "./WorkspaceSelector.module.css";
 
 export type WorkspaceSelection =
   | { type: "chat" }
-  | { type: "workspace"; workspace: Workspace };
+  | { type: "workspace"; workspace: Workspace }
+  | { type: "pending"; rootPath: string; name: string };
 
 export interface WorkspaceSelectorProps {
   value: WorkspaceSelection;
@@ -47,8 +48,14 @@ export function WorkspaceSelector({
   const [picking, setPicking] = useState(false);
   const canOpen = !disabled && !readOnly;
   const selectedWorkspaceId = value.type === "workspace" ? value.workspace.id : null;
-  const displayText = value.type === "workspace" ? value.workspace.name : "无项目聊天";
-  const displayHint = value.type === "workspace" ? value.workspace.root_path : "不挂载工作区，不启用项目工具";
+  const displayText =
+    value.type === "workspace" ? value.workspace.name : value.type === "pending" ? value.name : "无项目聊天";
+  const displayHint =
+    value.type === "workspace"
+      ? value.workspace.root_path
+      : value.type === "pending"
+        ? `${value.rootPath} - 本地服务启动后启用项目工具`
+        : "不挂载工作区，不启用项目工具";
   const filteredWorkspaces = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
@@ -230,7 +237,7 @@ export function WorkspaceSelector({
         disabled={!canOpen}
         onClick={toggleOpen}
       >
-        {value.type === "workspace" ? (
+        {value.type === "workspace" || value.type === "pending" ? (
           <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
         ) : (
           <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -253,21 +260,18 @@ export function WorkspaceSelector({
             />
           </label>
 
-          <div className={styles.section}>
-            <button
-              className={styles.option}
-              type="button"
-              aria-selected={value.type === "chat" ? "true" : "false"}
-              onClick={chooseChat}
-            >
-              <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
-              <span className={styles.optionText}>
-                <span>无项目聊天</span>
-                <small>只对话，不启用项目工具</small>
-              </span>
-              {value.type === "chat" ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
-            </button>
-          </div>
+          {value.type === "pending" ? (
+            <div className={styles.section}>
+              <div className={`${styles.option} ${styles.pendingOption}`} role="option" aria-selected="true">
+                <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
+                <span className={styles.optionText}>
+                  <span>{value.name}</span>
+                  <small>{value.rootPath}</small>
+                </span>
+                <Check size={14} strokeWidth={1.9} aria-hidden="true" />
+              </div>
+            </div>
+          ) : null}
 
           <div className={styles.section} role="listbox" aria-label="最近工作区">
             {loading ? <div className={styles.empty}>正在读取工作区</div> : null}
@@ -327,7 +331,7 @@ export function WorkspaceSelector({
                     onClick={() => void addPickedWorkspace()}
                   >
                     <Folder size={15} strokeWidth={1.9} aria-hidden="true" />
-                    <span>{picking ? "正在选择文件夹" : adding ? "正在添加" : "使用现有文件夹"}</span>
+                    <span>{picking ? "正在选择文件夹" : adding ? "正在添加" : "选择文件夹"}</span>
                   </button>
                   <button
                     className={styles.addSubmenuItem}
@@ -367,6 +371,22 @@ export function WorkspaceSelector({
               ) : null}
             </div>
           ) : null}
+
+          <div className={`${styles.section} ${styles.chatSection}`}>
+            <button
+              className={styles.option}
+              type="button"
+              aria-selected={value.type === "chat" ? "true" : "false"}
+              onClick={chooseChat}
+            >
+              <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
+              <span className={styles.optionText}>
+                <span>无项目聊天</span>
+                <small>只对话，不启用项目工具</small>
+              </span>
+              {value.type === "chat" ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
+            </button>
+          </div>
         </div>
       ) : null}
     </div>

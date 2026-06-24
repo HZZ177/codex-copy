@@ -70,6 +70,7 @@
 
 .body {
   position: relative;
+  grid-row: 3;
   min-height: 0;
   display: flex;
   overflow: hidden;

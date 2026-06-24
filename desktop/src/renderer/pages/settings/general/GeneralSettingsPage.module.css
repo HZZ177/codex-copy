@@ -1,0 +1,191 @@
+.page {
+  width: min(672px, calc(100% - 136px));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 92px 0 128px;
+  color: var(--color-text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.header p {
+  margin: 7px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.section {
+  display: grid;
+  gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 86%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 18px 48px rgb(15 23 42 / 4%);
+  padding: 16px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sectionHeader > svg {
+  margin-top: 1px;
+  color: var(--color-text-tertiary);
+}
+
+.sectionHeader h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.sectionHeader p {
+  margin: 5px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.option {
+  display: grid;
+  min-height: 72px;
+  grid-template-columns: 34px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-bg);
+  color: var(--color-text-primary);
+  padding: 12px;
+  text-align: left;
+}
+
+.option:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.option[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-border-default));
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--surface-bg));
+}
+
+.option:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.optionIcon,
+.optionState {
+  display: inline-grid;
+  place-items: center;
+}
+
+.optionIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--color-text-secondary);
+}
+
+.optionState {
+  width: 22px;
+  height: 22px;
+  color: var(--color-accent);
+}
+
+.optionText {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.optionTitle {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optionDescription {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  display: grid;
+  gap: 7px;
+}
+
+.progressTrack {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+.progressValue {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width 160ms var(--motion-ease-standard);
+}
+
+.progressText {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--surface-bg));
+  color: var(--color-danger);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .page {
+    width: calc(100% - 28px);
+    padding: 42px 0 118px;
+  }
+
+  .optionGrid {
+    grid-template-columns: 1fr;
+  }
+}

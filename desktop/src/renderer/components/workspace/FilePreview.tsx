@@ -1965,7 +1965,7 @@ function AnnotatedMarkdownPreview({
 
   return (
     <div className={styles.markdownPane} onClick={handleClick}>
-      <div className="codex-markdown">
+      <div className="keydex-markdown">
         <ReactMarkdown
           remarkPlugins={markdownRemarkPlugins}
           rehypePlugins={[...markdownRehypePlugins, annotationPlugin]}

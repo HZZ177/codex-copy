@@ -1,4 +1,7 @@
 .sider {
+  --sidebar-footer-feather-height: 38px;
+
+  position: relative;
   width: var(--sidebar-width);
   flex: 0 0 var(--sidebar-width);
   min-width: 0;
@@ -36,16 +39,49 @@
   gap: 2px;
 }
 
+.footer {
+  position: relative;
+  z-index: 1;
+  margin-top: -6px;
+}
+
+.footer::before {
+  position: absolute;
+  right: 12px;
+  bottom: 100%;
+  left: 0;
+  height: var(--sidebar-footer-feather-height);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sidebar-bg) 0%, transparent) 0%,
+    color-mix(in srgb, var(--sidebar-bg) 46%, transparent) 44%,
+    color-mix(in srgb, var(--sidebar-bg) 88%, transparent) 82%,
+    var(--sidebar-bg) 100%
+  );
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.sider[data-footer-feather="true"] .footer::before {
+  opacity: 1;
+}
+
 .history {
+  display: grid;
+  align-content: start;
+  gap: 14px;
   min-height: 0;
   overflow: hidden auto;
-  padding-top: 5px;
-  scrollbar-width: thin;
+  padding: 5px 5px 0 0;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
   scrollbar-color: color-mix(in srgb, var(--color-text-4) 34%, transparent) transparent;
 }
 
 .history::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 .history::-webkit-scrollbar-track {
@@ -62,7 +98,116 @@
 .section {
   display: grid;
   gap: 2px;
-  margin-bottom: 17px;
+  margin-bottom: 0;
+}
+
+.historyBucket {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.historyBucketHeader {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.historyBucketItems {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    grid-template-rows 180ms var(--motion-ease-standard),
+    opacity 140ms ease;
+}
+
+.historyBucketItems[data-expanded="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.historyBucketBody {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.historyBucketTitle {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyBucketTitle:hover,
+.historyBucketTitle:focus-visible,
+.historyBucketNewButton:hover,
+.historyBucketNewButton:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--surface-hover) 86%, transparent);
+  color: var(--color-text-1);
+}
+
+.historyBucketTitle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyBucketChevron {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, currentColor 80%, transparent);
+  transition: transform 160ms var(--motion-ease-standard);
+  transform: rotate(0deg);
+  transform-origin: center;
+}
+
+.historyBucketTitle[aria-expanded="false"] .historyBucketChevron {
+  transform: rotate(-90deg);
+}
+
+.historyBucketNewButton {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
+}
+
+.historyBucketNewButton svg {
+  color: currentColor;
 }
 
 .searchBox {
@@ -262,6 +407,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   min-width: 0;
   align-items: center;
   border-radius: 7px;
+  --history-row-edge: 8px;
 }
 
 .navItem:hover,
@@ -282,7 +428,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
   gap: 7px;
-  padding: 0 24px 0 10px;
+  padding: 0 var(--history-row-edge) 0 10px;
 }
 
 .historyTitle {
@@ -348,7 +494,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 .historyActions {
   position: absolute;
   top: 50%;
-  right: 5px;
+  right: var(--history-row-edge);
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -452,6 +598,17 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   padding: 7px 9px;
   color: var(--color-text-4);
   font-size: 11px;
+}
+
+.emptyLoading {
+  display: grid;
+  height: 32px;
+  place-items: center;
+  color: var(--color-text-4);
+}
+
+.emptyLoading svg {
+  animation: historySpinner 1100ms linear infinite;
 }
 
 .searchOverlay {
@@ -836,11 +993,14 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 
   .collapsedProjectButton,
   .collapsedSessionButton,
-  .collapsedSectionItems {
+  .collapsedSectionItems,
+  .historyBucketChevron,
+  .historyBucketItems {
     transition: none;
   }
 
-  .historyStreamingSpinner {
+  .historyStreamingSpinner,
+  .emptyLoading svg {
     animation: none;
   }
 }

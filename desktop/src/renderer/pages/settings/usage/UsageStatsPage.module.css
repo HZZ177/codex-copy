@@ -1,5 +1,5 @@
 .page {
-  width: min(1180px, calc(100% - 136px));
+  width: min(826px, calc(100% - 136px));
   min-height: 100%;
   margin: 0 auto;
   padding: 92px 0 128px;
@@ -131,6 +131,7 @@
 .pagination button:focus-visible,
 .modelMenu button:focus-visible,
 .bucketToggle button:focus-visible,
+.heatCell:focus-visible,
 .detail button:focus-visible,
 .table tr:focus-visible {
   outline: 0;
@@ -295,6 +296,27 @@
   padding: 7px 11px;
 }
 
+.scopedStats {
+  display: grid;
+  gap: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 84%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-bg) 96%, var(--surface-muted));
+  box-shadow: 0 18px 50px rgb(15 23 42 / 3%);
+  padding: 16px;
+}
+
+.scopedStats .rangeBar,
+.scopedStats .metrics,
+.scopedStats > .chartPanel {
+  margin-bottom: 0;
+}
+
+.scopedStats > .chartPanel,
+.scopedStats > .tablePanel {
+  box-shadow: none;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(170px, 1fr));
@@ -392,7 +414,226 @@
 
 .chartPanel {
   margin-bottom: 20px;
-  padding: 20px 20px 16px;
+  padding: 16px 20px 18px;
+}
+
+.chartToolbar {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.chartRange {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.heatWall {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.heatWallTotal {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--surface-muted));
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.heatWallViewport {
+  --heat-gap: 3px;
+
+  min-height: 0;
+  min-width: 0;
+  overflow: visible;
+  padding-top: 2px;
+}
+
+.heatWallGrid {
+  display: grid;
+  width: 100%;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(var(--heat-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(7, auto);
+  gap: var(--heat-gap);
+}
+
+.heatCell {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 4px;
+  background: #eeeeee;
+  padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.heatCell:hover {
+  z-index: 3;
+  transform: translateY(-1px);
+}
+
+.heatCell[data-level="1"] {
+  background: #cde4ff;
+}
+
+.heatCell[data-level="2"] {
+  background: #9fcaff;
+}
+
+.heatCell[data-level="3"] {
+  background: #529cff;
+}
+
+.heatCell[data-level="4"] {
+  background: #1f6fff;
+  box-shadow: 0 0 0 1px rgb(31 111 255 / 14%);
+}
+
+.heatCell[data-outside="true"] {
+  opacity: 0.38;
+}
+
+.heatCell[data-active="true"] {
+  box-shadow:
+    0 0 0 1px rgb(31 111 255 / 42%),
+    0 8px 18px rgb(31 111 255 / 15%);
+}
+
+.heatCellTooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 6;
+  display: grid;
+  min-width: max-content;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 82%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text-primary);
+  opacity: 0;
+  padding: 7px 9px;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.heatCellTooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 82%, transparent);
+  background: var(--color-bg-elevated);
+  content: "";
+  transform: translate(-50%, -4px) rotate(45deg);
+}
+
+.heatCellTooltip strong {
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.heatCellTooltip span {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.heatCell:hover .heatCellTooltip,
+.heatCell:focus-visible .heatCellTooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.heatWallAxis {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(var(--heat-columns), minmax(0, 1fr));
+  column-gap: var(--heat-gap);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1;
+  margin-top: 6px;
+}
+
+.heatWallAxis span {
+  min-width: max-content;
+}
+
+.heatWallLegend {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.heatWallLegendLevels {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.heatWallLegendLevels i {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 3px;
+  background: #eeeeee;
+}
+
+.heatWallLegendLevels i[data-level="1"] {
+  background: #cde4ff;
+}
+
+.heatWallLegendLevels i[data-level="2"] {
+  background: #9fcaff;
+}
+
+.heatWallLegendLevels i[data-level="3"] {
+  background: #529cff;
+}
+
+.heatWallLegendLevels i[data-level="4"] {
+  background: #1f6fff;
+}
+
+.heatWallEmpty {
+  display: grid;
+  min-height: 72px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-muted) 48%, transparent);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
 }
 
 .tablePanel {
@@ -755,6 +996,24 @@
 
   .panelHeaderActions {
     justify-content: space-between;
+  }
+
+  .chartToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .heatWall {
+    min-height: 0;
+  }
+
+  .heatWallLegend {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .heatWallViewport {
+    --heat-gap: 4px;
   }
 
   .filterButton {

@@ -5,6 +5,7 @@ import type { ModelProvider, RuntimeBridge } from "@/runtime";
 import {
   buildUsageTrendOption,
   completeUsageTrendPoints,
+  TokenHeatWall,
   UsageStatsPage,
 } from "@/renderer/pages/settings/usage/UsageStatsPage";
 import type {
@@ -42,14 +43,34 @@ describe("UsageStatsPage", () => {
     expect(screen.getAllByText("4,947")).toHaveLength(1);
     expect(screen.getAllByText("12,960")).toHaveLength(2);
     expect(screen.getAllByText("538")).toHaveLength(2);
+    expect(screen.getByTestId("usage-token-heatwall")).not.toBeNull();
     expect(screen.getByTestId("usage-trend-chart")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "使用趋势" })).toBeNull();
+    expect(screen.queryByText("Token 活动")).toBeNull();
     expect(screen.getByRole("button", { name: "按小时" }).getAttribute("data-active")).toBe("true");
-    expect(runtime.usage.getTrend).toHaveBeenLastCalledWith(
+    expect(runtime.usage.getTrend).toHaveBeenCalledWith(
       expect.objectContaining({
         bucket: "hour",
         timezoneOffsetMinutes: expect.any(Number),
       }),
     );
+    expect(runtime.usage.getTrend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucket: "day",
+        startTime: expect.any(String),
+        endTime: expect.any(String),
+        timezoneOffsetMinutes: expect.any(Number),
+      }),
+    );
+    const heatCall = runtime.usage.getTrend.mock.calls.find(([options]) => options.bucket === "day" && options.startTime);
+    expect(heatCall).toBeTruthy();
+    if (heatCall) {
+      const [{ startTime, endTime }] = heatCall;
+      const months = (new Date(endTime).getUTCFullYear() - new Date(startTime).getUTCFullYear()) * 12
+        + new Date(endTime).getUTCMonth()
+        - new Date(startTime).getUTCMonth();
+      expect(months).toBe(12);
+    }
     await waitFor(() => {
       expect(setOption).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -132,6 +153,7 @@ describe("UsageStatsPage", () => {
     render(<UsageStatsPage runtime={runtime} />);
 
     expect(await screen.findAllByText("0")).not.toHaveLength(0);
+    expect(screen.getByTestId("usage-token-heatwall").textContent).toContain("暂无 Token 活动");
     expect(screen.getByTestId("usage-trend-empty").textContent).toBe("暂无趋势数据");
     expect(screen.getByTestId("usage-request-empty").textContent).toBe("暂无请求日志");
     expect(screen.queryByText("deepseek-v4-flash")).toBeNull();
@@ -215,6 +237,56 @@ describe("UsageStatsPage", () => {
     ]);
 
     expect(option.xAxis).toMatchObject({ data: ["06/19 16:00"] });
+  });
+
+  it("renders token heat wall cells with total token tooltip data", () => {
+    render(
+      <TokenHeatWall
+        bucket="day"
+        points={[
+          trendPoint({
+            time: "2026-06-19",
+            request_count: 2,
+            input_tokens: 17_907,
+            cache_read_tokens: 12_960,
+            output_tokens: 538,
+            total_tokens: 18_445,
+          }),
+        ]}
+      />,
+    );
+
+    const heatWall = screen.getByTestId("usage-token-heatwall");
+    const cell = screen.getByRole("button", { name: "06/19 · 总 Token 18,445" });
+
+    expect(heatWall.textContent).toContain("18,445 Token");
+    expect(cell.getAttribute("title")).toBe("06/19 · 总 Token 18,445");
+    expect(cell.getAttribute("data-level")).toBe("4");
+    expect(screen.getByText("总 Token 18,445")).not.toBeNull();
+  });
+
+  it("highlights the whole heat wall week in weekly mode", () => {
+    render(
+      <TokenHeatWall
+        bucket="week"
+        points={[
+          trendPoint({
+            time: "2026-06-19",
+            request_count: 2,
+            input_tokens: 17_907,
+            cache_read_tokens: 12_960,
+            output_tokens: 538,
+            total_tokens: 18_445,
+          }),
+        ]}
+      />,
+    );
+
+    const weekCells = screen.getAllByRole("button", { name: "06/15 - 06/21 · 总 Token 18,445" });
+
+    expect(weekCells).toHaveLength(7);
+    fireEvent.mouseEnter(weekCells[4]);
+    expect(weekCells.every((cell) => cell.getAttribute("data-active") === "true")).toBe(true);
   });
 
   it("fills hourly trend buckets inside the selected range", () => {
@@ -383,7 +455,12 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
           ? () => Promise.reject(options.summaryError)
           : () => Promise.resolve(summary),
       ),
-      getTrend: vi.fn(() => Promise.resolve(trend)),
+      getTrend: vi.fn((query?: { bucket?: string; startTime?: string; endTime?: string }) => {
+        if (query?.bucket === "day" && query.startTime && query.endTime && isYearRange(query.startTime, query.endTime)) {
+          return Promise.resolve({ points: [] });
+        }
+        return Promise.resolve(trend);
+      }),
       listRequests: vi.fn(() => Promise.resolve(requests)),
       getRequestDetail: vi.fn(() => Promise.resolve(detail)),
     },
@@ -398,6 +475,12 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
       getRequestDetail: ReturnType<typeof vi.fn>;
     };
   };
+}
+
+function isYearRange(startTime: string, endTime: string) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  return end.getTime() - start.getTime() > 300 * 24 * 60 * 60 * 1000;
 }
 
 function trendPoint(overrides: Partial<UsageTrendPoint>): UsageTrendPoint {

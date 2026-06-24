@@ -26,7 +26,7 @@ import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
 import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
-import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
+import { useOptionalPreview, type PreviewQuoteSelectionRequest } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ConnectionStatus } from "@/renderer/components/runtime";
 
@@ -299,7 +299,7 @@ export function Layout({
   const rightSidebarOnLeft = state.rightSidebarPlacement === "left";
   const openRightSidebarLabel = rightSidebarOnLeft ? "展开左侧栏" : "展开右侧栏";
   const OpenRightSidebarIcon = rightSidebarOnLeft ? PanelLeftOpen : PanelRightOpen;
-  const showRuntimeStatus = Boolean(runtimeConnection && runtimeConnection.status !== "ready");
+  const showRuntimeStatus = Boolean(runtimeConnection && runtimeConnection.status === "error");
 
   return (
     <div
@@ -445,6 +445,24 @@ function RightSidebarPanel({
       : null;
   const activeRequest = activePreviewEntry?.request ?? (resolvedActivePanelId === activeEntryId ? request : null);
   const activeRenderContext = activePreviewEntry?.renderContext ?? renderContext;
+  const filePanelQuoteSelection = useCallback(
+    (request: PreviewQuoteSelectionRequest) => {
+      filePanelRenderContext?.onQuoteSelection?.(request);
+      if (maximized) {
+        onRestore();
+      }
+    },
+    [filePanelRenderContext?.onQuoteSelection, maximized, onRestore],
+  );
+  const activePreviewQuoteSelection = useCallback(
+    (request: PreviewQuoteSelectionRequest) => {
+      activeRenderContext?.onQuoteSelection?.(request);
+      if (maximized) {
+        onRestore();
+      }
+    },
+    [activeRenderContext?.onQuoteSelection, maximized, onRestore],
+  );
   const showFilesPanel = Boolean(activeFilePanel);
   const panelActivePreviewEntryId =
     open && resolvedActivePanelId && !activeFilePanel && !initialPanelIds.includes(resolvedActivePanelId)
@@ -873,7 +891,7 @@ function RightSidebarPanel({
                   sessionId={filePanelRenderContext.sessionId}
                   previewPath={activeFilePanel?.filePreviewPath ?? null}
                   previewRequestId={activeFilePanel?.filePreviewRequestId ?? 0}
-                  onQuoteSelection={filePanelRenderContext.onQuoteSelection}
+                  onQuoteSelection={filePanelRenderContext.onQuoteSelection ? filePanelQuoteSelection : undefined}
                   onStartChatFromAnnotation={filePanelRenderContext.onStartChatFromAnnotation}
                   onPreviewPathChange={updateFilePanelPreviewPath}
                 />
@@ -892,7 +910,7 @@ function RightSidebarPanel({
                   sessionId={activeRenderContext?.sessionId}
                   request={activeRequest}
                   runtime={activeRenderContext?.runtime}
-                  onQuoteSelection={activeRenderContext?.onQuoteSelection}
+                  onQuoteSelection={activeRenderContext?.onQuoteSelection ? activePreviewQuoteSelection : undefined}
                   onStartChatFromAnnotation={activeRenderContext?.onStartChatFromAnnotation}
                   chrome="panel"
                 />

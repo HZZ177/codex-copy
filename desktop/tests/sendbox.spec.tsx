@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SendBox, selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
 
 describe("SendBox", () => {
-  it("renders a Codex-like floating input shell without unavailable actions", () => {
+  it("renders a Keydex-like floating input shell without unavailable actions", () => {
     render(
       <SendBox
         value=""
@@ -49,6 +49,28 @@ describe("SendBox", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the contenteditable input when autoFocusKey changes", () => {
+    const props = {
+      value: "",
+      runtimeState: "idle" as const,
+      canSend: false,
+      canStop: false,
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+    };
+    const { rerender } = render(<SendBox {...props} />);
+
+    const input = screen.getByLabelText("继续输入");
+    expect(document.activeElement).not.toBe(input);
+
+    rerender(<SendBox {...props} autoFocusKey="route-1" />);
+
+    expect(document.activeElement).toBe(input);
+    (input as HTMLElement).blur();
+    window.getSelection()?.removeAllRanges();
   });
 
   it("keeps runtime controls immediately before the send button", () => {
