@@ -227,8 +227,41 @@
   opacity: 0.42;
 }
 
+.annotationToggle {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 7px;
+}
+
+.annotationToggle:hover,
+.annotationToggle[aria-pressed="true"] {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationToggleCount {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1;
+}
+
 .segmented button:focus-visible,
-.iconButton:focus-visible {
+.iconButton:focus-visible,
+.annotationToggle:focus-visible {
   outline: none;
 }
 
@@ -254,6 +287,7 @@
 }
 
 .body {
+  position: relative;
   min-height: 180px;
   max-height: calc(100vh - 230px);
   overflow: hidden;
@@ -271,6 +305,620 @@
   border-radius: 0;
   background: var(--color-bg-elevated);
   animation: none;
+}
+
+.annotationPanel {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  width: min(340px, 78%);
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-elevated) 96%, var(--surface-muted));
+  box-shadow: 0 18px 44px rgb(15 23 42 / 18%);
+  padding: 10px;
+  transform-origin: top right;
+  animation: annotationPanelIn 180ms var(--motion-ease-out) both;
+}
+
+.annotationPanel[data-state="closing"] {
+  pointer-events: none;
+  animation: annotationPanelOut 160ms var(--motion-ease-standard) both;
+}
+
+.preview[data-chrome="panel"] .annotationPanel {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(328px, 78%);
+}
+
+.annotationPopover {
+  position: fixed;
+  z-index: 70;
+  display: grid;
+  width: min(336px, calc(100vw - 24px));
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 18px 44px rgb(15 23 42 / 16%),
+    0 2px 8px rgb(15 23 42 / 8%);
+  padding: 9px;
+  transform: translate(-50%, -100%);
+  animation: annotationPopoverIn 150ms var(--motion-ease-out) both;
+}
+
+.annotationPopover[data-placement="bottom"] {
+  transform: translate(-50%, 0);
+  animation-name: annotationPopoverInFromBottom;
+}
+
+.annotationPopover::after {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border-subtle));
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border-subtle));
+  background: inherit;
+  content: "";
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.annotationPopover[data-placement="bottom"]::after {
+  top: -5px;
+  bottom: auto;
+  border-top: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border-subtle));
+  border-left: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border-subtle));
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.annotationPopoverHeader,
+.annotationPopoverActions {
+  display: flex;
+  align-items: center;
+}
+
+.annotationPopoverHeader {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.annotationPopoverHeader button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+}
+
+.annotationPopoverHeader button:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationPopoverQuote {
+  overflow: hidden;
+  max-height: 58px;
+  margin: 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-warning) 54%, var(--color-border-default));
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  padding-left: 7px;
+}
+
+.annotationPopoverComment {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.annotationPopoverTextarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 66px;
+  resize: vertical;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px;
+}
+
+.annotationPopoverTextarea:focus {
+  border-color: var(--color-border-default);
+  background: var(--color-bg-elevated);
+  outline: none;
+}
+
+.annotationPopoverError {
+  margin: 0;
+  color: var(--color-danger-6);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.annotationPopoverActions {
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.annotationPopoverActions[data-layout="annotation"] {
+  justify-content: space-between;
+}
+
+.annotationPopoverActionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotationPopoverActions button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 7px;
+}
+
+.annotationPopoverActions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationPopoverActions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.previewAnnotationMark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-warning) 68%, transparent);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-fast) var(--motion-ease-standard);
+}
+
+.previewAnnotationMark:hover,
+.previewAnnotationMark[data-active="true"] {
+  background: color-mix(in srgb, var(--color-warning) 32%, transparent);
+  box-shadow:
+    inset 0 -1px 0 color-mix(in srgb, var(--color-warning) 76%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-warning) 42%, transparent);
+}
+
+.previewAnnotationMark[data-flash="true"] {
+  animation: annotationMarkFlash 700ms var(--motion-ease-out) 1 both;
+}
+
+.annotationHeader,
+.annotationTitle,
+.annotationHeaderActions,
+.annotationComposerActions,
+.annotationItemHeader,
+.annotationActions,
+.annotationSelectionMeta,
+.annotationAddButton,
+.annotationClose {
+  display: flex;
+  align-items: center;
+}
+
+.annotationHeader {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.annotationTitle {
+  min-width: 0;
+  gap: 6px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.annotationTitle svg {
+  color: var(--color-text-tertiary);
+}
+
+.annotationHeaderActions {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.annotationCount {
+  display: inline-grid;
+  min-width: 22px;
+  height: 20px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.annotationClose {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+}
+
+.annotationClose:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationAddButton {
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-muted) 60%, transparent);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.annotationAddButton:hover {
+  border-color: var(--color-border-default);
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationComposer,
+.annotationSelectionDraft,
+.annotationEdit {
+  display: grid;
+  gap: 7px;
+}
+
+.annotationComposer,
+.annotationSelectionDraft {
+  flex: 0 0 auto;
+}
+
+.annotationComposer textarea,
+.annotationSelectionDraft textarea,
+.annotationEdit textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px;
+}
+
+.annotationComposer textarea:focus,
+.annotationSelectionDraft textarea:focus,
+.annotationEdit textarea:focus {
+  border-color: var(--color-border-default);
+  outline: none;
+}
+
+.annotationComposerActions {
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.annotationComposerActions button,
+.annotationError button,
+.annotationActions button,
+.annotationBadgeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.annotationComposerActions button {
+  height: 26px;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+.annotationComposerActions button[data-variant="ghost"] {
+  background: transparent;
+}
+
+.annotationComposerActions button:hover:not(:disabled),
+.annotationError button:hover,
+.annotationActions button:hover:not(:disabled),
+.annotationBadgeButton:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.annotationComposerActions button:disabled,
+.annotationActions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.annotationSelectionDraft {
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 24%, var(--color-border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--color-warning) 68%, transparent);
+  padding: 8px 8px 8px 10px;
+}
+
+.annotationSelectionMeta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.annotationBadge,
+.annotationBadgeButton,
+.annotationStale {
+  flex: 0 0 auto;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 7px;
+}
+
+.annotationBadge,
+.annotationBadgeButton {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-muted);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.annotationBadgeButton {
+  cursor: pointer;
+}
+
+.annotationSnippet {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotationMuted,
+.annotationEmpty,
+.annotationError {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.annotationError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-danger-6);
+}
+
+.annotationError button {
+  height: 24px;
+  padding: 0 7px;
+}
+
+.annotationList {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+}
+
+.annotationItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 62%, transparent);
+  background: transparent;
+  padding: 7px 7px 7px 10px;
+}
+
+.annotationItem[data-stale="true"] {
+  background: color-mix(in srgb, var(--color-warning-6) 7%, transparent);
+}
+
+.annotationItem[data-active="true"] {
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--color-warning) 72%, var(--color-border-default));
+}
+
+.annotationItemHeader {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  flex-direction: column;
+  min-width: 0;
+  align-items: flex-start;
+  align-self: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.annotationStale {
+  display: inline-flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--color-warning-6) 14%, transparent);
+  color: var(--color-text-tertiary);
+}
+
+.annotationQuote {
+  grid-column: 2;
+  grid-row: 2;
+  overflow: hidden;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotationComment {
+  grid-column: 2;
+  grid-row: 1;
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.annotationEdit {
+  grid-column: 2 / 4;
+  grid-row: 1 / span 2;
+}
+
+.annotationActions {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-content: flex-end;
+  gap: 4px;
+  opacity: 0.56;
+  transition: opacity var(--motion-fast) var(--motion-ease-standard);
+}
+
+.annotationItem:hover .annotationActions,
+.annotationItem:focus-within .annotationActions {
+  opacity: 1;
+}
+
+.annotationActions button {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+}
+
+@keyframes annotationPopoverIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 5px)) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+  }
+}
+
+@keyframes annotationPopoverInFromBottom {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 5px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes annotationMarkFlash {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--color-warning) 32%, transparent);
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--color-warning) 76%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--color-warning) 42%, transparent);
+  }
+
+  32% {
+    background: color-mix(in srgb, var(--color-warning) 52%, transparent);
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--color-warning) 86%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--color-warning) 22%, transparent);
+  }
+
+  64% {
+    background: color-mix(in srgb, var(--color-warning) 24%, transparent);
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--color-warning) 62%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--color-warning) 20%, transparent);
+  }
+}
+
+@keyframes annotationPanelIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes annotationPanelOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(10px) scale(0.985);
+  }
 }
 
 .content,
@@ -789,6 +1437,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .body,
+  .annotationPanel,
+  .annotationPopover,
   .splitPanel {
     animation: none;
   }

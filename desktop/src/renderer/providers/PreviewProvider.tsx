@@ -14,7 +14,23 @@ export interface PreviewRenderContext {
   workspaceAvailable?: boolean;
   workspaceLabel?: string;
   runtime?: RuntimeBridge;
-  onQuoteSelection?: (text: string) => void;
+  onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
+  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
+}
+
+export interface PreviewQuoteSelectionRequest {
+  path: string;
+  selectedText: string;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+}
+
+export interface PreviewAnnotationChatRequest {
+  path: string;
+  comment: string;
+  selectedText?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
 }
 
 export interface PreviewEntry {
@@ -382,7 +398,8 @@ function samePreviewRenderContext(left: PreviewRenderContext | null, right: Prev
     left?.workspaceAvailable === right?.workspaceAvailable &&
     left?.workspaceLabel === right?.workspaceLabel &&
     left?.runtime === right?.runtime &&
-    left?.onQuoteSelection === right?.onQuoteSelection
+    left?.onQuoteSelection === right?.onQuoteSelection &&
+    left?.onStartChatFromAnnotation === right?.onStartChatFromAnnotation
   );
 }
 

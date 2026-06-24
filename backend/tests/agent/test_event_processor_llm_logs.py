@@ -233,7 +233,8 @@ async def test_process_agent_events_emits_tool_progress_from_model_chunks() -> N
                                     "name": "apply_patch",
                                     "args": (
                                         '{"patch":"*** Begin Patch\\n'
-                                        '*** Add File: src/app.py\\n+one"}'
+                                        '*** Update File: src/app.py\\n'
+                                        '@@\\n-old\\n+one"}'
                                     ),
                                 }
                             ],
@@ -261,6 +262,63 @@ async def test_process_agent_events_emits_tool_progress_from_model_chunks() -> N
     assert progress_events[0].payload["files"][0]["path"] == "src/app.py"
     assert progress_events[0].payload["files"][0]["operation"] == "update"
     assert progress_events[0].payload["files"][0]["added_lines"] == 1
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_emits_tool_progress_for_streamed_apply_patch_move() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {
+                                    "id": "call_patch",
+                                    "index": 0,
+                                    "name": "apply_patch",
+                                    "args": (
+                                        '{"patch":"*** Begin Patch\\n'
+                                        '*** Update File: docs/old.md\\n'
+                                        '*** Move to: docs/new.md\\n'
+                                        '@@\\n-old\\n+new\\n*** End Patch"}'
+                                    ),
+                                }
+                            ],
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    progress_events = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_PROGRESS.value
+    ]
+    assert len(progress_events) == 1
+    file_change = progress_events[0].payload["files"][0]
+    assert file_change["operation"] == "update"
+    assert file_change["change_type"] == "move"
+    assert file_change["old_path"] == "docs/old.md"
+    assert file_change["new_path"] == "docs/new.md"
+    assert file_change["added_lines"] == 1
+    assert file_change["deleted_lines"] == 1
 
 
 @pytest.mark.asyncio

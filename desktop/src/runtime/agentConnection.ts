@@ -63,7 +63,7 @@ export async function resolveAgentConnection(
     });
     return connection;
   } catch (error) {
-    throw new Error(`启动本地 Agent 服务失败：${formatErrorMessage(error)}`);
+    throw new Error(`启动 Keydex 本地服务失败：${formatErrorMessage(error)}`);
   }
 }
 
@@ -87,7 +87,7 @@ export async function waitForAgentHealth(
     }
   }
 
-  throw new Error(`Agent 服务健康检查超时：${formatErrorMessage(lastError)}`);
+  throw new Error(`Keydex 服务健康检查超时：${formatErrorMessage(lastError)}`);
 }
 
 export function isTauriRuntime(): boolean {

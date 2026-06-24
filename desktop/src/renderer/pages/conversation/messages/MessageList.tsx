@@ -28,7 +28,6 @@ import { CommandExecutionBlock } from "./CommandExecutionBlock";
 import { ErrorItem } from "./ErrorItem";
 import { FileChangeBlock, type FileChangePreview } from "./FileChangeBlock";
 import { MessageGroupBlock } from "./MessageGroupBlock";
-import { MessagePlan } from "./MessagePlan";
 import { MessageThinking } from "./MessageThinking";
 import { MessageActionFooter, MessageText, StreamingCursor } from "./MessageText";
 import { ToolCallBlock } from "./ToolCallBlock";
@@ -90,13 +89,14 @@ export function MessageList({
   const olderLoadArmedRef = useRef(false);
   const virtualScrollerRef = useRef<HTMLElement | null>(null);
   const [showOlderTrigger, setShowOlderTrigger] = useState(false);
-  const processedMessages = useMemo(() => processMessages(messages), [messages]);
+  const visibleMessages = useMemo(() => messages.filter((message) => message.kind !== "plan"), [messages]);
+  const processedMessages = useMemo(() => processMessages(visibleMessages), [visibleMessages]);
   const pendingAssistantMessage = useMemo(
     () =>
-      isProcessing && shouldShowPendingAssistantCursor(messages)
-        ? createPendingAssistantMessage(messages)
+      isProcessing && shouldShowPendingAssistantCursor(visibleMessages)
+        ? createPendingAssistantMessage(visibleMessages)
         : null,
-    [isProcessing, messages],
+    [isProcessing, visibleMessages],
   );
   const displayItems = useMemo<ProcessedMessageItem[]>(() => {
     if (!pendingAssistantMessage) {
@@ -113,12 +113,12 @@ export function MessageList({
   }, [pendingAssistantMessage, processedMessages]);
   const displayTurns = useMemo(() => groupDisplayItemsByTurn(displayItems), [displayItems]);
   const assistantTurnFooters = useMemo(
-    () => collectAssistantTurnFooters(messages, displayItems, isProcessing),
-    [displayItems, isProcessing, messages],
+    () => collectAssistantTurnFooters(visibleMessages, displayItems, isProcessing),
+    [displayItems, isProcessing, visibleMessages],
   );
   const turnEndStreamingCursor = useMemo(
-    () => collectTurnEndStreamingCursor(messages, displayItems, isProcessing),
-    [displayItems, isProcessing, messages],
+    () => collectTurnEndStreamingCursor(visibleMessages, displayItems, isProcessing),
+    [displayItems, isProcessing, visibleMessages],
   );
   const useStaticList = shouldUseStaticMessageList(displayItems.length);
   const listMode = useStaticList ? "static" : "virtual";
@@ -212,7 +212,7 @@ export function MessageList({
       olderLoadAnchorRef.current = null;
       setShowOlderTrigger(false);
     }
-  }, [canLoadOlder, isProcessing, listMode, loading, messages[0]?.id]);
+  }, [canLoadOlder, isProcessing, listMode, loading, visibleMessages[0]?.id]);
 
   useLayoutEffect(() => {
     if (loadingOlder) {
@@ -343,7 +343,7 @@ export function MessageList({
         <div className={styles.scroller} data-testid="message-list-scroll">
           <MessageSkeleton />
         </div>
-      ) : messages.length ? (
+      ) : visibleMessages.length ? (
         messageListContent
       ) : (
         <div className={styles.scroller} data-testid="message-list-scroll">
@@ -579,9 +579,6 @@ function DefaultMessage({
 }) {
   if (message.kind === "thinking") {
     return <MessageThinking message={message} />;
-  }
-  if (message.kind === "plan") {
-    return <MessagePlan message={message} />;
   }
   if (message.kind === "tool") {
     return <ToolCallBlock message={message} />;

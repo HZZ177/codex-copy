@@ -37,6 +37,7 @@
   --color-danger-6: #d92d20;
   --color-info-6: #1677ff;
   --color-accent: var(--color-primary-6);
+  --color-warning: var(--color-warning-6);
   --color-danger: var(--color-danger-6);
   --diff-added-bg: #e6f6ea;
   --diff-added-text: #00a152;
@@ -108,6 +109,7 @@
   --color-danger-6: #f97066;
   --color-info-6: #3b8cff;
   --color-accent: var(--color-primary-6);
+  --color-warning: var(--color-warning-6);
   --color-danger: var(--color-danger-6);
   --diff-added-bg: rgb(46 160 67 / 16%);
   --diff-added-text: #42d77d;

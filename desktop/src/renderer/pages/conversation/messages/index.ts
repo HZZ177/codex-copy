@@ -10,8 +10,6 @@ export { MessageList } from "./MessageList";
 export type { MessageListProps, MessageListScrollControls } from "./MessageList";
 export { MessageAgentStatus } from "./MessageAgentStatus";
 export type { MessageAgentStatusProps } from "./MessageAgentStatus";
-export { MessagePlan } from "./MessagePlan";
-export type { MessagePlanProps } from "./MessagePlan";
 export { MessageThinking } from "./MessageThinking";
 export type { MessageThinkingProps } from "./MessageThinking";
 export { MessageText } from "./MessageText";

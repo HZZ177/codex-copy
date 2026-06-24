@@ -1,28 +1,47 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useCallback, type PropsWithChildren } from "react";
+import { lazy, Suspense, useCallback, type PropsWithChildren } from "react";
 
-import { EventReplayHarness } from "@/renderer/devtools/EventReplayHarness";
-import { ConversationPage } from "@/renderer/pages/conversation";
 import { queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
-import { HomePage } from "@/renderer/pages/home";
-import { SettingsShell } from "@/renderer/pages/settings/SettingsShell";
-import { ModelSettingsPage } from "@/renderer/pages/settings/model";
-import { UsageStatsPage } from "@/renderer/pages/settings/usage";
 
 import { Layout } from "./Layout";
 
+const EventReplayHarness = lazy(() =>
+  import("@/renderer/devtools/EventReplayHarness").then((module) => ({ default: module.EventReplayHarness })),
+);
+const ConversationPage = lazy(() =>
+  import("@/renderer/pages/conversation/ConversationPage").then((module) => ({ default: module.ConversationPage })),
+);
+const HomePage = lazy(() =>
+  import("@/renderer/pages/home/HomePage").then((module) => ({ default: module.HomePage })),
+);
+const SettingsShell = lazy(() =>
+  import("@/renderer/pages/settings/SettingsShell").then((module) => ({ default: module.SettingsShell })),
+);
+const ModelSettingsPage = lazy(() =>
+  import("@/renderer/pages/settings/model/ModelSettingsPage").then((module) => ({
+    default: module.ModelSettingsPage,
+  })),
+);
+const UsageStatsPage = lazy(() =>
+  import("@/renderer/pages/settings/usage/UsageStatsPage").then((module) => ({
+    default: module.UsageStatsPage,
+  })),
+);
+
 export function AppRouter() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/guid" replace />} />
-      <Route path="/guid" element={<HomeRoute />} />
-      <Route path="/conversation/:threadId" element={<ConversationRoute />} />
-      <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
-      <Route path="/settings/model" element={<ModelSettingsRoute />} />
-      <Route path="/settings/usage" element={<UsageSettingsRoute />} />
-      <Route path="/settings/general" element={<Navigate to="/settings/model" replace />} />
-      <Route path="*" element={<Navigate to="/guid" replace />} />
-    </Routes>
+    <Suspense fallback={null}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/guid" replace />} />
+        <Route path="/guid" element={<HomeRoute />} />
+        <Route path="/conversation/:threadId" element={<ConversationRoute />} />
+        <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
+        <Route path="/settings/model" element={<ModelSettingsRoute />} />
+        <Route path="/settings/usage" element={<UsageSettingsRoute />} />
+        <Route path="/settings/general" element={<Navigate to="/settings/model" replace />} />
+        <Route path="*" element={<Navigate to="/guid" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WorkspaceEntry, type WorkspaceSearchResult } from "@/runtime";
-import { SendBox, type SelectedFile } from "@/renderer/components/chat/SendBox";
+import { SendBox, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
-import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace";
+import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace/WorkspaceSelector";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
@@ -138,8 +138,8 @@ export function HomePage({
         }
       : undefined;
 
-  const submit = async (files: SelectedFile[] = []) => {
-    const prepared = prepareComposerMessage(draft, files);
+  const submit = async (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) => {
+    const prepared = prepareComposerMessage(draft, files, { quotes });
     const text = prepared.message;
     if ((!text && !prepared.contextItems.length) || submitting) {
       return false;

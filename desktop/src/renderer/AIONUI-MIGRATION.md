@@ -1,6 +1,6 @@
 # AionUi 迁移边界
 
-本文件记录 `keydex` 前端迁移时对 AionUi 的使用边界。AionUi 只作为成熟 React renderer 交互与组件实现参考，最终产品仍是本项目的本地个人型 Codex-like Windows 桌面 Agent。
+本文件记录 Keydex 前端迁移时对 AionUi 的使用边界。AionUi 只作为成熟 React renderer 交互与组件实现参考，最终产品仍是本项目的本地个人型 Codex-like Windows 桌面 Agent。
 
 ## 来源
 
@@ -13,7 +13,7 @@
 ```text
 Derived from AionUi (Apache-2.0).
 Source: <AionUi relative path>
-Modified for keydex.
+Modified for Keydex.
 ```
 
 如果只是重新实现同类交互，不需要在每个文件头部加来源说明，但实现必须遵守本文件的删除边界。
@@ -31,7 +31,7 @@ Modified for keydex.
 | SendBox | `packages/desktop/src/renderer/components/chat/SendBox/index.tsx` | 参考自动高度、IME、发送/停止、slash、@ 文件菜单；删除语音、BTW、DOM snippet |
 | MessageList | `packages/desktop/src/renderer/pages/conversation/Messages/MessageList.tsx` | 参考自动滚动、手动上滚检测、滚动到底按钮、hover action row，以及多段 AI 回复只在末尾显示动作行；消息正文不再额外创建内部滚动条 |
 | Thinking | `packages/desktop/src/renderer/pages/conversation/Messages/components/MessageThinking.tsx` | 参考折叠、计时、running/done/failed 状态；按 runtime event 时序内联在正文流里，以幽灵面板呈现 |
-| 计划卡片 | `packages/desktop/src/renderer/pages/conversation/Messages/components/MessagePlan.tsx` | 参考 To do list 展开/折叠和步骤状态；本项目通过正式 `update_plan` 工具事件驱动 |
+| 计划胶囊 | `packages/desktop/src/renderer/pages/conversation/ComposerAccessory.tsx` | 参考 Codex 胶囊 To do list 展开效果；本项目通过正式 `update_plan` 工具事件驱动，计划只在胶囊面板展示，不再占用正文消息流 |
 | 工具组摘要 | `packages/desktop/src/renderer/pages/conversation/Messages/components/MessageToolGroupSummary.tsx` | 参考工具步骤列表、状态点、运行态 breathing 和详情展开；本项目从现有 runtime message payload 生成 compact summary |
 | Preview 面板 | `packages/desktop/src/renderer/pages/conversation/Preview/components/PreviewPanel`、`MarkdownViewer`、`HTMLViewer`、`DiffViewer` | 参考模式切换、源码/预览分屏、工具栏、Markdown/HTML/Diff 专用渲染和轻量多标签历史；删除快照版本、编辑保存、HTML inspect 等重功能 |
 | 右侧侧栏 | Codex 右侧工作区/预览面板与 AionUi PreviewPanel 经验 | 工作区和预览作为对话页右侧 in-flow side rail，不再使用窄小 fixed 弹窗 |

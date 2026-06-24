@@ -79,7 +79,7 @@ describe("agentConnection", () => {
     };
 
     await expect(resolveAgentConnection({ invoke, isTauriRuntime: () => true })).rejects.toThrow(
-      "启动本地 Agent 服务失败：sidecar binary missing",
+      "启动 Keydex 本地服务失败：sidecar binary missing",
     );
   });
 
@@ -93,7 +93,7 @@ describe("agentConnection", () => {
         healthTimeoutMs: 0,
         sleep: async () => undefined,
       }),
-    ).rejects.toThrow("Agent 服务健康检查超时：connection refused");
+    ).rejects.toThrow("Keydex 服务健康检查超时：connection refused");
   });
 });
 

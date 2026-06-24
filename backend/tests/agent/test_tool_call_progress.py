@@ -11,10 +11,10 @@ from backend.app.agent.tool_call_progress import (
 
 
 def test_partial_json_string_field_returns_incomplete_streamed_value() -> None:
-    raw = '{"patch":"*** Begin Patch\\n*** Add File: src/app.py\\n+print('
+    raw = '{"patch":"*** Begin Patch\\n*** Update File: src/app.py\\n@@\\n-print('
 
     assert extract_partial_json_string_field(raw, "patch") == (
-        "*** Begin Patch\n*** Add File: src/app.py\n+print("
+        "*** Begin Patch\n*** Update File: src/app.py\n@@\n-print("
     )
     assert parse_partial_json_object(raw)["patch"].startswith("*** Begin Patch")
 
@@ -27,9 +27,6 @@ def test_apply_patch_file_change_parser_counts_added_and_deleted_lines() -> None
  keep
 -old
 +new
-*** Add File: docs/note.md
-+hello
-+world
 *** End Patch"""
     )
 
@@ -43,17 +40,35 @@ def test_apply_patch_file_change_parser_counts_added_and_deleted_lines() -> None
             "additions": 1,
             "deletions": 1,
             "diff": "--- a/src/app.py\n+++ b/src/app.py\n@@\n keep\n-old\n+new",
-        },
+        }
+    ]
+
+
+def test_apply_patch_file_change_parser_tracks_move_to() -> None:
+    files = parse_apply_patch_file_changes(
+        """*** Begin Patch
+*** Update File: docs/old.md
+*** Move to: docs/new.md
+@@
+-old
++new
+*** End Patch"""
+    )
+
+    assert files == [
         {
-            "path": "docs/note.md",
-            "operation": "add",
-            "added_lines": 2,
-            "deleted_lines": 0,
-            "removed_lines": 0,
-            "additions": 2,
-            "deletions": 0,
-            "diff": "--- /dev/null\n+++ b/docs/note.md\n+hello\n+world",
-        },
+            "path": "docs/new.md",
+            "operation": "move",
+            "change_type": "move",
+            "old_path": "docs/old.md",
+            "new_path": "docs/new.md",
+            "added_lines": 1,
+            "deleted_lines": 1,
+            "removed_lines": 1,
+            "additions": 1,
+            "deletions": 1,
+            "diff": "--- a/docs/old.md\n+++ b/docs/new.md\n*** Move to: docs/new.md\n@@\n-old\n+new",
+        }
     ]
 
 
@@ -66,7 +81,7 @@ def test_pipeline_emits_progress_for_streamed_apply_patch_chunks() -> None:
                 "id": "call_patch",
                 "index": 0,
                 "name": "apply_patch",
-                "args": '{"patch":"*** Begin Patch\\n*** Add File: src/app.py\\n+one',
+                "args": '{"patch":"*** Begin Patch\\n*** Update File: src/app.py\\n@@\\n-old\\n+one',
             }
         ],
     )
@@ -121,7 +136,7 @@ def test_pipeline_merges_openai_argument_chunks_by_index_after_first_id() -> Non
                     "name": None,
                     "args": (
                         '{"patch":"*** Begin Patch\\n'
-                        "*** Add File: src/app.py\\n+one\"}"
+                        "*** Update File: src/app.py\\n@@\\n-old\\n+one\"}"
                     ),
                 }
             ],
@@ -249,3 +264,4 @@ def test_pipeline_marks_write_file_progress_as_create_for_new_targets() -> None:
     assert file_change["added_lines"] == 1
     assert file_change["deleted_lines"] == 0
     assert file_change["diff"] == "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello"
+

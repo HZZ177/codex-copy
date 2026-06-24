@@ -10,7 +10,7 @@ import type {
 } from "@/runtime";
 import { useWorkspaceFileSearch } from "@/renderer/hooks/useWorkspaceFileSearch";
 
-import { resolveMaterialFileIcon, resolveMaterialFolderIcon } from "./materialIconTheme";
+import { useMaterialEntryIcon } from "./materialIconTheme";
 import styles from "./WorkspacePanel.module.css";
 
 export interface WorkspacePanelProps {
@@ -437,7 +437,7 @@ function AnimatedTreeGroup({ children, expanded }: { children: ReactNode; expand
 }
 
 function MaterialEntryIcon({ path, type }: { path: string; type: WorkspaceEntry["type"] }) {
-  const icon = type === "directory" ? resolveMaterialFolderIcon() : resolveMaterialFileIcon(path);
+  const icon = useMaterialEntryIcon(path, type === "directory" ? "directory" : "file");
   return (
     <img
       alt=""

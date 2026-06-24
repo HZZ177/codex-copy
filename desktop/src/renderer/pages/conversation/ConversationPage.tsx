@@ -9,9 +9,13 @@ import {
   type WorkspaceSearchResult,
   type WsConnectionStatus,
 } from "@/runtime";
-import { SendBox, type SelectedFile } from "@/renderer/components/chat/SendBox";
+import { SendBox, selectedQuoteFromText, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, type RuntimeModelSelection, useRuntimeModelSelection } from "@/renderer/components/model";
-import { usePreview } from "@/renderer/providers/PreviewProvider";
+import {
+  usePreview,
+  type PreviewAnnotationChatRequest,
+  type PreviewQuoteSelectionRequest,
+} from "@/renderer/providers/PreviewProvider";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
@@ -25,7 +29,6 @@ import {
   type AgentSessionRuntimeState,
 } from "@/renderer/stores/agentSessionStore";
 import type { ConversationMessage, ConversationRuntimeState } from "@/renderer/stores/conversationStore";
-import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
 import { prepareComposerMessage } from "@/renderer/utils/messageInjection";
 import type { AgentActionEnvelope, AgentChatMessage } from "@/types/protocol";
 
@@ -56,6 +59,8 @@ export function ConversationPage({
   const [localState, localDispatch] = useReducer(agentConversationReducer, createInitialAgentConversationState());
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
+  const [fileChipRequest, setFileChipRequest] = useState<{ requestId: number; file: SelectedFile } | null>(null);
+  const [quoteChipRequest, setQuoteChipRequest] = useState<{ requestId: number; quote: SelectedQuote } | null>(null);
   const [requestState, setRequestState] = useState<AgentSessionRuntimeState | null>(null);
   const [localRuntimeDetail, setLocalRuntimeDetail] = useState<string | null>(null);
   const [localWsStatus, setLocalWsStatus] = useState<WsConnectionStatus>("idle");
@@ -110,12 +115,63 @@ export function ConversationPage({
     scrollToBottomRef.current?.("smooth");
   }, []);
 
-  const quoteSelection = useCallback((text: string) => {
-    const marker = createQuoteMarker(text);
-    if (!marker) {
+  const quoteSelection = useCallback((request: string | PreviewQuoteSelectionRequest) => {
+    const quote =
+      typeof request === "string"
+        ? selectedQuoteFromText(request, "selection")
+        : selectedQuoteFromText(request.selectedText, {
+            source: "selection",
+            file: {
+              path: request.path,
+              name: fileName(request.path),
+              lineStart: request.lineStart ?? null,
+              lineEnd: request.lineEnd ?? null,
+            },
+          });
+    if (!quote) {
       return;
     }
-    setDraft((current) => (current.trim() ? `${current.trimEnd()}${marker}` : marker));
+    setQuoteChipRequest((current) => ({
+      requestId: (current?.requestId ?? 0) + 1,
+      quote,
+    }));
+  }, []);
+
+  const startChatFromAnnotation = useCallback((request: PreviewAnnotationChatRequest) => {
+    const path = request.path.trim();
+    const comment = request.comment.trim();
+    if (!path || !comment) {
+      return;
+    }
+    const selectedText = request.selectedText?.trim() ?? "";
+    const quote = selectedText
+      ? selectedQuoteFromText(selectedText, {
+          source: "annotation",
+          file: {
+            path,
+            name: fileName(path),
+            lineStart: request.lineStart ?? null,
+            lineEnd: request.lineEnd ?? null,
+          },
+        })
+      : null;
+    if (quote) {
+      setQuoteChipRequest((current) => ({
+        requestId: (current?.requestId ?? 0) + 1,
+        quote,
+      }));
+    } else {
+      setFileChipRequest((current) => ({
+        requestId: (current?.requestId ?? 0) + 1,
+        file: {
+          path,
+          name: fileName(path),
+          type: "file",
+          source: "workspace",
+        },
+      }));
+    }
+    setDraft((current) => appendDraftText(current, comment));
   }, []);
 
   useEffect(() => {
@@ -125,11 +181,20 @@ export function ConversationPage({
       workspaceLabel,
       runtime,
       onQuoteSelection: quoteSelection,
+      onStartChatFromAnnotation: startChatFromAnnotation,
     });
     return () => {
       setPreviewHostContext(null);
     };
-  }, [quoteSelection, runtime, setPreviewHostContext, threadId, workspaceAvailable, workspaceLabel]);
+  }, [
+    quoteSelection,
+    runtime,
+    setPreviewHostContext,
+    startChatFromAnnotation,
+    threadId,
+    workspaceAvailable,
+    workspaceLabel,
+  ]);
 
   const openPreview = useCallback(
     (request: PreviewRequest) => {
@@ -139,9 +204,10 @@ export function ConversationPage({
         workspaceLabel,
         runtime,
         onQuoteSelection: quoteSelection,
+        onStartChatFromAnnotation: startChatFromAnnotation,
       });
     },
-    [openPreviewRequest, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+    [openPreviewRequest, quoteSelection, runtime, startChatFromAnnotation, threadId, workspaceAvailable, workspaceLabel],
   );
 
   const openFileReference = useCallback(
@@ -155,9 +221,10 @@ export function ConversationPage({
         workspaceLabel,
         runtime,
         onQuoteSelection: quoteSelection,
+        onStartChatFromAnnotation: startChatFromAnnotation,
       });
     },
-    [openFilePanel, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+    [openFilePanel, quoteSelection, runtime, startChatFromAnnotation, threadId, workspaceAvailable, workspaceLabel],
   );
 
   const openFileChangePreview = useCallback(
@@ -171,9 +238,10 @@ export function ConversationPage({
         workspaceLabel,
         runtime,
         onQuoteSelection: quoteSelection,
+        onStartChatFromAnnotation: startChatFromAnnotation,
       });
     },
-    [openFilePanel, quoteSelection, runtime, threadId, workspaceAvailable, workspaceLabel],
+    [openFilePanel, quoteSelection, runtime, startChatFromAnnotation, threadId, workspaceAvailable, workspaceLabel],
   );
 
   useEffect(() => {
@@ -399,17 +467,18 @@ export function ConversationPage({
     ],
   );
 
-  const send = (files: SelectedFile[] = []) => {
-    const prepared = prepareComposerMessage(draft, files);
+  const send = (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) => {
+    const prepared = prepareComposerMessage(draft, files, { quotes });
     if (!prepared.message && !prepared.contextItems.length) {
       return false;
     }
     const model = modelSelection.selectedModel.trim();
-    return sendText(prepared.message, model, {
+    const sent = sendText(prepared.message, model, {
       clearDraft: true,
       contextItems: prepared.contextItems,
       runtimeParams: prepared.runtimeParams,
     });
+    return sent;
   };
 
   useEffect(() => {
@@ -510,6 +579,8 @@ export function ConversationPage({
           onSend={send}
           onStop={stop}
           onOpenFileReference={openFileReference}
+          externalFileRequest={fileChipRequest}
+          externalQuoteRequest={quoteChipRequest}
         />
       }
     >
@@ -549,6 +620,8 @@ function ConversationComposer({
   onSend,
   onStop,
   onOpenFileReference,
+  externalFileRequest,
+  externalQuoteRequest,
 }: {
   value: string;
   runtimeState: ConversationRuntimeState;
@@ -560,9 +633,11 @@ function ConversationComposer({
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenModelSettings?: () => void;
   onChange: (value: string) => void;
-  onSend: (files?: SelectedFile[]) => boolean;
+  onSend: (files?: SelectedFile[], quotes?: SelectedQuote[]) => boolean;
   onStop: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
+  externalFileRequest: { requestId: number; file: SelectedFile } | null;
+  externalQuoteRequest: { requestId: number; quote: SelectedQuote } | null;
 }) {
   return (
     <SendBox
@@ -588,6 +663,8 @@ function ConversationComposer({
       onSend={onSend}
       onStop={onStop}
       onOpenFileReference={onOpenFileReference}
+      externalFileRequest={externalFileRequest}
+      externalQuoteRequest={externalQuoteRequest}
       allowFileSelection={Boolean(onSearchWorkspace || onListWorkspaceDirectory)}
       onListWorkspaceDirectory={onListWorkspaceDirectory}
       onSearchWorkspace={onSearchWorkspace}
@@ -601,6 +678,18 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
     name: entry.name,
     type: entry.type,
   }));
+}
+
+function appendDraftText(current: string, addition: string): string {
+  const trimmedAddition = addition.trim();
+  if (!trimmedAddition) {
+    return current;
+  }
+  return current.trim() ? `${current.trimEnd()}\n\n${trimmedAddition}` : trimmedAddition;
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function appendLocalError(

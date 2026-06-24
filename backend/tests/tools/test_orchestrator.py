@@ -19,7 +19,7 @@ class RecordingConsumer:
 
 class ExplodingTool:
     name = "explode"
-    description = "always raises"
+    description = "总是抛出异常"
     parameters = {"type": "object"}
     enabled = True
 
@@ -55,7 +55,7 @@ async def test_tool_orchestrator_emits_start_and_finish_events(tmp_path) -> None
     registry.register(
         FunctionTool(
             name="echo",
-            description="echo args",
+            description="回显参数",
             parameters={"type": "object"},
             handler=lambda args, context: {"value": args["value"]},
         )
@@ -92,7 +92,7 @@ async def test_tool_orchestrator_emits_failed_event_for_tool_result_error(tmp_pa
     registry.register(
         FunctionTool(
             name="fail",
-            description="raises",
+            description="抛出异常",
             parameters={"type": "object"},
             handler=lambda args, context: (_ for _ in ()).throw(ValueError("bad")),
         )
@@ -149,7 +149,7 @@ async def test_tool_orchestrator_preserves_subagent_fields_and_ui_payload(tmp_pa
     registry.register(
         FunctionTool(
             name="update_plan",
-            description="plan",
+            description="计划工具",
             parameters={"type": "object"},
             handler=lambda args, context: {
                 "ui_payload": {"entries": [{"content": "实现", "status": "completed"}]}

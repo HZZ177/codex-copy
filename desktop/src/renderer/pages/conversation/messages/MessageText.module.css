@@ -114,6 +114,13 @@
   color: color-mix(in srgb, var(--color-text-primary) 78%, var(--color-text-tertiary));
 }
 
+.contextItemChip[data-context-type="source_quote"] {
+  max-width: min(228px, 100%);
+  background: color-mix(in srgb, var(--color-bg-elevated) 82%, var(--surface-muted));
+  border-color: color-mix(in srgb, var(--color-border-default) 70%, transparent);
+  color: color-mix(in srgb, var(--color-text-primary) 82%, var(--color-text-tertiary));
+}
+
 .contextItemChip[data-clickable="true"] {
   cursor: pointer;
 }
@@ -124,6 +131,7 @@
 }
 
 .contextItemWrapper:hover .contextItemChip,
+.contextItemWrapper[data-preview-open="true"] .contextItemChip,
 .contextItemChip:focus-visible {
   border-color: color-mix(in srgb, var(--color-border-default) 74%, transparent);
   background: color-mix(in srgb, var(--color-bg-elevated) 82%, var(--surface-hover));
@@ -135,11 +143,9 @@
 }
 
 .contextItemCard {
-  position: absolute;
-  z-index: 24;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  display: none;
+  position: fixed;
+  z-index: 80;
+  display: block;
   width: max-content;
   min-width: 160px;
   max-width: min(280px, calc(100vw - 32px));
@@ -150,29 +156,59 @@
     0 14px 34px rgb(15 23 42 / 10%),
     0 2px 8px rgb(15 23 42 / 7%);
   color: var(--color-text-primary);
+  opacity: 0;
   padding: 10px;
-  transform: translateX(-50%);
+  pointer-events: none;
+  transform: translateY(var(--quote-reference-enter-y, 5px)) scale(0.98);
   backdrop-filter: blur(12px);
 }
 
 .contextItemCard::after {
   position: absolute;
-  left: 50%;
-  bottom: -5px;
+  left: var(--quote-reference-arrow-left, 50%);
   width: 9px;
   height: 9px;
-  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
   background: inherit;
   content: "";
   pointer-events: none;
   transform: translateX(-50%) rotate(45deg);
 }
 
-.contextItemWrapper:hover .contextItemCard,
-.contextItemWrapper:focus-within .contextItemCard {
-  display: block;
-  animation: quoteReferenceCardEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+.contextItemCard[data-floating-placement="top"] {
+  --quote-reference-enter-y: 5px;
+}
+
+.contextItemCard[data-floating-placement="bottom"] {
+  --quote-reference-enter-y: -5px;
+}
+
+.contextItemCard[data-floating-placement="top"]::after {
+  bottom: -5px;
+  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+}
+
+.contextItemCard[data-floating-placement="bottom"]::after {
+  top: -5px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+}
+
+.contextItemCard[data-floating-ready="false"] {
+  visibility: hidden;
+}
+
+.contextItemCard[data-floating-ready="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  animation: contextItemCardEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.contextItemPathCard {
+  width: max-content;
+  min-width: 0;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 8px 10px;
 }
 
 .contextItemBody {
@@ -183,6 +219,28 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.contextItemPathTitle {
+  display: block;
+  max-height: 112px;
+  overflow: auto;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.contextItemPathMeta {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .contextItemActions {
@@ -209,136 +267,6 @@
 .contextItemActions button:hover {
   background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
   color: var(--color-text-primary);
-}
-
-.quoteReferenceWrapper {
-  position: relative;
-  display: inline-flex;
-  max-width: 100%;
-}
-
-.quoteReferenceChip {
-  display: inline-flex;
-  max-width: min(132px, 100%);
-  box-sizing: border-box;
-  height: 20px;
-  align-items: center;
-  overflow: hidden;
-  margin: 0;
-  vertical-align: middle;
-  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 82%, transparent);
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--surface-muted));
-  box-shadow:
-    0 4px 12px rgb(15 23 42 / 5%),
-    inset 0 0 0 1px color-mix(in srgb, #fff 72%, transparent);
-  color: var(--color-text-secondary);
-  font-size: 11.5px;
-  font-weight: 450;
-  line-height: 1;
-  padding: 0 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition:
-    background var(--motion-fast) ease,
-    border-color var(--motion-fast) ease,
-    color var(--motion-fast) ease,
-    box-shadow var(--motion-fast) ease;
-}
-
-.quoteReferenceWrapper:hover .quoteReferenceChip,
-.quoteReferenceChip:focus-visible {
-  border-color: color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  background: color-mix(in srgb, var(--color-bg-elevated) 78%, var(--surface-hover));
-  color: var(--color-text-primary);
-  box-shadow:
-    0 7px 18px rgb(15 23 42 / 7%),
-    inset 0 0 0 1px color-mix(in srgb, #fff 80%, transparent);
-}
-
-.quoteReferenceChip:focus-visible {
-  outline: none;
-}
-
-.quoteReferenceCard {
-  position: absolute;
-  z-index: 24;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  display: none;
-  width: max-content;
-  min-width: 164px;
-  max-width: min(280px, calc(100vw - 32px));
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
-  box-shadow:
-    0 14px 34px rgb(15 23 42 / 10%),
-    0 2px 8px rgb(15 23 42 / 7%);
-  color: var(--color-text-primary);
-  padding: 10px;
-  transform: translateX(-50%);
-  backdrop-filter: blur(12px);
-}
-
-.quoteReferenceCard::after {
-  position: absolute;
-  left: 50%;
-  bottom: -5px;
-  width: 9px;
-  height: 9px;
-  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  background: inherit;
-  content: "";
-  pointer-events: none;
-  transform: translateX(-50%) rotate(45deg);
-}
-
-.quoteReferenceWrapper:hover .quoteReferenceCard,
-.quoteReferenceWrapper:focus-within .quoteReferenceCard {
-  display: block;
-  animation: quoteReferenceCardEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.quoteReferenceBody {
-  display: block;
-  max-height: 112px;
-  overflow: auto;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.quoteReferenceActions {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.quoteReferenceActions button {
-  display: inline-flex;
-  height: 24px;
-  align-items: center;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1;
-  padding: 0 9px;
-}
-
-.quoteReferenceActions button:hover {
-  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
-  color: var(--color-text-primary);
-}
-
-.quoteReferenceActions button:focus-visible {
-  outline: none;
 }
 
 .actions {
@@ -1072,14 +1000,14 @@
   }
 }
 
-@keyframes quoteReferenceCardEnter {
+@keyframes contextItemCardEnter {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(5px) scale(0.98);
+    transform: translateY(var(--quote-reference-enter-y, 5px)) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -1106,8 +1034,7 @@
     animation: none;
   }
 
-  .quoteReferenceWrapper:hover .quoteReferenceCard,
-  .quoteReferenceWrapper:focus-within .quoteReferenceCard {
+  .contextItemCard[data-floating-ready="true"] {
     animation: none;
   }
 

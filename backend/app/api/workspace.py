@@ -123,6 +123,47 @@ class WorkspaceSearchResult(BaseModel):
     type: str
 
 
+class WorkspaceFileAnnotationPayload(BaseModel):
+    path: str
+    anchor_type: str = "file"
+    comment: str
+    selected_text: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    column_start: int | None = None
+    column_end: int | None = None
+    content_hash: str | None = None
+
+
+class WorkspaceFileAnnotationUpdatePayload(BaseModel):
+    anchor_type: str | None = None
+    comment: str | None = None
+    selected_text: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    column_start: int | None = None
+    column_end: int | None = None
+    content_hash: str | None = None
+
+
+class WorkspaceFileAnnotationResponse(BaseModel):
+    id: str
+    scope_type: str
+    scope_id: str
+    workspace_id: str | None = None
+    path: str
+    anchor_type: str
+    comment: str
+    selected_text: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    column_start: int | None = None
+    column_end: int | None = None
+    content_hash: str | None = None
+    created_at: str
+    updated_at: str
+
+
 @router.get("/api/workspaces/{workspace_id}/tree", response_model=WorkspaceTreeResponse)
 async def list_workspace_tree(
     workspace_id: str,
@@ -162,6 +203,82 @@ async def search_workspace(
 ) -> list[WorkspaceSearchResult]:
     scope = _workspace_scope(repositories, workspace_id)
     return await asyncio.to_thread(_search, scope, q, limit)
+
+
+@router.get(
+    "/api/workspaces/{workspace_id}/annotations",
+    response_model=list[WorkspaceFileAnnotationResponse],
+)
+async def list_workspace_annotations(
+    workspace_id: str,
+    path: str = Query(..., min_length=1),
+    repositories: StorageRepositories = RepositoriesDep,
+) -> list[WorkspaceFileAnnotationResponse]:
+    scope = _workspace_scope(repositories, workspace_id)
+    return _list_annotations(
+        repositories,
+        scope,
+        scope_type="workspace",
+        scope_id=workspace_id,
+        path=path,
+    )
+
+
+@router.post(
+    "/api/workspaces/{workspace_id}/annotations",
+    response_model=WorkspaceFileAnnotationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_workspace_annotation(
+    workspace_id: str,
+    payload: WorkspaceFileAnnotationPayload,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceFileAnnotationResponse:
+    scope = _workspace_scope(repositories, workspace_id)
+    return _create_annotation(
+        repositories,
+        scope,
+        scope_type="workspace",
+        scope_id=workspace_id,
+        payload=payload,
+    )
+
+
+@router.patch(
+    "/api/workspaces/{workspace_id}/annotations/{annotation_id}",
+    response_model=WorkspaceFileAnnotationResponse,
+)
+async def update_workspace_annotation(
+    workspace_id: str,
+    annotation_id: str,
+    payload: WorkspaceFileAnnotationUpdatePayload,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceFileAnnotationResponse:
+    scope = _workspace_scope(repositories, workspace_id)
+    return _update_annotation(
+        repositories,
+        scope,
+        scope_type="workspace",
+        scope_id=workspace_id,
+        annotation_id=annotation_id,
+        payload=payload,
+    )
+
+
+@router.delete("/api/workspaces/{workspace_id}/annotations/{annotation_id}", status_code=204)
+async def delete_workspace_annotation(
+    workspace_id: str,
+    annotation_id: str,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> None:
+    scope = _workspace_scope(repositories, workspace_id)
+    _delete_annotation(
+        repositories,
+        scope,
+        scope_type="workspace",
+        scope_id=workspace_id,
+        annotation_id=annotation_id,
+    )
 
 
 @router.get("/api/sessions/{session_id}/workspace/tree", response_model=WorkspaceTreeResponse)
@@ -206,6 +323,251 @@ async def search_session_workspace(
 ) -> list[WorkspaceSearchResult]:
     scope = _session_workspace_scope(repositories, session_id)
     return await asyncio.to_thread(_search, scope, q, limit)
+
+
+@router.get(
+    "/api/sessions/{session_id}/workspace/annotations",
+    response_model=list[WorkspaceFileAnnotationResponse],
+)
+async def list_session_workspace_annotations(
+    session_id: str,
+    path: str = Query(..., min_length=1),
+    repositories: StorageRepositories = RepositoriesDep,
+) -> list[WorkspaceFileAnnotationResponse]:
+    scope = _session_workspace_scope(repositories, session_id)
+    return _list_annotations(
+        repositories,
+        scope,
+        scope_type="session",
+        scope_id=session_id,
+        path=path,
+    )
+
+
+@router.post(
+    "/api/sessions/{session_id}/workspace/annotations",
+    response_model=WorkspaceFileAnnotationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_session_workspace_annotation(
+    session_id: str,
+    payload: WorkspaceFileAnnotationPayload,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceFileAnnotationResponse:
+    scope = _session_workspace_scope(repositories, session_id)
+    return _create_annotation(
+        repositories,
+        scope,
+        scope_type="session",
+        scope_id=session_id,
+        payload=payload,
+    )
+
+
+@router.patch(
+    "/api/sessions/{session_id}/workspace/annotations/{annotation_id}",
+    response_model=WorkspaceFileAnnotationResponse,
+)
+async def update_session_workspace_annotation(
+    session_id: str,
+    annotation_id: str,
+    payload: WorkspaceFileAnnotationUpdatePayload,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceFileAnnotationResponse:
+    scope = _session_workspace_scope(repositories, session_id)
+    return _update_annotation(
+        repositories,
+        scope,
+        scope_type="session",
+        scope_id=session_id,
+        annotation_id=annotation_id,
+        payload=payload,
+    )
+
+
+@router.delete("/api/sessions/{session_id}/workspace/annotations/{annotation_id}", status_code=204)
+async def delete_session_workspace_annotation(
+    session_id: str,
+    annotation_id: str,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> None:
+    scope = _session_workspace_scope(repositories, session_id)
+    _delete_annotation(
+        repositories,
+        scope,
+        scope_type="session",
+        scope_id=session_id,
+        annotation_id=annotation_id,
+    )
+
+
+def _list_annotations(
+    repositories: StorageRepositories,
+    scope: WorkspaceRuntimeContext,
+    *,
+    scope_type: str,
+    scope_id: str,
+    path: str,
+) -> list[WorkspaceFileAnnotationResponse]:
+    relative_path = _annotation_file_path(scope, path)
+    records = repositories.workspace_file_annotations.list(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        path=relative_path,
+    )
+    return [_annotation_response(record) for record in records]
+
+
+def _create_annotation(
+    repositories: StorageRepositories,
+    scope: WorkspaceRuntimeContext,
+    *,
+    scope_type: str,
+    scope_id: str,
+    payload: WorkspaceFileAnnotationPayload,
+) -> WorkspaceFileAnnotationResponse:
+    relative_path = _annotation_file_path(scope, payload.path)
+    try:
+        record = repositories.workspace_file_annotations.create(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            workspace_id=scope.workspace_id,
+            path=relative_path,
+            anchor_type=payload.anchor_type,
+            comment=payload.comment,
+            selected_text=payload.selected_text,
+            line_start=payload.line_start,
+            line_end=payload.line_end,
+            column_start=payload.column_start,
+            column_end=payload.column_end,
+            content_hash=payload.content_hash,
+        )
+    except ValueError as exc:
+        raise _workspace_error(
+            status.HTTP_400_BAD_REQUEST,
+            "workspace_annotation_invalid",
+            str(exc),
+        ) from exc
+    return _annotation_response(record)
+
+
+def _update_annotation(
+    repositories: StorageRepositories,
+    scope: WorkspaceRuntimeContext,
+    *,
+    scope_type: str,
+    scope_id: str,
+    annotation_id: str,
+    payload: WorkspaceFileAnnotationUpdatePayload,
+) -> WorkspaceFileAnnotationResponse:
+    existing = repositories.workspace_file_annotations.get(
+        annotation_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if existing is None:
+        raise _workspace_error(
+            status.HTTP_404_NOT_FOUND,
+            "workspace_annotation_not_found",
+            "Annotation does not exist in the current workspace scope",
+        )
+    _resolve(scope, existing.path)
+    fields = _payload_field_set(payload)
+    try:
+        updated = repositories.workspace_file_annotations.update(
+            annotation_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            anchor_type=payload.anchor_type if "anchor_type" in fields and payload.anchor_type is not None else existing.anchor_type,
+            comment=payload.comment if "comment" in fields and payload.comment is not None else existing.comment,
+            selected_text=payload.selected_text if "selected_text" in fields else existing.selected_text,
+            line_start=payload.line_start if "line_start" in fields else existing.line_start,
+            line_end=payload.line_end if "line_end" in fields else existing.line_end,
+            column_start=payload.column_start if "column_start" in fields else existing.column_start,
+            column_end=payload.column_end if "column_end" in fields else existing.column_end,
+            content_hash=payload.content_hash if "content_hash" in fields else existing.content_hash,
+        )
+    except ValueError as exc:
+        raise _workspace_error(
+            status.HTTP_400_BAD_REQUEST,
+            "workspace_annotation_invalid",
+            str(exc),
+        ) from exc
+    if updated is None:
+        raise _workspace_error(
+            status.HTTP_404_NOT_FOUND,
+            "workspace_annotation_not_found",
+            "Annotation does not exist in the current workspace scope",
+        )
+    return _annotation_response(updated)
+
+
+def _delete_annotation(
+    repositories: StorageRepositories,
+    scope: WorkspaceRuntimeContext,
+    *,
+    scope_type: str,
+    scope_id: str,
+    annotation_id: str,
+) -> None:
+    existing = repositories.workspace_file_annotations.get(
+        annotation_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if existing is None:
+        raise _workspace_error(
+            status.HTTP_404_NOT_FOUND,
+            "workspace_annotation_not_found",
+            "Annotation does not exist in the current workspace scope",
+        )
+    _resolve(scope, existing.path)
+    if not repositories.workspace_file_annotations.delete(
+        annotation_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    ):
+        raise _workspace_error(
+            status.HTTP_404_NOT_FOUND,
+            "workspace_annotation_not_found",
+            "Annotation does not exist in the current workspace scope",
+        )
+
+
+def _annotation_file_path(scope: WorkspaceRuntimeContext, path: str) -> str:
+    target = _resolve(scope, path)
+    if not target.exists():
+        raise _workspace_error(status.HTTP_404_NOT_FOUND, "workspace_path_not_found", "File does not exist")
+    if not target.is_file():
+        raise _workspace_error(status.HTTP_400_BAD_REQUEST, "workspace_not_file", "Path is not a file")
+    return _relative_path(scope, target)
+
+
+def _payload_field_set(payload: BaseModel) -> set[str]:
+    model_fields_set = getattr(payload, "model_fields_set", None)
+    if model_fields_set is not None:
+        return set(model_fields_set)
+    return set(getattr(payload, "__fields_set__", set()))
+
+
+def _annotation_response(record: Any) -> WorkspaceFileAnnotationResponse:
+    return WorkspaceFileAnnotationResponse(
+        id=record.id,
+        scope_type=record.scope_type,
+        scope_id=record.scope_id,
+        workspace_id=record.workspace_id,
+        path=record.path,
+        anchor_type=record.anchor_type,
+        comment=record.comment,
+        selected_text=record.selected_text,
+        line_start=record.line_start,
+        line_end=record.line_end,
+        column_start=record.column_start,
+        column_end=record.column_end,
+        content_hash=record.content_hash,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
 
 
 def _workspace_scope(

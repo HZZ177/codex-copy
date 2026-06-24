@@ -257,21 +257,11 @@ def parse_partial_json_object(value: str) -> dict[str, Any]:
         return parsed
 
     result: dict[str, Any] = {}
-    for key in ("patch", "path", "content"):
+    for key in ("patch", "path", "content", "mode"):
         extracted = extract_partial_json_string_field(value, key)
         if extracted is not None:
             result[key] = extracted
-    append = extract_partial_json_bool_field(value, "append")
-    if append is not None:
-        result["append"] = append
     return result
-
-
-def extract_partial_json_bool_field(value: str, field: str) -> bool | None:
-    match = re.search(rf'"{re.escape(field)}"\s*:\s*(true|false)', value)
-    if not match:
-        return None
-    return match.group(1) == "true"
 
 
 def extract_partial_json_string_field(value: str, field: str) -> str | None:
@@ -319,32 +309,50 @@ def parse_apply_patch_file_changes(patch: str) -> list[dict[str, Any]]:
     stats: dict[str, dict[str, Any]] = {}
     current_path = ""
     current_operation = ""
+    current_move_to = ""
     for line in patch.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        if line.startswith("*** Add File: "):
-            current_path = line.removeprefix("*** Add File: ").strip()
-            current_operation = "add"
-            ensure_file_change(stats, current_path, current_operation)
-            continue
         if line.startswith("*** Update File: "):
             current_path = line.removeprefix("*** Update File: ").strip()
             current_operation = "update"
+            current_move_to = ""
             ensure_file_change(stats, current_path, current_operation)
+            continue
+        if line.startswith("*** Move to: ") and current_path:
+            current_move_to = line.removeprefix("*** Move to: ").strip()
+            current_operation = "move"
+            file_change = ensure_file_change(stats, current_path, "move")
+            file_change["change_type"] = "move"
+            file_change["old_path"] = current_path
+            file_change["new_path"] = current_move_to
+            file_change["path"] = current_move_to or current_path
+            diff_lines = file_change.setdefault(
+                "_diff_lines",
+                [f"--- a/{current_path}", f"+++ b/{current_move_to or current_path}"],
+            )
+            if isinstance(diff_lines, list):
+                diff_lines.append(line)
             continue
         if line.startswith("*** Delete File: "):
             current_path = line.removeprefix("*** Delete File: ").strip()
             current_operation = "delete"
+            current_move_to = ""
             ensure_file_change(stats, current_path, current_operation)
             continue
         if line.startswith("*** "):
             current_path = ""
             current_operation = ""
+            current_move_to = ""
             continue
         if not current_path:
             continue
         file_change = ensure_file_change(stats, current_path, current_operation)
+        if current_move_to:
+            file_change["path"] = current_move_to
         diff_lines = file_change.setdefault(
             "_diff_lines",
-            diff_header(current_path, current_operation),
+            [f"--- a/{current_path}", f"+++ b/{current_move_to}"]
+            if current_move_to
+            else diff_header(current_path, current_operation),
         )
         if isinstance(diff_lines, list):
             diff_lines.append(line)
@@ -363,8 +371,6 @@ def parse_apply_patch_file_changes(patch: str) -> list[dict[str, Any]]:
 
 
 def diff_header(path: str, operation: str) -> list[str]:
-    if operation == "add":
-        return ["--- /dev/null", f"+++ b/{path}"]
     if operation == "delete":
         return [f"--- a/{path}", "+++ /dev/null"]
     return [f"--- a/{path}", f"+++ b/{path}"]
@@ -499,9 +505,6 @@ def tool_state_match_score(state: ToolCallChunkState, params: dict[str, Any]) ->
             score += 300
     if "path" in state.args and "path" in params and string_value(state.args.get("path")) == string_value(params.get("path")):
         score += 200
-    if "append" in state.args and "append" in params and state.args.get("append") == params.get("append"):
-        score += 25
-
     state_patch_paths = patch_paths(string_value(state.args.get("patch")))
     params_patch_paths = patch_paths(string_value(params.get("patch")))
     if state_patch_paths and params_patch_paths and state_patch_paths.intersection(params_patch_paths):
@@ -521,7 +524,7 @@ def jsonable_equal(left: Any, right: Any) -> bool:
 def patch_paths(patch: str) -> set[str]:
     paths: set[str] = set()
     for line in patch.splitlines():
-        match = re.match(r"^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$", line.strip())
+        match = re.match(r"^\*\*\* (?:(?:Update|Delete) File|Move to):\s+(.+)$", line.strip())
         if match:
             paths.add(match.group(1).strip())
     return paths

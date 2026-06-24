@@ -10,7 +10,16 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PropsWithChildren } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PropsWithChildren,
+} from "react";
 import { flushSync } from "react-dom";
 
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
@@ -18,7 +27,6 @@ import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
 import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
-import { FilePreview, WorkspaceFileBrowser } from "@/renderer/components/workspace";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
 import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
@@ -27,6 +35,15 @@ import { Sider } from "./Sider";
 import { Titlebar } from "./Titlebar";
 import styles from "./Layout.module.css";
 import type { SiderEntry } from "./Sider";
+
+const LazyWorkspaceFileBrowser = lazy(() =>
+  import("@/renderer/components/workspace/WorkspaceFileBrowser").then((module) => ({
+    default: module.WorkspaceFileBrowser,
+  })),
+);
+const LazyFilePreview = lazy(() =>
+  import("@/renderer/components/workspace/FilePreview").then((module) => ({ default: module.FilePreview })),
+);
 
 const LEGACY_FILES_PANEL_ID = "right-sidebar:files";
 const FILES_PANEL_ID_PREFIX = "right-sidebar:files:";
@@ -819,32 +836,39 @@ function RightSidebarPanel({
           </div>
           {showFilesPanel && filePanelRenderContext?.runtime && (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
             <div className={styles.rightSidebarBody} data-content="files">
-              <WorkspaceFileBrowser
-                key={`${activeScopeKey}:${activeFilePanel?.id ?? "files"}`}
-                label={filePanelRenderContext.workspaceLabel}
-                runtime={filePanelRenderContext.runtime}
-                workspaceId={filePanelRenderContext.workspaceId}
-                sessionId={filePanelRenderContext.sessionId}
-                previewPath={activeFilePanel?.filePreviewPath ?? null}
-                previewRequestId={activeFilePanel?.filePreviewRequestId ?? 0}
-                onPreviewPathChange={updateFilePanelPreviewPath}
-              />
+              <Suspense fallback={null}>
+                <LazyWorkspaceFileBrowser
+                  key={`${activeScopeKey}:${activeFilePanel?.id ?? "files"}`}
+                  label={filePanelRenderContext.workspaceLabel}
+                  runtime={filePanelRenderContext.runtime}
+                  workspaceId={filePanelRenderContext.workspaceId}
+                  sessionId={filePanelRenderContext.sessionId}
+                  previewPath={activeFilePanel?.filePreviewPath ?? null}
+                  previewRequestId={activeFilePanel?.filePreviewRequestId ?? 0}
+                  onQuoteSelection={filePanelRenderContext.onQuoteSelection}
+                  onStartChatFromAnnotation={filePanelRenderContext.onStartChatFromAnnotation}
+                  onPreviewPathChange={updateFilePanelPreviewPath}
+                />
+              </Suspense>
             </div>
           ) : activeRequest ? (
             <div className={styles.rightSidebarBody} data-content="preview">
-              <FilePreview
-                breadcrumbRootLabel={
-                  activeRequest.type === "content" && !activeRequest.sourcePath
-                    ? undefined
-                    : activeRenderContext?.workspaceLabel
-                }
-                workspaceId={activeRenderContext?.workspaceId}
-                sessionId={activeRenderContext?.sessionId}
-                request={activeRequest}
-                runtime={activeRenderContext?.runtime}
-                onQuoteSelection={activeRenderContext?.onQuoteSelection}
-                chrome="panel"
-              />
+              <Suspense fallback={null}>
+                <LazyFilePreview
+                  breadcrumbRootLabel={
+                    activeRequest.type === "content" && !activeRequest.sourcePath
+                      ? undefined
+                      : activeRenderContext?.workspaceLabel
+                  }
+                  workspaceId={activeRenderContext?.workspaceId}
+                  sessionId={activeRenderContext?.sessionId}
+                  request={activeRequest}
+                  runtime={activeRenderContext?.runtime}
+                  onQuoteSelection={activeRenderContext?.onQuoteSelection}
+                  onStartChatFromAnnotation={activeRenderContext?.onStartChatFromAnnotation}
+                  chrome="panel"
+                />
+              </Suspense>
             </div>
           ) : (
             <div className={styles.rightSidebarBody} data-content="empty">

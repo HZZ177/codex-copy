@@ -9,7 +9,7 @@ import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider
 import { ConversationPage } from "@/renderer/pages/conversation";
 import { clearQuickChatSendQueue, queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
-import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
+import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import type {
   AgentActionEnvelope,
@@ -381,6 +381,123 @@ describe("ConversationPage", () => {
     expect(screen.getByTestId("typing-speed-pill").textContent).toBe("打字机 0 字符/s - 待输出 0 字");
   });
 
+  it("restores persisted update_plan into the composer accessory plan panel", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "梳理计划"),
+        historyMessage("tool", "", {
+          toolName: "update_plan",
+          status: "completed",
+          uiPayload: {
+            explanation: "把计划同步到胶囊",
+            entries: [
+              { content: "分析现有胶囊入口", status: "completed" },
+              { content: "实现计划胶囊面板", status: "in_progress" },
+              { content: "补充回归测试", status: "pending" },
+            ],
+          },
+        }),
+      ],
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const pill = await screen.findByTestId("plan-summary-pill");
+    expect(pill.textContent).toContain("第 2 / 3 步");
+    expect(pill.textContent).toContain("实现计划胶囊面板");
+    expect(screen.queryByTestId("typing-speed-pill")).toBeNull();
+    expect(screen.getByTestId("plan-summary-card").textContent).not.toContain("把计划同步到胶囊");
+    expect(screen.getByTestId("plan-summary-card").textContent).toContain("补充回归测试");
+
+    typeComposer("继续");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("plan-summary-pill")).toBeNull();
+    });
+    expect(screen.getByTestId("typing-speed-pill").textContent).toBe("打字机 0 字符/s - 待输出 0 字");
+  });
+
+  it("shows streaming update_plan arguments in the composer accessory plan panel", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await act(async () => {
+      emit(agentEvent("tool_start", {
+        id: "evt-plan-start",
+        session_id: "ses-1",
+        run_id: "run-plan",
+        tool_name: "update_plan",
+        params: {
+          plan: [
+            { step: "确认计划入口", status: "completed" },
+            { step: "渲染胶囊计划", status: "in_progress" },
+          ],
+        },
+      }));
+    });
+
+    const pill = await screen.findByTestId("plan-summary-pill");
+    expect(pill.textContent).toContain("第 2 / 2 步");
+    expect(pill.textContent).toContain("渲染胶囊计划");
+    expect(screen.getByTestId("plan-summary-card").textContent).toContain("确认计划入口");
+  });
+
+  it("shows failed update_plan steps in the composer accessory plan panel", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "执行计划"),
+        historyMessage("tool", "", {
+          toolName: "update_plan",
+          status: "completed",
+          uiPayload: {
+            entries: [
+              { content: "完成前置分析", status: "completed" },
+              { content: "执行集成测试", status: "failed" },
+              { content: "整理验收结论", status: "pending" },
+            ],
+          },
+        }),
+      ],
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const pill = await screen.findByTestId("plan-summary-pill");
+    expect(pill.textContent).toContain("第 2 / 3 步");
+    expect(pill.textContent).toContain("执行集成测试");
+    expect(pill.textContent).toContain("失败");
+
+    fireEvent.click(screen.getByLabelText("切换胶囊信息"));
+    expect(screen.getByRole("menuitemradio", { name: /1\/3 已完成，1 失败/ })).not.toBeNull();
+  });
+
+  it("shows a later completed update_plan step over an earlier failed step", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "执行计划"),
+        historyMessage("tool", "", {
+          toolName: "update_plan",
+          status: "completed",
+          uiPayload: {
+            entries: [
+              { content: "完成前置分析", status: "completed" },
+              { content: "编写单元测试", status: "failed" },
+              { content: "执行集成测试", status: "completed" },
+            ],
+          },
+        }),
+      ],
+    });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const pill = await screen.findByTestId("plan-summary-pill");
+    expect(pill.textContent).toContain("第 3 / 3 步");
+    expect(pill.textContent).toContain("执行集成测试");
+    expect(pill.textContent).not.toContain("失败");
+    expect(screen.getByTestId("plan-summary-card").textContent).toContain("编写单元测试");
+  });
+
   it("excludes failed file changes from composer accessory totals", async () => {
     const { runtime } = fakeRuntime({
       history: [
@@ -541,6 +658,58 @@ describe("ConversationPage", () => {
       expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     });
     expect(screen.getByLabelText("发送")).not.toBeNull();
+  });
+
+  it("prefills composer from an annotation chat request and sends source quote context", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime, channel } = fakeRuntime({ session: projectSession });
+
+    renderConversation(
+      <>
+        <ConversationPage threadId="ses-1" runtime={runtime} />
+        <AnnotationPrefillHarness />
+      </>,
+    );
+
+    const input = await readyComposer();
+    fireEvent.click(await screen.findByRole("button", { name: "触发批注预填" }));
+
+    expect(await screen.findByText("main.ts · L3-L4")).not.toBeNull();
+    expect(document.querySelector("[data-quote-index='0']")).not.toBeNull();
+    expect(input.textContent?.trim()).toBe("Check this branch");
+    expect(input.textContent).not.toContain("文件：");
+    expect(input.textContent).not.toContain("引用位置：");
+    expect(channel.chat).not.toHaveBeenCalled();
+
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    const chatMock = channel.chat as unknown as ReturnType<typeof vi.fn>;
+    const payload = chatMock.mock.calls.at(-1)?.[0] as {
+      message?: string;
+      runtime_params?: { message_injection?: Array<{ role?: string; content?: string; metadata?: Record<string, unknown> }> };
+    };
+    expect(payload.message).toBe("Check this branch");
+    expect(payload.runtime_params?.message_injection).toHaveLength(1);
+    expect(payload.runtime_params?.message_injection?.[0]).toMatchObject({
+      type: "follow",
+      role: "HumanMessage",
+      metadata: {
+        kind: "source_quote",
+        path: "src/main.ts",
+        line_start: 3,
+        line_end: 4,
+      },
+    });
+    expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("src/main.ts");
+    expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("L3-L4");
+    expect(payload.runtime_params?.message_injection?.[0]?.content).toContain("if (enabled)");
+    expect(payload.runtime_params?.message_injection?.[0]?.content).not.toContain("Check this branch");
   });
 
   it("sends the composer text through the bound chat channel", async () => {
@@ -1236,6 +1405,26 @@ function conversationInLayout(ui: ReactElement) {
         </PreviewProvider>
       </LayoutStateProvider>
     </ThemeProvider>
+  );
+}
+
+function AnnotationPrefillHarness() {
+  const preview = usePreview();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        preview.hostContext?.onStartChatFromAnnotation?.({
+          path: "src/main.ts",
+          selectedText: "if (enabled) {\n  run();\n}",
+          lineStart: 3,
+          lineEnd: 4,
+          comment: "Check this branch",
+        })
+      }
+    >
+      触发批注预填
+    </button>
   );
 }
 

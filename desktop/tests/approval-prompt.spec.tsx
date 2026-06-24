@@ -68,7 +68,7 @@ function approvalMessage(status: ApprovalRequest["status"] = "pending", id = "ap
     call_id: "call-1",
     kind: "exec",
     title: "允许执行命令",
-    description: "Agent 请求执行命令以完成当前任务。",
+    description: "智能体请求执行命令以完成当前任务。",
     details: {
       command: "echo ok",
       cwd: "D:/repo",

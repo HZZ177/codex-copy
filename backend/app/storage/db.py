@@ -99,6 +99,31 @@ create index if not exists idx_sessions_parent_session_id on sessions(parent_ses
 create index if not exists idx_sessions_child_session_id on sessions(child_session_id);
 create index if not exists idx_sessions_updated_at on sessions(updated_at desc);
 
+create table if not exists workspace_file_annotations (
+  id text primary key,
+  scope_type text not null,
+  scope_id text not null,
+  workspace_id text,
+  path text not null,
+  anchor_type text not null,
+  comment text not null,
+  selected_text text,
+  line_start integer,
+  line_end integer,
+  column_start integer,
+  column_end integer,
+  content_hash text,
+  created_at text not null,
+  updated_at text not null,
+  is_deleted integer not null default 0,
+  foreign key(workspace_id) references workspaces(id) on delete set null
+);
+
+create index if not exists idx_workspace_file_annotations_scope_path
+  on workspace_file_annotations(scope_type, scope_id, path, is_deleted, updated_at desc);
+create index if not exists idx_workspace_file_annotations_workspace_path
+  on workspace_file_annotations(workspace_id, path, is_deleted);
+
 create table if not exists message_events (
   id text primary key,
   session_id text not null,

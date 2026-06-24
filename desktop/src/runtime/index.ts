@@ -53,7 +53,12 @@ export type {
   UpdateSessionPayload,
 } from "./conversation";
 export type {
+  WorkspaceAnnotationListOptions,
   WorkspaceEntry,
+  WorkspaceFileAnnotation,
+  WorkspaceFileAnnotationAnchorType,
+  WorkspaceFileAnnotationInput,
+  WorkspaceFileAnnotationUpdate,
   WorkspaceFileResponse,
   WorkspaceMediaResponse,
   WorkspaceRuntime,

@@ -86,6 +86,108 @@ describe("RuntimeBridge", () => {
     );
   });
 
+  it("routes workspace annotation CRUD calls to scoped backend endpoints", async () => {
+    const annotation = {
+      id: "ann 1",
+      scope_type: "session",
+      scope_id: "ses 1",
+      workspace_id: "ws-1",
+      path: "src/main.ts",
+      anchor_type: "selection",
+      comment: "Check this branch",
+      selected_text: "if (enabled)",
+      line_start: 3,
+      line_end: 4,
+      column_start: 1,
+      column_end: 14,
+      content_hash: "hash-1",
+      created_at: "2026-06-24T00:00:00Z",
+      updated_at: "2026-06-24T00:00:00Z",
+    };
+    const signal = new AbortController().signal;
+    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
+      const url = requestUrl(input);
+      if (
+        url.endsWith("/api/sessions/ses%201/workspace/annotations?path=src%2Fmain.ts") &&
+        init.method === "GET"
+      ) {
+        return Promise.resolve(jsonResponse(200, [annotation]));
+      }
+      if (url.endsWith("/api/sessions/ses%201/workspace/annotations") && init.method === "POST") {
+        return Promise.resolve(jsonResponse(200, annotation));
+      }
+      if (url.endsWith("/api/workspaces/ws%201/annotations/ann%201") && init.method === "PATCH") {
+        return Promise.resolve(jsonResponse(200, { ...annotation, scope_type: "workspace", scope_id: "ws 1" }));
+      }
+      if (url.endsWith("/api/sessions/ses%201/workspace/annotations/ann%201") && init.method === "DELETE") {
+        return Promise.resolve(jsonResponse(204, undefined));
+      }
+      return jsonResponse(404, { detail: "not found" });
+    });
+    const runtime = createRuntimeBridge({ fetcher });
+
+    await expect(runtime.workspace.listAnnotations({ sessionId: "ses 1" }, "src/main.ts", { signal })).resolves.toEqual([
+      annotation,
+    ]);
+    await expect(
+      runtime.workspace.createAnnotation(
+        { sessionId: "ses 1" },
+        {
+          path: "src/main.ts",
+          anchor_type: "selection",
+          comment: "Check this branch",
+          selected_text: "if (enabled)",
+          line_start: 3,
+          line_end: 4,
+          column_start: 1,
+          column_end: 14,
+          content_hash: "hash-1",
+        },
+      ),
+    ).resolves.toEqual(annotation);
+    await expect(
+      runtime.workspace.updateAnnotation({ workspaceId: "ws 1" }, "ann 1", { comment: "Updated comment" }),
+    ).resolves.toMatchObject({ comment: "Check this branch", scope_type: "workspace" });
+    await expect(runtime.workspace.deleteAnnotation({ sessionId: "ses 1" }, "ann 1")).resolves.toBeUndefined();
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8765/api/sessions/ses%201/workspace/annotations?path=src%2Fmain.ts",
+      expect.objectContaining({ method: "GET", signal }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8765/api/sessions/ses%201/workspace/annotations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          path: "src/main.ts",
+          anchor_type: "selection",
+          comment: "Check this branch",
+          selected_text: "if (enabled)",
+          line_start: 3,
+          line_end: 4,
+          column_start: 1,
+          column_end: 14,
+          content_hash: "hash-1",
+        }),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:8765/api/workspaces/ws%201/annotations/ann%201",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ comment: "Updated comment" }),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:8765/api/sessions/ses%201/workspace/annotations/ann%201",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
   it("routes workspace registry calls to the backend workspace API", async () => {
     const workspace = {
       id: "ws-1",

@@ -50,7 +50,7 @@ def build_with_pyinstaller(output_dir: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build the Python Codex agent server binary.")
+    parser = argparse.ArgumentParser(description="构建 Keydex 智能体服务端可执行文件。")
     parser.add_argument("--output-dir", default="desktop/src-tauri/binaries")
     args = parser.parse_args(argv)
     binary = build_with_pyinstaller(Path(args.output_dir))

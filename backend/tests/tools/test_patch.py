@@ -25,13 +25,12 @@ def test_apply_patch_tool_contract_documents_required_headers() -> None:
     tool = _registry().require("apply_patch")
 
     assert "*** Update File: <path>" in tool.description
-    assert "*** Add File: <path>" in tool.description
     assert "*** Delete File: <path>" in tool.description
     assert "不要写 `*** docs/file.md`" in tool.description
     assert "*** Update File: <path>" in tool.parameters["properties"]["patch"]["description"]
 
 
-async def test_apply_patch_adds_file_inside_workspace(tmp_path) -> None:
+async def test_apply_patch_rejects_add_file_to_keep_creation_separate(tmp_path) -> None:
     result = await _run(
         """*** Begin Patch
 *** Add File: docs/note.txt
@@ -41,21 +40,10 @@ async def test_apply_patch_adds_file_inside_workspace(tmp_path) -> None:
         tmp_path,
     )
 
-    assert result.ok is True
-    assert result.result["changes"] == [
-        {
-            "operation": "update",
-            "path": "docs/note.txt",
-            "added_lines": 2,
-            "deleted_lines": 0,
-            "removed_lines": 0,
-            "additions": 2,
-            "deletions": 0,
-            "diff": "--- /dev/null\n+++ b/docs/note.txt\n+第一行\n+第二行",
-        }
-    ]
-    assert result.result["files"] == result.result["changes"]
-    assert (tmp_path / "docs" / "note.txt").read_text(encoding="utf-8") == "第一行\n第二行\n"
+    assert result.ok is False
+    assert result.error["code"] == "invalid_patch"
+    assert result.error["details"]["line"] == "*** Add File: docs/note.txt"
+    assert not (tmp_path / "docs" / "note.txt").exists()
 
 
 async def test_apply_patch_updates_file_with_matching_context(tmp_path) -> None:
@@ -77,9 +65,37 @@ async def test_apply_patch_updates_file_with_matching_context(tmp_path) -> None:
 
     assert result.ok is True
     assert result.result["changes"][0]["operation"] == "update"
+    assert result.result["changes"][0]["change_type"] == "update"
     assert result.result["changes"][0]["added_lines"] == 1
     assert result.result["changes"][0]["deleted_lines"] == 1
     assert target.read_text(encoding="utf-8") == "alpha\nnew\nomega\n"
+
+
+async def test_apply_patch_updates_file_with_multiple_hunks(tmp_path) -> None:
+    target = tmp_path / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("alpha\nold-a\nmiddle\nold-b\nomega\n", encoding="utf-8")
+
+    result = await _run(
+        """*** Begin Patch
+*** Update File: src/app.py
+@@ alpha
+ alpha
+-old-a
++new-a
+ middle
+@@ old-b
+-old-b
++new-b
+ omega
+*** End Patch""",
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert result.result["changes"][0]["added_lines"] == 2
+    assert result.result["changes"][0]["deleted_lines"] == 2
+    assert target.read_text(encoding="utf-8") == "alpha\nnew-a\nmiddle\nnew-b\nomega\n"
 
 
 async def test_apply_patch_deletes_file_with_removed_line_count(tmp_path) -> None:
@@ -95,19 +111,46 @@ async def test_apply_patch_deletes_file_with_removed_line_count(tmp_path) -> Non
     )
 
     assert result.ok is True
-    assert result.result["changes"][0] | {"removed_bytes": 0} == {
-        "operation": "update",
-        "path": "docs/old.txt",
-        "removed_bytes": 0,
-        "added_lines": 0,
-        "removed_lines": 3,
-        "deleted_lines": 3,
-        "additions": 0,
-        "deletions": 3,
-        "diff": "--- a/docs/old.txt\n+++ /dev/null",
-    }
+    change = result.result["changes"][0]
+    assert change["operation"] == "update"
+    assert change["change_type"] == "delete"
+    assert change["path"] == "docs/old.txt"
+    assert change["added_lines"] == 0
+    assert change["removed_lines"] == 3
+    assert change["deleted_lines"] == 3
+    assert change["additions"] == 0
+    assert change["deletions"] == 3
+    assert change["diff"] == "--- a/docs/old.txt\n+++ /dev/null"
     assert result.result["changes"][0]["removed_bytes"] > 0
     assert not target.exists()
+
+
+async def test_apply_patch_moves_file_and_updates_content(tmp_path) -> None:
+    target = tmp_path / "docs" / "old.md"
+    target.parent.mkdir()
+    target.write_text("title: old\nbody\n", encoding="utf-8")
+
+    result = await _run(
+        """*** Begin Patch
+*** Update File: docs/old.md
+*** Move to: docs/new.md
+@@
+-title: old
++title: new
+ body
+*** End Patch""",
+        tmp_path,
+    )
+
+    assert result.ok is True
+    change = result.result["changes"][0]
+    assert change["operation"] == "update"
+    assert change["change_type"] == "move"
+    assert change["old_path"] == "docs/old.md"
+    assert change["new_path"] == "docs/new.md"
+    assert change["path"] == "docs/new.md"
+    assert not target.exists()
+    assert (tmp_path / "docs" / "new.md").read_text(encoding="utf-8") == "title: new\nbody\n"
 
 
 async def test_apply_patch_rejects_invalid_patch(tmp_path) -> None:
@@ -129,7 +172,7 @@ async def test_apply_patch_error_explains_shorthand_file_header(tmp_path) -> Non
 *** docs/project-structure.md
 --- docs/project-structure.md
 @@ -1,2 +1,3 @@
- # keydex 项目结构
+ # Keydex 项目结构
 +> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
 
 *** End Patch""",
@@ -140,7 +183,6 @@ async def test_apply_patch_error_explains_shorthand_file_header(tmp_path) -> Non
     assert result.error["code"] == "invalid_patch"
     assert result.error["details"]["line"] == "*** docs/project-structure.md"
     assert result.error["details"]["expected_headers"] == [
-        "*** Add File: <path>",
         "*** Update File: <path>",
         "*** Delete File: <path>",
     ]
@@ -152,8 +194,10 @@ async def test_apply_patch_rejects_workspace_escape(tmp_path) -> None:
 
     result = await _run(
         f"""*** Begin Patch
-*** Add File: {outside}
-+bad
+*** Update File: {outside}
+@@
+-bad
++worse
 *** End Patch""",
         tmp_path,
     )
@@ -179,3 +223,26 @@ async def test_apply_patch_rejects_context_mismatch(tmp_path) -> None:
     assert result.ok is False
     assert result.error["code"] == "patch_context_mismatch"
     assert target.read_text(encoding="utf-8") == "current\n"
+
+
+async def test_apply_patch_preflight_rejects_second_operation_without_partial_write(tmp_path) -> None:
+    first = tmp_path / "a.txt"
+    first.write_text("old\n", encoding="utf-8")
+
+    result = await _run(
+        """*** Begin Patch
+*** Update File: a.txt
+@@
+-old
++new
+*** Update File: missing.txt
+@@
+-missing
++new
+*** End Patch""",
+        tmp_path,
+    )
+
+    assert result.ok is False
+    assert result.error["code"] == "file_not_found"
+    assert first.read_text(encoding="utf-8") == "old\n"

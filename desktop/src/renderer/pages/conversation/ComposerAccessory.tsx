@@ -1,4 +1,4 @@
-import { ArrowDown, Check, ChevronsUpDown } from "lucide-react";
+import { ArrowDown, Check, ChevronsUpDown, Circle, CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
@@ -12,6 +12,7 @@ import {
   type TurnFileChangeItem,
   type TurnFileChangeSummary,
 } from "./turnFileChangeSummary";
+import { buildActiveTurnPlanSummary, type TurnPlanEntry, type TurnPlanSummary } from "./turnPlanSummary";
 
 interface ComposerAccessoryStatusItem {
   active: boolean;
@@ -35,6 +36,7 @@ export function ConversationComposerAccessory({
 }) {
   const runtimeTypingMetrics = useRuntimeTypingMetrics();
   const fileChangeSummary = useMemo(() => buildActiveTurnFileChangeSummary(messages), [messages]);
+  const planSummary = useMemo(() => buildActiveTurnPlanSummary(messages), [messages]);
   const accessoryItems = useMemo<ComposerAccessoryStatusItem[]>(
     () => [
       {
@@ -46,6 +48,14 @@ export function ConversationComposerAccessory({
         node: <TurnFileChangePill summary={fileChangeSummary} onFilePreview={onFilePreview} />,
       },
       {
+        id: "turn-plan-summary",
+        active: Boolean(planSummary),
+        description: planSummary ? planMenuDescription(planSummary) : "暂无计划",
+        label: "计划",
+        priority: 80,
+        node: planSummary ? <TurnPlanPill summary={planSummary} /> : null,
+      },
+      {
         id: "runtime-typing-speed",
         active: true,
         description: "打字速度和待输出字符",
@@ -54,7 +64,7 @@ export function ConversationComposerAccessory({
         node: <TypingSpeedPill speed={runtimeTypingMetrics.speed} backlog={runtimeTypingMetrics.backlog} />,
       },
     ],
-    [fileChangeSummary, onFilePreview, runtimeTypingMetrics.backlog, runtimeTypingMetrics.speed],
+    [fileChangeSummary, onFilePreview, planSummary, runtimeTypingMetrics.backlog, runtimeTypingMetrics.speed],
   );
   const activeItems = useMemo(
     () => accessoryItems.filter((item) => item.active).sort((left, right) => right.priority - left.priority),
@@ -252,6 +262,66 @@ function TurnFileChangePill({
       </div>
     </div>
   );
+}
+
+function TurnPlanPill({ summary }: { summary: TurnPlanSummary }) {
+  const activeStepNumber = Math.min(summary.activeIndex + 1, summary.totalCount);
+  const activeContent = summary.activeEntry?.content ?? "计划已同步";
+  const activeStatus = summary.activeEntry?.status ?? "completed";
+
+  return (
+    <div className={styles.planPillWrap}>
+      <span className={`${styles.typingSpeedPill} ${styles.planSummaryPill}`} data-testid="plan-summary-pill">
+        <span className={styles.planSummaryIcon} data-status={activeStatus} aria-hidden="true">
+          {activeStatus === "failed" ? (
+            <CircleX size={13} />
+          ) : activeStatus === "completed" ? (
+            <CircleCheck size={13} />
+          ) : (
+            <span className={styles.planSpinner} data-status={activeStatus} />
+          )}
+        </span>
+        <span className={styles.planSummaryText}>
+          第 {activeStepNumber} / {summary.totalCount} 步 · {activeContent}
+          {activeStatus === "failed" ? " · 失败" : ""}
+        </span>
+      </span>
+      <div className={styles.planHoverCard} role="tooltip" data-testid="plan-summary-card">
+        <ol className={styles.planList} aria-label="当前计划">
+          {summary.entries.map((entry, index) => (
+            <TurnPlanRow entry={entry} index={index} key={`${entry.status}-${index}-${entry.content}`} />
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+function TurnPlanRow({ entry, index }: { entry: TurnPlanEntry; index: number }) {
+  return (
+    <li className={styles.planRow} data-status={entry.status}>
+      <span className={styles.planStatusIcon} aria-hidden="true">
+        {entry.status === "completed" ? (
+          <CircleCheck size={16} />
+        ) : entry.status === "in_progress" ? (
+          <LoaderCircle className={styles.planStatusLoading} size={16} />
+        ) : entry.status === "failed" ? (
+          <CircleX size={16} />
+        ) : (
+          <Circle size={16} />
+        )}
+      </span>
+      <span className={styles.planRowText}>
+        <span className={styles.planRowIndex}>{index + 1}.</span>
+        <span className={styles.planRowContent}>{entry.content}</span>
+      </span>
+    </li>
+  );
+}
+
+function planMenuDescription(summary: TurnPlanSummary): string {
+  const completed = `${summary.completedCount}/${summary.totalCount} 已完成`;
+  return summary.failedCount > 0 ? `${completed}，${summary.failedCount} 失败` : completed;
 }
 
 function TurnFileChangeRow({

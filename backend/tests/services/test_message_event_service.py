@@ -238,6 +238,54 @@ def test_message_event_service_marks_serialized_tool_error_failed(tmp_path) -> N
     assert messages[0]["toolError"] == "文件不存在"
 
 
+def test_message_event_service_restores_update_plan_ui_payload(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    service = MessageEventService(repositories.message_events)
+
+    _append(
+        repositories,
+        "evt_plan_start",
+        "tool_start",
+        {
+            "tool": "update_plan",
+            "params": {
+                "plan": [
+                    {"step": "分析入口", "status": "completed"},
+                    {"step": "实现胶囊面板", "status": "in_progress"},
+                ]
+            },
+            "run_id": "tool_plan",
+        },
+    )
+    _append(
+        repositories,
+        "evt_plan_end",
+        "tool_end",
+        {
+            "run_id": "tool_plan",
+            "result": "",
+            "ui_payload": {
+                "explanation": "同步当前计划",
+                "entries": [
+                    {"content": "分析入口", "status": "completed"},
+                    {"content": "实现胶囊面板", "status": "in_progress"},
+                ],
+            },
+        },
+    )
+
+    messages = service.get_display_messages("ses_history")
+
+    assert messages[0]["role"] == "tool"
+    assert messages[0]["toolName"] == "update_plan"
+    assert messages[0]["status"] == "completed"
+    assert messages[0]["uiPayload"]["explanation"] == "同步当前计划"
+    assert messages[0]["uiPayload"]["entries"][1] == {
+        "content": "实现胶囊面板",
+        "status": "in_progress",
+    }
+
+
 def test_completed_events_to_messages_fast_path_applies_ghost_footer() -> None:
     messages = MessageEventService.events_to_messages(
         [

@@ -110,7 +110,6 @@ def _summarize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]
         content = args.get("content")
         return {
             "path": safe_args.get("path"),
-            "append": bool(args.get("append", False)),
             "content_chars": len(content) if isinstance(content, str) else 0,
         }
     if tool_name == "apply_patch":
@@ -126,13 +125,21 @@ def _summarize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]
             summary["command_preview"] = _preview_text(command)
             summary["command_chars"] = len(command)
         return summary
-    if tool_name in {"read_file", "list_directory", "search_text", "search_files"}:
+    if tool_name in {"read_file", "list_dir", "search_text", "search_files", "grep_files"}:
         allowed_keys = {
             "path",
             "query",
             "regex",
             "case_sensitive",
+            "context_lines",
+            "include",
+            "exclude",
             "limit",
+            "offset",
+            "depth",
+            "mode",
+            "anchor_line",
+            "include_hidden",
             "start_line",
             "max_lines",
         }

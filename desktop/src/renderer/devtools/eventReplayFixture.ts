@@ -143,7 +143,7 @@ function approval(status: ApprovalRequest["status"]): ApprovalRequest {
     call_id: "call-command",
     kind: "exec",
     title: "允许执行测试命令",
-    description: "Agent 请求运行 pnpm test 验证改动。",
+    description: "智能体请求运行 pnpm test 验证改动。",
     details: { command: "pnpm test", cwd: "D:/repo" },
     status,
     created_at: "2026-06-17T10:00:18Z",

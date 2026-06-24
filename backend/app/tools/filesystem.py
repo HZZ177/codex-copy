@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,23 +16,90 @@ from backend.app.tools.registry import ToolRegistry
 
 MAX_READ_BYTES = 512 * 1024
 DEFAULT_MAX_LINES = 400
+MAX_MAX_LINES = 5000
+MAX_NUMBERED_LINE_CHARS = 2000
+DEFAULT_LIST_LIMIT = 200
+MAX_LIST_LIMIT = 1000
+MAX_LIST_DEPTH = 5
+
+IGNORED_DIRS = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".npm-cache",
+}
+
+READ_FILE_DESCRIPTION = (
+    "读取当前工作区内的 UTF-8 文本文件，支持从 1 开始的行号窗口。"
+    "编辑文件前应先使用此工具查看精确上下文。返回原始 content、带行号的 numbered_content、"
+    "总行数、截断信息和用于继续分页的 next_start_line。"
+)
+
+WRITE_FILE_DESCRIPTION = (
+    "在工作区内创建新的 UTF-8 文本文件，并返回文件 diff。"
+    "如果目标文件已存在会失败；修改、删除或移动已有文件必须使用 apply_patch。"
+)
+
+LIST_DIR_DESCRIPTION = (
+    "以有界目录树形式列出工作区目录。搜索或读取文件前，可先用此工具浏览本地项目结构。"
+    "支持 depth、offset、limit，返回结构化 entries 和便于模型阅读的 tree 文本。"
+)
+
+@dataclass(frozen=True)
+class DirectoryEntry:
+    name: str
+    path: str
+    type: str
+    depth: int
+    size: int | None
+
+    def to_result(self, *, include_depth: bool = True) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "name": self.name,
+            "path": self.path,
+            "type": self.type,
+            "size": self.size,
+        }
+        if include_depth:
+            result["depth"] = self.depth
+        return result
 
 
 def create_filesystem_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
             name="read_file",
-            description="读取当前工作区内的 UTF-8 文本文件。",
+            description=READ_FILE_DESCRIPTION,
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "工作区相对路径或绝对路径"},
-                    "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                    "path": {"type": "string", "description": "工作区相对路径，或位于工作区内的绝对文件路径。"},
+                    "start_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "要返回的起始行号，从 1 开始。",
+                    },
                     "max_lines": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 5000,
+                        "maximum": MAX_MAX_LINES,
                         "default": DEFAULT_MAX_LINES,
+                        "description": "最多返回的行数。",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["window", "indentation"],
+                        "default": "window",
+                        "description": "window 返回指定行范围；indentation 会围绕 anchor_line 扩展同缩进代码块。",
+                    },
+                    "anchor_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "mode=indentation 使用的锚点行，默认使用 start_line。",
                     },
                 },
                 "required": ["path"],
@@ -41,28 +108,52 @@ def create_filesystem_tools() -> list[FunctionTool]:
         ),
         FunctionTool(
             name="write_file",
-            description="写入当前工作区内的 UTF-8 文本文件，可覆盖或追加。",
+            description=WRITE_FILE_DESCRIPTION,
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "工作区相对路径或绝对路径"},
-                    "content": {"type": "string", "description": "要写入的文本内容"},
-                    "append": {"type": "boolean", "default": False},
+                    "path": {"type": "string", "description": "工作区相对路径，或位于工作区内的绝对文件路径。"},
+                    "content": {"type": "string", "description": "要写入的 UTF-8 文本内容。"},
                 },
                 "required": ["path", "content"],
             },
             handler=write_file_tool,
         ),
         FunctionTool(
-            name="list_directory",
-            description="列出当前工作区内目录的直接子项。",
+            name="list_dir",
+            description=LIST_DIR_DESCRIPTION,
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "目录路径，默认当前工作区"},
+                    "path": {"type": "string", "description": "工作区目录路径，默认工作区根目录。"},
+                    "depth": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_LIST_DEPTH,
+                        "default": 2,
+                        "description": "最多包含的目录深度。直接子项的 depth 为 1。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_LIST_LIMIT,
+                        "default": DEFAULT_LIST_LIMIT,
+                        "description": "应用 offset 后最多返回的条目数。",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "分页时跳过的扁平条目数量。",
+                    },
+                    "include_hidden": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "是否包含隐藏文件和目录。高开销忽略目录仍会跳过。",
+                    },
                 },
             },
-            handler=list_directory_tool,
+            handler=list_dir_tool,
         ),
     ]
 
@@ -100,36 +191,49 @@ async def read_file_tool(
             details={"path": _relative(path, context)},
         ) from exc
 
+    mode = _read_mode(args.get("mode"))
     start_line = _positive_int(args.get("start_line"), default=1)
-    max_lines = min(_positive_int(args.get("max_lines"), default=DEFAULT_MAX_LINES), 5000)
+    max_lines = min(
+        _positive_int(args.get("max_lines"), default=DEFAULT_MAX_LINES),
+        MAX_MAX_LINES,
+    )
     lines = content.splitlines(keepends=True)
-    if not lines:
-        selected = ""
-        next_start_line = None
-    else:
-        start_index = min(start_line - 1, len(lines))
-        selected_lines = lines[start_index : start_index + max_lines]
-        selected = "".join(selected_lines)
-        next_line = start_index + len(selected_lines) + 1
-        next_start_line = next_line if next_line <= len(lines) else None
+
+    if mode == "indentation" and lines:
+        anchor_line = _positive_int(args.get("anchor_line"), default=start_line)
+        start_line, max_lines = _indentation_window(lines, anchor_line=anchor_line, max_lines=max_lines)
+
+    selected, returned_lines, next_start_line = _select_lines(
+        lines,
+        start_line=start_line,
+        max_lines=max_lines,
+    )
+    numbered_content = _numbered_content(
+        lines,
+        start_line=start_line,
+        max_lines=max_lines,
+    )
 
     relative = _relative(path, context)
     logger.info(
         "[FilesystemTool] 读取文件 | "
-        f"path={relative} | size={size} | start_line={start_line} | "
-        f"max_lines={max_lines} | returned_lines={len(selected_lines) if lines else 0} | "
+        f"path={relative} | size={size} | mode={mode} | start_line={start_line} | "
+        f"max_lines={max_lines} | returned_lines={returned_lines} | "
         f"truncated={next_start_line is not None}"
     )
     return {
         "path": relative,
         "content": selected,
+        "numbered_content": numbered_content,
         "encoding": "utf-8",
         "size": size,
         "start_line": start_line,
         "max_lines": max_lines,
         "total_lines": len(lines),
+        "returned_lines": returned_lines,
         "truncated": next_start_line is not None,
         "next_start_line": next_start_line,
+        "mode": mode,
     }
 
 
@@ -144,51 +248,39 @@ async def write_file_tool(
     if path.exists() and path.is_dir():
         raise ToolExecutionError("路径是目录，不能写入文件", code="path_is_directory")
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    append = bool(args.get("append", False))
     existed = path.exists()
-    original = ""
-    if existed and path.is_file():
-        try:
-            original = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            raise ToolExecutionError(
-                "文件不是 UTF-8 文本",
-                code="file_not_text",
-                details={"path": _relative(path, context)},
-            ) from exc
-    if append:
-        with path.open("a", encoding="utf-8", newline="") as file:
-            file.write(content)
-    else:
-        path.write_text(content, encoding="utf-8", newline="")
+    if existed:
+        raise ToolExecutionError(
+            "文件已存在，write_file 只允许创建新文件；修改已有文件请使用 apply_patch",
+            code="file_exists",
+            details={"path": _relative(path, context)},
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="")
 
     relative = _relative(path, context)
     size = path.stat().st_size
-    logger.info(
-        "[FilesystemTool] 写入文件 | "
-        f"path={relative} | size={size} | append={append} | content_chars={len(content)}"
-    )
     new_content = path.read_text(encoding="utf-8")
     change = _write_file_change(
         path=relative,
-        original=original,
-        content=content,
         new_content=new_content,
-        existed=existed,
-        append=append,
+    )
+    logger.info(
+        "[FilesystemTool] 写入文件 | "
+        f"path={relative} | size={size} | change_type=create | content_chars={len(content)}"
     )
     return {
         "path": relative,
         "size": size,
-        "append": append,
-        "created": not existed,
+        "created": True,
+        "change_type": "create",
         **change,
         "files": [change],
     }
 
 
-async def list_directory_tool(
+async def list_dir_tool(
     args: dict[str, Any],
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
@@ -198,26 +290,38 @@ async def list_directory_tool(
     if not path.is_dir():
         raise ToolExecutionError("路径不是目录", code="path_not_directory")
 
-    entries = []
-    for child in sorted(
-        path.iterdir(),
-        key=lambda item: (0 if item.is_dir() else 1, item.name.lower()),
-    ):
-        stat = child.stat()
-        entries.append(
-            {
-                "name": child.name,
-                "path": _relative(child, context),
-                "type": "directory" if child.is_dir() else "file",
-                "size": None if child.is_dir() else stat.st_size,
-            }
-        )
-    relative = _relative(path, context)
-    logger.info(
-        "[FilesystemTool] 列出目录 | "
-        f"path={relative} | entries={len(entries)}"
+    depth = min(_positive_int(args.get("depth"), default=2), MAX_LIST_DEPTH)
+    limit = min(_positive_int(args.get("limit"), default=DEFAULT_LIST_LIMIT), MAX_LIST_LIMIT)
+    offset = _non_negative_int(args.get("offset"), default=0)
+    include_hidden = bool(args.get("include_hidden", False))
+
+    all_entries = _collect_directory_entries(
+        path,
+        context=context,
+        max_depth=depth,
+        include_hidden=include_hidden,
     )
-    return {"path": relative, "entries": entries}
+    selected = all_entries[offset : offset + limit]
+    next_offset = offset + len(selected) if offset + len(selected) < len(all_entries) else None
+    result_entries = [entry.to_result() for entry in selected]
+    relative = _relative(path, context)
+    result = {
+        "path": relative or ".",
+        "entries": result_entries,
+        "tree": _tree_text(relative or ".", selected),
+        "depth": depth,
+        "offset": offset,
+        "limit": limit,
+        "total_entries": len(all_entries),
+        "truncated": next_offset is not None,
+        "next_offset": next_offset,
+    }
+    logger.info(
+        "[FilesystemTool] 列出目录树 | "
+        f"path={relative or '.'} | depth={depth} | entries={len(result_entries)} | "
+        f"total_entries={len(all_entries)} | truncated={result['truncated']}"
+    )
+    return result
 
 
 def _resolve(raw_path: Any, context: ToolExecutionContext) -> Path:
@@ -238,7 +342,8 @@ def _resolve(raw_path: Any, context: ToolExecutionContext) -> Path:
 
 
 def _relative(path: Path, context: ToolExecutionContext) -> str:
-    return path.resolve().relative_to(context.workspace_root).as_posix()
+    rel = path.resolve().relative_to(context.workspace_root).as_posix()
+    return rel or "."
 
 
 def _positive_int(value: Any, *, default: int) -> int:
@@ -249,60 +354,174 @@ def _positive_int(value: Any, *, default: int) -> int:
     return max(1, parsed)
 
 
-def _write_file_change(
-    *,
-    path: str,
-    original: str,
-    content: str,
-    new_content: str,
-    existed: bool,
-    append: bool,
-) -> dict[str, Any]:
-    if append:
-        if existed:
-            added, deleted = _line_diff_counts(original, new_content)
-            return normalize_file_change(
-                path=path,
-                operation="add",
-                added_lines=added,
-                deleted_lines=deleted,
-                diff=build_text_diff(path=path, before=original, after=new_content),
-            )
-        return normalize_file_change(
-            path=path,
-            operation="add",
-            added_lines=count_text_lines(new_content),
-            deleted_lines=0,
-            diff=build_text_diff(path=path, before="", after=new_content, operation="add"),
-        )
-    if not existed:
-        return normalize_file_change(
-            path=path,
-            operation="add",
-            added_lines=count_text_lines(new_content),
-            deleted_lines=0,
-            diff=build_text_diff(path=path, before="", after=new_content, operation="add"),
-        )
-    added, deleted = _line_diff_counts(original, new_content)
-    return normalize_file_change(
-        path=path,
-        operation="add",
-        added_lines=added,
-        deleted_lines=deleted,
-        diff=build_text_diff(path=path, before=original, after=new_content),
+def _non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def _read_mode(value: Any) -> str:
+    if value in (None, "", "window"):
+        return "window"
+    if value == "indentation":
+        return "indentation"
+    raise ToolExecutionError(
+        "mode 必须是 window 或 indentation",
+        code="invalid_tool_args",
+        details={"mode": value},
     )
 
 
-def _line_diff_counts(before: str, after: str) -> tuple[int, int]:
-    before_lines = before.splitlines()
-    after_lines = after.splitlines()
-    added = 0
-    deleted = 0
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, before_lines, after_lines).get_opcodes():
-        if tag == "equal":
+def _select_lines(
+    lines: list[str],
+    *,
+    start_line: int,
+    max_lines: int,
+) -> tuple[str, int, int | None]:
+    if not lines:
+        return "", 0, None
+    start_index = min(start_line - 1, len(lines))
+    selected_lines = lines[start_index : start_index + max_lines]
+    next_line = start_index + len(selected_lines) + 1
+    next_start_line = next_line if next_line <= len(lines) else None
+    return "".join(selected_lines), len(selected_lines), next_start_line
+
+
+def _numbered_content(lines: list[str], *, start_line: int, max_lines: int) -> str:
+    if not lines:
+        return ""
+    start_index = min(start_line - 1, len(lines))
+    selected = lines[start_index : start_index + max_lines]
+    width = max(len(str(start_index + len(selected))), len(str(start_line)))
+    numbered: list[str] = []
+    for offset, line in enumerate(selected):
+        line_number = start_index + offset + 1
+        value = line
+        if len(value) > MAX_NUMBERED_LINE_CHARS:
+            value = f"{value[:MAX_NUMBERED_LINE_CHARS]}...[本行已截断]\n"
+        suffix = "" if value.endswith("\n") else "\n"
+        numbered.append(f"{line_number:>{width}}: {value}{suffix}")
+    return "".join(numbered)
+
+
+def _indentation_window(
+    lines: list[str],
+    *,
+    anchor_line: int,
+    max_lines: int,
+) -> tuple[int, int]:
+    anchor_index = min(max(anchor_line - 1, 0), len(lines) - 1)
+    base_indent = _line_indent(lines[anchor_index])
+    start = anchor_index
+    while start > 0:
+        previous = lines[start - 1]
+        if previous.strip() == "":
+            start -= 1
             continue
-        if tag in {"replace", "delete"}:
-            deleted += i2 - i1
-        if tag in {"replace", "insert"}:
-            added += j2 - j1
-    return added, deleted
+        previous_indent = _line_indent(previous)
+        if previous_indent < base_indent:
+            break
+        if previous_indent == base_indent and start - 1 != anchor_index:
+            break
+        start -= 1
+
+    end = anchor_index + 1
+    while end < len(lines):
+        current = lines[end]
+        if current.strip() == "":
+            end += 1
+            continue
+        current_indent = _line_indent(current)
+        if current_indent <= base_indent:
+            break
+        end += 1
+
+    return start + 1, min(max_lines, max(1, end - start))
+
+
+def _line_indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
+
+
+def _collect_directory_entries(
+    root: Path,
+    *,
+    context: ToolExecutionContext,
+    max_depth: int,
+    include_hidden: bool,
+) -> list[DirectoryEntry]:
+    entries: list[DirectoryEntry] = []
+
+    def visit(directory: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        children = _sorted_children(directory, include_hidden=include_hidden)
+        for child in children:
+            try:
+                stat = child.stat()
+            except OSError:
+                continue
+            child_type = "directory" if child.is_dir() else "file"
+            entries.append(
+                DirectoryEntry(
+                    name=child.name,
+                    path=_relative(child, context),
+                    type=child_type,
+                    depth=depth,
+                    size=None if child.is_dir() else stat.st_size,
+                )
+            )
+            if child.is_dir() and depth < max_depth and child.name not in IGNORED_DIRS:
+                visit(child, depth + 1)
+
+    visit(root, 1)
+    return entries
+
+
+def _sorted_children(directory: Path, *, include_hidden: bool) -> list[Path]:
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return []
+    filtered = [
+        child
+        for child in children
+        if _include_child(child, include_hidden=include_hidden)
+    ]
+    return sorted(filtered, key=lambda item: (0 if item.is_dir() else 1, item.name.lower()))
+
+
+def _include_child(path: Path, *, include_hidden: bool) -> bool:
+    if path.name in IGNORED_DIRS:
+        return False
+    if not include_hidden and path.name.startswith("."):
+        return False
+    return True
+
+
+def _tree_text(root_label: str, entries: list[DirectoryEntry]) -> str:
+    lines = [f"{root_label}/"]
+    for entry in entries:
+        indent = "  " * max(entry.depth - 1, 0)
+        suffix = "/" if entry.type == "directory" else ""
+        lines.append(f"{indent}{entry.name}{suffix}")
+    return "\n".join(lines)
+
+
+def _write_file_change(
+    *,
+    path: str,
+    new_content: str,
+) -> dict[str, Any]:
+    change = normalize_file_change(
+        path=path,
+        operation="add",
+        added_lines=count_text_lines(new_content),
+        deleted_lines=0,
+        diff=build_text_diff(path=path, before="", after=new_content, operation="add"),
+    )
+    change["change_type"] = "create"
+    return change

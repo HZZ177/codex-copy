@@ -592,20 +592,12 @@ describe("MessageList", () => {
     expect(screen.queryByText("编辑失败 2 个文件")).toBeNull();
   });
 
-  it("renders update_plan as a collapsible plan card", () => {
+  it("does not render update_plan in the main message list", () => {
     render(<MessageList messages={[planMessage()]} />);
 
-    expect(screen.getByTestId("message-plan")).not.toBeNull();
-    expect(screen.getByText("计划")).not.toBeNull();
-    expect(screen.getByText(/1\/3 已完成/)).not.toBeNull();
-    expect(screen.getByText(/正在进行：实现计划卡片/)).not.toBeNull();
-    expect(screen.getByText("补充 AionUi 计划展示")).not.toBeNull();
-    expect(screen.getByText("进行中")).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "收起计划详情" }));
-
+    expect(screen.queryByTestId("message-plan")).toBeNull();
     expect(screen.queryByText("补充 AionUi 计划展示")).toBeNull();
-    expect(screen.getByRole("button", { name: "展开计划详情" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("message-empty").textContent).toBe("暂无消息");
   });
 
   it("passes file preview callbacks into file change blocks", () => {

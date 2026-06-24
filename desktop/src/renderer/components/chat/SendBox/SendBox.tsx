@@ -6,6 +6,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,7 +19,7 @@ import {
 
 import type { WorkspaceSearchResult } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
-import { AtFileMenu, getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu";
+import { getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu/atFiles";
 import {
   defaultSlashCommands,
   filterSlashCommands,
@@ -26,12 +28,6 @@ import {
   SlashCommandMenu,
   type SlashCommand,
 } from "@/renderer/components/chat/SlashCommandMenu";
-import {
-  parseQuoteMarkers,
-  quoteMarkerPreview,
-  removeQuoteMarkerAtIndex,
-  type QuoteMarkerQuoteSegment,
-} from "@/renderer/utils/quoteMarkers";
 import { useWorkspaceFileSearch, type WorkspaceFileSearchFn } from "@/renderer/hooks/useWorkspaceFileSearch";
 
 import styles from "./SendBox.module.css";
@@ -42,7 +38,18 @@ import {
   selectedFileFromFile,
   selectedFileFromWorkspace,
 } from "./fileSelection";
+import {
+  initialQuoteSelectionState,
+  quoteSelectionReducer,
+  type SelectedQuote,
+} from "./quoteSelection";
 import { useCompositionInput } from "./useCompositionInput";
+
+const LazyAtFileMenu = lazy(() =>
+  import("@/renderer/components/chat/AtFileMenu/AtFileMenu").then((module) => ({
+    default: module.AtFileMenu,
+  })),
+);
 
 export interface SendBoxProps {
   value: string;
@@ -59,14 +66,26 @@ export interface SendBoxProps {
   disabled?: boolean;
   variant?: "conversation" | "codex";
   allowFileSelection?: boolean;
+  externalFileRequest?: SendBoxExternalFileRequest | null;
+  externalQuoteRequest?: SendBoxExternalQuoteRequest | null;
   leftHint?: ReactNode;
   onChange: (value: string) => void;
-  onSend: (files: SelectedFile[]) => boolean | void | Promise<boolean | void>;
+  onSend: (files: SelectedFile[], quotes: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onSearchWorkspace?: WorkspaceFileSearchFn;
+}
+
+export interface SendBoxExternalFileRequest {
+  requestId: number;
+  file: SelectedFile;
+}
+
+export interface SendBoxExternalQuoteRequest {
+  requestId: number;
+  quote: SelectedQuote;
 }
 
 export function SendBox({
@@ -84,6 +103,8 @@ export function SendBox({
   disabled = false,
   variant = "conversation",
   allowFileSelection = true,
+  externalFileRequest = null,
+  externalQuoteRequest = null,
   leftHint = null,
   onChange,
   onSend,
@@ -94,6 +115,8 @@ export function SendBox({
   onSearchWorkspace,
 }: SendBoxProps) {
   const inputRef = useRef<HTMLDivElement | null>(null);
+  const handledExternalFileRequestIdRef = useRef<number | null>(null);
+  const handledExternalQuoteRequestIdRef = useRef<number | null>(null);
   const [focused, setFocused] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(null);
@@ -108,19 +131,23 @@ export function SendBox({
     fileSelectionReducer,
     initialFileSelectionState,
   );
-  const editorValue = useMemo(() => editorTextFromComposerValue(value), [value]);
-  const quoteChips = useMemo(() => quoteChipsFromComposerValue(value), [value]);
+  const [quoteSelection, dispatchQuoteSelection] = useReducer(
+    quoteSelectionReducer,
+    initialQuoteSelectionState,
+  );
+  const editorValue = value;
   const busy = isBusy(runtimeState);
   const inputDisabled = disabled || (busy && runtimeState !== "running");
-  const canSubmit = !busy && (canSend || fileSelection.files.length > 0);
+  const canSubmit = !busy && (canSend || fileSelection.files.length > 0 || quoteSelection.quotes.length > 0);
   const requestSend = useCallback(() => {
-    const result = onSend(fileSelection.files);
+    const result = onSend(fileSelection.files, quoteSelection.quotes);
     void Promise.resolve(result).then((sent) => {
       if (sent !== false) {
         dispatchFileSelection({ type: "clear" });
+        dispatchQuoteSelection({ type: "clear" });
       }
     });
-  }, [fileSelection.files, onSend]);
+  }, [fileSelection.files, onSend, quoteSelection.quotes]);
   const SendIcon = variant === "codex" ? ArrowUp : SendHorizontal;
   const slashQuery = getSlashQuery(editorValue);
   const slashCommands = useMemo(
@@ -180,6 +207,30 @@ export function SendBox({
   }, [atBrowseState, atQuery, editorValue]);
 
   useEffect(() => {
+    if (!externalFileRequest || !allowFileSelection) {
+      return;
+    }
+    if (handledExternalFileRequestIdRef.current === externalFileRequest.requestId) {
+      return;
+    }
+    handledExternalFileRequestIdRef.current = externalFileRequest.requestId;
+    dispatchFileSelection({ type: "add", file: externalFileRequest.file });
+    inputRef.current?.focus();
+  }, [allowFileSelection, externalFileRequest]);
+
+  useEffect(() => {
+    if (!externalQuoteRequest) {
+      return;
+    }
+    if (handledExternalQuoteRequestIdRef.current === externalQuoteRequest.requestId) {
+      return;
+    }
+    handledExternalQuoteRequestIdRef.current = externalQuoteRequest.requestId;
+    dispatchQuoteSelection({ type: "add", quote: externalQuoteRequest.quote });
+    inputRef.current?.focus();
+  }, [externalQuoteRequest]);
+
+  useEffect(() => {
     let active = true;
     if (!atOpen || atDirectoryPath === null || !onListWorkspaceDirectory) {
       if (hadAtDirectoryRequestRef.current) {
@@ -229,9 +280,10 @@ export function SendBox({
     onSlashCommand?.(command);
     if (command.id === "clear") {
       onChange("");
+      dispatchQuoteSelection({ type: "clear" });
       return;
     }
-    onChange(composerValueFromEditorText(replaceSlashQuery(editorValue, `${command.label} `), value));
+    onChange(replaceSlashQuery(editorValue, `${command.label} `));
   };
 
   const selectFile = (result: WorkspaceSearchResult) => {
@@ -243,7 +295,7 @@ export function SendBox({
     const nextValue = removeAtQuery(editorValue);
     setAtBrowseState(null);
     setDismissedAtValue(nextValue);
-    onChange(composerValueFromEditorText(nextValue, value));
+    onChange(nextValue);
   };
 
   const navigateAtDirectory = (path: string) => {
@@ -306,7 +358,7 @@ export function SendBox({
     }
     pastePlainText(event);
     syncEditableChange(event.currentTarget, (nextValue) => {
-      onChange(composerValueFromEditorText(nextValue, value));
+      onChange(nextValue);
     });
   };
 
@@ -365,7 +417,7 @@ export function SendBox({
       event.preventDefault();
       insertPlainText("\n");
       syncEditableChange(event.currentTarget, (nextValue) => {
-        onChange(composerValueFromEditorText(nextValue, value));
+        onChange(nextValue);
       });
       resizeEditableInput(event.currentTarget);
       scrollEditableToBottom(event.currentTarget);
@@ -377,17 +429,17 @@ export function SendBox({
   const handleEditorInput = useCallback(
     (event: FormEvent<HTMLDivElement>) => {
       syncEditableChange(event.currentTarget, (nextValue) => {
-        onChange(composerValueFromEditorText(nextValue, value));
+        onChange(nextValue);
       });
     },
-    [onChange, value],
+    [onChange],
   );
 
   const handleQuoteRemove = useCallback(
-    (quoteIndex: number) => {
-      onChange(removeQuoteMarkerAtIndex(value, quoteIndex));
+    (quoteId: string) => {
+      dispatchQuoteSelection({ type: "remove", id: quoteId });
     },
-    [onChange, value],
+    [],
   );
 
   return (
@@ -408,35 +460,23 @@ export function SendBox({
         }
       }}
     >
-      {quoteChips.length || fileSelection.files.length ? (
+      {quoteSelection.quotes.length || fileSelection.files.length ? (
         <div className={styles.fileChips} aria-label="已添加上下文">
-          {quoteChips.map((quote) => (
+          {quoteSelection.quotes.map((quote, index) => (
             <QuoteContextChip
-              key={`${quote.index}:${quote.marker}`}
+              key={quote.id}
               quote={quote}
-              onRemove={() => handleQuoteRemove(quote.index)}
+              index={index}
+              onRemove={() => handleQuoteRemove(quote.id)}
             />
           ))}
           {fileSelection.files.map((file) => (
-            <span className={styles.fileChip} key={file.path}>
-              <button
-                className={styles.fileChipMain}
-                type="button"
-                aria-label={`打开文件引用 ${file.path}`}
-                disabled={!onOpenFileReference}
-                onClick={() => onOpenFileReference?.(file)}
-              >
-                <span className={styles.fileChipText}>{file.path}</span>
-              </button>
-              <button
-                className={styles.fileChipRemove}
-                type="button"
-                aria-label={`移除文件引用 ${file.path}`}
-                onClick={() => removeFile(file.path)}
-              >
-                <X size={12} strokeWidth={2} />
-              </button>
-            </span>
+            <FileContextChip
+              key={file.path}
+              file={file}
+              onOpen={onOpenFileReference}
+              onRemove={() => removeFile(file.path)}
+            />
           ))}
         </div>
       ) : null}
@@ -445,7 +485,7 @@ export function SendBox({
         refSetter={(node) => {
           inputRef.current = node;
         }}
-        value={editorValue}
+        value={value}
         inputLabel={inputLabel}
         placeholder={placeholder}
         disabled={inputDisabled}
@@ -463,16 +503,18 @@ export function SendBox({
         <SlashCommandMenu commands={slashCommands} activeIndex={slashActiveIndex} onSelect={selectSlashCommand} />
       ) : null}
       {atOpen ? (
-        <AtFileMenu
-          results={atResults}
-          activeIndex={atActiveIndex}
-          loading={atLoading}
-          error={atError}
-          directoryPath={atDirectoryPath}
-          query={atQuery ?? ""}
-          onNavigateDirectory={navigateAtDirectory}
-          onSelect={selectFile}
-        />
+        <Suspense fallback={null}>
+          <LazyAtFileMenu
+            results={atResults}
+            activeIndex={atActiveIndex}
+            loading={atLoading}
+            error={atError}
+            directoryPath={atDirectoryPath}
+            query={atQuery ?? ""}
+            onNavigateDirectory={navigateAtDirectory}
+            onSelect={selectFile}
+          />
+        </Suspense>
       ) : null}
 
       {fileSelection.error ? <div className={styles.fileError}>{fileSelection.error}</div> : null}
@@ -514,40 +556,15 @@ function nextMenuIndex(index: number, length: number, delta: 1 | -1): number {
   return (index + delta + length) % length;
 }
 
-function editorTextFromComposerValue(value: string): string {
-  return parseQuoteMarkers(value)
-    .map((segment) => (segment.type === "text" ? segment.value : ""))
-    .join("");
-}
-
-function composerValueFromEditorText(editorText: string, currentValue: string): string {
-  const quoteMarkers = quoteSegmentsFromComposerValue(currentValue)
-    .map((segment) => segment.marker)
-    .join("");
-  return `${editorText}${quoteMarkers}`;
-}
-
-function quoteChipsFromComposerValue(value: string): QuoteChipItem[] {
-  return quoteSegmentsFromComposerValue(value).map((segment, index) => ({
-    index,
-    marker: segment.marker,
-    preview: quoteMarkerPreview(segment.value),
-    text: segment.value,
-  }));
-}
-
-function quoteSegmentsFromComposerValue(value: string): QuoteMarkerQuoteSegment[] {
-  return parseQuoteMarkers(value).filter((segment): segment is QuoteMarkerQuoteSegment => segment.type === "quote");
-}
-
-interface QuoteChipItem {
+function QuoteContextChip({
+  quote,
+  index,
+  onRemove,
+}: {
+  quote: SelectedQuote;
   index: number;
-  marker: string;
-  preview: string;
-  text: string;
-}
-
-function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove: () => void }) {
+  onRemove: () => void;
+}) {
   const showTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
@@ -601,6 +618,8 @@ function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove:
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
+  const chipLabel = quoteChipLabel(quote);
+  const lineLabel = quote.file ? quoteLineLabel(quote.file.lineStart, quote.file.lineEnd) : null;
 
   return (
     <span
@@ -618,14 +637,15 @@ function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove:
       <span
         className={styles.quoteInputChip}
         tabIndex={0}
-        aria-label={`引用片段：${quote.preview}`}
-        data-quote-index={quote.index}
+        aria-label={`${chipLabel}：${quote.preview}`}
+        data-quote-index={index}
+        data-source-quote={quote.file ? "true" : "false"}
       >
-        <span className={styles.quoteInputChipLabel}>引用片段</span>
+        <span className={styles.quoteInputChipLabel}>{chipLabel}</span>
         <button
           className={styles.quoteInputChipRemove}
           type="button"
-          aria-label={`删除引用片段 ${quote.preview}`}
+          aria-label={`删除${chipLabel} ${quote.preview}`}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -643,6 +663,12 @@ function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove:
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleClose}
         >
+          {quote.file ? (
+            <span className={styles.quoteHoverMeta}>
+              <span>{quote.file.path}</span>
+              {lineLabel ? <span>{lineLabel}</span> : null}
+            </span>
+          ) : null}
           <span className={styles.quoteHoverBody}>{quote.text}</span>
           <span className={styles.quoteHoverActions}>
             <button type="button" onClick={handleCopyQuote}>
@@ -652,6 +678,133 @@ function QuoteContextChip({ quote, onRemove }: { quote: QuoteChipItem; onRemove:
               删除
             </button>
           </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function quoteChipLabel(quote: SelectedQuote): string {
+  if (!quote.file) {
+    return "引用片段";
+  }
+  const name = quote.file.name || fileName(quote.file.path);
+  const lineLabel = quoteLineLabel(quote.file.lineStart, quote.file.lineEnd);
+  return lineLabel ? `${name} · ${lineLabel}` : `${name} · 引用`;
+}
+
+function quoteLineLabel(start?: number | null, end?: number | null): string | null {
+  if (!start || !end) {
+    return null;
+  }
+  return start === end ? `L${start}` : `L${start}-L${end}`;
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function FileContextChip({
+  file,
+  onOpen,
+  onRemove,
+}: {
+  file: SelectedFile;
+  onOpen?: (file: SelectedFile) => void;
+  onRemove: () => void;
+}) {
+  const showTimerRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const fileKindLabel = file.type === "directory" ? "工作区目录" : "工作区文件";
+  const chipLabel = fileName(file.name || file.path);
+
+  const clearShowTimer = useCallback(() => {
+    if (showTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(showTimerRef.current);
+    showTimerRef.current = null;
+  }, []);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = null;
+  }, []);
+
+  const scheduleOpen = useCallback(() => {
+    clearShowTimer();
+    clearHideTimer();
+    showTimerRef.current = window.setTimeout(() => {
+      showTimerRef.current = null;
+      setOpen(true);
+    }, QUOTE_CARD_SHOW_DELAY_MS);
+  }, [clearHideTimer, clearShowTimer]);
+
+  const scheduleClose = useCallback(() => {
+    clearShowTimer();
+    clearHideTimer();
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null;
+      setOpen(false);
+    }, 120);
+  }, [clearHideTimer, clearShowTimer]);
+
+  useEffect(
+    () => () => {
+      clearShowTimer();
+      clearHideTimer();
+    },
+    [clearHideTimer, clearShowTimer],
+  );
+
+  return (
+    <span
+      className={styles.fileChipWrapper}
+      onBlur={(event) => {
+        const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+        if (!event.currentTarget.contains(relatedTarget)) {
+          scheduleClose();
+        }
+      }}
+      onFocus={scheduleOpen}
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={scheduleClose}
+    >
+      <span className={styles.fileChip}>
+        <button
+          className={styles.fileChipMain}
+          type="button"
+          aria-label={`打开文件引用 ${file.path}`}
+          disabled={!onOpen}
+          onClick={() => onOpen?.(file)}
+        >
+          <span className={styles.fileChipText}>{chipLabel}</span>
+        </button>
+        <button
+          className={styles.fileChipRemove}
+          type="button"
+          aria-label={`移除文件引用 ${file.path}`}
+          onClick={onRemove}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      </span>
+      {open ? (
+        <span
+          className={styles.filePathHoverCard}
+          data-file-path-hover-card="true"
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={clearHideTimer}
+          onMouseLeave={scheduleClose}
+        >
+          <span className={styles.filePathHoverTitle} data-file-path-hover-title="true">
+            {file.path}
+          </span>
+          <span className={styles.filePathHoverMeta}>{fileKindLabel}</span>
         </span>
       ) : null}
     </span>

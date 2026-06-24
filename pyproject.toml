@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "keydex"
 version = "0.1.0"
-description = "Python Codex-like local desktop agent backend."
+description = "Keydex local desktop agent backend."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-from backend.app.agent.tool_call_progress import count_text_lines, finalize_file_change
+from backend.app.agent.tool_call_progress import (
+    build_text_diff,
+    count_text_lines,
+    finalize_file_change,
+)
 from backend.app.core.logger import logger
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
@@ -12,25 +17,17 @@ from backend.app.tools.registry import ToolRegistry
 
 APPLY_PATCH_USAGE = """在当前工作区内应用 Codex apply_patch 风格的文本补丁。
 
-patch 必须严格使用以下文件操作头，不能使用普通 unified diff 文件头：
-- *** Add File: <path>
+patch 必须使用以下文件操作头；不接受普通 unified diff 文件头：
 - *** Update File: <path>
 - *** Delete File: <path>
+- *** Move to: <path>（只能跟在 Update File 后面）
 
 更新文件示例：
 *** Begin Patch
 *** Update File: docs/project-structure.md
 @@
- # keydex 项目结构
+ # Keydex 项目结构
 +> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
-
-*** End Patch
-
-新增文件示例：
-*** Begin Patch
-*** Add File: docs/note.md
-+第一行
-+第二行
 *** End Patch
 
 删除文件示例：
@@ -38,24 +35,52 @@ patch 必须严格使用以下文件操作头，不能使用普通 unified diff 
 *** Delete File: docs/old.md
 *** End Patch
 
-禁止写法：不要写 `*** docs/file.md`、`--- docs/file.md`、`+++ docs/file.md` 或只包含 `@@ -1,2 +1,3 @@` 的普通 diff。"""
+移动并修改文件示例：
+*** Begin Patch
+*** Update File: docs/old.md
+*** Move to: docs/new.md
+@@
+-旧标题
++新标题
+*** End Patch
 
-PATCH_PARAMETER_DESCRIPTION = """完整 patch 文本。必须以 `*** Begin Patch` 开始、以 `*** End Patch` 结束。
-每个文件操作必须使用 `*** Add File: <path>`、`*** Update File: <path>` 或 `*** Delete File: <path>`。
-Update File 内容行只能以空格、+、- 或 @@ 开头；普通上下文行前面必须保留一个空格。"""
+禁止写法：不要写 `*** docs/file.md`、`--- docs/file.md`、`+++ docs/file.md`，也不要只写普通 unified diff hunk，例如 `@@ -1,2 +1,3 @@`。"""
+
+PATCH_PARAMETER_DESCRIPTION = """完整 patch 文本。必须以 `*** Begin Patch` 开始，并以 `*** End Patch` 结束。
+每个文件操作必须使用 `*** Update File: <path>` 或 `*** Delete File: <path>`。
+Update File 内容行必须以空格、+、-、@@、`*** Move to: <path>` 或 `*** End of File` 开头；上下文行必须保留前导空格。"""
 
 PATCH_EXPECTED_HEADERS = [
-    "*** Add File: <path>",
     "*** Update File: <path>",
     "*** Delete File: <path>",
 ]
 
 
 @dataclass(frozen=True)
+class PatchHunk:
+    header: str
+    lines: list[str]
+    end_of_file: bool = False
+
+
+@dataclass(frozen=True)
 class PatchOperation:
     kind: str
     path: str
-    lines: list[str]
+    lines: list[str] = field(default_factory=list)
+    move_to: str | None = None
+
+
+@dataclass(frozen=True)
+class PlannedChange:
+    kind: str
+    target: Path
+    destination: Path
+    relative_path: str
+    relative_destination: str
+    before: str
+    after: str
+    patch_lines: list[str]
 
 
 def create_patch_tools() -> list[FunctionTool]:
@@ -93,21 +118,9 @@ async def apply_patch_tool(
         raise ToolExecutionError("patch 必须是非空字符串", code="invalid_tool_args")
 
     operations = _parse_patch(patch)
-    changes: list[dict[str, Any]] = []
-    for operation in operations:
-        target = _resolve(operation.path, context)
-        if operation.kind == "add":
-            changes.append(_apply_add(target, operation, context))
-        elif operation.kind == "update":
-            changes.append(_apply_update(target, operation, context))
-        elif operation.kind == "delete":
-            changes.append(_apply_delete(target, operation, context))
-        else:
-            raise ToolExecutionError(
-                "不支持的 patch 操作",
-                code="invalid_patch",
-                details={"operation": operation.kind},
-            )
+    planned_changes = _preflight_changes(operations, context)
+    _write_planned_changes(planned_changes)
+    changes = [_change_result(change, context) for change in planned_changes]
 
     logger.info(
         "[PatchTool] 应用补丁完成 | "
@@ -129,15 +142,13 @@ def _parse_patch(patch: str) -> list[PatchOperation]:
     index = 1
     while index < len(lines) - 1:
         header = lines[index]
-        if header.startswith("*** Add File: "):
-            index = _collect_operation(lines, index, "add", "*** Add File: ", operations)
-        elif header.startswith("*** Update File: "):
-            index = _collect_operation(lines, index, "update", "*** Update File: ", operations)
+        if header.startswith("*** Update File: "):
+            index = _collect_update_operation(lines, index, operations)
         elif header.startswith("*** Delete File: "):
             path = header.removeprefix("*** Delete File: ").strip()
             if not path:
                 raise ToolExecutionError("Delete File 缺少路径", code="invalid_patch")
-            operations.append(PatchOperation(kind="delete", path=path, lines=[]))
+            operations.append(PatchOperation(kind="delete", path=path))
             index += 1
         else:
             _raise_unrecognized_patch_line(header, index + 1)
@@ -147,8 +158,41 @@ def _parse_patch(patch: str) -> list[PatchOperation]:
     return operations
 
 
+def _collect_update_operation(
+    lines: list[str],
+    index: int,
+    operations: list[PatchOperation],
+) -> int:
+    path = lines[index].removeprefix("*** Update File: ").strip()
+    if not path:
+        raise ToolExecutionError("Update File 缺少路径", code="invalid_patch")
+    index += 1
+    move_to: str | None = None
+    if index < len(lines) - 1 and lines[index].startswith("*** Move to: "):
+        move_to = lines[index].removeprefix("*** Move to: ").strip()
+        if not move_to:
+            raise ToolExecutionError("Move to 缺少路径", code="invalid_patch")
+        index += 1
+
+    body: list[str] = []
+    while index < len(lines) - 1 and not _is_file_operation_header(lines[index]):
+        body.append(lines[index])
+        index += 1
+    if not body and not move_to:
+        raise ToolExecutionError("Update File 缺少有效变更", code="invalid_patch")
+    operations.append(PatchOperation(kind="update", path=path, lines=body, move_to=move_to))
+    return index
+
+
+def _is_file_operation_header(line: str) -> bool:
+    return (
+        line.startswith("*** Update File: ")
+        or line.startswith("*** Delete File: ")
+    )
+
+
 def _raise_unrecognized_patch_line(line: str, line_number: int) -> None:
-    hint = "文件操作头必须写成 `*** Update File: <path>`、`*** Add File: <path>` 或 `*** Delete File: <path>`。"
+    hint = "文件操作头必须写成 `*** Update File: <path>` 或 `*** Delete File: <path>`。"
     if line.startswith("*** ") and ":" not in line:
         hint = (
             "看起来你写成了 `*** <path>`。这不是有效的 apply_patch 文件头；"
@@ -171,160 +215,186 @@ def _raise_unrecognized_patch_line(line: str, line_number: int) -> None:
     )
 
 
-def _collect_operation(
-    lines: list[str],
-    index: int,
-    kind: str,
-    prefix: str,
+def _preflight_changes(
     operations: list[PatchOperation],
-) -> int:
-    path = lines[index].removeprefix(prefix).strip()
-    if not path:
-        raise ToolExecutionError(f"{prefix.strip()} 缺少路径", code="invalid_patch")
+    context: ToolExecutionContext,
+) -> list[PlannedChange]:
+    state: dict[Path, str | None] = {}
+    planned: list[PlannedChange] = []
+    for operation in operations:
+        target = _resolve(operation.path, context)
+        if operation.kind == "update":
+            planned_change = _plan_update(target, operation, context, state)
+        elif operation.kind == "delete":
+            planned_change = _plan_delete(target, operation, context, state)
+        else:
+            raise ToolExecutionError(
+                "不支持的 patch 操作",
+                code="invalid_patch",
+                details={"operation": operation.kind},
+            )
+        planned.append(planned_change)
+    return planned
 
-    index += 1
-    body: list[str] = []
-    while index < len(lines) - 1 and not lines[index].startswith("*** "):
-        body.append(lines[index])
-        index += 1
-    if not body:
-        raise ToolExecutionError("文件操作缺少 patch 内容", code="invalid_patch")
-    operations.append(PatchOperation(kind=kind, path=path, lines=body))
-    return index
 
-
-def _apply_add(
+def _plan_update(
     target: Path,
     operation: PatchOperation,
     context: ToolExecutionContext,
-) -> dict[str, Any]:
-    if target.exists():
+    state: dict[Path, str | None],
+) -> PlannedChange:
+    original = _state_content(target, context, state)
+    destination = _resolve(operation.move_to, context) if operation.move_to else target
+    if destination != target and _state_exists(destination, state):
         raise ToolExecutionError(
-            "新增文件已存在",
+            "移动目标已存在",
             code="patch_target_exists",
-            details={"path": _relative(target, context)},
+            details={"path": _relative_missing(destination, context)},
         )
-    content_lines = []
-    for line in operation.lines:
-        if not line.startswith("+"):
-            raise ToolExecutionError("Add File 行必须以 + 开头", code="invalid_patch")
-        content_lines.append(line[1:])
-    content = "\n".join(content_lines)
-    if content_lines:
-        content += "\n"
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8", newline="")
-    return finalize_file_change({
-        "operation": "update",
-        "path": _relative(target, context),
-        "added_lines": len(content_lines),
-        "removed_lines": 0,
-        "diff": _operation_diff(_relative(target, context), "add", operation.lines),
-    })
+    updated = _apply_update_hunks(original, operation.lines, path=_relative_missing(target, context))
+    state[target] = None
+    state[destination] = updated
+    return PlannedChange(
+        kind="move" if operation.move_to else "update",
+        target=target,
+        destination=destination,
+        relative_path=_relative_missing(target, context),
+        relative_destination=_relative_missing(destination, context),
+        before=original,
+        after=updated,
+        patch_lines=_move_patch_lines(operation),
+    )
 
 
-def _apply_update(
+def _plan_delete(
     target: Path,
     operation: PatchOperation,
     context: ToolExecutionContext,
-) -> dict[str, Any]:
-    if not target.exists():
+    state: dict[Path, str | None],
+) -> PlannedChange:
+    original = _state_content(target, context, state)
+    state[target] = None
+    return PlannedChange(
+        kind="delete",
+        target=target,
+        destination=target,
+        relative_path=_relative_missing(target, context),
+        relative_destination=_relative_missing(target, context),
+        before=original,
+        after="",
+        patch_lines=operation.lines,
+    )
+
+
+def _state_exists(path: Path, state: dict[Path, str | None]) -> bool:
+    if path in state:
+        return state[path] is not None
+    return path.exists()
+
+
+def _state_content(
+    path: Path,
+    context: ToolExecutionContext,
+    state: dict[Path, str | None],
+) -> str:
+    if path in state:
+        content = state[path]
+        if content is None:
+            raise ToolExecutionError(
+                "更新文件不存在",
+                code="file_not_found",
+                details={"path": _relative_missing(path, context)},
+            )
+        return content
+    if not path.exists():
         raise ToolExecutionError(
             "更新文件不存在",
             code="file_not_found",
-            details={"path": _relative_missing(target, context)},
+            details={"path": _relative_missing(path, context)},
         )
-    if not target.is_file():
+    if not path.is_file():
         raise ToolExecutionError(
             "更新目标不是文件",
             code="path_not_file",
-            details={"path": _relative(target, context)},
+            details={"path": _relative_missing(path, context)},
         )
     try:
-        original = target.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise ToolExecutionError(
             "文件不是 UTF-8 文本",
             code="file_not_text",
-            details={"path": _relative(target, context)},
+            details={"path": _relative_missing(path, context)},
         ) from exc
 
-    old_block, new_block, added, removed = _build_update_blocks(operation.lines)
-    if old_block not in original:
-        raise ToolExecutionError(
-            "patch 上下文不匹配，拒绝覆盖当前文件",
-            code="patch_context_mismatch",
-            details={"path": _relative(target, context)},
-        )
 
-    updated = original.replace(old_block, new_block, 1)
-    target.write_text(updated, encoding="utf-8", newline="")
-    return finalize_file_change({
-        "operation": "update",
-        "path": _relative(target, context),
-        "added_lines": added,
-        "removed_lines": removed,
-        "diff": _operation_diff(_relative(target, context), "update", operation.lines),
-    })
-
-
-def _apply_delete(
-    target: Path,
-    operation: PatchOperation,
-    context: ToolExecutionContext,
-) -> dict[str, Any]:
-    if not target.exists():
-        raise ToolExecutionError(
-            "删除文件不存在",
-            code="file_not_found",
-            details={"path": _relative_missing(target, context)},
-        )
-    if not target.is_file():
-        raise ToolExecutionError(
-            "删除目标不是文件",
-            code="path_not_file",
-            details={"path": _relative(target, context)},
-        )
-    size = target.stat().st_size
-    try:
-        content = target.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise ToolExecutionError(
-            "文件不是 UTF-8 文本",
-            code="file_not_text",
-            details={"path": _relative(target, context)},
-        ) from exc
-    removed_lines = count_text_lines(content)
-    target.unlink()
-    return finalize_file_change({
-        "operation": "update",
-        "path": _relative_missing(target, context),
-        "removed_bytes": size,
-        "added_lines": 0,
-        "removed_lines": removed_lines,
-        "diff": _operation_diff(_relative_missing(target, context), "delete", operation.lines),
-    })
+def _apply_update_hunks(original: str, lines: list[str], *, path: str) -> str:
+    if not lines:
+        return original
+    hunks = _parse_hunks(lines)
+    current = original.splitlines()
+    trailing_newline = original.endswith("\n")
+    cursor = 0
+    for hunk in hunks:
+        old_lines, new_lines, added, removed = _hunk_lines(hunk)
+        if added == 0 and removed == 0:
+            continue
+        search_start = _search_start_for_hunk(current, hunk, cursor)
+        if hunk.end_of_file and old_lines:
+            search_start = max(search_start, len(current) - len(old_lines))
+        position = _find_sequence(current, old_lines, search_start)
+        if position is None:
+            raise ToolExecutionError(
+                "patch 上下文不匹配，拒绝覆盖当前文件",
+                code="patch_context_mismatch",
+                details={"path": path},
+            )
+        current[position : position + len(old_lines)] = new_lines
+        cursor = position + len(new_lines)
+        if hunk.end_of_file:
+            trailing_newline = False
+    if not current:
+        return ""
+    return "\n".join(current) + ("\n" if trailing_newline else "")
 
 
-def _operation_diff(path: str, operation: str, lines: list[str]) -> str:
-    if operation == "add":
-        header = ["--- /dev/null", f"+++ b/{path}"]
-    elif operation == "delete":
-        header = [f"--- a/{path}", "+++ /dev/null"]
-    else:
-        header = [f"--- a/{path}", f"+++ b/{path}"]
-    return "\n".join([*header, *lines])
+def _parse_hunks(lines: list[str]) -> list[PatchHunk]:
+    hunks: list[PatchHunk] = []
+    header = "@@"
+    body: list[str] = []
+    end_of_file = False
+    saw_hunk_header = False
+    for line in lines:
+        if line == "*** End of File":
+            end_of_file = True
+            continue
+        if line == "@@" or line.startswith("@@ "):
+            if saw_hunk_header or body:
+                hunks.append(PatchHunk(header=header, lines=body, end_of_file=end_of_file))
+            header = line[2:].strip()
+            body = []
+            end_of_file = False
+            saw_hunk_header = True
+            continue
+        if not line.startswith((" ", "+", "-")):
+            raise ToolExecutionError(
+                "Update File 内容行必须以空格、+、-、@@ 或 *** End of File 开头",
+                code="invalid_patch",
+            )
+        body.append(line)
+    if saw_hunk_header or body:
+        hunks.append(PatchHunk(header=header, lines=body, end_of_file=end_of_file))
+    if not hunks:
+        raise ToolExecutionError("Update File 缺少有效变更", code="invalid_patch")
+    return hunks
 
 
-def _build_update_blocks(lines: list[str]) -> tuple[str, str, int, int]:
+def _hunk_lines(hunk: PatchHunk) -> tuple[list[str], list[str], int, int]:
     old_lines: list[str] = []
     new_lines: list[str] = []
     added = 0
     removed = 0
-    for line in lines:
-        if line == "@@" or line.startswith("@@ "):
-            continue
+    for line in hunk.lines:
         if line.startswith(" "):
             value = line[1:]
             old_lines.append(value)
@@ -335,18 +405,108 @@ def _build_update_blocks(lines: list[str]) -> tuple[str, str, int, int]:
         elif line.startswith("+"):
             new_lines.append(line[1:])
             added += 1
-        else:
-            raise ToolExecutionError(
-                "Update File 内容行必须以空格、+、- 或 @@ 开头",
-                code="invalid_patch",
-            )
-
-    if not old_lines and not new_lines:
-        raise ToolExecutionError("Update File 缺少有效变更", code="invalid_patch")
-    return "\n".join(old_lines) + "\n", "\n".join(new_lines) + "\n", added, removed
+    return old_lines, new_lines, added, removed
 
 
-def _resolve(raw_path: str, context: ToolExecutionContext) -> Path:
+def _search_start_for_hunk(current: list[str], hunk: PatchHunk, cursor: int) -> int:
+    if not hunk.header:
+        return cursor
+    header = hunk.header.strip()
+    if not header:
+        return cursor
+    for index in range(cursor, len(current)):
+        if header in current[index]:
+            return index
+    return cursor
+
+
+def _find_sequence(lines: list[str], sequence: list[str], start: int) -> int | None:
+    if not sequence:
+        return min(start, len(lines))
+    for index in range(min(start, len(lines)), len(lines) - len(sequence) + 1):
+        if lines[index : index + len(sequence)] == sequence:
+            return index
+    return None
+
+
+def _write_planned_changes(changes: list[PlannedChange]) -> None:
+    for change in changes:
+        if change.kind == "delete":
+            change.target.unlink()
+            continue
+        change.destination.parent.mkdir(parents=True, exist_ok=True)
+        change.destination.write_text(change.after, encoding="utf-8", newline="")
+        if change.kind == "move" and change.target != change.destination and change.target.exists():
+            change.target.unlink()
+
+
+def _change_result(change: PlannedChange, context: ToolExecutionContext) -> dict[str, Any]:
+    added, deleted = _change_counts(change)
+    diff = _patch_diff(change)
+    result = finalize_file_change(
+        {
+            "operation": "update",
+            "change_type": change.kind,
+            "path": change.relative_destination if change.kind == "move" else change.relative_path,
+            "added_lines": added,
+            "deleted_lines": deleted,
+            "diff": diff,
+        }
+    )
+    if change.kind == "delete":
+        result["removed_bytes"] = len(change.before.encode("utf-8"))
+    if change.kind == "move":
+        result["old_path"] = change.relative_path
+        result["new_path"] = change.relative_destination
+    return result
+
+
+def _change_counts(change: PlannedChange) -> tuple[int, int]:
+    if change.kind == "delete":
+        return 0, count_text_lines(change.before)
+    before_lines = change.before.splitlines()
+    after_lines = change.after.splitlines()
+    added = 0
+    deleted = 0
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, before_lines, after_lines).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag in {"replace", "delete"}:
+            deleted += i2 - i1
+        if tag in {"replace", "insert"}:
+            added += j2 - j1
+    return added, deleted
+
+
+def _patch_diff(change: PlannedChange) -> str:
+    if change.kind == "delete":
+        return _operation_diff(change.relative_path, "delete", change.patch_lines)
+    if change.kind == "move":
+        return build_text_diff(
+            path=change.relative_destination,
+            before=change.before,
+            after=change.after,
+        ).replace(f"--- a/{change.relative_destination}", f"--- a/{change.relative_path}", 1)
+    return _operation_diff(change.relative_path, "update", change.patch_lines)
+
+
+def _operation_diff(path: str, operation: str, lines: list[str]) -> str:
+    if operation == "delete":
+        header = [f"--- a/{path}", "+++ /dev/null"]
+    else:
+        header = [f"--- a/{path}", f"+++ b/{path}"]
+    return "\n".join([*header, *lines])
+
+
+def _move_patch_lines(operation: PatchOperation) -> list[str]:
+    if operation.move_to:
+        return [f"*** Move to: {operation.move_to}", *operation.lines]
+    return operation.lines
+
+
+def _resolve(raw_path: str | None, context: ToolExecutionContext) -> Path:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ToolExecutionError("path 必须是非空字符串", code="invalid_tool_args")
     try:
         return resolve_workspace_path(
             raw_path,
@@ -361,10 +521,6 @@ def _resolve(raw_path: str, context: ToolExecutionContext) -> Path:
         ) from exc
 
 
-def _relative(path: Path, context: ToolExecutionContext) -> str:
-    return path.resolve().relative_to(context.workspace_root).as_posix()
-
-
 def _relative_missing(path: Path, context: ToolExecutionContext) -> str:
     return path.resolve().relative_to(context.workspace_root).as_posix()
 
@@ -373,7 +529,10 @@ def _summarize_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "operation": change.get("operation"),
+            "change_type": change.get("change_type"),
             "path": change.get("path"),
+            "old_path": change.get("old_path"),
+            "new_path": change.get("new_path"),
             "added_lines": change.get("added_lines"),
             "removed_lines": change.get("removed_lines"),
             "removed_bytes": change.get("removed_bytes"),

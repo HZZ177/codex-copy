@@ -35,12 +35,14 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     (project_a / "shared.txt").write_text("A_ONLY\n", encoding="utf-8")
     (project_b / "shared.txt").write_text("B_ONLY\n", encoding="utf-8")
 
-    list_a = await _run("list_directory", {"path": "."}, project_a, "ses_a")
-    list_b = await _run("list_directory", {"path": "."}, project_b, "ses_b")
+    list_a = await _run("list_dir", {"path": ".", "depth": 1}, project_a, "ses_a")
+    list_b = await _run("list_dir", {"path": ".", "depth": 1}, project_b, "ses_b")
     read_a = await _run("read_file", {"path": "shared.txt"}, project_a, "ses_a")
     read_b = await _run("read_file", {"path": "shared.txt"}, project_b, "ses_b")
     search_a = await _run("search_text", {"query": "A_ONLY"}, project_a, "ses_a")
     search_b = await _run("search_text", {"query": "A_ONLY"}, project_b, "ses_b")
+    grep_a = await _run("grep_files", {"query": "A_ONLY", "regex": False}, project_a, "ses_a")
+    grep_b = await _run("grep_files", {"query": "A_ONLY", "regex": False}, project_b, "ses_b")
     shell_a = await _run(
         "run_command",
         {
@@ -72,6 +74,8 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     assert read_b.result["content"] == "B_ONLY\n"
     assert search_a.result["results"][0]["path"] == "shared.txt"
     assert search_b.result["results"] == []
+    assert grep_a.result["paths"] == ["shared.txt"]
+    assert grep_b.result["paths"] == []
     assert shell_a.result["stdout"].strip() == "A_ONLY"
     assert patch_a.ok is True
     assert (project_a / "shared.txt").read_text(encoding="utf-8") == "A_PATCHED\n"

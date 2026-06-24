@@ -1,4 +1,4 @@
-# 🏗️ keydex 项目结构总览> 📝 **提示**：上面所有 Mermaid 图均可在支持 Mermaid 的 Markdown 预览/渲染器中图形化展示（如 VS Code、GitHub、Obsidian 等）。
+# 🏗️ Keydex 项目结构总览> 📝 **提示**：上面所有 Mermaid 图均可在支持 Mermaid 的 Markdown 预览/渲染器中图形化展示（如 VS Code、GitHub、Obsidian 等）。
 
 > ⏱️ 最后更新：2025-07-16
 

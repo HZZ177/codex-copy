@@ -25,7 +25,7 @@ def test_trace_record_create_update_and_list_by_session(tmp_path) -> None:
         session_id="ses_trace",
         active_session_id="ses_trace",
         scene_id="desktop-agent",
-        scene_name="Local Desktop Agent",
+        scene_name="Keydex",
         user_id="local-user",
         turn_index=1,
         root_node_id="node_root",

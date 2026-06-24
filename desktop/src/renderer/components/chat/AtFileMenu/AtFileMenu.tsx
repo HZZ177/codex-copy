@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import type { WorkspaceSearchResult } from "@/runtime";
-import { resolveMaterialFileIcon, resolveMaterialFolderIcon } from "@/renderer/components/workspace/materialIconTheme";
+import { useMaterialEntryIcon } from "@/renderer/components/workspace/materialIconTheme";
 
 import styles from "./AtFileMenu.module.css";
 
@@ -118,7 +118,7 @@ function MaterialEntryIcon({
   path: string;
   type: WorkspaceSearchResult["type"];
 }) {
-  const icon = type === "directory" ? resolveMaterialFolderIcon() : resolveMaterialFileIcon(path);
+  const icon = useMaterialEntryIcon(path, type === "directory" ? "directory" : "file");
   return (
     <img
       alt=""

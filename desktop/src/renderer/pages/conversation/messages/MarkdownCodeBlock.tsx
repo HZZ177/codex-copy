@@ -13,23 +13,23 @@ import {
 } from "lucide-react";
 import katex from "katex";
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import SyntaxHighlighter from "react-syntax-highlighter";
-import { vs, vs2015 } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
-import { JsonTreeViewer } from "@/renderer/components/json/JsonTreeViewer";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import { formatMermaidCssPixels, normalizeMermaidSvgDimensions, type SvgDimensions } from "@/renderer/utils/mermaidSvg";
@@ -68,6 +68,45 @@ const MERMAID_SCALE_STEP = 0.1;
 const MERMAID_FIT_PADDING = 64;
 const MERMAID_AUTO_FIT_FRAMES = 40;
 type ContentPreviewRequest = Extract<PreviewRequest, { type: "content" }>;
+type SyntaxHighlighterRuntimeProps = {
+  language: string;
+  PreTag: string;
+  wrapLines?: boolean;
+  lineProps?: (lineNumber: number) => { style: CSSProperties };
+  customStyle: CSSProperties;
+  codeTagProps: typeof CODE_TAG_PROPS;
+  children: string;
+};
+type SyntaxHighlighterModule = {
+  default: ComponentType<SyntaxHighlighterRuntimeProps & { style: unknown }>;
+};
+type HighlightStyleModule = {
+  vs: unknown;
+  vs2015: unknown;
+};
+
+const LazySyntaxHighlighter = lazy(async () => {
+  const [highlighterModule, styleModule] = await Promise.all([
+    import("react-syntax-highlighter") as Promise<SyntaxHighlighterModule>,
+    import("react-syntax-highlighter/dist/esm/styles/hljs") as Promise<HighlightStyleModule>,
+  ]);
+  const SyntaxHighlighter = highlighterModule.default;
+
+  return {
+    default: function SyntaxHighlighterView({
+      theme,
+      ...props
+    }: SyntaxHighlighterRuntimeProps & { theme: "light" | "dark" }) {
+      return <SyntaxHighlighter {...props} style={theme === "dark" ? styleModule.vs2015 : styleModule.vs} />;
+    },
+  };
+});
+
+const LazyJsonTreeViewer = lazy(() =>
+  import("@/renderer/components/json/JsonTreeViewer").then((module) => ({
+    default: module.JsonTreeViewer,
+  })),
+);
 
 export interface MarkdownCodeBlockProps {
   children?: ReactNode;
@@ -328,7 +367,9 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
       ) : canPreviewMath && viewMode === "preview" ? (
         <MathPreview source={text} />
       ) : canPreviewJson && viewMode === "preview" ? (
-        <JsonTreeViewer source={text} size="inline" />
+        <Suspense fallback={<CodeViewLoading targetMode="preview" />}>
+          <LazyJsonTreeViewer source={text} size="inline" />
+        </Suspense>
       ) : (
         <div
           ref={sourceViewportRef}
@@ -386,7 +427,6 @@ const SourceCodeHighlighter = memo(function SourceCodeHighlighter({
   isDiff: boolean;
   theme: "light" | "dark";
 }) {
-  const highlighterTheme = theme === "dark" ? vs2015 : vs;
   const lineProps = useMemo(
     () =>
       isDiff
@@ -398,19 +438,29 @@ const SourceCodeHighlighter = memo(function SourceCodeHighlighter({
   );
 
   return (
-    <SyntaxHighlighter
-      language={language}
-      style={highlighterTheme}
-      PreTag="div"
-      wrapLines={isDiff}
-      lineProps={lineProps}
-      customStyle={CODE_HIGHLIGHTER_STYLE}
-      codeTagProps={CODE_TAG_PROPS}
-    >
-      {displayText}
-    </SyntaxHighlighter>
+    <Suspense fallback={<PlainCodeBlock displayText={displayText} />}>
+      <LazySyntaxHighlighter
+        language={language}
+        theme={theme}
+        PreTag="div"
+        wrapLines={isDiff}
+        lineProps={lineProps}
+        customStyle={CODE_HIGHLIGHTER_STYLE}
+        codeTagProps={CODE_TAG_PROPS}
+      >
+        {displayText}
+      </LazySyntaxHighlighter>
+    </Suspense>
   );
 });
+
+function PlainCodeBlock({ displayText }: { displayText: string }) {
+  return (
+    <pre style={{ ...CODE_HIGHLIGHTER_STYLE, whiteSpace: "pre" }}>
+      <code style={CODE_TAG_PROPS.style}>{displayText}</code>
+    </pre>
+  );
+}
 
 function clearSourceAnimation(animationRef: { current: Animation | null }, element: HTMLElement | null) {
   const animation = animationRef.current;
@@ -502,7 +552,11 @@ function FullscreenPreviewContent({
     return <MathPreview source={text} size="fullscreen" />;
   }
   if (contentType === "json" || language === "json") {
-    return <JsonTreeViewer source={text} size="fullscreen" />;
+    return (
+      <Suspense fallback={<CodeViewLoading targetMode="preview" />}>
+        <LazyJsonTreeViewer source={text} size="fullscreen" />
+      </Suspense>
+    );
   }
   if (contentType === "markdown") {
     return (

@@ -312,7 +312,7 @@ function approval(status: ApprovalRequest["status"]): ApprovalRequest {
     call_id: "call-1",
     kind: "exec",
     title: "允许执行命令",
-    description: "echo ok",
+    description: "请求执行回显命令。",
     details: { command: "echo ok" },
     status,
     created_at: "2026-06-17T10:00:19Z",

@@ -351,6 +351,188 @@
   color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text-primary));
 }
 
+.planPillWrap {
+  position: relative;
+  display: inline-flex;
+  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  outline: 0;
+  pointer-events: auto;
+}
+
+.planPillWrap::after {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  z-index: 29;
+  height: 12px;
+  content: "";
+  pointer-events: auto;
+}
+
+.planSummaryPill {
+  gap: 7px;
+  color: var(--color-text-secondary);
+}
+
+.planSummaryIcon {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-text-tertiary);
+}
+
+.planSummaryIcon[data-status="completed"] {
+  color: color-mix(in srgb, var(--diff-added-text) 82%, var(--color-accent));
+}
+
+.planSummaryIcon[data-status="failed"] {
+  color: var(--color-danger);
+}
+
+.planSpinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+}
+
+.planSpinner[data-status="in_progress"] {
+  animation: planPillSpin 0.9s linear infinite;
+}
+
+.planSpinner[data-status="completed"] {
+  border-color: color-mix(in srgb, var(--diff-added-text) 72%, var(--color-accent));
+}
+
+.planSummaryText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planHoverCard {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 24px));
+  max-height: min(320px, 42vh);
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, white);
+  box-shadow:
+    0 18px 42px rgb(15 23 42 / 12%),
+    0 3px 9px rgb(15 23 42 / 8%);
+  opacity: 0;
+  padding: 9px 10px;
+  pointer-events: none;
+  transform: translate(-50%, 4px) scale(0.985);
+  transform-origin: bottom center;
+  transition:
+    opacity 140ms ease,
+    transform 140ms var(--motion-ease-out);
+}
+
+.planPillWrap:hover .planHoverCard {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.planExplanation {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.planList {
+  display: grid;
+  min-height: 0;
+  gap: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  scrollbar-gutter: stable;
+  list-style: none;
+}
+
+.planRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.planStatusIcon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+}
+
+.planRow[data-status="completed"] .planStatusIcon {
+  color: color-mix(in srgb, var(--diff-added-text) 82%, var(--color-accent));
+}
+
+.planRow[data-status="in_progress"] .planStatusIcon {
+  color: var(--color-accent);
+}
+
+.planRow[data-status="failed"] .planStatusIcon {
+  color: var(--color-danger);
+}
+
+.planStatusLoading {
+  animation: planPillSpin 0.9s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.planRowText {
+  display: inline-flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.planRowIndex {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.planRowContent {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .scrollBottomButton {
   display: inline-grid;
   width: 30px;
@@ -383,4 +565,10 @@
 .scrollBottomButton:disabled {
   cursor: default;
   opacity: 0.68;
+}
+
+@keyframes planPillSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }

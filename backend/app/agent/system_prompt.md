@@ -23,7 +23,7 @@
 *** Begin Patch
 *** Update File: docs/project-structure.md
 @@
- # keydex 项目结构
+ # Keydex 项目结构
 +> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
  
 *** End Patch

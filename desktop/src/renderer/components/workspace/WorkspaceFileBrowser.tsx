@@ -10,6 +10,10 @@ import {
 } from "react";
 
 import type { RuntimeBridge } from "@/runtime";
+import type {
+  PreviewAnnotationChatRequest,
+  PreviewQuoteSelectionRequest,
+} from "@/renderer/providers/PreviewProvider";
 
 import { FilePreview } from "./FilePreview";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -22,6 +26,8 @@ export interface WorkspaceFileBrowserProps {
   runtime: RuntimeBridge;
   previewPath?: string | null;
   previewRequestId?: number;
+  onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
+  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
   onPreviewPathChange?: (path: string | null) => void;
 }
 
@@ -46,6 +52,8 @@ export function WorkspaceFileBrowser({
   runtime,
   previewPath = null,
   previewRequestId = 0,
+  onQuoteSelection,
+  onStartChatFromAnnotation,
   onPreviewPathChange,
 }: WorkspaceFileBrowserProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -288,6 +296,8 @@ export function WorkspaceFileBrowser({
                 runtime={runtime}
                 chrome="panel"
                 hideBreadcrumbs
+                onQuoteSelection={onQuoteSelection}
+                onStartChatFromAnnotation={onStartChatFromAnnotation}
                 onClose={closePreview}
               />
             </div>

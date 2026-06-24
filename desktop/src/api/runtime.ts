@@ -58,7 +58,7 @@ async function waitForAgentHealth(timeoutMs = 10_000): Promise<void> {
       await sleep(150);
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Agent 服务健康检查超时");
+  throw lastError instanceof Error ? lastError : new Error("Keydex 服务健康检查超时");
 }
 
 function sleep(ms: number): Promise<void> {

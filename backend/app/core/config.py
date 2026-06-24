@@ -12,7 +12,7 @@ DEFAULT_PROTOCOL_VERSION = "2026-06-15"
 
 
 class AppSettings(BaseSettings):
-    app_name: str = "keydex-agent"
+    app_name: str = "Keydex"
     version: str = "0.1.0"
     protocol_version: str = DEFAULT_PROTOCOL_VERSION
     host: str = "127.0.0.1"
@@ -21,7 +21,7 @@ class AppSettings(BaseSettings):
     workspace_root: Path = Field(default_factory=lambda: Path.cwd().resolve())
     default_user_id: str = "local-user"
     default_scene_id: str = "desktop-agent"
-    default_scene_name: str = "Local Desktop Agent"
+    default_scene_name: str = "Keydex"
     max_history_messages: int = Field(default=40, ge=1)
     max_tool_calls: int = Field(default=80, ge=1)
     tool_timeout_seconds: float = Field(default=120.0, gt=0)

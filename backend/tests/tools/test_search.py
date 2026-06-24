@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-
 from backend.app.tools import ToolExecutionContext, ToolRegistry
 from backend.app.tools.search import register_search_tools
 
@@ -35,6 +33,34 @@ async def test_search_text_finds_chinese_content(tmp_path) -> None:
     assert "关键逻辑" in result.result["results"][0]["snippet"]
 
 
+async def test_search_text_supports_context_and_include_exclude(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("one\nneedle\ntwo\n", encoding="utf-8")
+    (tmp_path / "src" / "skip.txt").write_text("needle\n", encoding="utf-8")
+
+    result = await _run(
+        "search_text",
+        {
+            "query": "needle",
+            "include": ["*.py"],
+            "exclude": ["skip*"],
+            "context_lines": 1,
+        },
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert result.result["results"] == [
+        {
+            "path": "src/main.py",
+            "line": 2,
+            "snippet": "needle",
+            "before_context": [{"line": 1, "text": "one"}],
+            "after_context": [{"line": 3, "text": "two"}],
+        }
+    ]
+
+
 async def test_search_text_returns_empty_results(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")
 
@@ -44,8 +70,7 @@ async def test_search_text_returns_empty_results(tmp_path) -> None:
     assert result.result["results"] == []
 
 
-async def test_search_text_reports_invalid_regex(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+async def test_search_text_reports_invalid_regex(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")
 
     result = await _run("search_text", {"query": "[", "regex": True}, tmp_path)
@@ -63,6 +88,35 @@ async def test_search_files_finds_by_name_and_path(tmp_path) -> None:
     paths = [item["path"] for item in result.result["results"]]
     assert "src/pkg" in paths
     assert "src/pkg/agent.py" in paths
+
+
+async def test_search_files_does_not_search_file_contents(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "agent.py").write_text("UNIQUE_CONTENT", encoding="utf-8")
+
+    result = await _run("search_files", {"query": "UNIQUE_CONTENT"}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["results"] == []
+    assert result.result["search_scope"] == "path"
+
+
+async def test_grep_files_finds_matching_file_paths(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "src" / "agent.py").write_text("class LocalAgent:\n    pass\n", encoding="utf-8")
+    (tmp_path / "docs" / "note.md").write_text("LocalAgent design\n", encoding="utf-8")
+
+    result = await _run(
+        "grep_files",
+        {"query": "LocalAgent", "regex": False, "include": ["*.py"]},
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert result.result["paths"] == ["src/agent.py"]
+    assert result.result["results"][0]["matches"] == 1
+    assert result.result["results"][0]["first_line"] == 1
 
 
 async def test_search_tools_reject_workspace_escape(tmp_path) -> None:

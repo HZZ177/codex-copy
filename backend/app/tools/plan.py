@@ -5,15 +5,19 @@ from typing import Any, Literal
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
 
-PlanStatus = Literal["pending", "in_progress", "completed"]
-VALID_PLAN_STATUSES: set[str] = {"pending", "in_progress", "completed"}
+PlanStatus = Literal["pending", "in_progress", "completed", "failed"]
+VALID_PLAN_STATUSES: set[str] = {"pending", "in_progress", "completed", "failed"}
 
 
 def create_plan_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
             name="update_plan",
-            description="同步当前任务计划快照，用于前端计划卡片和历史恢复。",
+            description=(
+                "向前端同步当前完整任务计划快照，用于展示多步骤任务进度。"
+                "每次调用都应发送全部步骤，并且最多只能有一个步骤处于 in_progress。"
+                "步骤状态支持 pending、in_progress、completed、failed。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -30,7 +34,7 @@ def create_plan_tools() -> list[FunctionTool]:
                                 "step": {"type": "string", "description": "计划步骤内容。"},
                                 "status": {
                                     "type": "string",
-                                    "enum": ["pending", "in_progress", "completed"],
+                                    "enum": ["pending", "in_progress", "completed", "failed"],
                                 },
                             },
                             "required": ["step", "status"],
@@ -58,6 +62,7 @@ async def update_plan_tool(
     entries = _normalize_plan(raw_plan)
     explanation = _optional_text(args.get("explanation"))
     completed = sum(1 for entry in entries if entry["status"] == "completed")
+    failed = sum(1 for entry in entries if entry["status"] == "failed")
     active = next((entry["content"] for entry in entries if entry["status"] == "in_progress"), None)
 
     ui_payload = {
@@ -72,6 +77,7 @@ async def update_plan_tool(
         "summary": {
             "total": len(entries),
             "completed": completed,
+            "failed": failed,
             "active": active,
         },
         "session_id": context.session_id,

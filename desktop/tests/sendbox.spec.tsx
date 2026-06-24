@@ -1,8 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { SendBox } from "@/renderer/components/chat/SendBox";
-import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
+import { SendBox, selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
 
 describe("SendBox", () => {
   it("renders a Codex-like floating input shell without unavailable actions", () => {
@@ -224,8 +223,29 @@ describe("SendBox", () => {
     expect(input.getAttribute("data-empty")).toBe("false");
   });
 
-  it("renders quoted draft markers as removable top context chips", async () => {
+  it("keeps bracket syntax as ordinary composer text", () => {
+    render(
+      <SendBox
+        value="[[123]]"
+        runtimeState="idle"
+        canSend
+        canStop={false}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("继续输入").textContent).toBe("[[123]]");
+    expect(screen.queryByLabelText("已添加上下文")).toBeNull();
+  });
+
+  it("renders external quote requests as removable top context chips", async () => {
     const onChange = vi.fn();
+    const quote = selectedQuoteFromText("这是一段选中的历史内容");
+    if (!quote) {
+      throw new Error("quote not created");
+    }
     vi.stubGlobal("navigator", {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -235,10 +255,11 @@ describe("SendBox", () => {
     try {
       render(
         <SendBox
-          value={createQuoteMarker("这是一段选中的历史内容")}
+          value=""
           runtimeState="idle"
-          canSend
+          canSend={false}
           canStop={false}
+          externalQuoteRequest={{ requestId: 1, quote }}
           onChange={onChange}
           onSend={vi.fn()}
           onStop={vi.fn()}
@@ -268,18 +289,49 @@ describe("SendBox", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
 
-    expect(onChange).toHaveBeenCalledWith("");
+    expect(screen.queryByText("引用片段")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("submits explicit quote context without hidden composer text", async () => {
+    const quote = selectedQuoteFromText("这是一段选中的历史内容");
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    const onSend = vi.fn();
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalQuoteRequest={{ requestId: 1, quote }}
+        onChange={vi.fn()}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("引用片段")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(onSend).toHaveBeenCalledWith([], [quote]);
   });
 
   it("hides the quote card when the pointer leaves a top context chip", () => {
+    const quote = selectedQuoteFromText("这是一段选中的历史内容");
+    if (!quote) {
+      throw new Error("quote not created");
+    }
     vi.useFakeTimers();
     try {
       render(
         <SendBox
-          value={createQuoteMarker("这是一段选中的历史内容")}
+          value=""
           runtimeState="idle"
-          canSend
+          canSend={false}
           canStop={false}
+          externalQuoteRequest={{ requestId: 1, quote }}
           onChange={vi.fn()}
           onSend={vi.fn()}
           onStop={vi.fn()}
@@ -309,14 +361,18 @@ describe("SendBox", () => {
   });
 
   it("keeps top quote context when editing the visible composer text", () => {
-    const marker = createQuoteMarker("这是一段选中的历史内容");
+    const quote = selectedQuoteFromText("这是一段选中的历史内容");
+    if (!quote) {
+      throw new Error("quote not created");
+    }
     const onChange = vi.fn();
     render(
       <SendBox
-        value={`原文${marker}`}
+        value="原文"
         runtimeState="idle"
         canSend
         canStop={false}
+        externalQuoteRequest={{ requestId: 1, quote }}
         onChange={onChange}
         onSend={vi.fn()}
         onStop={vi.fn()}
@@ -330,6 +386,107 @@ describe("SendBox", () => {
     input.textContent = "更新后正文";
     fireEvent.input(input);
 
-    expect(onChange).toHaveBeenCalledWith(`更新后正文${marker}`);
+    expect(onChange).toHaveBeenCalledWith("更新后正文");
+  });
+
+  it("adds an external file chip once for a request id", () => {
+    const props = {
+      value: "",
+      runtimeState: "idle" as const,
+      canSend: false,
+      canStop: false,
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+    };
+    const request = {
+      requestId: 1,
+      file: {
+        path: "src/main.ts",
+        name: "main.ts",
+        type: "file" as const,
+        source: "workspace" as const,
+      },
+    };
+    const { rerender } = render(<SendBox {...props} externalFileRequest={request} />);
+
+    expect(screen.getAllByText("main.ts")).toHaveLength(1);
+    expect(screen.queryByText("src/main.ts")).toBeNull();
+
+    rerender(<SendBox {...props} externalFileRequest={request} />);
+
+    expect(screen.getAllByText("main.ts")).toHaveLength(1);
+    expect(screen.queryByText("src/main.ts")).toBeNull();
+  });
+
+  it("shows the full file path in a hover card for top file chips", () => {
+    vi.useFakeTimers();
+    const path = "src/features/conversation/components/deeply-nested/FileWithLongName.tsx";
+
+    try {
+      render(
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          externalFileRequest={{
+            requestId: 1,
+            file: {
+              path,
+              name: "FileWithLongName.tsx",
+              type: "file",
+              source: "workspace",
+            },
+          }}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("FileWithLongName.tsx")).not.toBeNull();
+      expect(screen.queryByText(path)).toBeNull();
+
+      fireEvent.mouseEnter(screen.getByText("FileWithLongName.tsx"));
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+
+      expect(screen.getByText("FileWithLongName.tsx")).not.toBeNull();
+      expect(screen.getAllByText(path)).toHaveLength(1);
+      expect(document.querySelector('[data-file-path-hover-title="true"]')?.textContent).toBe(path);
+      expect(document.querySelector('[data-file-path-hover-card="true"]')?.textContent).toContain(path);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes an externally added file chip", () => {
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalFileRequest={{
+          requestId: 1,
+          file: {
+            path: "src/main.ts",
+            name: "main.ts",
+            type: "file",
+            source: "workspace",
+          },
+        }}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const fileButtons = screen.getAllByRole("button", { name: /src\/main\.ts/ });
+    fireEvent.click(fileButtons[fileButtons.length - 1]);
+
+    expect(screen.queryByText("main.ts")).toBeNull();
   });
 });

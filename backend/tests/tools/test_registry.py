@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from backend.app.agent.langchain_tools import registry_to_langchain_tools
 from backend.app.tools import (
     FunctionTool,
     ToolDefinitionError,
@@ -9,6 +10,7 @@ from backend.app.tools import (
     ToolExecutionError,
     ToolRegistry,
     ToolRegistryError,
+    create_default_tool_registry,
 )
 
 
@@ -74,7 +76,7 @@ def test_function_tool_validates_schema_and_name() -> None:
     with pytest.raises(ToolDefinitionError, match="顶层 type"):
         FunctionTool(
             name="bad_schema",
-            description="bad",
+            description="错误 schema",
             parameters={"type": "array"},
             handler=lambda args, context: None,
         )
@@ -107,3 +109,42 @@ async def test_function_tool_executes_and_wraps_errors(tmp_path) -> None:
         "message": "无法读取",
         "details": {"path": "missing.txt"},
     }
+
+
+def test_default_tool_registry_exposes_phase_one_tool_contracts(tmp_path) -> None:
+    registry = create_default_tool_registry()
+
+    assert registry.names() == [
+        "apply_patch",
+        "grep_files",
+        "list_dir",
+        "read_file",
+        "run_command",
+        "search_files",
+        "search_text",
+        "update_plan",
+        "write_file",
+    ]
+    specs = {spec.name: spec for spec in registry.to_tool_specs()}
+    assert "带行号的 numbered_content" in specs["read_file"].description
+    assert "创建新的 UTF-8 文本文件" in specs["write_file"].description
+    assert "目标文件已存在会失败" in specs["write_file"].description
+    assert "有界目录树" in specs["list_dir"].description
+    assert "不搜索文件内容" in specs["search_files"].description
+    assert "发现候选文件" in specs["grep_files"].description
+    assert "*** Move to: <path>" in specs["apply_patch"].description
+    assert "一次性 shell 命令" in specs["run_command"].description
+    assert "最多只能有一个步骤处于 in_progress" in specs["update_plan"].description
+    assert "failed" in specs["update_plan"].parameters["properties"]["plan"]["items"]["properties"]["status"]["enum"]
+    assert specs["list_dir"].parameters["properties"]["depth"]["maximum"] == 5
+    assert "mode" not in specs["write_file"].parameters["properties"]
+    assert "append" not in specs["write_file"].parameters["properties"]
+    assert "offset" not in specs["read_file"].parameters["properties"]
+    assert "grep_files" in specs
+
+    langchain_tools = registry_to_langchain_tools(
+        registry,
+        context_factory=lambda: _context(tmp_path),
+    )
+    assert {tool.name for tool in langchain_tools} == set(specs)
+    assert next(tool for tool in langchain_tools if tool.name == "grep_files").description == specs["grep_files"].description

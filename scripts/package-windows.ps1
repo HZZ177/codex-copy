@@ -22,8 +22,8 @@ $BackendPython = Join-Path $Root ".venv\Scripts\python.exe"
 $DesktopDir = Join-Path $Root "desktop"
 $TauriDir = Join-Path $DesktopDir "src-tauri"
 $Sidecar = Join-Path $Root "desktop\src-tauri\binaries\agent-server-x86_64-pc-windows-msvc.exe"
-$Installer = Join-Path $Root "desktop\src-tauri\target\release\bundle\nsis\Python Codex_0.1.0_x64-setup.exe"
-$ReleaseApp = Join-Path $Root "desktop\src-tauri\target\release\python-codex-desktop.exe"
+$Installer = Join-Path $Root "desktop\src-tauri\target\release\bundle\nsis\Keydex_0.1.0_x64-setup.exe"
+$ReleaseApp = Join-Path $Root "desktop\src-tauri\target\release\keydex-desktop.exe"
 $ReleaseSidecar = Join-Path $Root "desktop\src-tauri\target\release\agent-server.exe"
 $ArtifactDir = Join-Path $Root "artifacts\windows"
 
@@ -55,7 +55,7 @@ function Stop-ArtifactProcesses {
         return
     }
     $resolved = (Resolve-Path $Directory).Path
-    Get-Process "python-codex-desktop", "agent-server" -ErrorAction SilentlyContinue |
+    Get-Process "keydex-desktop", "agent-server" -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -and $_.Path.StartsWith($resolved, [System.StringComparison]::OrdinalIgnoreCase) } |
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
@@ -179,8 +179,8 @@ Invoke-Step "复制发布产物到快速目录" {
     New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
     Stop-ArtifactProcesses -Directory $ArtifactDir
 
-    $artifactInstaller = Join-Path $ArtifactDir "Python Codex_0.1.0_x64-setup.exe"
-    $artifactApp = Join-Path $ArtifactDir "python-codex-desktop.exe"
+    $artifactInstaller = Join-Path $ArtifactDir "Keydex_0.1.0_x64-setup.exe"
+    $artifactApp = Join-Path $ArtifactDir "keydex-desktop.exe"
     $artifactSidecar = Join-Path $ArtifactDir "agent-server.exe"
     $artifactBuildSidecar = Join-Path $ArtifactDir "agent-server-x86_64-pc-windows-msvc.exe"
 
@@ -212,13 +212,13 @@ Invoke-Step "复制发布产物到快速目录" {
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $ArtifactDir "manifest.json")
 
     $readmeLines = @(
-        "Python Codex Windows 产物",
+        "Keydex Windows 产物",
         "",
         "主安装包：",
-        "  Python Codex_0.1.0_x64-setup.exe",
+        "  Keydex_0.1.0_x64-setup.exe",
         "",
         "调试/直接运行二进制：",
-        "  python-codex-desktop.exe",
+        "  keydex-desktop.exe",
         "  agent-server.exe",
         "",
         "Tauri sidecar 输入二进制：",
@@ -233,7 +233,7 @@ Invoke-Step "复制发布产物到快速目录" {
 
 $InstallerInfo = Get-Item -LiteralPath $Installer
 $SidecarInfo = Get-Item -LiteralPath $Sidecar
-$ArtifactInstallerInfo = Get-Item -LiteralPath (Join-Path $ArtifactDir "Python Codex_0.1.0_x64-setup.exe")
+$ArtifactInstallerInfo = Get-Item -LiteralPath (Join-Path $ArtifactDir "Keydex_0.1.0_x64-setup.exe")
 
 Write-Host ""
 Write-Host "打包完成。"

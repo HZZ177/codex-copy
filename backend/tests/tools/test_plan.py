@@ -29,6 +29,7 @@ async def test_update_plan_tool_creates_plan_ui_payload(tmp_path) -> None:
                 {"step": "分析需求", "status": "completed"},
                 {"step": "实现工具", "status": "in_progress"},
                 {"step": "补充测试", "status": "pending"},
+                {"step": "回归失败项", "status": "failed"},
             ],
         },
         tmp_path,
@@ -41,11 +42,13 @@ async def test_update_plan_tool_creates_plan_ui_payload(tmp_path) -> None:
             {"content": "分析需求", "status": "completed"},
             {"content": "实现工具", "status": "in_progress"},
             {"content": "补充测试", "status": "pending"},
+            {"content": "回归失败项", "status": "failed"},
         ],
     }
     assert result.result["summary"] == {
-        "total": 3,
+        "total": 4,
         "completed": 1,
+        "failed": 1,
         "active": "实现工具",
     }
     assert result.result["session_id"] == "ses_plan"

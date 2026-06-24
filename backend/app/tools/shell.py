@@ -33,7 +33,10 @@ def create_shell_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
             name="run_command",
-            description="在当前工作区内执行 shell 命令，返回 stdout、stderr、exit_code 和耗时。",
+            description=(
+                "在当前工作区内执行一次性 shell 命令，并返回 stdout、stderr、exit_code、cwd 和 duration_ms。"
+                "适用于有边界的诊断或测试；该工具不是交互式终端，也不提供持久会话。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {

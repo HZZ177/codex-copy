@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.ids import new_id
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.security import WorkspacePathError, normalize_workspace_root_for_storage
 from backend.app.storage.db import Database
@@ -133,6 +134,26 @@ class MessageEventRecord:
     created_at: str
     updated_at: str
     trace_record_id: str | None = None
+    is_deleted: bool = False
+
+
+@dataclass(frozen=True)
+class WorkspaceFileAnnotationRecord:
+    id: str
+    scope_type: str
+    scope_id: str
+    path: str
+    anchor_type: str
+    comment: str
+    created_at: str
+    updated_at: str
+    workspace_id: str | None = None
+    selected_text: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    column_start: int | None = None
+    column_end: int | None = None
+    content_hash: str | None = None
     is_deleted: bool = False
 
 
@@ -793,6 +814,341 @@ class SessionsRepository:
             cwd=row["cwd"],
             workspace_roots=_json_loads(row["workspace_roots_json"], []),
             title=row["title"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            is_deleted=bool(row["is_deleted"]),
+        )
+
+
+class WorkspaceFileAnnotationsRepository:
+    VALID_SCOPE_TYPES = {"session", "workspace"}
+    VALID_ANCHOR_TYPES = {"file", "selection"}
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def create(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        workspace_id: str | None,
+        path: str,
+        anchor_type: str,
+        comment: str,
+        selected_text: str | None = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+        column_start: int | None = None,
+        column_end: int | None = None,
+        content_hash: str | None = None,
+        annotation_id: str | None = None,
+    ) -> WorkspaceFileAnnotationRecord:
+        values = self._validate_values(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            path=path,
+            anchor_type=anchor_type,
+            comment=comment,
+            selected_text=selected_text,
+            line_start=line_start,
+            line_end=line_end,
+            column_start=column_start,
+            column_end=column_end,
+            content_hash=content_hash,
+        )
+        resolved_id = annotation_id or new_id()
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                insert into workspace_file_annotations (
+                  id, scope_type, scope_id, workspace_id, path, anchor_type, comment,
+                  selected_text, line_start, line_end, column_start, column_end,
+                  content_hash, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    resolved_id,
+                    values["scope_type"],
+                    values["scope_id"],
+                    workspace_id,
+                    values["path"],
+                    values["anchor_type"],
+                    values["comment"],
+                    values["selected_text"],
+                    values["line_start"],
+                    values["line_end"],
+                    values["column_start"],
+                    values["column_end"],
+                    values["content_hash"],
+                    now,
+                    now,
+                ),
+            )
+        record = self.get(
+            resolved_id,
+            scope_type=values["scope_type"],
+            scope_id=values["scope_id"],
+        )
+        if record is None:
+            raise RuntimeError(f"Created annotation cannot be loaded: {resolved_id}")
+        return record
+
+    def get(
+        self,
+        annotation_id: str,
+        *,
+        scope_type: str,
+        scope_id: str,
+        include_deleted: bool = False,
+    ) -> WorkspaceFileAnnotationRecord | None:
+        self._validate_scope(scope_type, scope_id)
+        query = """
+            select * from workspace_file_annotations
+            where id = ? and scope_type = ? and scope_id = ?
+        """
+        params: list[Any] = [annotation_id, scope_type, scope_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._from_row(row) if row else None
+
+    def list(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        path: str,
+    ) -> list[WorkspaceFileAnnotationRecord]:
+        scope_type, scope_id = self._validate_scope(scope_type, scope_id)
+        normalized_path = self._normalize_path(path)
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                select * from workspace_file_annotations
+                where scope_type = ?
+                  and scope_id = ?
+                  and path = ?
+                  and is_deleted = 0
+                order by updated_at desc, created_at desc, id desc
+                """,
+                (scope_type, scope_id, normalized_path),
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def update(
+        self,
+        annotation_id: str,
+        *,
+        scope_type: str,
+        scope_id: str,
+        anchor_type: str,
+        comment: str,
+        selected_text: str | None = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+        column_start: int | None = None,
+        column_end: int | None = None,
+        content_hash: str | None = None,
+    ) -> WorkspaceFileAnnotationRecord | None:
+        values = self._validate_values(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            path="placeholder.txt",
+            anchor_type=anchor_type,
+            comment=comment,
+            selected_text=selected_text,
+            line_start=line_start,
+            line_end=line_end,
+            column_start=column_start,
+            column_end=column_end,
+            content_hash=content_hash,
+        )
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                update workspace_file_annotations
+                set
+                  anchor_type = ?,
+                  comment = ?,
+                  selected_text = ?,
+                  line_start = ?,
+                  line_end = ?,
+                  column_start = ?,
+                  column_end = ?,
+                  content_hash = ?,
+                  updated_at = ?
+                where id = ?
+                  and scope_type = ?
+                  and scope_id = ?
+                  and is_deleted = 0
+                """,
+                (
+                    values["anchor_type"],
+                    values["comment"],
+                    values["selected_text"],
+                    values["line_start"],
+                    values["line_end"],
+                    values["column_start"],
+                    values["column_end"],
+                    values["content_hash"],
+                    now,
+                    annotation_id,
+                    values["scope_type"],
+                    values["scope_id"],
+                ),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get(
+            annotation_id,
+            scope_type=values["scope_type"],
+            scope_id=values["scope_id"],
+        )
+
+    def delete(
+        self,
+        annotation_id: str,
+        *,
+        scope_type: str,
+        scope_id: str,
+    ) -> bool:
+        scope_type, scope_id = self._validate_scope(scope_type, scope_id)
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                update workspace_file_annotations
+                set is_deleted = 1, updated_at = ?
+                where id = ?
+                  and scope_type = ?
+                  and scope_id = ?
+                  and is_deleted = 0
+                """,
+                (to_iso_z(utc_now()), annotation_id, scope_type, scope_id),
+            )
+        return cursor.rowcount > 0
+
+    @classmethod
+    def _validate_values(
+        cls,
+        *,
+        scope_type: str,
+        scope_id: str,
+        path: str,
+        anchor_type: str,
+        comment: str,
+        selected_text: str | None,
+        line_start: int | None,
+        line_end: int | None,
+        column_start: int | None,
+        column_end: int | None,
+        content_hash: str | None,
+    ) -> dict[str, Any]:
+        normalized_scope_type, normalized_scope_id = cls._validate_scope(scope_type, scope_id)
+        normalized_path = cls._normalize_path(path)
+        normalized_anchor_type = str(anchor_type or "").strip()
+        if normalized_anchor_type not in cls.VALID_ANCHOR_TYPES:
+            raise ValueError(f"Unsupported annotation anchor_type: {anchor_type}")
+
+        normalized_comment = str(comment or "").strip()
+        if not normalized_comment:
+            raise ValueError("Annotation comment cannot be empty")
+
+        resolved_selected_text = selected_text if selected_text is None else str(selected_text)
+        if normalized_anchor_type == "selection" and not (resolved_selected_text or "").strip():
+            raise ValueError("Selection annotation requires selected_text")
+        if normalized_anchor_type == "file":
+            resolved_selected_text = None
+            line_start = None
+            line_end = None
+            column_start = None
+            column_end = None
+
+        cls._validate_range(
+            line_start=line_start,
+            line_end=line_end,
+            column_start=column_start,
+            column_end=column_end,
+        )
+
+        return {
+            "scope_type": normalized_scope_type,
+            "scope_id": normalized_scope_id,
+            "path": normalized_path,
+            "anchor_type": normalized_anchor_type,
+            "comment": normalized_comment,
+            "selected_text": resolved_selected_text,
+            "line_start": line_start,
+            "line_end": line_end,
+            "column_start": column_start,
+            "column_end": column_end,
+            "content_hash": str(content_hash).strip() if content_hash else None,
+        }
+
+    @classmethod
+    def _validate_scope(cls, scope_type: str, scope_id: str) -> tuple[str, str]:
+        normalized_scope_type = str(scope_type or "").strip()
+        normalized_scope_id = str(scope_id or "").strip()
+        if normalized_scope_type not in cls.VALID_SCOPE_TYPES:
+            raise ValueError(f"Unsupported annotation scope_type: {scope_type}")
+        if not normalized_scope_id:
+            raise ValueError("Annotation scope_id cannot be empty")
+        return normalized_scope_type, normalized_scope_id
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        normalized = str(path or "").replace("\\", "/").strip().strip("/")
+        if not normalized or normalized == ".":
+            raise ValueError("Annotation path cannot be empty")
+        if Path(normalized).is_absolute():
+            raise ValueError("Annotation path must be workspace-relative")
+        segments = [segment for segment in normalized.split("/") if segment]
+        if any(segment == ".." for segment in segments):
+            raise ValueError("Annotation path must stay inside the workspace")
+        return "/".join(segments)
+
+    @staticmethod
+    def _validate_range(
+        *,
+        line_start: int | None,
+        line_end: int | None,
+        column_start: int | None,
+        column_end: int | None,
+    ) -> None:
+        if (line_start is None) != (line_end is None):
+            raise ValueError("Annotation line range must include start and end")
+        if line_start is not None and line_end is not None:
+            if line_start < 1 or line_end < 1 or line_end < line_start:
+                raise ValueError("Annotation line range is invalid")
+        if (column_start is None) != (column_end is None):
+            raise ValueError("Annotation column range must include start and end")
+        if column_start is not None and column_end is not None:
+            if line_start is None or line_end is None:
+                raise ValueError("Annotation column range requires a line range")
+            if column_start < 1 or column_end < 1:
+                raise ValueError("Annotation column range is invalid")
+            if line_start == line_end and column_end < column_start:
+                raise ValueError("Annotation column range is invalid")
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> WorkspaceFileAnnotationRecord:
+        return WorkspaceFileAnnotationRecord(
+            id=row["id"],
+            scope_type=row["scope_type"],
+            scope_id=row["scope_id"],
+            workspace_id=row["workspace_id"],
+            path=row["path"],
+            anchor_type=row["anchor_type"],
+            comment=row["comment"],
+            selected_text=row["selected_text"],
+            line_start=row["line_start"],
+            line_end=row["line_end"],
+            column_start=row["column_start"],
+            column_end=row["column_end"],
+            content_hash=row["content_hash"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_deleted=bool(row["is_deleted"]),
@@ -1667,6 +2023,7 @@ class StorageRepositories:
         self.model_providers = ModelProvidersRepository(db)
         self.workspaces = WorkspacesRepository(db)
         self.sessions = SessionsRepository(db)
+        self.workspace_file_annotations = WorkspaceFileAnnotationsRepository(db)
         self.message_events = MessageEventsRepository(db)
         self.trace_records = TraceRecordsRepository(db)
         self.trace_event_logs = TraceEventLogsRepository(db)

@@ -1,11 +1,23 @@
 import { Check, Copy } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type AnchorHTMLAttributes, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type AnchorHTMLAttributes,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 
 import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
 import { useOptionalPreview, type PreviewRenderContext } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import { quoteMarkersToMarkdownLinks, quoteTextFromMarkdownHref } from "@/renderer/utils/quoteMarkers";
 import type { AgentContextItem } from "@/types/protocol";
 
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
@@ -55,7 +67,7 @@ export function MessageText({
     () => redactTextualToolProtocol(stripThinkTags(message.content)),
     [message.content],
   );
-  const content = isUser ? quoteMarkersToMarkdownLinks(message.content) : assistantContent.content;
+  const content = isUser ? message.content : assistantContent.content;
   const contextItems = useMemo(
     () => (isUser ? contextItemsFromPayload(message.payload) : []),
     [isUser, message.payload],
@@ -220,6 +232,9 @@ function MessageContextChip({
   if (item.type === "file") {
     return <MessageFileContextChip item={item} onOpenFile={onOpenFile} />;
   }
+  if (item.type === "source_quote") {
+    return <MessageSourceQuoteContextChip item={item} onOpenFile={onOpenFile} />;
+  }
   if (item.type === "quote") {
     return <MessageQuoteContextChip item={item} />;
   }
@@ -234,46 +249,96 @@ function MessageFileContextChip({
   onOpenFile?: (item: AgentContextItem) => void;
 }) {
   const canOpen = Boolean(item.path && onOpenFile);
+  const pathPreview = item.path || item.content || item.label;
+  const chipLabel = contextFileName(item.name || item.label || pathPreview);
   return (
-    <span className={styles.contextItemWrapper}>
-      <button
-        className={styles.contextItemChip}
-        type="button"
-        aria-label={`打开文件引用 ${item.path || item.label}`}
-        data-clickable={canOpen ? "true" : "false"}
-        data-context-type={item.type}
-        disabled={!canOpen}
-        onClick={() => onOpenFile?.(item)}
-      >
-        @{item.label}
-      </button>
-    </span>
+    <FloatingQuotePreview
+      quoteText={fileContextKindLabel(item)}
+      titleText={pathPreview}
+      wrapperClassName={styles.contextItemWrapper}
+      chipClassName={styles.contextItemChip}
+      cardClassName={`${styles.contextItemCard} ${styles.contextItemPathCard}`}
+      titleClassName={styles.contextItemPathTitle}
+      bodyClassName={styles.contextItemPathMeta}
+      chipElement="button"
+      chipButtonProps={{
+        type: "button",
+        "aria-label": `打开文件引用 ${item.path || item.label}`,
+        disabled: !canOpen,
+        onClick: () => onOpenFile?.(item),
+      }}
+      chipProps={{
+        "data-clickable": canOpen ? "true" : "false",
+        "data-context-type": item.type,
+      }}
+      showCopyAction={false}
+    >
+      @{chipLabel}
+    </FloatingQuotePreview>
+  );
+}
+
+function fileContextKindLabel(item: AgentContextItem): string {
+  return item.fileType === "directory" ? "工作区目录" : "工作区文件";
+}
+
+function contextFileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function MessageSourceQuoteContextChip({
+  item,
+  onOpenFile,
+}: {
+  item: AgentContextItem;
+  onOpenFile?: (item: AgentContextItem) => void;
+}) {
+  const canOpen = Boolean(item.path && onOpenFile);
+  const lineLabel = contextItemLineLabel(item);
+  const path = item.path || item.label;
+  const preview = `${path}${lineLabel ? `\n${lineLabel}` : ""}\n\n${item.content || item.label}`;
+  return (
+    <FloatingQuotePreview
+      quoteText={preview}
+      copyValue={item.content || item.path || item.label}
+      wrapperClassName={styles.contextItemWrapper}
+      chipClassName={styles.contextItemChip}
+      cardClassName={styles.contextItemCard}
+      bodyClassName={styles.contextItemBody}
+      actionsClassName={styles.contextItemActions}
+      chipElement="button"
+      chipButtonProps={{
+        type: "button",
+        "aria-label": `打开文件引用 ${path}`,
+        disabled: !canOpen,
+        onClick: () => onOpenFile?.(item),
+      }}
+      chipProps={{
+        "data-clickable": canOpen ? "true" : "false",
+        "data-context-type": item.type,
+      }}
+    >
+      {item.label}
+    </FloatingQuotePreview>
   );
 }
 
 function MessageQuoteContextChip({ item }: { item: AgentContextItem }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const preview = item.content || item.label;
-  const handleCopy = async () => {
-    await copyText(item.content || item.path || item.label);
-    setCopyState("copied");
-    window.setTimeout(() => setCopyState("idle"), 1200);
-  };
   return (
-    <span className={styles.contextItemWrapper}>
-      <span className={styles.contextItemChip} tabIndex={0} data-context-type={item.type}>
-        {item.type === "file" ? "@" : ""}
-        {item.label}
-      </span>
-      <span className={styles.contextItemCard} onMouseDown={(event) => event.preventDefault()}>
-        <span className={styles.contextItemBody}>{preview}</span>
-        <span className={styles.contextItemActions}>
-          <button type="button" onClick={handleCopy}>
-            {copyState === "copied" ? "已复制" : "复制"}
-          </button>
-        </span>
-      </span>
-    </span>
+    <FloatingQuotePreview
+      quoteText={preview}
+      copyValue={item.content || item.path || item.label}
+      wrapperClassName={styles.contextItemWrapper}
+      chipClassName={styles.contextItemChip}
+      cardClassName={styles.contextItemCard}
+      bodyClassName={styles.contextItemBody}
+      actionsClassName={styles.contextItemActions}
+      chipProps={{ "data-context-type": item.type }}
+    >
+      {item.type === "file" ? "@" : ""}
+      {item.label}
+    </FloatingQuotePreview>
   );
 }
 
@@ -285,6 +350,19 @@ function MessagePlainContextChip({ item }: { item: AgentContextItem }) {
       </span>
     </span>
   );
+}
+
+function contextItemLineLabel(item: AgentContextItem): string | null {
+  const start = numericMetadataValue(item.metadata?.line_start);
+  const end = numericMetadataValue(item.metadata?.line_end);
+  if (!start || !end) {
+    return null;
+  }
+  return start === end ? `L${start}` : `L${start}-L${end}`;
+}
+
+function numericMetadataValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export function MessageActionFooter({
@@ -378,7 +456,7 @@ function previewRenderContextFromWorkspaceScope(
     context.runtime = runtime;
   }
   if (onQuoteSelection) {
-    context.onQuoteSelection = onQuoteSelection;
+    context.onQuoteSelection = (request) => onQuoteSelection(request.selectedText);
   }
   return context;
 }
@@ -400,30 +478,6 @@ function previewContextMatchesWorkspaceScope(
 }
 
 function MarkdownAnchor({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) {
-  const quoteText = quoteTextFromMarkdownHref(href);
-  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
-  if (quoteText) {
-    const handleCopy = async () => {
-      await copyText(quoteText);
-      setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 1200);
-    };
-    return (
-      <span className={styles.quoteReferenceWrapper}>
-        <span className={styles.quoteReferenceChip} tabIndex={0}>
-          {children}
-        </span>
-        <span className={styles.quoteReferenceCard} onMouseDown={(event) => event.preventDefault()}>
-          <span className={styles.quoteReferenceBody}>{quoteText}</span>
-          <span className={styles.quoteReferenceActions}>
-            <button type="button" onClick={handleCopy}>
-              {copyState === "copied" ? "已复制" : "复制"}
-            </button>
-          </span>
-        </span>
-      </span>
-    );
-  }
   return (
     <a href={href} {...props}>
       {children}
@@ -431,10 +485,245 @@ function MarkdownAnchor({ href, children, ...props }: AnchorHTMLAttributes<HTMLA
   );
 }
 
+interface FloatingQuotePosition {
+  left: number;
+  top: number;
+  arrowLeft: number;
+  placement: "top" | "bottom";
+}
+
+interface FloatingQuotePreviewProps {
+  quoteText: string;
+  copyValue?: string;
+  wrapperClassName: string;
+  chipClassName: string;
+  cardClassName: string;
+  titleText?: string;
+  titleClassName?: string;
+  bodyClassName: string;
+  actionsClassName?: string;
+  chipElement?: "span" | "button";
+  chipButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  chipProps?: Record<string, string>;
+  showCopyAction?: boolean;
+  children: ReactNode;
+}
+
+function FloatingQuotePreview({
+  quoteText,
+  copyValue,
+  wrapperClassName,
+  chipClassName,
+  cardClassName,
+  titleText,
+  titleClassName,
+  bodyClassName,
+  actionsClassName,
+  chipElement = "span",
+  chipButtonProps,
+  chipProps,
+  showCopyAction = true,
+  children,
+}: FloatingQuotePreviewProps) {
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<FloatingQuotePosition | null>(null);
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const chipRef = useRef<HTMLElement | null>(null);
+  const cardRef = useRef<HTMLSpanElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const openPreview = useCallback(() => {
+    clearCloseTimer();
+    setOpen(true);
+  }, [clearCloseTimer]);
+
+  const scheduleClosePreview = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      setPosition(null);
+      closeTimerRef.current = null;
+    }, 120);
+  }, [clearCloseTimer]);
+
+  const shouldKeepOpenOnBlur = useCallback((event: FocusEvent<HTMLElement>) => {
+    const nextTarget = event.relatedTarget;
+    return Boolean(
+      nextTarget &&
+        (wrapperRef.current?.contains(nextTarget as Node) || cardRef.current?.contains(nextTarget as Node)),
+    );
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const chip = chipRef.current;
+    if (!chip) {
+      return;
+    }
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const rect = chip.getBoundingClientRect();
+    const card = cardRef.current;
+    const cardWidth = Math.min(card?.offsetWidth || 280, Math.max(160, viewportWidth - 24));
+    const cardHeight = Math.min(card?.offsetHeight || 132, Math.max(96, viewportHeight - 24));
+    const viewportPadding = 12;
+    const gap = 8;
+    const chipCenter = rect.left + rect.width / 2;
+    const left = clamp(chipCenter - cardWidth / 2, viewportPadding, viewportWidth - cardWidth - viewportPadding);
+    const spaceAbove = rect.top - viewportPadding;
+    const spaceBelow = viewportHeight - rect.bottom - viewportPadding;
+    const placement: FloatingQuotePosition["placement"] =
+      spaceAbove >= cardHeight + gap || spaceAbove > spaceBelow ? "top" : "bottom";
+    const top =
+      placement === "top"
+        ? clamp(rect.top - cardHeight - gap, viewportPadding, viewportHeight - cardHeight - viewportPadding)
+        : clamp(rect.bottom + gap, viewportPadding, viewportHeight - cardHeight - viewportPadding);
+    const arrowLeft = clamp(chipCenter - left, 16, cardWidth - 16);
+
+    setPosition({ left, top, arrowLeft, placement });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(
+    () => () => {
+      clearCloseTimer();
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    },
+    [clearCloseTimer],
+  );
+
+  const handleCopy = async () => {
+    await copyText(copyValue || quoteText);
+    setCopyState("copied");
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopyState("idle");
+      copyTimerRef.current = null;
+    }, 1200);
+  };
+
+  const cardStyle = {
+    left: position?.left ?? 0,
+    top: position?.top ?? 0,
+    "--quote-reference-arrow-left": `${position?.arrowLeft ?? 20}px`,
+  } as CSSProperties;
+  const trigger =
+    chipElement === "button" ? (
+      <button
+        {...chipButtonProps}
+        {...chipProps}
+        ref={(node) => {
+          chipRef.current = node;
+        }}
+        className={chipClassName}
+      >
+        {children}
+      </button>
+    ) : (
+      <span
+        {...chipProps}
+        ref={(node) => {
+          chipRef.current = node;
+        }}
+        className={chipClassName}
+        tabIndex={0}
+      >
+        {children}
+      </span>
+    );
+
+  return (
+    <span
+      ref={wrapperRef}
+      className={wrapperClassName}
+      data-preview-open={open ? "true" : "false"}
+      onMouseEnter={openPreview}
+      onMouseLeave={scheduleClosePreview}
+      onFocus={openPreview}
+      onBlur={(event) => {
+        if (!shouldKeepOpenOnBlur(event)) {
+          scheduleClosePreview();
+        }
+      }}
+    >
+      {trigger}
+      {open
+        ? createPortal(
+            <span
+              ref={cardRef}
+              className={cardClassName}
+              data-floating-ready={position ? "true" : "false"}
+              data-floating-placement={position?.placement ?? "top"}
+              style={cardStyle}
+              onMouseEnter={openPreview}
+              onMouseLeave={scheduleClosePreview}
+              onFocus={openPreview}
+              onBlur={(event) => {
+                if (!shouldKeepOpenOnBlur(event)) {
+                  scheduleClosePreview();
+                }
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              {titleText ? (
+                <span className={titleClassName} data-floating-preview-title="true">
+                  {titleText}
+                </span>
+              ) : null}
+              <span className={bodyClassName}>{quoteText}</span>
+              {showCopyAction && actionsClassName ? (
+                <span className={actionsClassName}>
+                  <button type="button" onClick={handleCopy}>
+                    {copyState === "copied" ? "已复制" : "复制"}
+                  </button>
+                </span>
+              ) : null}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
 function markdownUrlTransform(url: string): string | null | undefined {
-  if (quoteTextFromMarkdownHref(url)) {
-    return url;
-  }
   return defaultUrlTransform(url);
 }
 

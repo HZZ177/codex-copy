@@ -8,7 +8,6 @@ import { LineChangeTicker } from "@/renderer/pages/conversation/messages/LineCha
 import { MessageText } from "@/renderer/pages/conversation/messages";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import { createQuoteMarker } from "@/renderer/utils/quoteMarkers";
 import type { RuntimeBridge } from "@/runtime";
 
 const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
@@ -55,22 +54,41 @@ describe("MessageText", () => {
     expect(document.querySelector("script")).toBeNull();
   });
 
-  it("renders persisted user quote markers as reference chips", async () => {
+  it("renders bracket syntax in user messages as ordinary text", () => {
     render(
       <MessageText
-        message={message("user", `请基于 ${createQuoteMarker("这是一段选中的历史内容")} 继续分析`, "completed")}
+        message={message("user", "请基于 [[这是一段选中的历史内容]] 继续分析", "completed")}
       />,
     );
 
-    expect(screen.getByTestId("message-text").textContent).toContain("请基于");
-    expect(screen.getByText("引用片段")).not.toBeNull();
-    expect(screen.queryByTitle("这是一段选中的历史内容")).toBeNull();
-    expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("这是一段选中的历史内容");
-    });
-    expect(screen.queryByText("[[这是一段选中的历史内容]]")).toBeNull();
+    expect(screen.getByTestId("message-text").textContent).toContain("[[这是一段选中的历史内容]]");
+    expect(screen.queryByText("引用片段")).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+  });
+
+  it("renders restored quote context preview cards in a body portal", async () => {
+    render(
+      <MessageText
+        message={message("user", "请看这个引用", "completed", {
+          contextItems: [
+            {
+              id: "ctx-quote",
+              type: "quote",
+              label: "引用片段",
+              content: "payload 中恢复的引用内容",
+              source: "follow",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const chip = screen.getByText("引用片段");
+    expect(screen.queryByText("payload 中恢复的引用内容")).toBeNull();
+    fireEvent.mouseEnter(chip);
+
+    const preview = await screen.findByText("payload 中恢复的引用内容");
+    expect(preview.closest('[data-testid="message-text"]')).toBeNull();
   });
 
   it("opens restored file context chips without a quote hover card", () => {
@@ -103,6 +121,36 @@ describe("MessageText", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开文件引用 README.md" }));
 
     expect(screen.getByTestId("file-panel-request").textContent).toBe("session:ses-1:README.md");
+  });
+
+  it("shows restored file context paths in a body portal", async () => {
+    const path = "src/features/conversation/components/deeply-nested/FileWithLongName.tsx";
+    render(
+      <MessageText
+        message={message("user", "please check this file", "completed", {
+          contextItems: [
+            {
+              id: "ctx-file",
+              type: "file",
+              label: path,
+              content: "workspace file",
+              source: "follow",
+              path,
+              fileType: "file",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(path)).toBeNull();
+    expect(screen.getByTestId("message-text").textContent).toContain("@FileWithLongName.tsx");
+    expect(screen.getByTestId("message-text").textContent).not.toContain(`@${path}`);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }));
+
+    const preview = await screen.findByText(path);
+    expect(preview.getAttribute("data-floating-preview-title")).toBe("true");
+    expect(preview.closest('[data-testid="message-text"]')).toBeNull();
   });
 
   it("renders Chinese headings, ordered lists and code blocks without widening the message", () => {

@@ -7,7 +7,17 @@ export interface SelectionPosition {
   height: number;
 }
 
-export function useTextSelection(containerRef: RefObject<HTMLElement | null>, enabled = true) {
+export interface TextSelectionOptions {
+  enabled?: boolean;
+  excludeSelector?: string;
+}
+
+export function useTextSelection(
+  containerRef: RefObject<HTMLElement | null>,
+  enabledOrOptions: boolean | TextSelectionOptions = true,
+) {
+  const enabled = typeof enabledOrOptions === "boolean" ? enabledOrOptions : enabledOrOptions.enabled ?? true;
+  const excludeSelector = typeof enabledOrOptions === "boolean" ? undefined : enabledOrOptions.excludeSelector;
   const [selectedText, setSelectedText] = useState("");
   const [selectionPosition, setSelectionPosition] = useState<SelectionPosition | null>(null);
   const deferredUpdateRef = useRef<number | null>(null);
@@ -30,7 +40,10 @@ export function useTextSelection(containerRef: RefObject<HTMLElement | null>, en
     }
 
     const range = selection.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) {
+    if (
+      !container.contains(range.commonAncestorContainer) ||
+      rangeTouchesExcludedElement(range, container, excludeSelector)
+    ) {
       setSelectedText("");
       setSelectionPosition(null);
       return;
@@ -46,7 +59,7 @@ export function useTextSelection(containerRef: RefObject<HTMLElement | null>, en
       width: rect.width,
       height: rect.height,
     });
-  }, [containerRef]);
+  }, [containerRef, excludeSelector]);
 
   useEffect(() => {
     if (!enabled) {
@@ -89,6 +102,25 @@ export function useTextSelection(containerRef: RefObject<HTMLElement | null>, en
   }, [enabled, updateSelection]);
 
   return { selectedText, selectionPosition, clearSelection };
+}
+
+function rangeTouchesExcludedElement(
+  range: Range,
+  container: HTMLElement,
+  excludeSelector: string | undefined,
+): boolean {
+  if (!excludeSelector) {
+    return false;
+  }
+  return [range.commonAncestorContainer, range.startContainer, range.endContainer]
+    .filter((node): node is Node => Boolean(node))
+    .some((node) => nodeTouchesExcludedElement(node, container, excludeSelector));
+}
+
+function nodeTouchesExcludedElement(node: Node, container: HTMLElement, excludeSelector: string): boolean {
+  const element = node instanceof Element ? node : node.parentElement;
+  const excluded = element?.closest(excludeSelector);
+  return Boolean(excluded && container.contains(excluded));
 }
 
 function selectionRect(range: Range): DOMRect {
