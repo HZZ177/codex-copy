@@ -103,6 +103,22 @@ fn resolve_sidecar_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn kill_child(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let mut command = Command::new("taskkill");
+        command
+            .args(["/PID", &pid, "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        if command.status().map(|status| status.success()).unwrap_or(false) {
+            let _ = child.wait();
+            return;
+        }
+    }
+
     let _ = child.kill();
     let _ = child.wait();
 }

@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "fingerprint": "6f09d57dcbf5dec1253942357b81dbe255f0c136adc27a50d4644a7bed4cca33",
+  "fingerprint": "5fe13e2ad90ed78d01cf3bdaa28467a208a0db708e536577b9a2e814cdf39c97",
   "binary": "agent-server-x86_64-pc-windows-msvc.exe",
   "inputs": [
     "backend/app/__init__.py",

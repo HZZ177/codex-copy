@@ -5,6 +5,7 @@
     [switch]$RebuildSidecar,
     [switch]$CleanSidecar,
     [switch]$Fast,
+    [switch]$Full,
     [switch]$NoSign = $true,
     [switch]$Help
 )
@@ -12,13 +13,15 @@
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-Fast] [-SkipInstall] [-SkipTests] [-SkipRustChecks] [-RebuildSidecar] [-CleanSidecar] [-NoSign]"
+    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-Fast|-Full] [-SkipInstall] [-SkipTests] [-SkipRustChecks] [-RebuildSidecar] [-CleanSidecar] [-NoSign]"
     Write-Host ""
     Write-Host "说明："
     Write-Host "- 仅在需要 Windows exe 时执行。日常开发不要默认打包。"
-    Write-Host "- 默认会安装依赖、运行测试、构建或复用 sidecar，并构建 Tauri 安装包。"
+    Write-Host "- 不传 -Fast/-Full 时会先让你选择快速打包或全量打包。"
+    Write-Host "- 全量打包会安装依赖、运行测试、构建或复用 sidecar，并构建 Tauri 安装包。"
     Write-Host "- Tauri build 会按 tauri.conf.json 的 beforeBuildCommand 构建前端资源，脚本不再重复执行前端 build。"
     Write-Host "- -Fast 跳过依赖安装、测试和 Rust 预检查；sidecar 输入未变化时直接复用。"
+    Write-Host "- -Full 直接使用全量打包模式，不显示交互选择。"
     Write-Host "- -SkipInstall 跳过依赖安装；-SkipTests 跳过测试。"
     Write-Host "- -SkipRustChecks 跳过 cargo fmt/check 预检查；Tauri release build 仍会编译 Rust。"
     Write-Host "- -RebuildSidecar 强制重建 sidecar；-CleanSidecar 清理 PyInstaller 缓存后重建。"
@@ -34,12 +37,6 @@ $Installer = Join-Path $Root "desktop\src-tauri\target\release\bundle\nsis\Keyde
 $ReleaseApp = Join-Path $Root "desktop\src-tauri\target\release\keydex-desktop.exe"
 $ReleaseSidecar = Join-Path $Root "desktop\src-tauri\target\release\agent-server.exe"
 $ArtifactDir = Join-Path $Root "artifacts\windows"
-
-if ($Fast) {
-    $SkipInstall = $true
-    $SkipTests = $true
-    $SkipRustChecks = $true
-}
 
 function Invoke-Step {
     param(
@@ -74,6 +71,59 @@ function Stop-ArtifactProcesses {
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
+function Read-PackageMode {
+    Write-Host ""
+    Write-Host "请选择 Windows 打包模式："
+    Write-Host "  1) 快速打包：跳过依赖安装、测试和 Rust 预检查；sidecar 输入未变化时复用。"
+    Write-Host "  2) 全量打包：安装依赖、运行测试和 Rust 预检查；再构建安装包。"
+    Write-Host ""
+
+    while ($true) {
+        $choice = (Read-Host "请输入 1/2，或输入 fast/full").Trim().ToLowerInvariant()
+        switch ($choice) {
+            { $_ -in @("1", "f", "fast", "quick", "q", "快速", "快速打包") } { return "Fast" }
+            { $_ -in @("2", "full", "all", "a", "全量", "全量打包") } { return "Full" }
+            default {
+                Write-Host "输入无效，请输入 1 或 2。"
+            }
+        }
+    }
+}
+
+function Resolve-PackageMode {
+    if ($Fast -and $Full) {
+        throw "-Fast 和 -Full 不能同时使用。"
+    }
+    if ($Fast) {
+        return "Fast"
+    }
+    if ($Full) {
+        return "Full"
+    }
+    return (Read-PackageMode)
+}
+
+function Apply-PackageMode {
+    param(
+        [ValidateSet("Fast", "Full")]
+        [string]$Mode
+    )
+
+    if ($Mode -eq "Fast") {
+        $script:SkipInstall = $true
+        $script:SkipTests = $true
+        $script:SkipRustChecks = $true
+        Write-Host ""
+        Write-Host "已选择：快速打包"
+        Write-Host "将跳过依赖安装、测试和 Rust 预检查；sidecar 输入未变化时复用。"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "已选择：全量打包"
+    Write-Host "将安装依赖、运行测试和 Rust 预检查；sidecar 输入未变化时复用，除非显式传入 -RebuildSidecar 或 -CleanSidecar。"
+}
+
 function Copy-Artifact {
     param(
         [string]$Source,
@@ -91,6 +141,9 @@ function Copy-Artifact {
     }
     throw $lastError
 }
+
+$PackageMode = Resolve-PackageMode
+Apply-PackageMode -Mode $PackageMode
 
 Assert-Path $BackendPython "未找到 Python 虚拟环境：$BackendPython。打包前请先创建 .venv。"
 

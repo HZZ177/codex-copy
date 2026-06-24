@@ -12,8 +12,9 @@ const faviconIcoPath = resolve(root, "public/favicon.ico");
 const favicon32Path = resolve(root, "public/favicon-32.png");
 const appleTouchPath = resolve(root, "public/apple-touch-icon.png");
 
-const icoSizes = [16, 24, 32, 48, 64, 128, 256];
+const icoSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const faviconSizes = [16, 32, 48, 64];
+const smallIconSizes = new Set([16, 20, 24, 32, 40]);
 
 const pngBySize = new Map();
 
@@ -39,13 +40,14 @@ async function renderIconPng(browser, size) {
     viewport: { width: size, height: size },
     deviceScaleFactor: 1,
   });
-  await page.setContent(iconMarkup(), { waitUntil: "load" });
+  await page.setContent(iconMarkup(size), { waitUntil: "load" });
   const png = await page.locator("svg").screenshot({ omitBackground: true });
   await page.close();
   return png;
 }
 
-function iconMarkup() {
+function iconMarkup(size) {
+  const svg = smallIconSizes.has(size) ? smallIconSvg(size) : largeIconSvg();
   return `<!doctype html>
 <html>
   <head>
@@ -69,7 +71,39 @@ function iconMarkup() {
     </style>
   </head>
   <body>
-    <svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+    ${svg}
+  </body>
+</html>`;
+}
+
+function smallIconSvg(size) {
+  const scale = size / 24;
+  const n = (value) => Math.round(value * scale);
+  const radius = Math.max(3, n(5));
+  const barX = n(5);
+  const barY = n(4);
+  const barWidth = Math.max(4, n(6));
+  const barHeight = size - barY * 2;
+  const barRadius = Math.max(1, Math.round(scale * 2));
+  const jointX = n(11);
+  const upperTipX = size - n(3);
+  const upperTopY = n(5);
+  const upperMidY = n(10);
+  const upperLowY = n(14);
+  const lowerTipX = size - n(4);
+  const lowerBottomY = size - n(3);
+  const lowerMidY = n(14);
+
+  return `<svg viewBox="0 0 ${size} ${size}" fill="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+      <rect width="${size}" height="${size}" rx="${radius}" fill="#F1E8D9" />
+      <path d="M${jointX} ${upperMidY}L${upperTipX} ${upperTopY}C${size - n(1)} ${upperTopY} ${size} ${upperTopY + n(2)} ${size} ${upperTopY + n(4)}V${upperMidY}C${size} ${upperMidY + n(1)} ${size - n(1)} ${upperMidY + n(2)} ${size - n(2)} ${upperMidY + n(3)}L${jointX} ${upperLowY}V${upperMidY}Z" fill="#D8C09D" />
+      <path d="M${jointX} ${lowerMidY}L${lowerTipX} ${lowerBottomY}C${size - n(3)} ${size - n(1)} ${size - n(4)} ${size} ${size - n(6)} ${size}H${size - n(10)}C${size - n(11)} ${size} ${size - n(12)} ${size - n(1)} ${size - n(13)} ${size - n(2)}L${barX + barWidth - 1} ${size - n(8)}V${size - n(10)}L${jointX} ${lowerMidY}Z" fill="#B84A40" />
+      <rect x="${barX}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="${barRadius}" fill="#20242A" />
+    </svg>`;
+}
+
+function largeIconSvg() {
+  return `<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect width="256" height="256" rx="56" fill="#F0E9DE" />
       <path d="M60 58C60 48.0589 68.0589 40 78 40H101C110.941 40 119 48.0589 119 58V198C119 207.941 110.941 216 101 216H78C68.0589 216 60 207.941 60 198V58Z" fill="#24272C" />
       <path d="M124 103.5L190 67C203.333 59.6262 216 69.266 216 84.5V116.5C216 123.432 212.351 129.852 206.398 133.401L124 182.5V103.5Z" fill="#E1D2BC" />
@@ -81,9 +115,7 @@ function iconMarkup() {
           <stop offset="1" stop-color="#000000" stop-opacity="0.18" />
         </linearGradient>
       </defs>
-    </svg>
-  </body>
-</html>`;
+    </svg>`;
 }
 
 async function launchBrowser() {
