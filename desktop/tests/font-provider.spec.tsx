@@ -7,15 +7,16 @@ import type { SettingsRuntime } from "@/runtime/settings";
 import type { AppFontFamily } from "@/types/protocol";
 import { installIndexedDbMock } from "./helpers/indexedDbMock";
 
-const FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
+const MAPLE_FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
 
 function FontHarness() {
   const font = useFontPreference();
   return (
     <div>
       <span data-testid="family">{font.family}</span>
+      <span data-testid="downloading-family">{font.downloadingFamily}</span>
       <span data-testid="status">{font.status}</span>
-      <span data-testid="cached">{String(font.hasMapleMonoCache)}</span>
+      <span data-testid="cached-maple">{String(font.cachedFamilies["maple-mono"])}</span>
       <span data-testid="error">{font.error}</span>
       <span data-testid="progress">
         {font.progress.downloadedBytes}/{font.progress.totalBytes}/{font.progress.percent}
@@ -44,8 +45,8 @@ function mockSuccessfulFontDownload() {
       return Promise.resolve({
         ok: true,
         headers: new Headers({ "content-type": "text/css" }),
-        text: () => Promise.resolve(FONT_CSS),
-        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(FONT_CSS).buffer),
+        text: () => Promise.resolve(MAPLE_FONT_CSS),
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(MAPLE_FONT_CSS).buffer),
       } as Response);
     }
 
@@ -87,7 +88,7 @@ describe("FontProvider", () => {
     localStorage.clear();
     indexedDB.deleteDatabase("keydex-font-cache");
     document.documentElement.removeAttribute("style");
-    document.getElementById("keydex-maple-mono-font-face")?.remove();
+    document.getElementById("keydex-custom-font-face")?.remove();
     vi.stubGlobal("fetch", vi.fn());
     vi.stubGlobal("URL", {
       ...URL,
@@ -101,7 +102,7 @@ describe("FontProvider", () => {
 
     expect(screen.getByTestId("family").textContent).toBe("system");
     expect(screen.getByTestId("status").textContent).toBe("idle");
-    expect(screen.getByTestId("cached").textContent).toBe("false");
+    expect(screen.getByTestId("cached-maple").textContent).toBe("undefined");
     expect(fetch).not.toHaveBeenCalled();
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("");
   });
@@ -125,13 +126,13 @@ describe("FontProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("family").textContent).toBe("maple-mono"));
     expect(fetch).toHaveBeenCalledTimes(8);
-    expect(screen.getByTestId("cached").textContent).toBe("true");
+    expect(screen.getByTestId("cached-maple").textContent).toBe("true");
     expect(screen.getByTestId("progress").textContent).toBe("36447552/36447552/100");
     expect(localStorage.getItem("keydex.font.family.v1")).toBe("maple-mono");
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toContain("Maple Mono CN");
     expect(document.documentElement.style.getPropertyValue("--font-reading")).toContain("Maple Mono CN");
     expect(document.documentElement.style.getPropertyValue("--font-mono")).toContain("Maple Mono CN");
-    expect(document.getElementById("keydex-maple-mono-font-face")?.textContent).toContain('url("blob:font")');
+    expect(document.getElementById("keydex-custom-font-face")?.textContent).toContain('url("blob:font")');
     expect(settingsRuntime.saveAppearanceSettings).toHaveBeenCalledWith({ font_family: "maple-mono" });
   });
 
@@ -145,7 +146,7 @@ describe("FontProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "系统默认" }));
 
     expect(screen.getByTestId("family").textContent).toBe("system");
-    expect(screen.getByTestId("cached").textContent).toBe("true");
+    expect(screen.getByTestId("cached-maple").textContent).toBe("true");
     expect(localStorage.getItem("keydex.font.family.v1")).toBe("system");
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--font-reading")).toBe("");
@@ -203,7 +204,7 @@ describe("FontProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("family").textContent).toBe("maple-mono"));
     expect(fetch).toHaveBeenCalledTimes(8);
-    expect(screen.getByTestId("cached").textContent).toBe("true");
+    expect(screen.getByTestId("cached-maple").textContent).toBe("true");
     expect(screen.getByTestId("progress").textContent).toBe("36447552/36447552/100");
   });
 });

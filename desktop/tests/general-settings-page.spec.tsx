@@ -5,7 +5,7 @@ import { GeneralSettingsPage } from "@/renderer/pages/settings/general";
 import { FontProvider } from "@/renderer/providers/FontProvider";
 import { installIndexedDbMock } from "./helpers/indexedDbMock";
 
-const FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
+const MAPLE_FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
 
 function renderPage() {
   return render(
@@ -22,8 +22,8 @@ function mockSuccessfulFontDownload() {
       return Promise.resolve({
         ok: true,
         headers: new Headers({ "content-type": "text/css" }),
-        text: () => Promise.resolve(FONT_CSS),
-        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(FONT_CSS).buffer),
+        text: () => Promise.resolve(MAPLE_FONT_CSS),
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(MAPLE_FONT_CSS).buffer),
       } as Response);
     }
 
@@ -41,7 +41,7 @@ describe("GeneralSettingsPage", () => {
     localStorage.clear();
     indexedDB.deleteDatabase("keydex-font-cache");
     document.documentElement.removeAttribute("style");
-    document.getElementById("keydex-maple-mono-font-face")?.remove();
+    document.getElementById("keydex-custom-font-face")?.remove();
     vi.stubGlobal("fetch", vi.fn());
     vi.stubGlobal("URL", {
       ...URL,

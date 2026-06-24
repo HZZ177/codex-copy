@@ -59,6 +59,17 @@ def test_settings_api_coerces_removed_segoe_ui_appearance_setting(tmp_path) -> N
         assert response.json()["appearance"]["font_family"] == "system"
 
 
+def test_settings_api_coerces_removed_misans_appearance_setting(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        app.state.repositories.settings.set("appearance_settings", {"font_family": "misans"})
+
+        response = client.get("/api/settings")
+
+        assert response.status_code == 200
+        assert response.json()["appearance"]["font_family"] == "system"
+
+
 def test_settings_api_allows_browser_preflight(tmp_path) -> None:
     app = create_app(AppSettings(data_dir=tmp_path / "data"))
     with TestClient(app) as client:

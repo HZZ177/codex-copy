@@ -22,10 +22,14 @@ const fontOptions: Array<{
   },
 ];
 
+const fontStatusLabels: Partial<Record<AppFontFamily, string>> = {
+  "maple-mono": "Maple Mono CN 已启用",
+};
+
 export function GeneralSettingsPage() {
   const font = useFontPreference();
   const downloading = font.status === "downloading";
-  const showProgress = downloading;
+  const showProgress = downloading && font.downloadingFamily !== null;
 
   const chooseFont = (family: AppFontFamily) => {
     if (downloading || font.family === family) {
@@ -56,12 +60,14 @@ export function GeneralSettingsPage() {
           {fontOptions.map((option) => {
             const Icon = option.icon;
             const selected = font.family === option.id;
-            const isMapleDownloading = option.id === "maple-mono" && downloading;
+            const isFontAssetOption = option.id !== "system";
+            const cached = Boolean(font.cachedFamilies[option.id]);
+            const isOptionDownloading = isFontAssetOption && font.downloadingFamily === option.id && downloading;
             const optionDescription = fontOptionDescription({
               id: option.id,
               selected,
-              downloading: isMapleDownloading,
-              hasMapleMonoCache: font.hasMapleMonoCache,
+              downloading: isOptionDownloading,
+              cached,
               progress: font.progress,
             });
             return (
@@ -79,17 +85,13 @@ export function GeneralSettingsPage() {
                   <Icon size={17} />
                 </span>
                 <span className={styles.optionText}>
-                  <span className={styles.optionTitle}>
-                    {option.label}
-                  </span>
-                  <span className={styles.optionDescription}>
-                    {optionDescription}
-                  </span>
+                  <span className={styles.optionTitle}>{option.label}</span>
+                  <span className={styles.optionDescription}>{optionDescription}</span>
                 </span>
                 <span className={styles.optionState} aria-hidden="true">
                   {selected ? (
                     <Check size={15} />
-                  ) : option.id === "maple-mono" && !font.hasMapleMonoCache ? (
+                  ) : isFontAssetOption && !cached ? (
                     <Download size={15} />
                   ) : null}
                 </span>
@@ -130,13 +132,13 @@ function fontOptionDescription({
   id,
   selected,
   downloading,
-  hasMapleMonoCache,
+  cached,
   progress,
 }: {
   id: AppFontFamily;
   selected: boolean;
   downloading: boolean;
-  hasMapleMonoCache: boolean;
+  cached: boolean;
   progress: FontDownloadProgress;
 }): string {
   if (id === "system") {
@@ -148,7 +150,7 @@ function fontOptionDescription({
   if (selected) {
     return "已启用";
   }
-  if (hasMapleMonoCache) {
+  if (cached) {
     return "已下载到本地，点击启用";
   }
   return "点击下载到本地后使用";
@@ -161,10 +163,7 @@ function fontStatusText(family: AppFontFamily, status: string): string {
   if (status === "error") {
     return "字体下载失败";
   }
-  if (family === "maple-mono") {
-    return "Maple Mono CN 已启用";
-  }
-  return "使用系统默认";
+  return fontStatusLabels[family] ?? "使用系统默认";
 }
 
 function formatBytes(bytes: number): string {

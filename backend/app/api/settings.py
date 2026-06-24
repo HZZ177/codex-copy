@@ -47,7 +47,7 @@ def load_model_settings(repositories: StorageRepositories) -> ModelSettings:
 
 def load_appearance_settings(repositories: StorageRepositories) -> AppearanceSettings:
     settings = repositories.settings.get(APPEARANCE_SETTINGS_KEY, default={})
-    if isinstance(settings, dict) and settings.get("font_family") == "segoe-ui":
+    if isinstance(settings, dict) and settings.get("font_family") in {"segoe-ui", "misans"}:
         settings = {**settings, "font_family": "system"}
     return AppearanceSettings(**settings)
 

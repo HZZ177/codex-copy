@@ -7,6 +7,7 @@ import { useOptionalRuntimeConnection } from "./RuntimeConnectionProvider";
 
 export type { AppFontFamily };
 export type FontAssetStatus = "idle" | "downloading" | "ready" | "error";
+type FontAssetFamily = Exclude<AppFontFamily, "system">;
 
 export interface FontDownloadProgress {
   downloadedAssets: number;
@@ -18,17 +19,31 @@ export interface FontDownloadProgress {
 
 export interface FontContextValue {
   family: AppFontFamily;
+  downloadingFamily: FontAssetFamily | null;
   status: FontAssetStatus;
-  hasMapleMonoCache: boolean;
+  cachedFamilies: Partial<Record<AppFontFamily, boolean>>;
   progress: FontDownloadProgress;
   error: string | null;
   setFamily(family: AppFontFamily): Promise<void>;
 }
 
-interface MapleFontFaceSource {
+interface FontFaceSource {
   id: string;
-  directory: string;
   cssUrl: string;
+  assetBaseUrl: string;
+}
+
+interface FontDefinition {
+  id: FontAssetFamily;
+  displayName: string;
+  cacheVersion: string;
+  faces: FontFaceSource[];
+  totalAssets: number;
+  totalBytes: number;
+  sansStack: string;
+  readingStack: string;
+  monoStack: string;
+  removeLocalSource?: string;
 }
 
 interface FontFileDescriptor {
@@ -42,47 +57,44 @@ interface CachedFontFile extends FontFileDescriptor {
   mimeType: string;
 }
 
-interface CachedFontFace extends MapleFontFaceSource {
+interface CachedFontFace extends FontFaceSource {
   css: string;
   files: CachedFontFile[];
 }
+
+type FontFamilyCacheState = Partial<Record<AppFontFamily, boolean>>;
 
 const FontContext = createContext<FontContextValue | null>(null);
 
 const FONT_STORAGE_KEY = "keydex.font.family.v1";
 const FONT_DB_NAME = "keydex-font-cache";
 const FONT_STORE_NAME = "assets";
-const MAPLE_MONO_CACHE_VERSION = "chinese-fonts-maple-mono-cn-2.0.0-regular-bold-italic";
 const MAPLE_MONO_CDN_BASE = "https://cdn.jsdelivr.net/npm/@chinese-fonts/maple-mono-cn@2.0.0/dist";
 const MAPLE_MONO_FAMILY = "Maple Mono CN";
-const MAPLE_MONO_SANS_STACK = `"${MAPLE_MONO_FAMILY}", var(--font-sans-system)`;
-const MAPLE_MONO_READING_STACK = `"${MAPLE_MONO_FAMILY}", var(--font-reading-system)`;
-const MAPLE_MONO_MONO_STACK = `"${MAPLE_MONO_FAMILY}", var(--font-mono-system)`;
-const FONT_STYLE_ID = "keydex-maple-mono-font-face";
+const FONT_STYLE_ID = "keydex-custom-font-face";
 const FONT_DOWNLOAD_CONCURRENCY = 8;
 
-const MAPLE_MONO_FACES: MapleFontFaceSource[] = [
-  fontFace("regular", "MapleMono-CN-Regular"),
-  fontFace("bold", "MapleMono-CN-Bold"),
-  fontFace("italic", "MapleMono-CN-Italic"),
-  fontFace("bold-italic", "MapleMono-CN-BoldItalic"),
-];
-const MAPLE_MONO_TOTAL_ASSETS = 944;
-const MAPLE_MONO_TOTAL_BYTES = 36_447_552;
-const EMPTY_PROGRESS: FontDownloadProgress = {
-  downloadedAssets: 0,
-  totalAssets: MAPLE_MONO_TOTAL_ASSETS,
-  downloadedBytes: 0,
-  totalBytes: MAPLE_MONO_TOTAL_BYTES,
-  percent: 0,
+const FONT_DEFINITIONS: Record<FontAssetFamily, FontDefinition> = {
+  "maple-mono": {
+    id: "maple-mono",
+    displayName: "Maple Mono CN",
+    cacheVersion: "chinese-fonts-maple-mono-cn-2.0.0-regular-bold-italic",
+    faces: [
+      fontFace("regular", `${MAPLE_MONO_CDN_BASE}/MapleMono-CN-Regular`, "result.css"),
+      fontFace("bold", `${MAPLE_MONO_CDN_BASE}/MapleMono-CN-Bold`, "result.css"),
+      fontFace("italic", `${MAPLE_MONO_CDN_BASE}/MapleMono-CN-Italic`, "result.css"),
+      fontFace("bold-italic", `${MAPLE_MONO_CDN_BASE}/MapleMono-CN-BoldItalic`, "result.css"),
+    ],
+    totalAssets: 944,
+    totalBytes: 36_447_552,
+    sansStack: `"${MAPLE_MONO_FAMILY}", var(--font-sans-system)`,
+    readingStack: `"${MAPLE_MONO_FAMILY}", var(--font-reading-system)`,
+    monoStack: `"${MAPLE_MONO_FAMILY}", var(--font-mono-system)`,
+    removeLocalSource: `src:local("${MAPLE_MONO_FAMILY}"),url`,
+  },
 };
-const COMPLETE_PROGRESS: FontDownloadProgress = {
-  downloadedAssets: MAPLE_MONO_TOTAL_ASSETS,
-  totalAssets: MAPLE_MONO_TOTAL_ASSETS,
-  downloadedBytes: MAPLE_MONO_TOTAL_BYTES,
-  totalBytes: MAPLE_MONO_TOTAL_BYTES,
-  percent: 100,
-};
+const FONT_ASSET_FAMILIES = Object.keys(FONT_DEFINITIONS) as FontAssetFamily[];
+const DEFAULT_PROGRESS = emptyProgress(FONT_DEFINITIONS["maple-mono"]);
 
 let activeObjectUrls: string[] = [];
 
@@ -95,10 +107,15 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
   const resolvedSettingsRuntime =
     settingsRuntime === undefined ? (runtimeConnection?.ready ? runtimeConnection.runtime.settings : null) : settingsRuntime;
   const [family, setFamilyState] = useState<AppFontFamily>("system");
+  const [downloadingFamily, setDownloadingFamily] = useState<FontAssetFamily | null>(null);
   const [status, setStatus] = useState<FontAssetStatus>("idle");
-  const [hasMapleMonoCache, setHasMapleMonoCache] = useState(false);
-  const [progress, setProgress] = useState<FontDownloadProgress>(EMPTY_PROGRESS);
+  const [cachedFamilies, setCachedFamilies] = useState<FontFamilyCacheState>({});
+  const [progress, setProgress] = useState<FontDownloadProgress>(DEFAULT_PROGRESS);
   const [error, setError] = useState<string | null>(null);
+
+  const setCachedFamily = useCallback((fontFamily: FontAssetFamily, cached: boolean) => {
+    setCachedFamilies((previous) => ({ ...previous, [fontFamily]: cached }));
+  }, []);
 
   const applyConfiguredFamily = useCallback(
     async (
@@ -111,28 +128,30 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
         onError,
       }: {
         isActive: () => boolean;
-        onDownloadStart?: () => void;
+        onDownloadStart?: (definition: FontDefinition) => void;
         onProgress?: (progress: FontDownloadProgress) => void;
         onReady?: () => void;
         onError?: (reason: unknown) => void;
       },
     ) => {
       try {
-        if (nextFamily === "system") {
+        const definition = getFontDefinition(nextFamily);
+        if (!definition) {
           saveFamily("system");
           applySystemFont();
           if (isActive()) {
             setFamilyState("system");
+            setDownloadingFamily(null);
             setStatus("idle");
             onReady?.();
           }
           return;
         }
 
-        await activateMapleMono({
+        await activateFont(definition, {
           onDownloadStart() {
             if (isActive()) {
-              onDownloadStart?.();
+              onDownloadStart?.(definition);
             }
           },
           onProgress(nextProgress) {
@@ -141,53 +160,54 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
             }
           },
         });
-        saveFamily("maple-mono");
+        saveFamily(definition.id);
         if (isActive()) {
-          setFamilyState("maple-mono");
-          setHasMapleMonoCache(true);
-          setProgress(COMPLETE_PROGRESS);
+          setFamilyState(definition.id);
+          setCachedFamily(definition.id, true);
+          setProgress(completeProgress(definition));
+          setDownloadingFamily(null);
           setStatus("ready");
           onReady?.();
         }
       } catch (reason) {
         if (isActive()) {
+          setDownloadingFamily(null);
           onError?.(reason);
         }
         throw reason;
       }
     },
-    [],
+    [setCachedFamily],
   );
 
   useEffect(() => {
     let active = true;
     const savedFamily = readSavedFamily();
+    const savedDefinition = getFontDefinition(savedFamily);
 
-    if (savedFamily !== "maple-mono") {
+    void readCachedFontFamilies()
+      .then((nextCachedFamilies) => {
+        if (active) {
+          setCachedFamilies(nextCachedFamilies);
+        }
+      })
+      .catch(() => undefined);
+
+    if (!savedDefinition) {
       applySystemFont();
-      void readCachedMapleMonoFaces()
-        .then((faces) => {
-          if (active) {
-            setHasMapleMonoCache(Boolean(faces));
-          }
-        })
-        .catch(() => {
-          if (active) {
-            setHasMapleMonoCache(false);
-          }
-        });
       return () => {
         active = false;
       };
     }
 
-    void activateMapleMono({
+    void activateFont(savedDefinition, {
       onDownloadStart() {
         if (!active) {
           return;
         }
         setStatus("downloading");
-        setProgress(EMPTY_PROGRESS);
+        setDownloadingFamily(savedDefinition.id);
+        setProgress(emptyProgress(savedDefinition));
       },
       onProgress(nextProgress) {
         if (active) {
@@ -199,9 +219,10 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
         if (!active) {
           return;
         }
-        setFamilyState("maple-mono");
-        setHasMapleMonoCache(true);
-        setProgress(COMPLETE_PROGRESS);
+        setFamilyState(savedDefinition.id);
+        setCachedFamily(savedDefinition.id, true);
+        setProgress(completeProgress(savedDefinition));
+        setDownloadingFamily(null);
         setStatus("ready");
       })
       .catch((reason: unknown) => {
@@ -211,7 +232,8 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
         saveFamily("system");
         applySystemFont();
         setFamilyState("system");
-        setHasMapleMonoCache(false);
+        setCachedFamily(savedDefinition.id, false);
+        setDownloadingFamily(null);
         setStatus("error");
         setError(errorMessage(reason));
       });
@@ -219,7 +241,7 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [setCachedFamily]);
 
   useEffect(() => {
     if (!resolvedSettingsRuntime) {
@@ -239,9 +261,10 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
         }
         void applyConfiguredFamily(configuredFamily, {
           isActive: () => active,
-          onDownloadStart() {
+          onDownloadStart(definition) {
             setStatus("downloading");
-            setProgress(EMPTY_PROGRESS);
+            setDownloadingFamily(definition.id);
+            setProgress(emptyProgress(definition));
           },
           onProgress: setProgress,
           onReady() {
@@ -266,14 +289,16 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
     try {
       await applyConfiguredFamily(nextFamily, {
         isActive: () => true,
-        onDownloadStart() {
+        onDownloadStart(definition) {
           setStatus("downloading");
-          setProgress(EMPTY_PROGRESS);
+          setDownloadingFamily(definition.id);
+          setProgress(emptyProgress(definition));
         },
         onProgress: setProgress,
       });
       await resolvedSettingsRuntime?.saveAppearanceSettings({ font_family: nextFamily });
     } catch (reason) {
+      setDownloadingFamily(null);
       setStatus("error");
       setError(errorMessage(reason));
       throw reason;
@@ -283,13 +308,14 @@ export function FontProvider({ children, settingsRuntime }: FontProviderProps) {
   const value = useMemo<FontContextValue>(
     () => ({
       family,
+      downloadingFamily,
       status,
-      hasMapleMonoCache,
+      cachedFamilies,
       progress,
       error,
       setFamily,
     }),
-    [error, family, hasMapleMonoCache, progress, setFamily, status],
+    [cachedFamilies, downloadingFamily, error, family, progress, setFamily, status],
   );
 
   return <FontContext.Provider value={value}>{children}</FontContext.Provider>;
@@ -303,11 +329,11 @@ export function useFontPreference() {
   return value;
 }
 
-function fontFace(id: string, directory: string): MapleFontFaceSource {
+function fontFace(id: string, assetBaseUrl: string, cssFile: string): FontFaceSource {
   return {
     id,
-    directory,
-    cssUrl: `${MAPLE_MONO_CDN_BASE}/${directory}/result.css`,
+    assetBaseUrl,
+    cssUrl: `${assetBaseUrl}/${cssFile}`,
   };
 }
 
@@ -328,12 +354,18 @@ function readSavedFamily(): AppFontFamily {
 }
 
 function normalizeFamily(value: unknown): AppFontFamily | null {
-  return value === "maple-mono" || value === "system" ? value : null;
+  return value === "system" || getFontDefinition(value) ? value as AppFontFamily : null;
 }
 
-function saveFamily(family: AppFontFamily) {
+function getFontDefinition(value: unknown): FontDefinition | null {
+  return typeof value === "string" && value in FONT_DEFINITIONS
+    ? FONT_DEFINITIONS[value as FontAssetFamily]
+    : null;
+}
+
+function saveFamily(fontFamily: AppFontFamily) {
   try {
-    localStorage.setItem(FONT_STORAGE_KEY, family);
+    localStorage.setItem(FONT_STORAGE_KEY, fontFamily);
   } catch {
     // Keep the runtime selection active even if storage is unavailable.
   }
@@ -345,29 +377,33 @@ function applySystemFont() {
   document.documentElement.style.removeProperty("--font-mono");
 }
 
-function applyMapleMonoFont() {
-  document.documentElement.style.setProperty("--font-sans", MAPLE_MONO_SANS_STACK);
-  document.documentElement.style.setProperty("--font-reading", MAPLE_MONO_READING_STACK);
-  document.documentElement.style.setProperty("--font-mono", MAPLE_MONO_MONO_STACK);
+function applyCustomFont(definition: FontDefinition) {
+  document.documentElement.style.setProperty("--font-sans", definition.sansStack);
+  document.documentElement.style.setProperty("--font-reading", definition.readingStack);
+  document.documentElement.style.setProperty("--font-mono", definition.monoStack);
 }
 
-async function activateMapleMono({
-  onDownloadStart,
-  onProgress,
-}: {
-  onDownloadStart?: () => void;
-  onProgress?: (progress: FontDownloadProgress) => void;
-} = {}): Promise<void> {
-  let faces = await readCachedMapleMonoFaces();
+async function activateFont(
+  definition: FontDefinition,
+  {
+    onDownloadStart,
+    onProgress,
+  }: {
+    onDownloadStart?: () => void;
+    onProgress?: (progress: FontDownloadProgress) => void;
+  } = {},
+): Promise<void> {
+  let faces = await readCachedFontFaces(definition);
   if (!faces) {
     onDownloadStart?.();
-    faces = await downloadAndCacheMapleMonoFaces(onProgress);
+    faces = await downloadAndCacheFontFaces(definition, onProgress);
   }
-  registerMapleMonoFaces(faces);
-  applyMapleMonoFont();
+  registerFontFaces(definition, faces);
+  applyCustomFont(definition);
 }
 
-async function downloadAndCacheMapleMonoFaces(
+async function downloadAndCacheFontFaces(
+  definition: FontDefinition,
   onProgress?: (progress: FontDownloadProgress) => void,
 ): Promise<CachedFontFace[]> {
   const completedAssetIds = new Set<string>();
@@ -377,9 +413,9 @@ async function downloadAndCacheMapleMonoFaces(
     onProgress?.(
       buildProgress({
         downloadedAssets: completedAssetIds.size,
-        totalAssets: MAPLE_MONO_TOTAL_ASSETS,
+        totalAssets: definition.totalAssets,
         downloadedBytes,
-        totalBytes: MAPLE_MONO_TOTAL_BYTES,
+        totalBytes: definition.totalBytes,
       }),
     );
   };
@@ -396,22 +432,23 @@ async function downloadAndCacheMapleMonoFaces(
   reportProgress();
 
   const cachedFaces: CachedFontFace[] = [];
-  for (const face of MAPLE_MONO_FACES) {
-    const cssResponse = await fetchFontAsset(face.cssUrl);
+  for (const face of definition.faces) {
+    const cssResponse = await fetchFontAsset(definition, face.cssUrl);
     const css = await readResponseText(cssResponse);
-    const cssAssetId = `${face.id}:result.css`;
+    const cssAssetId = `${face.id}:css`;
     completeAsset(cssAssetId, byteLength(css));
 
-    const descriptors = parseFontFileDescriptors(face, css);
-    const files = await downloadFontFiles(descriptors, setAssetBytes, completeAsset);
+    const descriptors = parseFontFileDescriptors(definition, face, css);
+    const files = await downloadFontFiles(definition, descriptors, setAssetBytes, completeAsset);
     cachedFaces.push({ ...face, css, files });
   }
 
-  await writeCachedMapleMonoFaces(cachedFaces);
+  await writeCachedFontFaces(definition, cachedFaces);
   return cachedFaces;
 }
 
 async function downloadFontFiles(
+  definition: FontDefinition,
   descriptors: FontFileDescriptor[],
   onAssetBytes: (assetId: string, bytes: number) => void,
   onAssetComplete: (assetId: string, bytes: number) => void,
@@ -430,7 +467,7 @@ async function downloadFontFiles(
         }
 
         const descriptor = descriptors[index];
-        const response = await fetchFontAsset(descriptor.url);
+        const response = await fetchFontAsset(definition, descriptor.url);
         const data = await readResponseData(response, (bytes) => onAssetBytes(descriptor.id, bytes));
         onAssetComplete(descriptor.id, data.byteLength);
         files[index] = {
@@ -445,45 +482,64 @@ async function downloadFontFiles(
   return files;
 }
 
-function parseFontFileDescriptors(face: MapleFontFaceSource, css: string): FontFileDescriptor[] {
-  const matches = Array.from(css.matchAll(/url\("\.\/([^"]+\.woff2)"\)/g));
+function parseFontFileDescriptors(
+  definition: FontDefinition,
+  face: FontFaceSource,
+  css: string,
+): FontFileDescriptor[] {
+  const matches = Array.from(css.matchAll(/url\((["']?)(?:\.\/)?([^"')]+\.woff2)\1\)/g));
   if (matches.length === 0) {
-    throw new Error("Maple Mono CN 字体清单为空");
+    throw new Error(`${definition.displayName} 字体清单为空`);
   }
   return matches.map((match) => {
-    const fileName = match[1];
+    const fileName = match[2];
     return {
       id: `${face.id}:${fileName}`,
       fileName,
-      url: `${MAPLE_MONO_CDN_BASE}/${face.directory}/${fileName}`,
+      url: `${face.assetBaseUrl}/${fileName}`,
     };
   });
 }
 
-async function fetchFontAsset(url: string): Promise<Response> {
+async function fetchFontAsset(definition: FontDefinition, url: string): Promise<Response> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Maple Mono CN 下载失败：${response.status}`);
+    throw new Error(`${definition.displayName} 下载失败：${response.status}`);
   }
   return response;
 }
 
-async function readCachedMapleMonoFaces(): Promise<CachedFontFace[] | null> {
-  const db = await openFontDb();
-  const cached = await Promise.all(MAPLE_MONO_FACES.map((face) => readCachedFace(db, cacheKey(face.id))));
-  db.close();
-  if (cached.some((face): face is null => face === null)) {
-    return null;
-  }
-  return cached as CachedFontFace[];
+async function readCachedFontFamilies(): Promise<FontFamilyCacheState> {
+  const entries = await Promise.all(
+    FONT_ASSET_FAMILIES.map(async (fontFamily) => {
+      const faces = await readCachedFontFaces(FONT_DEFINITIONS[fontFamily]);
+      return [fontFamily, Boolean(faces)] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
-async function writeCachedMapleMonoFaces(faces: CachedFontFace[]): Promise<void> {
+async function readCachedFontFaces(definition: FontDefinition): Promise<CachedFontFace[] | null> {
+  const db = await openFontDb();
+  try {
+    const cached = await Promise.all(
+      definition.faces.map((face) => readCachedFace(db, cacheKey(definition, face.id))),
+    );
+    if (cached.some((face): face is null => face === null)) {
+      return null;
+    }
+    return cached as CachedFontFace[];
+  } finally {
+    db.close();
+  }
+}
+
+async function writeCachedFontFaces(definition: FontDefinition, faces: CachedFontFace[]): Promise<void> {
   const db = await openFontDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(FONT_STORE_NAME, "readwrite");
     const store = transaction.objectStore(FONT_STORE_NAME);
-    faces.forEach((face) => store.put(face, cacheKey(face.id)));
+    faces.forEach((face) => store.put(face, cacheKey(definition, face.id)));
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error ?? new Error("字体缓存写入失败"));
   });
@@ -516,15 +572,15 @@ function openFontDb(): Promise<IDBDatabase> {
   });
 }
 
-function registerMapleMonoFaces(faces: CachedFontFace[]) {
+function registerFontFaces(definition: FontDefinition, faces: CachedFontFace[]) {
   activeObjectUrls.forEach((url) => URL.revokeObjectURL(url));
   activeObjectUrls = [];
 
   const styleElement = getFontStyleElement();
-  styleElement.textContent = faces.map((face) => buildCachedFaceCss(face)).join("\n");
+  styleElement.textContent = faces.map((face) => buildCachedFaceCss(definition, face)).join("\n");
 }
 
-function buildCachedFaceCss(face: CachedFontFace): string {
+function buildCachedFaceCss(definition: FontDefinition, face: CachedFontFace): string {
   const objectUrlsByFileName = new Map<string, string>();
   face.files.forEach((file) => {
     const objectUrl = URL.createObjectURL(new Blob([file.data], { type: file.mimeType }));
@@ -532,12 +588,13 @@ function buildCachedFaceCss(face: CachedFontFace): string {
     objectUrlsByFileName.set(file.fileName, objectUrl);
   });
 
-  return face.css
-    .replaceAll(`src:local("${MAPLE_MONO_FAMILY}"),url`, "src:url")
-    .replace(/url\("\.\/([^"]+\.woff2)"\)/g, (match, fileName: string) => {
-      const objectUrl = objectUrlsByFileName.get(fileName);
-      return objectUrl ? `url("${objectUrl}")` : match;
-    });
+  const css = definition.removeLocalSource
+    ? face.css.replaceAll(definition.removeLocalSource, "src:url")
+    : face.css;
+  return css.replace(/url\((["']?)(?:\.\/)?([^"')]+\.woff2)\1\)/g, (match, _quote: string, fileName: string) => {
+    const objectUrl = objectUrlsByFileName.get(fileName);
+    return objectUrl ? `url("${objectUrl}")` : match;
+  });
 }
 
 function getFontStyleElement(): HTMLStyleElement {
@@ -551,8 +608,8 @@ function getFontStyleElement(): HTMLStyleElement {
   return styleElement;
 }
 
-function cacheKey(id: string): string {
-  return `${MAPLE_MONO_CACHE_VERSION}:${id}`;
+function cacheKey(definition: FontDefinition, id: string): string {
+  return `${definition.cacheVersion}:${id}`;
 }
 
 async function readResponseText(response: Response): Promise<string> {
@@ -596,6 +653,24 @@ function concatChunks(chunks: Uint8Array[], byteLength: number): ArrayBuffer {
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+function emptyProgress(definition: FontDefinition): FontDownloadProgress {
+  return buildProgress({
+    downloadedAssets: 0,
+    totalAssets: definition.totalAssets,
+    downloadedBytes: 0,
+    totalBytes: definition.totalBytes,
+  });
+}
+
+function completeProgress(definition: FontDefinition): FontDownloadProgress {
+  return buildProgress({
+    downloadedAssets: definition.totalAssets,
+    totalAssets: definition.totalAssets,
+    downloadedBytes: definition.totalBytes,
+    totalBytes: definition.totalBytes,
+  });
 }
 
 function buildProgress({
