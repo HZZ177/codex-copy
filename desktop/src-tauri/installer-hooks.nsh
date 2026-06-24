@@ -1,9 +1,9 @@
 !macro KEYDEX_CLOSE_RUNNING_PROCESSES
-  DetailPrint "Checking running Keydex processes in $INSTDIR..."
-  nsExec::ExecToLog `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "& { $$installDir = '$INSTDIR'; $$targets = @((Join-Path $$installDir 'keydex-desktop.exe'), (Join-Path $$installDir 'agent-server.exe')); $$filter = \"Name='keydex-desktop.exe' OR Name='agent-server.exe'\"; $$processes = @(); foreach ($$candidate in (Get-CimInstance Win32_Process -Filter $$filter)) { if ($$candidate.ExecutablePath -and ($$targets -contains $$candidate.ExecutablePath)) { $$processes += $$candidate } }; if ($$processes.Count -eq 0) { Write-Output ('No running Keydex processes found in ' + $$installDir + '.'); exit 0 }; Write-Output ('Found ' + $$processes.Count + ' running Keydex process(es) in ' + $$installDir + '.'); $$taskkill = Join-Path $$env:SystemRoot 'System32\taskkill.exe'; foreach ($$process in $$processes) { $$current = Get-Process -Id $$process.ProcessId -ErrorAction SilentlyContinue; if (-not $$current) { Write-Output ('Already stopped: ' + $$process.Name + ' pid=' + $$process.ProcessId); continue }; Write-Output ('Closing ' + $$process.Name + ' pid=' + $$process.ProcessId + ' path=' + $$process.ExecutablePath); $$result = & $$taskkill /PID $$process.ProcessId /T /F 2>&1; foreach ($$line in $$result) { Write-Output ('taskkill: ' + $$line) } }; Start-Sleep -Milliseconds 800; $$remaining = @(); foreach ($$candidate in (Get-CimInstance Win32_Process -Filter $$filter)) { if ($$candidate.ExecutablePath -and ($$targets -contains $$candidate.ExecutablePath)) { $$remaining += $$candidate } }; if ($$remaining.Count -gt 0) { Write-Output ('Failed to close ' + $$remaining.Count + ' Keydex process(es):'); foreach ($$process in $$remaining) { Write-Output ('Remaining ' + $$process.Name + ' pid=' + $$process.ProcessId + ' path=' + $$process.ExecutablePath) }; exit 1 }; Write-Output ('Closed all running Keydex processes in ' + $$installDir + '.'); exit 0 }"`
+  DetailPrint "Closing running Keydex processes..."
+  nsExec::ExecToLog `"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\taskkill.exe" /IM keydex-desktop.exe /T /F 2>NUL || exit /B 0"`
   Pop $0
-  StrCmp $0 "0" +2 0
-  DetailPrint "Keydex process cleanup returned $0."
+  nsExec::ExecToLog `"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\taskkill.exe" /IM agent-server.exe /T /F 2>NUL || exit /B 0"`
+  Pop $0
   Sleep 800
 !macroend
 
