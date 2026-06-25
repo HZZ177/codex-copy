@@ -160,6 +160,7 @@ function fakeChannel(onStatus?: (status: WsConnectionStatus) => void): ChatChann
       sessionId = null;
     },
     chat: () => undefined,
+    approvalDecision: () => undefined,
     cancel: () => undefined,
     ping: () => undefined,
     requestStatus: () => undefined,

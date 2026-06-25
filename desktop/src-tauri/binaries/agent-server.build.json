@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "fingerprint": "eadb4500c5ddc520f9509108e4d29b29e2498bf8741ff2ac8010aacacba8480f",
+  "fingerprint": "5acff7e58460427af2eaa36d1b433c8edb1b88e18308ca136b5e2caa9ec5f396",
   "binary": "agent-server-x86_64-pc-windows-msvc.exe",
   "inputs": [
     "backend/app/__init__.py",
@@ -14,6 +14,7 @@
     "backend/app/agent/system_prompt.py",
     "backend/app/agent/tool_call_progress.py",
     "backend/app/api/__init__.py",
+    "backend/app/api/approvals.py",
     "backend/app/api/dependencies.py",
     "backend/app/api/health.py",
     "backend/app/api/model_providers.py",
@@ -24,6 +25,7 @@
     "backend/app/api/websocket.py",
     "backend/app/api/workspace.py",
     "backend/app/api/workspaces.py",
+    "backend/app/command_approval.py",
     "backend/app/core/__init__.py",
     "backend/app/core/config.py",
     "backend/app/core/env.py",

@@ -76,7 +76,7 @@
 }
 
 .windowControl {
-  width: 46px;
+  width: 40px;
   height: var(--titlebar-height);
   display: inline-grid;
   place-items: center;

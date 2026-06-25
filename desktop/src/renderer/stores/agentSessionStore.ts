@@ -1141,6 +1141,10 @@ function approvalFromData(data: Record<string, unknown>): CommandApprovalRequest
   if (!id || !sessionId) {
     return null;
   }
+  const status = stringValue(approval.status);
+  const decision = stringValue(approval.decision);
+  const trustScope = stringValue(approval.trust_scope);
+  const ruleMatchType = stringValue(approval.rule_match_type);
   return {
     id,
     session_id: sessionId,
@@ -1154,10 +1158,10 @@ function approvalFromData(data: Record<string, unknown>): CommandApprovalRequest
     title: stringValue(approval.title) || "是否允许执行命令？",
     description: stringValue(approval.description),
     details: asRecord(approval.details) ?? {},
-    status: isApprovalStatus(stringValue(approval.status)) ? stringValue(approval.status) : "pending",
-    decision: isApprovalDecision(stringValue(approval.decision)) ? stringValue(approval.decision) : null,
-    trust_scope: isTrustScope(stringValue(approval.trust_scope)) ? stringValue(approval.trust_scope) : null,
-    rule_match_type: isRuleMatchType(stringValue(approval.rule_match_type)) ? stringValue(approval.rule_match_type) : null,
+    status: isApprovalStatus(status) ? status : "pending",
+    decision: isApprovalDecision(decision) ? decision : null,
+    trust_scope: isTrustScope(trustScope) ? trustScope : null,
+    rule_match_type: isRuleMatchType(ruleMatchType) ? ruleMatchType : null,
     reject_message: nullableString(approval.reject_message),
     trusted_rule_id: nullableString(approval.trusted_rule_id),
     created_at: stringValue(approval.created_at) || new Date().toISOString(),

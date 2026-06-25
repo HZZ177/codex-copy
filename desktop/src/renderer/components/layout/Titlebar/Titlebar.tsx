@@ -1,4 +1,4 @@
-import { Maximize2, Minus, X } from "lucide-react";
+import { Minus, Square, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 
@@ -54,8 +54,8 @@ export function Titlebar({
         <div className={styles.title}>{title}</div>
       </div>
 
-      <div className={styles.right} data-titlebar-interactive="true">
-        <div className={styles.windowControls} role="group" aria-label="窗口控制">
+      <div className={styles.right} data-testid="titlebar-right-drag-region">
+        <div className={styles.windowControls} role="group" aria-label="窗口控制" data-titlebar-interactive="true">
           <button
             className={styles.windowControl}
             data-icon="minimize"
@@ -64,7 +64,7 @@ export function Titlebar({
             title="最小化"
             onClick={() => void controls.minimize()}
           >
-            <Minus size={15} strokeWidth={2.1} />
+            <Minus size={13} strokeWidth={1.8} />
           </button>
           <button
             className={styles.windowControl}
@@ -74,7 +74,7 @@ export function Titlebar({
             title="最大化或还原"
             onClick={() => void controls.toggleMaximize()}
           >
-            <Maximize2 size={14} strokeWidth={2.1} />
+            <Square size={12} strokeWidth={1.8} />
           </button>
           <button
             className={`${styles.windowControl} ${styles.closeControl}`}
@@ -84,7 +84,7 @@ export function Titlebar({
             title="关闭"
             onClick={() => void controls.close()}
           >
-            <X size={15} strokeWidth={2.1} />
+            <X size={13} strokeWidth={1.8} />
           </button>
         </div>
       </div>
@@ -94,7 +94,7 @@ export function Titlebar({
 
 function isInteractiveTitlebarTarget(target: EventTarget | null) {
   return (
-    target instanceof HTMLElement &&
+    target instanceof Element &&
     Boolean(target.closest("button, a, input, textarea, select, [role='button'], [data-titlebar-interactive='true']"))
   );
 }

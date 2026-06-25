@@ -45,9 +45,13 @@ describe("Titlebar", () => {
 
     fireEvent.mouseDown(screen.getByLabelText("Keydex"), { button: 0 });
     fireEvent.mouseDown(screen.getByText("测试标题"), { button: 0 });
+    fireEvent.mouseDown(screen.getByTestId("titlebar-right-drag-region"), { button: 0 });
     fireEvent.doubleClick(screen.getByText("测试标题"));
-    fireEvent.mouseDown(screen.getByLabelText("最小化"), { button: 0 });
-    fireEvent.click(screen.getByLabelText("最小化"));
+
+    const minimizeIcon = screen.getByLabelText("最小化").querySelector("svg");
+    expect(minimizeIcon).not.toBeNull();
+    fireEvent.mouseDown(minimizeIcon as SVGElement, { button: 0 });
+    fireEvent.click(minimizeIcon as SVGElement);
     fireEvent.click(screen.getByLabelText("最大化或还原"));
     fireEvent.click(screen.getByLabelText("关闭"));
 
@@ -55,7 +59,7 @@ describe("Titlebar", () => {
       expect(appWindow.minimize).toHaveBeenCalledTimes(1);
       expect(appWindow.toggleMaximize).toHaveBeenCalledTimes(2);
       expect(appWindow.close).toHaveBeenCalledTimes(1);
-      expect(appWindow.startDragging).toHaveBeenCalledTimes(2);
+      expect(appWindow.startDragging).toHaveBeenCalledTimes(3);
     });
   });
 });

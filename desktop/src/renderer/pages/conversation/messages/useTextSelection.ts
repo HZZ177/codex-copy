@@ -73,6 +73,9 @@ export function useTextSelection(
 
   useEffect(() => {
     const subscriber = subscriberRef.current;
+    if (!subscriber) {
+      return;
+    }
     if (!enabled) {
       if (activeSelectionSubscriber === subscriber) {
         activeSelectionSubscriber = null;

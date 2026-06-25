@@ -48,6 +48,17 @@ function Invoke-Step {
     & $Script
 }
 
+function Invoke-NativeCommand {
+    param(
+        [string]$Command,
+        [string[]]$Arguments = @()
+    )
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "命令执行失败（exit code $LASTEXITCODE）：$Command $($Arguments -join ' ')"
+    }
+}
+
 function Assert-Path {
     param(
         [string]$Path,
@@ -151,7 +162,7 @@ if (-not $SkipInstall) {
     Invoke-Step "使用 uv 安装 Python 依赖" {
         Push-Location $Root
         try {
-            uv pip install -r requirements.txt
+            Invoke-NativeCommand "uv" @("pip", "install", "-r", "requirements.txt")
         } finally {
             Pop-Location
         }
@@ -160,7 +171,7 @@ if (-not $SkipInstall) {
     Invoke-Step "安装桌面端依赖" {
         Push-Location $DesktopDir
         try {
-            npm.cmd install --cache .\.npm-cache
+            Invoke-NativeCommand "npm.cmd" @("install", "--cache", ".\.npm-cache")
         } finally {
             Pop-Location
         }
@@ -171,7 +182,7 @@ if (-not $SkipTests) {
     Invoke-Step "运行后端 lint 检查" {
         Push-Location $Root
         try {
-            & $BackendPython -m ruff check .
+            Invoke-NativeCommand $BackendPython @("-m", "ruff", "check", ".")
         } finally {
             Pop-Location
         }
@@ -180,7 +191,7 @@ if (-not $SkipTests) {
     Invoke-Step "运行后端测试" {
         Push-Location $Root
         try {
-            & $BackendPython -m pytest
+            Invoke-NativeCommand $BackendPython @("-m", "pytest")
         } finally {
             Pop-Location
         }
@@ -189,7 +200,7 @@ if (-not $SkipTests) {
     Invoke-Step "运行桌面端测试" {
         Push-Location $DesktopDir
         try {
-            npm.cmd run test
+            Invoke-NativeCommand "npm.cmd" @("run", "test")
         } finally {
             Pop-Location
         }
@@ -206,7 +217,7 @@ Invoke-Step "构建 Python sidecar" {
         if ($CleanSidecar) {
             $sidecarArgs += "--clean"
         }
-        & $BackendPython @sidecarArgs
+        Invoke-NativeCommand $BackendPython $sidecarArgs
     } finally {
         Pop-Location
     }
@@ -217,8 +228,8 @@ if (-not $SkipRustChecks) {
     Invoke-Step "检查 Tauri Rust 代码" {
         Push-Location $TauriDir
         try {
-            cargo fmt --check
-            cargo check
+            Invoke-NativeCommand "cargo" @("fmt", "--check")
+            Invoke-NativeCommand "cargo" @("check")
         } finally {
             Pop-Location
         }
@@ -232,7 +243,7 @@ Invoke-Step "构建 Tauri NSIS 安装包" {
         if ($NoSign) {
             $args += "--no-sign"
         }
-        & npm.cmd @args
+        Invoke-NativeCommand "npm.cmd" $args
     } finally {
         Pop-Location
     }

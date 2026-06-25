@@ -101,6 +101,7 @@ function fakeRuntime(): RuntimeBridge {
     bindSession: vi.fn(),
     unbindSession: vi.fn(),
     chat: vi.fn(),
+    approvalDecision: vi.fn(),
     cancel: vi.fn(),
     requestStatus: vi.fn(),
     ping: vi.fn(),
