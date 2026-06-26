@@ -32,7 +32,7 @@ import { createPortal } from "react-dom";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import {
   MarkdownDocumentModelCache,
-  MarkdownDocumentView,
+  VirtualMarkdownPreview,
 } from "@/renderer/components/workspace/markdownPreviewEngine";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
@@ -594,7 +594,7 @@ function FullscreenMarkdownPreview({ source }: { source: string }) {
 
   return (
     <div className={styles.fullscreenMarkdown}>
-      <MarkdownDocumentView model={model} />
+      <VirtualMarkdownPreview model={model} />
     </div>
   );
 }

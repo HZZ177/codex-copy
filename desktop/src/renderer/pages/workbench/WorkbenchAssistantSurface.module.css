@@ -98,7 +98,7 @@
   color: color-mix(in srgb, var(--color-text-2) 82%, var(--color-text-3));
   cursor: text;
   font-size: 13px;
-  line-height: 1;
+  line-height: var(--ui-line-height-compact);
   padding: 0 14px;
   text-align: left;
   transition:
@@ -111,6 +111,7 @@
 
 .miniComposer span {
   overflow: hidden;
+  line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -313,6 +314,7 @@
   color: var(--color-text-2);
   font-size: 13px;
   font-weight: 650;
+  line-height: var(--ui-line-height-compact);
   padding: 0 10px 0 14px;
 }
 

@@ -135,7 +135,7 @@
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 8px;
   text-align: left;
 }
@@ -148,6 +148,7 @@
 
 .menuItem span {
   overflow: hidden;
+  line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

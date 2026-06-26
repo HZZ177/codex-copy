@@ -386,48 +386,31 @@ describe("AppRouter", () => {
     expect(screen.getByRole("button", { name: "展开工作台输入框" })).not.toBeNull();
   });
 
-  it("shows local skeletons before switching app modes", async () => {
+  it("switches app modes without local skeleton placeholders", async () => {
     renderRouter(["/conversation/thread-1"]);
 
     expect(await screen.findByRole("heading", { name: /thread-1/ }, { timeout: 10000 })).not.toBeNull();
     expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
-    const shell = screen.getByTestId("app-shell");
 
     vi.useFakeTimers();
     try {
       fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
-      expect(shell.dataset.appModeLoading).toBe("true");
-      expect(screen.getByTestId("app-mode-session-loading-skeleton")).not.toBeNull();
-      expect(screen.getByTestId("app-mode-content-loading-skeleton")).not.toBeNull();
-      expect(screen.queryByText("正在切换应用模式")).toBeNull();
-      expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "Agent" }));
-      expect(shell.dataset.appModeLoading).toBe("false");
+      expect(screen.getByTestId("app-mode-switch").getAttribute("data-mode")).toBe("workbench");
+      expect(screen.getByTestId("app-shell").dataset.appModeLoading).toBeUndefined();
       expect(screen.queryByTestId("app-mode-session-loading-skeleton")).toBeNull();
       expect(screen.queryByTestId("app-mode-content-loading-skeleton")).toBeNull();
-      await act(async () => {
-        vi.advanceTimersByTime(220);
-        await Promise.resolve();
-      });
       expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
-      expect(shell.dataset.appModeLoading).toBe("true");
-      expect(screen.getByTestId("app-mode-session-loading-skeleton")).not.toBeNull();
-      expect(screen.getByTestId("app-mode-content-loading-skeleton")).not.toBeNull();
       await act(async () => {
-        vi.advanceTimersByTime(220);
+        vi.advanceTimersByTime(180);
         await Promise.resolve();
       });
-
-      expect(screen.getByTestId("workbench-mode-page")).not.toBeNull();
-      expect(screen.getByTestId("app-shell").dataset.appModeLoading).toBe("false");
-      expect(screen.queryByTestId("app-mode-session-loading-skeleton")).toBeNull();
-      expect(screen.queryByTestId("app-mode-content-loading-skeleton")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
+
+    expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
   });
 });
 

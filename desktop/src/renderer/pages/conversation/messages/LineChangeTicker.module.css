@@ -12,7 +12,7 @@
   gap: 7px;
   color: var(--color-text-tertiary);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   white-space: nowrap;
 }
 
@@ -20,6 +20,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--color-text-tertiary);
+  line-height: inherit;
   text-overflow: ellipsis;
 }
 

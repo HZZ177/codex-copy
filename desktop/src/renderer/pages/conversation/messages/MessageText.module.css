@@ -66,7 +66,7 @@
   background: color-mix(in srgb, var(--surface-hover) 86%, var(--color-bg-elevated));
   color: var(--color-text-secondary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   margin-top: 8px;
   padding: 5px 9px;
 }
@@ -459,7 +459,7 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -539,7 +539,7 @@
   background: transparent;
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0;
 }
 
@@ -613,7 +613,7 @@
   box-shadow: none;
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   margin: 4px auto 6px;
   padding: 0 8px;
 }
@@ -698,7 +698,7 @@
   color: var(--color-text-1);
   font-size: 13px;
   font-weight: 650;
-  line-height: 1;
+  line-height: var(--ui-line-height-compact);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -731,9 +731,10 @@
 }
 
 .fullscreenMarkdown {
+  box-sizing: border-box;
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--surface-bg);
   padding: 24px 28px;
 }
@@ -823,7 +824,7 @@
   background: var(--surface-muted);
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   margin: 8px 0;
   padding: 8px 10px;
 }
@@ -994,7 +995,7 @@
   color: var(--color-text-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   user-select: none;
 }
 

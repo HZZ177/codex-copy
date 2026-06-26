@@ -148,7 +148,7 @@
   overflow: hidden;
   font-size: 12px;
   font-weight: 560;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -157,7 +157,7 @@
   overflow: hidden;
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -174,7 +174,7 @@
   box-shadow: none;
   color: var(--color-text-tertiary);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 8px 0 4px;
   pointer-events: auto;
   text-overflow: ellipsis;
@@ -282,7 +282,7 @@
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .fileChangeCardStats {
@@ -291,7 +291,7 @@
   gap: 8px;
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .fileChangeCardList {
@@ -322,7 +322,7 @@
 .fileChangeKind {
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   white-space: nowrap;
 }
 
@@ -339,7 +339,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 560;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0;
   text-align: left;
   text-overflow: ellipsis;

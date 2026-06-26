@@ -73,7 +73,7 @@
   color: var(--color-text-tertiary);
   font: inherit;
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 10px;
 }
 
@@ -108,7 +108,7 @@
   color: var(--color-text-secondary);
   font: inherit;
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .iconButton {
@@ -349,7 +349,7 @@
   gap: 6px;
   color: var(--color-text-tertiary);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .metricLabel svg {
@@ -360,7 +360,7 @@
   font-size: 17px;
   font-weight: 680;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .metricCard > span {
@@ -381,7 +381,7 @@
   gap: 8px;
   color: var(--color-text-tertiary);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .progressMeta strong {
@@ -468,7 +468,7 @@
   gap: var(--heat-gap);
   color: var(--color-text-tertiary);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .heatWallWeekdays span {
@@ -570,14 +570,14 @@
 .heatCellTooltip strong {
   font-size: 11px;
   font-weight: 650;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .heatCellTooltip span {
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .heatCell:hover .heatCellTooltip,
@@ -593,7 +593,7 @@
   column-gap: var(--heat-gap);
   color: var(--color-text-tertiary);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .heatWallAxisRow {

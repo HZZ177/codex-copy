@@ -69,7 +69,7 @@
   overflow: hidden;
   max-width: 118px;
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -256,7 +256,7 @@
   background: var(--color-bg-elevated);
   color: var(--color-text-tertiary);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .segmented button:focus-visible,
@@ -396,7 +396,7 @@
   min-width: 42px;
   color: var(--color-text-secondary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-align: center;
   white-space: nowrap;
 }
@@ -676,7 +676,7 @@
   color: var(--color-text-primary);
   font-size: 12px;
   font-weight: 650;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .annotationTitle svg {
@@ -697,7 +697,7 @@
   background: var(--surface-muted);
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .annotationClose {
@@ -838,7 +838,7 @@
   height: 20px;
   border-radius: var(--radius-pill);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 7px;
 }
 
@@ -1254,7 +1254,7 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-overflow: ellipsis;
   text-transform: lowercase;
   white-space: nowrap;
@@ -1314,7 +1314,7 @@
   right: 42px;
   color: var(--color-danger-6);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .markdownPane [data-code-token-kind="keyword"] {
@@ -1386,12 +1386,13 @@
   background: var(--surface-muted);
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 10px;
 }
 
 .splitPanelHeader span {
   overflow: hidden;
+  line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1561,7 +1562,7 @@
   color: var(--color-text-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   user-select: none;
 }
 
@@ -1681,7 +1682,7 @@
   color: var(--color-text-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   user-select: none;
 }
 
@@ -1758,7 +1759,7 @@
 .copyError {
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .copyError {

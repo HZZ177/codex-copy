@@ -19,7 +19,9 @@ import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
 import {
   MarkdownBlockView,
   MarkdownDocumentModelCache,
+  VirtualMarkdownPreview,
   type MarkdownBlock,
+  type MarkdownDocumentModel,
   type MarkdownBlockRendererProps,
   type MarkdownBlockRendererRegistry,
   type MarkdownInlineImageProps,
@@ -46,6 +48,17 @@ import { useTypingAnimation } from "./useTypingAnimation";
 import styles from "./MessageText.module.css";
 
 const messageMarkdownModelCache = new MarkdownDocumentModelCache(96);
+const MESSAGE_MARKDOWN_SCROLL_PARENT_SELECTOR = "[data-message-list-scroll='true']";
+const MESSAGE_MARKDOWN_VIRTUAL_BLOCK_THRESHOLD = 96;
+const MESSAGE_MARKDOWN_VIRTUAL_TEXT_THRESHOLD = 80_000;
+const MESSAGE_MARKDOWN_VIRTUAL_MIN_BLOCKS_FOR_TEXT_THRESHOLD = 24;
+const MESSAGE_MARKDOWN_VIRTUAL_HEAVY_BLOCK_THRESHOLD = 8;
+const MESSAGE_MARKDOWN_VIRTUAL_MIN_BLOCKS_FOR_HEAVY_THRESHOLD = 32;
+type MessageMarkdownScrollParent = HTMLElement | false | null;
+interface MessageMarkdownScrollParentState {
+  messageId: string;
+  value: MessageMarkdownScrollParent;
+}
 
 export interface MessageTextProps {
   message: ConversationMessage;
@@ -111,6 +124,28 @@ export function MessageText({
       }),
     [message.id, renderedContent],
   );
+  const shouldVirtualizeMarkdown = shouldVirtualizeMessageMarkdown({
+    cancelled,
+    isUser,
+    model: markdownModel,
+    visuallyStreaming,
+  });
+  const [markdownScrollParentState, setMarkdownScrollParentState] = useState<MessageMarkdownScrollParentState>({
+    messageId: "",
+    value: null,
+  });
+  const markdownScrollParent =
+    markdownScrollParentState.messageId === message.id ? markdownScrollParentState.value : null;
+  useLayoutEffect(() => {
+    if (!shouldVirtualizeMarkdown) {
+      setMarkdownScrollParentState({ messageId: message.id, value: null });
+      return;
+    }
+    setMarkdownScrollParentState({
+      messageId: message.id,
+      value: nearestMessageMarkdownScrollParent(contentRef.current),
+    });
+  }, [message.id, shouldVirtualizeMarkdown]);
   const activeStreamingFence = useMemo(
     () => (!isUser && visuallyStreaming ? findActiveStreamingFence(displayedContent) : null),
     [displayedContent, isUser, visuallyStreaming],
@@ -150,17 +185,20 @@ export function MessageText({
     ),
     [workspaceRuntime, workspaceScope],
   );
+  const renderStaticMarkdownBlocks = !shouldVirtualizeMarkdown || markdownScrollParent === false;
   const markdownBlocks = useMemo(
     () =>
-      markdownModel.blocks.map((block) => (
-        <MarkdownBlockView
-          block={block}
-          key={messageMarkdownBlockKey(message.id, block)}
-          registry={markdownComponents}
-          renderImage={renderMarkdownImage}
-        />
-      )),
-    [markdownComponents, markdownModel.blocks, message.id, renderMarkdownImage],
+      renderStaticMarkdownBlocks
+        ? markdownModel.blocks.map((block) => (
+            <MarkdownBlockView
+              block={block}
+              key={messageMarkdownBlockKey(message.id, block)}
+              registry={markdownComponents}
+              renderImage={renderMarkdownImage}
+            />
+          ))
+        : null,
+    [markdownComponents, markdownModel.blocks, message.id, renderMarkdownImage, renderStaticMarkdownBlocks],
   );
   const openContextFile = useCallback(
     (item: AgentContextItem) => {
@@ -201,12 +239,24 @@ export function MessageText({
           ) : null}
           {inlineContextItems ? <MessageContextItems items={contextItems} onOpenFile={openContextFile} /> : null}
           {renderedContent || !userContextItems ? (
-            <div className="keydex-markdown" ref={contentRef}>
-              {markdownBlocks}
-              {showStreamingCursor ? (
-                <StreamingCursor />
-              ) : null}
-            </div>
+            shouldVirtualizeMarkdown && markdownScrollParent === null ? (
+              <div className="keydex-markdown" data-message-markdown-mode="virtual-pending" ref={contentRef} />
+            ) : shouldVirtualizeMarkdown && markdownScrollParent ? (
+              <VirtualMarkdownPreview
+                customScrollParent={markdownScrollParent}
+                model={markdownModel}
+                registry={markdownComponents}
+                renderImage={renderMarkdownImage}
+                rootRef={contentRef}
+              />
+            ) : (
+              <div className="keydex-markdown" data-message-markdown-mode="static" ref={contentRef}>
+                {markdownBlocks}
+                {showStreamingCursor ? (
+                  <StreamingCursor />
+                ) : null}
+              </div>
+            )
           ) : null}
           {cancelled ? <div className={styles.cancelledBadge}>已取消</div> : null}
           {onQuoteSelection ? (
@@ -266,6 +316,40 @@ function MessageMarkdownCodeBlock({
 
 function messageMarkdownBlockKey(messageId: string, block: MarkdownBlock): string {
   return `${messageId}:${block.index}:${block.type}:${block.sourceStart}`;
+}
+
+function shouldVirtualizeMessageMarkdown({
+  cancelled,
+  isUser,
+  model,
+  visuallyStreaming,
+}: {
+  cancelled: boolean;
+  isUser: boolean;
+  model: MarkdownDocumentModel;
+  visuallyStreaming: boolean;
+}): boolean {
+  if (isUser || visuallyStreaming || cancelled || model.blocks.length < 2) {
+    return false;
+  }
+  if (model.blocks.length >= MESSAGE_MARKDOWN_VIRTUAL_BLOCK_THRESHOLD) {
+    return true;
+  }
+  if (
+    model.source.length >= MESSAGE_MARKDOWN_VIRTUAL_TEXT_THRESHOLD &&
+    model.blocks.length >= MESSAGE_MARKDOWN_VIRTUAL_MIN_BLOCKS_FOR_TEXT_THRESHOLD
+  ) {
+    return true;
+  }
+  const heavyBlockCount = model.blocks.filter((block) => block.type === "fence" || block.type === "table").length;
+  return (
+    heavyBlockCount >= MESSAGE_MARKDOWN_VIRTUAL_HEAVY_BLOCK_THRESHOLD &&
+    model.blocks.length >= MESSAGE_MARKDOWN_VIRTUAL_MIN_BLOCKS_FOR_HEAVY_THRESHOLD
+  );
+}
+
+function nearestMessageMarkdownScrollParent(root: HTMLElement | null): MessageMarkdownScrollParent {
+  return root?.closest<HTMLElement>(MESSAGE_MARKDOWN_SCROLL_PARENT_SELECTOR) ?? false;
 }
 
 function MessageContextItems({

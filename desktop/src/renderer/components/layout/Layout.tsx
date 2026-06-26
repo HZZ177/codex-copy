@@ -33,7 +33,7 @@ import {
 } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ConnectionStatus } from "@/renderer/components/runtime";
-import { LoadingSkeleton, LoadingSkeletonStack } from "@/renderer/components/loading";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { AppMode } from "@/renderer/components/layout/appMode";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
@@ -57,7 +57,7 @@ const LEGACY_FILES_PANEL_ID = "right-sidebar:files";
 const FILES_PANEL_ID_PREFIX = "right-sidebar:files:";
 const INITIAL_PANEL_ID_PREFIX = "right-sidebar:initial:";
 const GLOBAL_RIGHT_SIDEBAR_SCOPE = "global";
-const APP_MODE_LOADING_MS = 220;
+const APP_MODE_SWITCH_NAVIGATION_DELAY_MS = 180;
 
 interface RightSidebarFilePanelState {
   id: string;
@@ -133,9 +133,8 @@ export function Layout({
   const lastFilePanelOpenRequestRef = useRef(previewContext?.filePanelRequest?.requestId ?? 0);
   const lastPreviewScopeKeyRef = useRef<string | null>(previewContext?.activeScopeKey ?? null);
   const lastRightSidebarResetKeyRef = useRef<string | null>(null);
-  const appModeLoadingTimerRef = useRef<number | null>(null);
+  const appModeNavigationTimerRef = useRef<number | null>(null);
   const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
-  const [appModeLoadingTarget, setAppModeLoadingTarget] = useState<AppMode | null>(null);
   const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   const { state, actions } = useLayoutState();
   const runtimeConnection = useOptionalRuntimeConnection();
@@ -383,50 +382,38 @@ export function Layout({
     [closeRightSidebar, onNavigate],
   );
 
-  const clearAppModeLoadingTimer = useCallback(() => {
-    if (appModeLoadingTimerRef.current === null || typeof window === "undefined") {
-      appModeLoadingTimerRef.current = null;
+  const clearAppModeNavigationTimer = useCallback(() => {
+    if (appModeNavigationTimerRef.current === null || typeof window === "undefined") {
+      appModeNavigationTimerRef.current = null;
       return;
     }
-    window.clearTimeout(appModeLoadingTimerRef.current);
-    appModeLoadingTimerRef.current = null;
+    window.clearTimeout(appModeNavigationTimerRef.current);
+    appModeNavigationTimerRef.current = null;
   }, []);
 
   const switchAppMode = useCallback(
     (mode: AppMode) => {
+      clearAppModeNavigationTimer();
       if (mode === appMode) {
-        clearAppModeLoadingTimer();
-        setAppModeLoadingTarget(null);
         return;
       }
       const target = modeSwitchTargets?.[mode];
       if (!target || target === activePath) {
         return;
       }
-      clearAppModeLoadingTimer();
-      setAppModeLoadingTarget(mode);
-      if (typeof window === "undefined") {
+      if (typeof window === "undefined" || prefersReducedMotion()) {
         onNavigate?.(target);
         return;
       }
-      appModeLoadingTimerRef.current = window.setTimeout(() => {
-        appModeLoadingTimerRef.current = null;
-        setAppModeLoadingTarget(null);
+      appModeNavigationTimerRef.current = window.setTimeout(() => {
+        appModeNavigationTimerRef.current = null;
         onNavigate?.(target);
-      }, APP_MODE_LOADING_MS);
+      }, APP_MODE_SWITCH_NAVIGATION_DELAY_MS);
     },
-    [activePath, appMode, clearAppModeLoadingTimer, modeSwitchTargets, onNavigate],
+    [activePath, appMode, clearAppModeNavigationTimer, modeSwitchTargets, onNavigate],
   );
 
-  useEffect(() => {
-    return () => {
-      clearAppModeLoadingTimer();
-    };
-  }, [clearAppModeLoadingTimer]);
-
-  useEffect(() => {
-    setAppModeLoadingTarget(null);
-  }, [appMode]);
+  useEffect(() => () => clearAppModeNavigationTimer(), [clearAppModeNavigationTimer]);
 
   useEffect(() => {
     if (!resetRightSidebarKey || lastRightSidebarResetKeyRef.current === resetRightSidebarKey) {
@@ -442,7 +429,6 @@ export function Layout({
   const openRightSidebarLabel = rightSidebarOnLeft ? "展开左侧栏" : "展开右侧栏";
   const OpenRightSidebarIcon = rightSidebarOnLeft ? PanelLeftOpen : PanelRightOpen;
   const showRuntimeStatus = Boolean(runtimeConnection?.error);
-  const appModeLoading = appModeLoadingTarget !== null;
 
   return (
     <div
@@ -456,7 +442,6 @@ export function Layout({
       data-right-sidebar-mode={rightSidebarMaximized ? "maximized" : "split"}
       data-right-sidebar-motion={rightSidebarMotion ? "true" : "false"}
       data-right-sidebar-placement={state.rightSidebarPlacement}
-      data-app-mode-loading={appModeLoading ? "true" : "false"}
       data-workspace={state.workspaceOpen ? "open" : "closed"}
       data-preview={state.previewOpen ? "open" : "closed"}
       style={
@@ -487,99 +472,70 @@ export function Layout({
       ) : null}
 
       <div className={styles.body}>
-        {appModeLoading ? (
-          <AppModeLoadingLayout contentMode={contentMode} />
-        ) : (
+        <Sider
+          appMode={appMode}
+          activePath={activePath}
+          collapsed={collapsed}
+          projects={projects}
+          conversations={conversations}
+          showChatBucket={showChatBucket}
+          newConversationPath={newConversationPath}
+          deleteActiveFallbackPath={deleteActiveFallbackPath}
+          getSessionPath={getSessionPath}
+          getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
+          workbenchWorkspaceSelector={workbenchWorkspaceSelector}
+          onToggleSidebar={toggleSidebar}
+          onNavigate={navigateFromShell}
+        />
+        <SidebarResizeHandle
+          disabled={collapsed}
+          width={state.sidebarWidth}
+          onResizePreview={previewSidebarWidth}
+          onResize={actions.setSidebarWidth}
+        />
+
+        <section className={styles.content} data-content={contentMode} aria-label="主内容区">
+          <div className={styles.readingColumn} data-content={contentMode}>
+            {children}
+          </div>
+        </section>
+        {globalRightSidebarEnabled && !rightSidebarOpen ? (
+          <button
+            className={styles.contentRightSidebarToggle}
+            data-icon={rightSidebarOnLeft ? "panel-left-open" : "panel-right-open"}
+            type="button"
+            aria-label={openRightSidebarLabel}
+            title={openRightSidebarLabel}
+            onClick={openRightSidebar}
+          >
+            <OpenRightSidebarIcon size={17} strokeWidth={2.1} />
+          </button>
+        ) : null}
+
+        {globalRightSidebarEnabled ? (
           <>
-            <Sider
-              appMode={appMode}
-              activePath={activePath}
-              collapsed={collapsed}
-              projects={projects}
-              conversations={conversations}
-              showChatBucket={showChatBucket}
-              newConversationPath={newConversationPath}
-              deleteActiveFallbackPath={deleteActiveFallbackPath}
-              getSessionPath={getSessionPath}
-              getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
-              workbenchWorkspaceSelector={workbenchWorkspaceSelector}
-              onToggleSidebar={toggleSidebar}
-              onNavigate={navigateFromShell}
+            <RightSidebarResizeHandle
+              disabled={!rightSidebarOpen || rightSidebarMaximized}
+              ratio={state.rightSidebarRatio}
+              placement={state.rightSidebarPlacement}
+              getAvailableWidth={getRightSidebarAvailableWidth}
+              onResizePreview={previewRightSidebarRatio}
+              onResize={actions.setRightSidebarRatio}
+              onResizeDragChange={setRightSidebarResizing}
+              onSwapPlacement={swapRightSidebarPlacement}
             />
-            <SidebarResizeHandle
-              disabled={collapsed}
-              width={state.sidebarWidth}
-              onResizePreview={previewSidebarWidth}
-              onResize={actions.setSidebarWidth}
+            <RightSidebarPanel
+              open={rightSidebarOpen}
+              maximized={rightSidebarMaximized}
+              placement={state.rightSidebarPlacement}
+              onClose={closeRightSidebar}
+              onMaximize={maximizeRightSidebar}
+              onRestore={restoreRightSidebar}
             />
-
-            <section className={styles.content} data-content={contentMode} aria-label="主内容区">
-              <div className={styles.readingColumn} data-content={contentMode}>
-                {children}
-              </div>
-            </section>
-            {globalRightSidebarEnabled && !rightSidebarOpen ? (
-              <button
-                className={styles.contentRightSidebarToggle}
-                data-icon={rightSidebarOnLeft ? "panel-left-open" : "panel-right-open"}
-                type="button"
-                aria-label={openRightSidebarLabel}
-                title={openRightSidebarLabel}
-                onClick={openRightSidebar}
-              >
-                <OpenRightSidebarIcon size={17} strokeWidth={2.1} />
-              </button>
-            ) : null}
-
-            {globalRightSidebarEnabled ? (
-              <>
-                <RightSidebarResizeHandle
-                  disabled={!rightSidebarOpen || rightSidebarMaximized}
-                  ratio={state.rightSidebarRatio}
-                  placement={state.rightSidebarPlacement}
-                  getAvailableWidth={getRightSidebarAvailableWidth}
-                  onResizePreview={previewRightSidebarRatio}
-                  onResize={actions.setRightSidebarRatio}
-                  onResizeDragChange={setRightSidebarResizing}
-                  onSwapPlacement={swapRightSidebarPlacement}
-                />
-                <RightSidebarPanel
-                  open={rightSidebarOpen}
-                  maximized={rightSidebarMaximized}
-                  placement={state.rightSidebarPlacement}
-                  onClose={closeRightSidebar}
-                  onMaximize={maximizeRightSidebar}
-                  onRestore={restoreRightSidebar}
-                />
-              </>
-            ) : null}
           </>
-        )}
+        ) : null}
       </div>
     </div>
-  );
-}
-
-function AppModeLoadingLayout({ contentMode }: { contentMode: NonNullable<LayoutProps["contentMode"]> }) {
-  return (
-    <>
-      <LoadingSkeleton
-        aria-label="正在切换会话区域"
-        className={styles.appModeLoadingSider}
-        lineCount={4}
-        testId="app-mode-session-loading-skeleton"
-        width="compact"
-      />
-      <section className={styles.content} data-content={contentMode} aria-label="主内容区" aria-busy="true">
-        <div className={styles.readingColumn} data-content={contentMode}>
-          <LoadingSkeleton
-            aria-label="正在切换主内容区"
-            className={styles.appModeLoadingContent}
-            testId="app-mode-content-loading-skeleton"
-          />
-        </div>
-      </section>
-    </>
   );
 }
 
@@ -1097,7 +1053,6 @@ function RightSidebarPanel({
             </div>
           ) : activeRequest ? (
             <div className={styles.rightSidebarBody} data-content="preview">
-              <ResizePreviewSkeleton className={styles.rightSidebarResizeSkeleton} />
               <Suspense fallback={<RightSidebarLoading label="正在加载预览" />}>
                 <LazyFilePreview
                   breadcrumbRootLabel={
@@ -1139,14 +1094,6 @@ function prefersReducedMotion(): boolean {
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
-function ResizePreviewSkeleton({ className }: { className: string }) {
-  return (
-    <div className={className} aria-hidden="true" data-resize-preview-skeleton="true">
-      <LoadingSkeletonStack width="compact" />
-    </div>
   );
 }
 

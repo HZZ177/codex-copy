@@ -60,7 +60,7 @@ describe("FilePreview", () => {
     expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
   });
 
-  it("defers large panel markdown rendering until after the open motion window", async () => {
+  it("renders large panel markdown without the old preparation skeleton", async () => {
     const runtime = fakeRuntime({
       readFile: vi.fn().mockResolvedValue({
         path: "README.md",
@@ -71,9 +71,9 @@ describe("FilePreview", () => {
 
     render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} chrome="panel" />);
 
-    expect(await screen.findByRole("status", { name: "正在准备预览" })).not.toBeNull();
-    expect(screen.queryByRole("heading", { name: "Project" })).toBeNull();
+    expect(screen.queryByRole("status", { name: "正在准备预览" })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Project" })).not.toBeNull();
+    expect(screen.queryByRole("status", { name: "正在准备预览" })).toBeNull();
   });
 
   it("opens an in-preview search bar for Ctrl+F and navigates matches", async () => {

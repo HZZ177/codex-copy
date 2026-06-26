@@ -6,8 +6,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type HTMLAttributes,
   type ReactNode,
+  type Ref,
 } from "react";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 
@@ -32,12 +34,16 @@ export interface VirtualMarkdownPreviewProps {
   activeBlockId?: string | null;
   activeFindMatchId?: string | null;
   annotationIndex?: MarkdownAnnotationIndexItem[];
+  customScrollParent?: HTMLElement | null;
   findIndex?: MarkdownFindIndex | null;
   flashAnnotationId?: string | null;
   model: MarkdownDocumentModel;
   onMountedBlockIdsChange?: (blockIds: string[]) => void;
   registry?: MarkdownBlockRendererRegistry;
   renderImage?: MarkdownInlineImageRenderer;
+  rootClassName?: string;
+  rootRef?: Ref<HTMLDivElement>;
+  rootStyle?: CSSProperties;
 }
 
 interface VirtualMarkdownPreviewItem {
@@ -63,12 +69,16 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
       activeAnnotationId = null,
       activeFindMatchId = null,
       annotationIndex = [],
+      customScrollParent = null,
       findIndex = null,
       flashAnnotationId = null,
       model,
       onMountedBlockIdsChange,
       registry,
       renderImage,
+      rootClassName,
+      rootRef,
+      rootStyle,
     },
     ref,
   ) {
@@ -153,6 +163,9 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
         })),
       [annotationRenderStateByBlockId, findRenderStateByBlockId, model.blocks, model.version],
     );
+    const usesExternalScrollParent = Boolean(customScrollParent);
+    const rootClassNames = rootClassName ? `keydex-markdown ${rootClassName}` : "keydex-markdown";
+    const rootStyles = usesExternalScrollParent ? rootStyle : { height: "100%", ...rootStyle };
 
     useEffect(() => {
       onMountedBlockIdsChange?.(mountedBlockIds);
@@ -200,7 +213,8 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
 
     return (
       <div
-        className="keydex-markdown"
+        ref={rootRef}
+        className={rootClassNames}
         data-markdown-active-find-match-id={activeFindMatchId ?? undefined}
         data-markdown-block-count={model.blocks.length}
         data-markdown-find-match-count={findIndex?.matches.length ?? 0}
@@ -208,12 +222,14 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
         data-markdown-mounted-block-count={mountedBlockIds.length}
         data-markdown-mounted-heavy-block-count={mountedHeavyBlockCount}
         data-markdown-pending-reveal-block-id={pendingRevealBlockId ?? undefined}
+        data-markdown-scroll-parent={usesExternalScrollParent ? "external" : "self"}
         data-markdown-virtual-preview="true"
-        style={{ height: "100%" }}
+        style={rootStyles}
       >
         <Virtuoso
           components={markdownVirtuosoComponents}
           computeItemKey={(_index, item) => `${item.block.id}:${item.renderStateKey}`}
+          customScrollParent={customScrollParent ?? undefined}
           data={renderedBlocks}
           increaseViewportBy={{ bottom: 640, top: 320 }}
           initialItemCount={Math.min(model.blocks.length, 32)}
@@ -233,7 +249,7 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
           overscan={480}
           rangeChanged={setMountedRange}
           ref={virtuosoRef}
-          style={{ height: "100%" }}
+          style={usesExternalScrollParent ? undefined : { height: "100%" }}
         />
       </div>
     );

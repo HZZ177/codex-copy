@@ -177,7 +177,7 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1;
+  line-height: var(--ui-line-height-compact);
   padding: 0 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -195,6 +195,7 @@
 .historyBucketTitle span {
   min-width: 0;
   overflow: hidden;
+  line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -272,7 +273,7 @@
   color: var(--color-text-4);
   font: inherit;
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   text-align: left;
 }
 
@@ -413,7 +414,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   background: transparent;
   color: var(--color-text-2);
   font-size: 13px;
-  line-height: 1;
+  line-height: var(--ui-line-height-compact);
   text-align: left;
   transition:
     background-color var(--motion-fast) ease,
@@ -467,6 +468,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 .historyTitle {
   min-width: 0;
   overflow: hidden;
+  line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -512,7 +514,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   color: var(--color-text-4);
   font: inherit;
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 6px;
   transition:
     color var(--motion-fast) ease,
@@ -543,7 +545,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   gap: 5px;
   color: var(--color-text-4);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   opacity: 0.86;
   transition: opacity var(--motion-fast) ease;
   white-space: nowrap;
@@ -590,7 +592,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   background: color-mix(in srgb, var(--color-success-6) 10%, var(--surface-bg));
   color: var(--color-success-6);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   white-space: nowrap;
 }
 
@@ -1015,7 +1017,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   background: color-mix(in srgb, currentColor 8%, transparent);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 .collapsedSessionLoading {
@@ -1064,7 +1066,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   gap: 6px;
   color: var(--color-text-4);
   font-size: 10px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
 }
 
 @keyframes overlayIn {

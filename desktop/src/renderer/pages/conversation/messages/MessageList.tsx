@@ -252,6 +252,7 @@ export function MessageList({
             {...scrollerProps}
             ref={ref}
             className={styles.scroller}
+            data-message-list-scroll="true"
             data-testid="message-list-scroll"
             style={style}
             onScroll={(event) => {
@@ -281,6 +282,7 @@ export function MessageList({
     <div
       ref={staticAutoScroll.containerRef}
       className={styles.scroller}
+      data-message-list-scroll="true"
       data-testid="message-list-scroll"
       onPointerDown={staticAutoScroll.handlePointerDown}
       onScroll={handleStaticScroll}
@@ -378,7 +380,14 @@ const messageVirtuosoComponents: Components<MessageTurn> = {
     ref,
   ) {
     return (
-      <div {...props} ref={ref} className={styles.scroller} data-testid="message-list-scroll" style={style}>
+      <div
+        {...props}
+        ref={ref}
+        className={styles.scroller}
+        data-message-list-scroll="true"
+        data-testid="message-list-scroll"
+        style={style}
+      >
         {children}
       </div>
     );

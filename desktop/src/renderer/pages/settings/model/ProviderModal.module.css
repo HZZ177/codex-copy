@@ -193,7 +193,7 @@
   border: 0;
   border-radius: var(--radius-pill);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 13px;
 }
 

@@ -74,7 +74,7 @@
   place-items: center;
   color: var(--color-text-tertiary);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   opacity: 0;
   transition: opacity 140ms ease;
 }

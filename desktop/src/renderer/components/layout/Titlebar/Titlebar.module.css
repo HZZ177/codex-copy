@@ -76,7 +76,7 @@
   color: var(--color-text-2);
   font-size: 12px;
   font-weight: 600;
-  line-height: 1;
+  line-height: var(--ui-line-height-compact);
   white-space: nowrap;
   transition:
     color var(--motion-fast) ease;
@@ -103,6 +103,7 @@
   color: var(--color-text-1);
   font-size: 12px;
   font-weight: 600;
+  line-height: var(--ui-line-height-compact);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

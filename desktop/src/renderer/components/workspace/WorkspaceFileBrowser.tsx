@@ -15,7 +15,6 @@ import type {
   PreviewAnnotationChatRequest,
   PreviewQuoteSelectionRequest,
 } from "@/renderer/providers/PreviewProvider";
-import { LoadingSkeletonStack } from "@/renderer/components/loading";
 
 import {
   FilePreview,
@@ -382,9 +381,6 @@ export function WorkspaceFileBrowser({
               data-testid="workspace-file-browser-preview"
               aria-hidden={!previewOpen}
             >
-              <div className={styles.previewResizeSkeleton} aria-hidden="true" data-resize-preview-skeleton="true">
-                <LoadingSkeletonStack width="compact" />
-              </div>
               <FilePreview
                 breadcrumbRootLabel={label}
                 workspaceId={workspaceId}

@@ -12,6 +12,10 @@
   --radius-lg: 14px;
   --radius-pill: 999px;
 
+  --ui-line-height-tight: 1.4;
+  --ui-line-height-compact: 1.4;
+  --ui-line-height-body: 1.5;
+
   --shadow-soft: 0 10px 28px rgb(15 23 42 / 8%);
   --shadow-popover: 0 18px 50px rgb(15 23 42 / 14%);
   --motion-fast: 140ms;

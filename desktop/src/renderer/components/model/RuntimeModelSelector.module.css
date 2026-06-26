@@ -101,7 +101,7 @@
 .menuLabel {
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 5px 7px 8px;
 }
 

@@ -435,28 +435,6 @@
   background: var(--color-bg-elevated);
 }
 
-.browser[data-resizing="true"] .previewPane [data-file-preview-root="true"] {
-  display: none;
-  pointer-events: none;
-}
-
-.previewResizeSkeleton {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: min(260px, 78%);
-  z-index: 8;
-  display: none;
-  justify-items: center;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.browser[data-resizing="true"] .previewResizeSkeleton,
-:global([data-right-sidebar-resizing="true"]) .previewResizeSkeleton {
-  display: grid;
-}
-
 .collapsedEmptyState {
   display: grid;
   width: 100%;

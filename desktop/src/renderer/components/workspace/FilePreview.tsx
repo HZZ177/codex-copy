@@ -181,21 +181,8 @@ export function FilePreview({
   const previewContent = immediateContent ?? content;
   const previewLoading = immediateContent === null ? loading : false;
   const [error, setError] = useState<string | null>(null);
-  const panelMarkdownRenderKey =
-    panelChrome &&
-    kind === "markdown" &&
-    request.type === "file" &&
-    !previewLoading &&
-    !error &&
-    previewContent.length >= PANEL_MARKDOWN_RENDER_DEFER_CHARS
-      ? `${request.path}:${previewContent.length}`
-      : "";
-  const [readyPanelMarkdownRenderKey, setReadyPanelMarkdownRenderKey] = useState<string | null>(null);
-  const previewRenderDeferred = Boolean(
-    panelMarkdownRenderKey && readyPanelMarkdownRenderKey !== panelMarkdownRenderKey,
-  );
-  const renderedPreviewContent = previewRenderDeferred ? "" : previewContent;
-  const previewBusy = previewLoading || previewRenderDeferred;
+  const renderedPreviewContent = previewContent;
+  const previewBusy = previewLoading;
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
   const [splitMode, setSplitMode] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -253,7 +240,6 @@ export function FilePreview({
   const annotationPanelCloseTimerRef = useRef<number | null>(null);
   const annotationFlashTimerRef = useRef<number | null>(null);
   const annotationPopoverFrameRef = useRef<number | null>(null);
-  const panelMarkdownRenderTimerRef = useRef<number | null>(null);
   const transientRevealAnnotationRef = useRef<WorkspaceFileAnnotation | null>(null);
   const handledSourceRevealRequestIdRef = useRef(0);
   const lastFindScrollLineRef = useRef<FilePreviewFindScrollLine | null>(null);
@@ -290,33 +276,8 @@ export function FilePreview({
       if (annotationPopoverFrameRef.current !== null) {
         window.cancelAnimationFrame(annotationPopoverFrameRef.current);
       }
-      if (panelMarkdownRenderTimerRef.current !== null) {
-        window.clearTimeout(panelMarkdownRenderTimerRef.current);
-      }
     };
   }, []);
-
-  useEffect(() => {
-    if (panelMarkdownRenderTimerRef.current !== null) {
-      window.clearTimeout(panelMarkdownRenderTimerRef.current);
-      panelMarkdownRenderTimerRef.current = null;
-    }
-    if (!panelMarkdownRenderKey) {
-      setReadyPanelMarkdownRenderKey(null);
-      return;
-    }
-    setReadyPanelMarkdownRenderKey((current) => (current === panelMarkdownRenderKey ? current : null));
-    panelMarkdownRenderTimerRef.current = window.setTimeout(() => {
-      panelMarkdownRenderTimerRef.current = null;
-      setReadyPanelMarkdownRenderKey(panelMarkdownRenderKey);
-    }, PANEL_MARKDOWN_RENDER_DEFER_MS);
-    return () => {
-      if (panelMarkdownRenderTimerRef.current !== null) {
-        window.clearTimeout(panelMarkdownRenderTimerRef.current);
-        panelMarkdownRenderTimerRef.current = null;
-      }
-    };
-  }, [panelMarkdownRenderKey]);
 
   const hasAnchoredAnnotationPopover = Boolean(activeAnnotationPopover || selectionDraftPopover);
   useEffect(() => {
@@ -549,14 +510,14 @@ export function FilePreview({
   const formattedSource = useMemo(() => formatSource(renderedPreviewContent, kind), [kind, renderedPreviewContent]);
   const markdownModel = useMemo(
     () =>
-      kind === "markdown" && !previewRenderDeferred
+      kind === "markdown"
         ? markdownDocumentModelCache.getOrCreate({
           cacheKey: sourceLabel,
           idPrefix: "file-preview",
           source: renderedPreviewContent,
         })
         : null,
-    [kind, previewRenderDeferred, renderedPreviewContent, sourceLabel],
+    [kind, renderedPreviewContent, sourceLabel],
   );
   const markdownOutline = useMemo(
     () =>
@@ -1593,7 +1554,7 @@ export function FilePreview({
         {renderActions()}
       </header>
 
-      {previewBusy ? <FilePreviewLoading label={previewLoading ? "正在读取文件" : "正在准备预览"} /> : null}
+      {previewBusy ? <FilePreviewLoading label="正在读取文件" /> : null}
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       {!previewBusy && !error ? (
         <div className={styles.body} data-chrome={chrome} aria-label="预览内容" ref={bodyRef}>
@@ -1898,8 +1859,6 @@ interface FilePreviewFindScrollLine {
 
 const HIGHLIGHT_MAX_CHARS = 120_000;
 const HIGHLIGHT_MAX_LINES = 2_000;
-const PANEL_MARKDOWN_RENDER_DEFER_CHARS = 40_000;
-const PANEL_MARKDOWN_RENDER_DEFER_MS = 260;
 const ANNOTATION_PANEL_EXIT_MS = 160;
 const ANNOTATION_FLASH_ITERATIONS = 1;
 const ANNOTATION_FLASH_INTERVAL_MS = 700;
@@ -4911,115 +4870,6 @@ function countLines(text: string): number {
 
 function lineNumbersText(lineCount: number): string {
   return Array.from({ length: Math.max(1, lineCount) }, (_, index) => String(index + 1)).join("\n");
-}
-
-function extractMarkdownOutline(source: string): MarkdownOutlineItem[] {
-  const outline: MarkdownOutlineItem[] = [];
-  const lines = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  let fence: MarkdownFence | null = null;
-  let setextCandidate: { line: number; text: string } | null = null;
-
-  lines.forEach((line, index) => {
-    const lineNumber = index + 1;
-    const fenceMatch = markdownFenceMatch(line);
-    if (fence) {
-      if (fenceMatch && fenceMatch.marker === fence.marker && fenceMatch.length >= fence.length) {
-        fence = null;
-      }
-      setextCandidate = null;
-      return;
-    }
-    if (fenceMatch) {
-      fence = fenceMatch;
-      setextCandidate = null;
-      return;
-    }
-
-    const atxHeading = markdownAtxHeading(line);
-    if (atxHeading) {
-      outline.push(markdownOutlineItem(outline.length, atxHeading.level, lineNumber, atxHeading.title));
-      setextCandidate = null;
-      return;
-    }
-
-    const setextLevel = markdownSetextHeadingLevel(line);
-    if (setextLevel && setextCandidate) {
-      outline.push(markdownOutlineItem(outline.length, setextLevel, setextCandidate.line, setextCandidate.text));
-      setextCandidate = null;
-      return;
-    }
-
-    setextCandidate = markdownSetextCandidate(line)
-      ? { line: lineNumber, text: markdownHeadingText(line) }
-      : null;
-  });
-
-  return outline;
-}
-
-interface MarkdownFence {
-  marker: "`" | "~";
-  length: number;
-}
-
-function markdownFenceMatch(line: string): MarkdownFence | null {
-  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-  if (!match) {
-    return null;
-  }
-  const sequence = match[1];
-  return { marker: sequence[0] as "`" | "~", length: sequence.length };
-}
-
-function markdownAtxHeading(line: string): { level: number; title: string } | null {
-  const match = /^ {0,3}(#{1,6})(?:[ \t]+|$)(.*)$/.exec(line);
-  if (!match) {
-    return null;
-  }
-  const title = markdownHeadingText(match[2].replace(/[ \t]+#+[ \t]*$/, ""));
-  return title ? { level: match[1].length, title } : null;
-}
-
-function markdownSetextHeadingLevel(line: string): 1 | 2 | null {
-  const match = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
-  if (!match) {
-    return null;
-  }
-  return match[1][0] === "=" ? 1 : 2;
-}
-
-function markdownSetextCandidate(line: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return false;
-  }
-  if (/^ {0,3}(>|[-+*]\s|\d+[.)]\s|#{1,6}(?:\s|$)|={1,}\s*$|-{1,}\s*$)/.test(line)) {
-    return false;
-  }
-  return true;
-}
-
-function markdownOutlineItem(index: number, level: number, line: number, title: string): MarkdownOutlineItem {
-  return {
-    id: `markdown-heading-${line}-${index + 1}-${hashText(title)}`,
-    level,
-    line,
-    title,
-  };
-}
-
-function markdownHeadingText(raw: string): string {
-  const text = raw
-    .trim()
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\\([\\`*{}\[\]()#+\-.!_>])/g, "$1")
-    .replace(/[*_~]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || "未命名标题";
 }
 
 const IMAGE_MIN_SCALE = 0.25;

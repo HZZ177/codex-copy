@@ -16,7 +16,7 @@
   background: var(--surface-muted);
   color: var(--color-text-tertiary);
   font-size: 11px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 8px;
   white-space: nowrap;
 }

@@ -349,7 +349,7 @@
   color: var(--color-text-secondary);
   font: inherit;
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 0 10px;
   cursor: pointer;
 }

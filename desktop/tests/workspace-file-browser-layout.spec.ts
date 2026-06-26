@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
 
 describe("workspace file browser layout", () => {
-  it("contains file tree and preview resize invalidation inside the browser", () => {
+  it("keeps the file tree and preview panes contained without resize skeleton masking", () => {
     const browser = readSource("renderer/components/workspace/WorkspaceFileBrowser.module.css");
     const layout = readSource("renderer/components/layout/Layout.module.css");
 
@@ -16,11 +16,11 @@ describe("workspace file browser layout", () => {
     expect(browser).toMatch(/\.browser\s*{[^}]*overflow:\s*hidden/s);
     expect(browser).toMatch(/\.browser\s*{[^}]*contain:\s*layout paint style/s);
     expect(browser).toMatch(/\.treePane,\s*\n\.previewPane\s*{[^}]*contain:\s*layout paint style/s);
-    expect(browser).toMatch(
-      /\.browser\[data-resizing="true"\]\s+\.previewPane\s+\[data-file-preview-root="true"\]\s*{[^}]*display:\s*none/s,
-    );
-    expect(layout).toMatch(
-      /\.shell\[data-right-sidebar-resizing="true"\]\s+\.rightSidebarBody\[data-content="preview"\]\s+\[data-file-preview-root="true"\],[\s\S]*?{[^}]*display:\s*none/s,
+    expect(browser).not.toContain("previewResizeSkeleton");
+    expect(browser).not.toMatch(/\.browser\[data-resizing="true"\]\s+\.previewPane\s+\[data-file-preview-root="true"\]/s);
+    expect(layout).not.toContain("rightSidebarResizeSkeleton");
+    expect(layout).not.toMatch(
+      /\.shell\[data-right-sidebar-resizing="true"\]\s+\.rightSidebarBody\[data-content="preview"\]\s+\[data-file-preview-root="true"\]/s,
     );
   });
 

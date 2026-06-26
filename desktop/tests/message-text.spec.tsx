@@ -15,6 +15,9 @@ const mermaidRenderResult: RenderResult = {
   diagramType: "flowchart-v2",
   svg: '<svg role="img" aria-label="测试图表"></svg>',
 };
+const virtuosoMock = vi.hoisted(() => ({
+  scrollToIndex: vi.fn(),
+}));
 
 vi.mock("mermaid", () => ({
   default: {
@@ -27,8 +30,48 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+vi.mock("react-virtuoso", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    Virtuoso: React.forwardRef(function VirtuosoMock(props: {
+      customScrollParent?: HTMLElement;
+      data: unknown[];
+      itemContent: (index: number, item: unknown) => unknown;
+      rangeChanged?: (range: { startIndex: number; endIndex: number }) => void;
+      style?: React.CSSProperties;
+    }, ref) {
+      const endIndex = Math.min(7, props.data.length - 1);
+      const rangeChanged = props.rangeChanged;
+      React.useImperativeHandle(ref, () => ({
+        scrollToIndex: virtuosoMock.scrollToIndex,
+      }));
+      React.useEffect(() => {
+        if (endIndex >= 0) {
+          rangeChanged?.({ startIndex: 0, endIndex });
+        }
+      }, [endIndex, rangeChanged]);
+      return React.createElement(
+        "div",
+        {
+          "data-custom-scroll-parent": props.customScrollParent ? "true" : "false",
+          "data-testid": "virtuoso-mock",
+          style: props.style,
+        },
+        props.data.slice(0, endIndex + 1).map((item, index) =>
+          React.createElement(
+            "div",
+            { "data-testid": "virtuoso-item", key: index },
+            props.itemContent(index, item) as import("react").ReactNode,
+          ),
+        ),
+      );
+    }),
+  };
+});
+
 describe("MessageText", () => {
   beforeEach(() => {
+    virtuosoMock.scrollToIndex.mockClear();
     vi.stubGlobal("navigator", {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -965,6 +1008,44 @@ describe("MessageText", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Markdown 预览" });
     expect(within(dialog).getByRole("heading", { name: "片段标题" })).not.toBeNull();
+    const virtualPreview = dialog.querySelector("[data-markdown-virtual-preview='true']") as HTMLElement;
+    expect(virtualPreview).not.toBeNull();
+    expect(virtualPreview.getAttribute("data-markdown-scroll-parent")).toBe("self");
+  });
+
+  it("virtualizes large completed assistant markdown with the message list scroll parent", async () => {
+    render(
+      <div data-message-list-scroll="true">
+        <MessageText
+          message={message("assistant", largeMarkdownSections(120), "completed")}
+        />
+      </div>,
+    );
+
+    await screen.findByTestId("virtuoso-mock");
+
+    const virtualPreview = document.querySelector("[data-markdown-virtual-preview='true']") as HTMLElement;
+    const blockCount = Number(virtualPreview.dataset.markdownBlockCount);
+    expect(virtualPreview.getAttribute("data-markdown-scroll-parent")).toBe("external");
+    expect(screen.getByTestId("virtuoso-mock").getAttribute("data-custom-scroll-parent")).toBe("true");
+    expect(blockCount).toBeGreaterThan(96);
+    expect(document.querySelectorAll("[data-markdown-block-id]").length).toBeLessThan(blockCount);
+    expect(screen.queryByText("Section 119")).toBeNull();
+  });
+
+  it("keeps long user markdown on the static message renderer", () => {
+    render(
+      <div data-message-list-scroll="true">
+        <MessageText
+          message={message("user", largeMarkdownSections(60), "completed")}
+        />
+      </div>,
+    );
+
+    expect(screen.queryByTestId("virtuoso-mock")).toBeNull();
+    expect(document.querySelector("[data-markdown-virtual-preview='true']")).toBeNull();
+    expect(document.querySelector("[data-message-markdown-mode='static']")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Section 59" })).not.toBeNull();
   });
 
   it("quotes selected message text through the floating selection toolbar", async () => {
@@ -1378,6 +1459,13 @@ function message(
     createdAt: "2026-06-17T10:00:00Z",
     updatedAt: "2026-06-17T10:01:00Z",
   };
+}
+
+function largeMarkdownSections(count: number): string {
+  return Array.from(
+    { length: count },
+    (_, index) => `## Section ${index}\n\nBody ${index}`,
+  ).join("\n\n");
 }
 
 function RuntimeTypingMetricsProbe() {

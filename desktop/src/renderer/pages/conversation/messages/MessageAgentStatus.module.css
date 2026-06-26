@@ -8,7 +8,7 @@
   background: var(--inline-block-bg);
   color: var(--color-text-secondary);
   font-size: 12px;
-  line-height: 1;
+  line-height: var(--ui-line-height-tight);
   padding: 7px 10px;
 }
 
