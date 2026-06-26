@@ -1,5 +1,5 @@
 import { HashRouter } from "react-router-dom";
-import type { PropsWithChildren } from "react";
+import { useEffect, type PropsWithChildren } from "react";
 
 import { PreviewProvider } from "./PreviewProvider";
 import { ThemeProvider } from "./ThemeProvider";
@@ -7,6 +7,7 @@ import { FontProvider } from "./FontProvider";
 import { AgentSessionProvider } from "./AgentSessionProvider";
 import { NotificationProvider } from "./NotificationProvider";
 import { RuntimeConnectionProvider, type RuntimeConnectionProviderProps } from "./RuntimeConnectionProvider";
+import { APP_FIND_SHORTCUT_EVENT, isFindShortcutEvent } from "@/renderer/events/findShortcut";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 
@@ -20,6 +21,8 @@ export function AppProviders({
   runtime = runtimeBridge,
   runtimeConnection,
 }: AppProvidersProps) {
+  useDisableBrowserFindShortcut();
+
   return (
     <ThemeProvider>
       <NotificationProvider>
@@ -37,4 +40,24 @@ export function AppProviders({
       </NotificationProvider>
     </ThemeProvider>
   );
+}
+
+function useDisableBrowserFindShortcut() {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isFindShortcutEvent(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      document.dispatchEvent(
+        new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+          detail: { sourceTarget: event.target },
+        }),
+      );
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, []);
 }

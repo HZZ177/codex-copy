@@ -131,6 +131,40 @@ describe("Layout", () => {
     expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
   });
 
+  it("keeps the shared right sidebar unavailable in workbench mode", () => {
+    renderLayout(
+      <Layout appMode="workbench" contentMode="full">
+        <div>工作台内容</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.dataset.rightSidebarEnabled).toBe("false");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
+    expect(screen.queryByRole("separator", { name: "调整右侧栏宽度" })).toBeNull();
+  });
+
+  it("does not open the shared right sidebar from preview requests in workbench mode", () => {
+    renderLayoutWithPreview(
+      <>
+        <RightSidebarPreviewHarness />
+        <Layout appMode="workbench" contentMode="full">
+          <div>工作台内容</div>
+        </Layout>
+      </>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+
+    expect(shell.dataset.rightSidebarEnabled).toBe("false");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByRole("tablist", { name: "侧边栏窗口" })).toBeNull();
+    expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+  });
+
   it("marks the right sidebar as resizing only during pointer drag", async () => {
     renderLayout(
       <Layout>

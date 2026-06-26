@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
-import os
-import time
+import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from backend.app.api.dependencies import get_repositories
 from backend.app.core.logger import logger
+from backend.app.core.ripgrep import BUNDLED_RIPGREP_BINARY_NAME, resolve_ripgrep_binary
 from backend.app.keydex.schemas import WorkspaceSkillsResponse, workspace_skills_response
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.services.workspace_service import (
@@ -27,9 +28,8 @@ RepositoriesDep = Depends(get_repositories)
 
 MAX_READ_BYTES = 512 * 1024
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
-DEFAULT_SEARCH_LIMIT = 50
-MAX_SEARCH_VISITED_PATHS = 50_000
-MAX_SEARCH_SECONDS = 2.5
+DEFAULT_SEARCH_LIMIT = 100
+MAX_SEARCH_SECONDS = 2.0
 IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -798,52 +798,179 @@ def _search(scope: WorkspaceRuntimeContext, q: str, limit: int) -> list[Workspac
             "工作区不存在",
         )
 
-    query = q.lower()
-    results: list[WorkspaceSearchResult] = []
-    visited = 0
-    started_at = time.perf_counter()
-    for current_text, dir_names, file_names in os.walk(base):
-        current = Path(current_text)
-        dir_names[:] = [name for name in dir_names if not _should_skip_search_dir(name)]
-        file_names = [name for name in file_names if not _should_skip_search_file(name)]
-        candidates = [
-            *(current / name for name in dir_names),
-            *(current / name for name in file_names),
-        ]
-        for candidate in sorted(candidates, key=_entry_sort_key):
-            visited += 1
-            if (
-                visited > MAX_SEARCH_VISITED_PATHS
-                or time.perf_counter() - started_at > MAX_SEARCH_SECONDS
-            ):
-                logger.info(
-                    "[WorkspaceAPI] 搜索达到预算提前返回 | "
-                    f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | "
-                    f"visited={visited} | limit={limit}"
-                )
-                return results
-            if query not in candidate.name.lower():
-                continue
-            rel = _relative_path(scope, candidate)
-            results.append(
-                WorkspaceSearchResult(
-                    path=rel,
-                    name=candidate.name,
-                    type="directory" if candidate.is_dir() else "file",
-                )
-            )
-            if len(results) >= limit:
-                logger.debug(
-                    "[WorkspaceAPI] 搜索工作区 | "
-                    f"workspace_id={scope.workspace_id} | query={q} | "
-                    f"results={len(results)} | limit={limit}"
-                )
-                return results
-    logger.debug(
-        "[WorkspaceAPI] 搜索工作区 | "
-        f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | limit={limit}"
-    )
+    file_paths, truncated, visited = _workspace_rg_file_paths(base)
+    results = _workspace_search_results_from_paths(file_paths, q, limit)
+    if truncated:
+        logger.info(
+            "[WorkspaceAPI] 搜索达到预算提前返回 | "
+            f"workspace_id={scope.workspace_id} | query={q} | results={len(results)} | "
+            f"visited={visited} | limit={limit}"
+        )
+    else:
+        logger.debug(
+            "[WorkspaceAPI] 搜索工作区 | "
+            f"workspace_id={scope.workspace_id} | query={q} | "
+            f"results={len(results)} | limit={limit}"
+        )
     return results
+
+
+def _workspace_rg_file_paths(base: Path) -> tuple[list[str], bool, int]:
+    rg = resolve_ripgrep_binary()
+    if rg is None:
+        raise _workspace_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "workspace_search_engine_unavailable",
+            "未找到项目内置 ripgrep (rg)，无法搜索工作区",
+            {"engine": "ripgrep", "required_binary": BUNDLED_RIPGREP_BINARY_NAME},
+        )
+    try:
+        process = subprocess.Popen(
+            [str(rg), *_workspace_rg_file_args()],
+            cwd=str(base),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        raise _workspace_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "workspace_search_engine_unavailable",
+            f"启动 ripgrep 失败：{exc}",
+            {"engine": "ripgrep"},
+        ) from exc
+
+    paths: list[str] = []
+    truncated = False
+    timed_out = False
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    def kill_after_timeout() -> None:
+        nonlocal timed_out
+        timed_out = True
+        _kill_process(process)
+
+    timer = threading.Timer(MAX_SEARCH_SECONDS, kill_after_timeout)
+    timer.start()
+    try:
+        for line in process.stdout:
+            rel = _normalize_rg_file_path(line)
+            if rel:
+                paths.append(rel)
+        process.wait()
+    finally:
+        timer.cancel()
+
+    stderr = process.stderr.read()
+    if timed_out:
+        truncated = True
+    if process.returncode not in (0, 1, None) and not truncated:
+        message = stderr.strip() or "ripgrep 工作区搜索失败"
+        raise _workspace_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "workspace_search_failed",
+            message,
+            {"engine": "ripgrep"},
+        )
+    return paths, truncated, len(paths)
+
+
+def _workspace_rg_file_args() -> list[str]:
+    args = [
+        "--files",
+        "--hidden",
+        "--no-ignore",
+        "--no-messages",
+        "--color",
+        "never",
+    ]
+    for name in sorted(IGNORED_DIRS):
+        args.extend(["--iglob", f"!{name}/**", "--iglob", f"!**/{name}/**"])
+    for name in sorted(IGNORED_FILE_NAMES):
+        args.extend(["--iglob", f"!{name}", "--iglob", f"!**/{name}"])
+    for suffix in sorted(IGNORED_FILE_SUFFIXES):
+        args.extend(["--iglob", f"!**/*{suffix}"])
+    return args
+
+
+def _workspace_search_results_from_paths(
+    file_paths: list[str],
+    q: str,
+    limit: int,
+) -> list[WorkspaceSearchResult]:
+    query = q.lower()
+    entries = _workspace_search_entries_from_paths(file_paths)
+    results: list[WorkspaceSearchResult] = []
+    for path, entry_type in _workspace_search_ordered_entries(entries):
+        name = path.rsplit("/", 1)[-1]
+        if query not in name.lower():
+            continue
+        results.append(WorkspaceSearchResult(path=path, name=name, type=entry_type))
+        if len(results) >= limit:
+            return results
+    return results
+
+
+def _workspace_search_entries_from_paths(file_paths: list[str]) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for path in file_paths:
+        parts = [part for part in path.split("/") if part and part != "."]
+        if not parts or _has_ignored_search_dir(parts[:-1]) or _should_skip_search_file(parts[-1]):
+            continue
+        ancestors: list[str] = []
+        for part in parts[:-1]:
+            ancestors.append(part)
+            entries.setdefault("/".join(ancestors), "directory")
+        entries.setdefault("/".join(parts), "file")
+    return entries
+
+
+def _workspace_search_ordered_entries(entries: dict[str, str]) -> list[tuple[str, str]]:
+    children_by_parent: dict[str, list[tuple[str, str]]] = {}
+    for path, entry_type in entries.items():
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
+        children_by_parent.setdefault(parent, []).append((path, entry_type))
+
+    ordered: list[tuple[str, str]] = []
+
+    def visit(parent: str) -> None:
+        children = sorted(children_by_parent.get(parent, []), key=_search_entry_sort_key)
+        ordered.extend(children)
+        for child_path, child_type in children:
+            if child_type == "directory":
+                visit(child_path)
+
+    visit("")
+    return ordered
+
+
+def _search_entry_sort_key(item: tuple[str, str]) -> tuple[int, str]:
+    path, entry_type = item
+    name = path.rsplit("/", 1)[-1]
+    return (0 if entry_type == "directory" else 1, name.lower())
+
+
+def _normalize_rg_file_path(line: str) -> str:
+    path = line.strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    if not path or path == "." or path.startswith("../") or "/../" in path:
+        return ""
+    return path
+
+
+def _has_ignored_search_dir(parts: list[str]) -> bool:
+    return any(_should_skip_search_dir(part) for part in parts)
+
+
+def _kill_process(process: subprocess.Popen[str]) -> None:
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 def _should_skip_search_dir(name: str) -> bool:

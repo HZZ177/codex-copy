@@ -30,6 +30,7 @@ import {
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import {
@@ -534,12 +535,10 @@ function PreviewFullscreenDialog({
 }
 
 function CodeViewLoading({ targetMode }: { targetMode: "source" | "preview" | null }) {
+  const ariaLabel =
+    targetMode === "source" ? "正在切换到源码视图" : targetMode === "preview" ? "正在切换到预览视图" : "正在切换代码视图";
   return (
-    <div className={styles.codeViewLoading} aria-label="正在切换代码视图" data-target={targetMode ?? "unknown"}>
-      <span />
-      <span />
-      <span />
-    </div>
+    <LoadingSkeleton aria-label={ariaLabel} className={styles.codeViewLoading} lineCount={3} width="compact" />
   );
 }
 

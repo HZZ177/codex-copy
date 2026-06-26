@@ -66,6 +66,52 @@ describe("MessageText", () => {
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
   });
 
+  it("renders restored user context chips above the user bubble", () => {
+    render(
+      <MessageText
+        message={message("user", "please review", "completed", {
+          contextItems: [
+            {
+              id: "ctx-file",
+              type: "file",
+              label: "README.md",
+              source: "follow",
+              path: "README.md",
+              fileType: "file",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const bubble = screen.getByTestId("message-bubble");
+    expect(bubble.textContent).toContain("please review");
+    expect(bubble.textContent).not.toContain("@README.md");
+    expect(screen.getByTestId("message-text").textContent).toContain("@README.md");
+  });
+
+  it("does not render an empty user bubble for context-only restored messages", () => {
+    render(
+      <MessageText
+        message={message("user", "", "completed", {
+          contextItems: [
+            {
+              id: "ctx-file",
+              type: "file",
+              label: "README.md",
+              source: "follow",
+              path: "README.md",
+              fileType: "file",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.queryByTestId("message-bubble")).toBeNull();
+    expect(screen.getByTestId("message-text").textContent).toContain("@README.md");
+  });
+
   it("renders restored quote context preview cards in a body portal", async () => {
     render(
       <MessageText
@@ -151,6 +197,9 @@ describe("MessageText", () => {
     const preview = await screen.findByText(path);
     expect(document.querySelector('[data-floating-preview-title="true"]')?.textContent).toBe("FileWithLongName.tsx");
     expect(preview.closest('[data-testid="message-text"]')).toBeNull();
+    const hoverCard = preview.closest("[data-floating-ready]");
+    expect(hoverCard).not.toBeNull();
+    expect(fireEvent.mouseDown(hoverCard as Element)).toBe(true);
   });
 
   it("renders Chinese headings, ordered lists and code blocks without widening the message", () => {

@@ -17,7 +17,7 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 
 import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
 import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
-import { useOptionalPreview, type PreviewRenderContext } from "@/renderer/providers/PreviewProvider";
+import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { AgentContextItem } from "@/types/protocol";
 
@@ -36,6 +36,7 @@ import {
   stripThinkTags,
   textualToolProtocolNotice,
 } from "./markdown";
+import { previewRenderContextFromWorkspaceScope } from "./previewRenderContext";
 import { useTextSelection } from "./useTextSelection";
 import { useTypingAnimation } from "./useTypingAnimation";
 import styles from "./MessageText.module.css";
@@ -153,42 +154,51 @@ export function MessageText({
     [onQuoteSelection, previewContext, workspaceRuntime, workspaceScope],
   );
 
+  const userContextItems = isUser && contextItems.length > 0;
+  const inlineContextItems = !isUser && contextItems.length > 0;
+  const showBubble = Boolean(renderedContent || !userContextItems || cancelled);
+
   return (
     <article className={isUser ? styles.userMessage : styles.assistantMessage} data-testid="message-text">
-      <div className={styles.bubble}>
-        {!isUser && assistantContent.redacted ? (
-          <div className={styles.protocolNotice} role="note">
-            {textualToolProtocolNotice}
-          </div>
-        ) : null}
-        {contextItems.length ? <MessageContextItems items={contextItems} onOpenFile={openContextFile} /> : null}
-        {renderedContent || !contextItems.length ? (
-          <div className="keydex-markdown" ref={contentRef}>
-            <ReactMarkdown
-              remarkPlugins={markdownRemarkPlugins}
-              rehypePlugins={markdownRehypePlugins}
-              components={markdownComponents}
-              urlTransform={markdownUrlTransform}
-            >
-              {renderedContent}
-            </ReactMarkdown>
-            {showStreamingCursor ? (
-              <StreamingCursor />
-            ) : null}
-          </div>
-        ) : (
-          <div ref={contentRef} />
-        )}
-        {cancelled ? <div className={styles.cancelledBadge}>已取消</div> : null}
-        {onQuoteSelection ? (
-          <SelectionToolbar
-            selectedText={selection.selectedText}
-            position={selection.selectionPosition}
-            onQuote={onQuoteSelection}
-            onClear={selection.clearSelection}
-          />
-        ) : null}
-      </div>
+      {userContextItems ? (
+        <div className={styles.userContextItems}>
+          <MessageContextItems items={contextItems} onOpenFile={openContextFile} />
+        </div>
+      ) : null}
+      {showBubble ? (
+        <div className={styles.bubble} data-testid="message-bubble">
+          {!isUser && assistantContent.redacted ? (
+            <div className={styles.protocolNotice} role="note">
+              {textualToolProtocolNotice}
+            </div>
+          ) : null}
+          {inlineContextItems ? <MessageContextItems items={contextItems} onOpenFile={openContextFile} /> : null}
+          {renderedContent || !userContextItems ? (
+            <div className="keydex-markdown" ref={contentRef}>
+              <ReactMarkdown
+                remarkPlugins={markdownRemarkPlugins}
+                rehypePlugins={markdownRehypePlugins}
+                components={markdownComponents}
+                urlTransform={markdownUrlTransform}
+              >
+                {renderedContent}
+              </ReactMarkdown>
+              {showStreamingCursor ? (
+                <StreamingCursor />
+              ) : null}
+            </div>
+          ) : null}
+          {cancelled ? <div className={styles.cancelledBadge}>已取消</div> : null}
+          {onQuoteSelection ? (
+            <SelectionToolbar
+              selectedText={selection.selectedText}
+              position={selection.selectionPosition}
+              onQuote={onQuoteSelection}
+              onClear={selection.clearSelection}
+            />
+          ) : null}
+        </div>
+      ) : null}
       <MessageGhostFooter footer={ghostFooter} />
 
       {!visuallyStreaming && showActionRow ? (
@@ -536,52 +546,6 @@ function contextItemsFromPayload(payload: Record<string, unknown>): AgentContext
   });
 }
 
-function previewRenderContextFromWorkspaceScope(
-  workspaceScope: WorkspaceScope | null | undefined,
-  runtime: RuntimeBridge | undefined,
-  onQuoteSelection: ((text: string) => void) | undefined,
-  hostContext: PreviewRenderContext | null | undefined,
-): PreviewRenderContext | undefined {
-  if (hostContext?.workspaceAvailable && previewContextMatchesWorkspaceScope(hostContext, workspaceScope)) {
-    return hostContext;
-  }
-  if (!workspaceScope) {
-    return undefined;
-  }
-  const context: PreviewRenderContext = {
-    workspaceAvailable: true,
-  };
-  if ("sessionId" in workspaceScope && workspaceScope.sessionId) {
-    context.sessionId = workspaceScope.sessionId;
-  }
-  if ("workspaceId" in workspaceScope && workspaceScope.workspaceId) {
-    context.workspaceId = workspaceScope.workspaceId;
-  }
-  if (runtime) {
-    context.runtime = runtime;
-  }
-  if (onQuoteSelection) {
-    context.onQuoteSelection = (request) => onQuoteSelection(request.selectedText);
-  }
-  return context;
-}
-
-function previewContextMatchesWorkspaceScope(
-  context: PreviewRenderContext,
-  workspaceScope: WorkspaceScope | null | undefined,
-): boolean {
-  if (!workspaceScope) {
-    return false;
-  }
-  if ("sessionId" in workspaceScope && workspaceScope.sessionId) {
-    return context.sessionId === workspaceScope.sessionId;
-  }
-  if ("workspaceId" in workspaceScope && workspaceScope.workspaceId) {
-    return context.workspaceId === workspaceScope.workspaceId;
-  }
-  return false;
-}
-
 function MarkdownAnchor({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) {
   return (
     <a href={href} {...props}>
@@ -801,7 +765,6 @@ function FloatingQuotePreview({
                   scheduleClosePreview();
                 }
               }}
-              onMouseDown={(event) => event.preventDefault()}
             >
               {titleText ? (
                 <span className={titleClassName} data-floating-preview-title="true">

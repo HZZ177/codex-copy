@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
@@ -79,7 +79,7 @@ describe("WorkspacePanel", () => {
 
     expect(await screen.findByRole("searchbox", { name: "筛选文件" })).not.toBeNull();
     expect((screen.getByRole("button", { name: "定位当前文件" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("最多返回 50 项 · 最多搜索 2.5 秒")).not.toBeNull();
+    expect(screen.getByText("最多返回 100 项 · 最多搜索 2 秒")).not.toBeNull();
     expect(screen.getByText("desktop")).not.toBeNull();
     expect(screen.getByText("package.json")).not.toBeNull();
 
@@ -249,6 +249,61 @@ describe("WorkspacePanel", () => {
     }
   });
 
+  it("auto-locates externally requested preview files in the tree", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const runtime = fakeRuntime(
+      {
+        "": [entry("src", "src", "directory")],
+        src: [entry("components", "src/components", "directory")],
+        "src/components": [entry("main.py", "src/components/main.py", "file", 24)],
+      },
+      {
+        "src/components/main.py": "print('ok')",
+      },
+    );
+
+    try {
+      render(
+        <WorkspaceFileBrowser
+          previewPath="src/components/main.py"
+          previewRequestId={1}
+          sessionId="ses-1"
+          label="D:/repo"
+          runtime={runtime}
+        />,
+      );
+
+      expect(await screen.findByTestId("file-source-viewer")).not.toBeNull();
+      const treePane = screen.getByTestId("workspace-file-browser-tree");
+      const selectedLabel = await within(treePane).findByText("main.py");
+      const selected = selectedLabel.closest("button");
+      expect(selected).not.toBeNull();
+      if (!selected) {
+        throw new Error("selected tree button not found");
+      }
+      expect(selected.getAttribute("data-selected")).toBe("true");
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+      await waitFor(() => {
+        expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "src");
+        expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ sessionId: "ses-1" }, "src/components");
+      });
+    } finally {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    }
+  });
+
   it("opens selected files in a right-hand preview while keeping the tree visible", async () => {
     const runtime = fakeRuntime(
       {
@@ -339,7 +394,7 @@ describe("WorkspacePanel", () => {
 
       await waitFor(() => {
         expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "center",
+          block: "start",
           inline: "nearest",
           behavior: "smooth",
         });

@@ -828,6 +828,11 @@ function selectedFileFromQuote(quote: SelectedQuote): SelectedFile | null {
     name: quote.file.name || fileName(quote.file.path),
     type: "file",
     source: "workspace",
+    selectedText: quote.text,
+    lineStart: quote.file.lineStart ?? null,
+    lineEnd: quote.file.lineEnd ?? null,
+    sourceStart: quote.file.sourceStart ?? null,
+    sourceEnd: quote.file.sourceEnd ?? null,
   };
 }
 
@@ -989,7 +994,6 @@ function ComposerContextHover({
           data-sendbox-context-hover-card="true"
           data-context-type={hoverAnchor}
           style={hoverPlacement.style}
-          onMouseDown={(event) => event.preventDefault()}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleClose}
         >

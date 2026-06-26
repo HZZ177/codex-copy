@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type PropsWi
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
+import type { WorkspaceSelection } from "@/renderer/components/workspace";
 import type { AgentSession, Workspace } from "@/types/protocol";
 
 import {
@@ -15,7 +16,7 @@ import {
   WORKBENCH_PATH,
 } from "./appMode";
 import { Layout } from "./Layout";
-import type { SiderEntry } from "./Sider";
+import type { SiderEntry, WorkbenchWorkspaceSelectorProps } from "./Sider";
 
 const EventReplayHarness = lazy(() =>
   import("@/renderer/devtools/EventReplayHarness").then((module) => ({ default: module.EventReplayHarness })),
@@ -98,6 +99,7 @@ function RoutedLayout({
   deleteActiveFallbackPath,
   getSessionPath,
   getWorkspaceNewConversationPath,
+  workbenchWorkspaceSelector,
   resetRightSidebarOnEnter = false,
   children,
 }: PropsWithChildren<{
@@ -110,6 +112,7 @@ function RoutedLayout({
   deleteActiveFallbackPath?: string;
   getSessionPath?: (sessionId: string) => string;
   getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
+  workbenchWorkspaceSelector?: WorkbenchWorkspaceSelectorProps;
   resetRightSidebarOnEnter?: boolean;
 }>) {
   const navigate = useNavigate();
@@ -142,6 +145,7 @@ function RoutedLayout({
       deleteActiveFallbackPath={deleteActiveFallbackPath}
       getSessionPath={getSessionPath}
       getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
+      workbenchWorkspaceSelector={workbenchWorkspaceSelector}
       modeSwitchTargets={modeSwitchTargets}
       resetRightSidebarKey={resetRightSidebarOnEnter ? location.key : undefined}
       onNavigate={handleNavigate}
@@ -281,6 +285,10 @@ function WorkbenchRoute({ runtime }: { runtime: RuntimeBridge }) {
       })),
     [workspaceSessions],
   );
+  const workspaceSelectorValue = useMemo<WorkspaceSelection>(
+    () => (selectedWorkspace ? { type: "workspace", workspace: selectedWorkspace } : { type: "chat" }),
+    [selectedWorkspace],
+  );
   const getWorkbenchSessionPath = useCallback(
     (id: string) => workbenchPath(decodedWorkspaceId, id),
     [decodedWorkspaceId],
@@ -345,6 +353,19 @@ function WorkbenchRoute({ runtime }: { runtime: RuntimeBridge }) {
       deleteActiveFallbackPath={decodedWorkspaceId ? workbenchPath(decodedWorkspaceId) : WORKBENCH_PATH}
       getSessionPath={getWorkbenchSessionPath}
       getWorkspaceNewConversationPath={getWorkbenchNewPath}
+      workbenchWorkspaceSelector={
+        decodedWorkspaceId
+          ? {
+              value: workspaceSelectorValue,
+              workspaces,
+              loading: workspaceLoading,
+              allowProjectFreeChat: false,
+              onSelectWorkspace: navigateToWorkspace,
+              onAddWorkspace: addWorkspace,
+              onPickWorkspacePath: pickWorkspacePath,
+            }
+          : undefined
+      }
     >
       <WorkbenchModePage
         runtime={runtime}

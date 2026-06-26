@@ -94,6 +94,11 @@
   overflow-anchor: none;
 }
 
+.item[data-kind="skill"],
+.item:has(+ .item[data-kind="skill"]) {
+  padding-bottom: 10px;
+}
+
 .item:last-child {
   padding-bottom: 0;
 }
@@ -172,11 +177,11 @@
 .skeletonWrap {
   width: min(var(--composer-width), calc(100% - (var(--conversation-edge-padding, 18px) * 2)));
   min-width: 0;
+  min-height: 100%;
   box-sizing: border-box;
   margin: 0 auto;
-  display: grid;
-  gap: 18px;
-  padding: 22px 0 var(--message-list-bottom-buffer);
+  --loading-skeleton-padding: 24px 0 var(--message-list-bottom-buffer);
+  --loading-skeleton-stack-width: min(300px, 76%);
 }
 
 @media (max-width: 860px) {
@@ -185,31 +190,6 @@
   .skeletonWrap {
     width: min(var(--composer-width), calc(100% - (var(--conversation-edge-padding, 14px) * 2)));
   }
-}
-
-.skeleton {
-  display: grid;
-  gap: 10px;
-}
-
-.skeleton span {
-  display: block;
-  height: 12px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    var(--surface-muted) 0%,
-    var(--surface-hover) 44%,
-    var(--surface-muted) 88%
-  );
-}
-
-.skeleton span:first-child {
-  width: 34%;
-}
-
-.skeleton span:last-child {
-  width: 72%;
 }
 
 .scrollButton {

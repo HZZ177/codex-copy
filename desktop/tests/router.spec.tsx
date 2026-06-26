@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -122,7 +122,7 @@ describe("AppRouter", () => {
     renderRouter(["/workbench"]);
 
     expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByTestId("workbench-workspace-picker")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-capsule").getAttribute("data-disabled")).toBe("true");
     expect(screen.queryByRole("button", { name: /无项目聊天/ })).toBeNull();
@@ -137,6 +137,10 @@ describe("AppRouter", () => {
 
     expect(await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 })).not.toBeNull();
     expect(screen.getByTestId("workbench-mode-page").getAttribute("data-workspace-id")).toBe("workspace A");
+    expect(screen.getByTestId("workbench-sidebar-workspace-selector")).not.toBeNull();
+    expect(
+      within(screen.getByRole("main", { name: "工作台" })).queryByRole("button", { name: "选择工作区" }),
+    ).toBeNull();
   });
 
   it("opens a workbench workspace session route", async () => {
@@ -147,7 +151,7 @@ describe("AppRouter", () => {
     expect(screen.getByTestId("workspace-file-browser")).not.toBeNull();
     expect(screen.getByTestId("workbench-mode-page").getAttribute("data-workspace-id")).toBe("workspace A");
     expect(screen.getByTestId("workbench-mode-page").getAttribute("data-selected-session-id")).toBe("session 1");
-    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("true");
     expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ workspaceId: "workspace A" }, "");
     expect(runtime.conversation.listSessions).toHaveBeenCalledWith({
       sessionType: "workspace",
@@ -173,6 +177,7 @@ describe("AppRouter", () => {
   it("creates a workspace-owned session from the workbench assistant capsule", async () => {
     const { runtime } = renderRouter(["/workbench/workspace%20A"]);
 
+    fireEvent.click(await screen.findByRole("button", { name: "展开工作台输入框" }, { timeout: 10000 }));
     const input = await screen.findByLabelText("工作台助手输入", undefined, { timeout: 10000 });
     input.textContent = "生成验收说明";
     fireEvent.input(input);
@@ -206,6 +211,7 @@ describe("AppRouter", () => {
     const workspaceSearch = vi.fn().mockResolvedValue([{ path: "README.md", name: "README.md", type: "file" }]);
     renderRouter(["/workbench/workspace%20A/session/session%201"], { workspaceSearch });
 
+    fireEvent.click(await screen.findByRole("button", { name: "展开工作台输入框" }, { timeout: 10000 }));
     const input = await screen.findByLabelText("工作台助手输入", undefined, { timeout: 10000 });
     input.textContent = "@READ";
     fireEvent.input(input);
@@ -223,10 +229,22 @@ describe("AppRouter", () => {
   it("switches the workbench assistant between capsule, expanded layer and drawer", async () => {
     renderRouter(["/workbench/workspace%20A/session/session%201"]);
 
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.dataset.rightSidebarEnabled).toBe("false");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
     const surface = await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
+    expect(screen.getByTestId("workbench-assistant-capsule")).not.toBeNull();
+    expect(screen.getByLabelText("输入框状态")).not.toBeNull();
+    expect(screen.queryByLabelText("工作台助手输入")).toBeNull();
     expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+    expect(await screen.findByLabelText("工作台助手输入")).not.toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
 
     fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
     expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
@@ -236,14 +254,31 @@ describe("AppRouter", () => {
     expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
 
-    fireEvent.click(screen.getByRole("button", { name: "停靠到工作台右侧助手栏" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+    const emptyInput = await screen.findByLabelText("工作台助手输入");
+    fireEvent.pointerDown(screen.getByTestId("workspace-file-browser"));
+    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    expect(emptyInput.isConnected).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+    const stickyInput = await screen.findByLabelText("工作台助手输入");
+    stickyInput.textContent = "保留草稿";
+    fireEvent.input(stickyInput);
+    fireEvent.pointerDown(screen.getByTestId("workspace-file-browser"));
+    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
     expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
     expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+    expect(surface.getAttribute("data-dock-layout")).toBe("inline");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
     expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
-    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
   });
 
   it("surfaces pending approval in the workbench assistant drawer", async () => {
@@ -265,6 +300,7 @@ describe("AppRouter", () => {
 
     expect(await screen.findByTestId("workbench-approval-prompt", undefined, { timeout: 10000 })).not.toBeNull();
     expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+    expect(surface.getAttribute("data-dock-layout")).toBe("inline");
     expect(screen.getByText("是否允许执行命令？")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "批准" }));
@@ -277,13 +313,78 @@ describe("AppRouter", () => {
     });
   });
 
-  it("switches to workbench only when the user clicks the titlebar mode control", async () => {
+  it("shows active plan status in the workbench assistant capsule group", async () => {
+    const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);
+
+    await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
+    await waitFor(() => {
+      expect(runtime.conversation.openChatChannel).toHaveBeenCalled();
+    });
+
+    act(() => {
+      runtime.__spies.emit({
+        action: "tool_start",
+        data: {
+          session_id: "session 1",
+          run_id: "plan-run",
+          tool_name: "update_plan",
+          params: {
+            plan: [
+              { content: "确认工作台输入框交互", status: "completed" },
+              { content: "补充状态胶囊", status: "in_progress" },
+            ],
+          },
+        },
+      });
+    });
+
+    const planPill = await screen.findByTestId("plan-summary-pill", undefined, { timeout: 10000 });
+    expect(within(planPill).getByText(/补充状态胶囊/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "展开工作台输入框" })).not.toBeNull();
+  });
+
+  it("shows local skeletons before switching app modes", async () => {
     renderRouter(["/conversation/thread-1"]);
 
     expect(await screen.findByRole("heading", { name: /thread-1/ }, { timeout: 10000 })).not.toBeNull();
     expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Workbench" }));
-    expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+    const shell = screen.getByTestId("app-shell");
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
+      expect(shell.dataset.appModeLoading).toBe("true");
+      expect(screen.getByTestId("app-mode-session-loading-skeleton")).not.toBeNull();
+      expect(screen.getByTestId("app-mode-content-loading-skeleton")).not.toBeNull();
+      expect(screen.queryByText("正在切换应用模式")).toBeNull();
+      expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Agent" }));
+      expect(shell.dataset.appModeLoading).toBe("false");
+      expect(screen.queryByTestId("app-mode-session-loading-skeleton")).toBeNull();
+      expect(screen.queryByTestId("app-mode-content-loading-skeleton")).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(220);
+        await Promise.resolve();
+      });
+      expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
+      expect(shell.dataset.appModeLoading).toBe("true");
+      expect(screen.getByTestId("app-mode-session-loading-skeleton")).not.toBeNull();
+      expect(screen.getByTestId("app-mode-content-loading-skeleton")).not.toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(220);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("workbench-mode-page")).not.toBeNull();
+      expect(screen.getByTestId("app-shell").dataset.appModeLoading).toBe("false");
+      expect(screen.queryByTestId("app-mode-session-loading-skeleton")).toBeNull();
+      expect(screen.queryByTestId("app-mode-content-loading-skeleton")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

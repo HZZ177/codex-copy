@@ -50,39 +50,17 @@
   position: relative;
   height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 48px minmax(0, 1fr);
-  padding-bottom: 76px;
-}
-
-.toolbar {
-  min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--color-border-1);
-  background: var(--surface-bg);
-}
-
-.workspaceSelector {
-  min-width: 0;
-  max-width: min(420px, 60%);
-}
-
-.context {
-  min-width: 0;
+  align-items: stretch;
   overflow: hidden;
-  color: var(--color-text-3);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .canvas {
+  position: relative;
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .assistantCapsule {
@@ -114,17 +92,5 @@
 @media (max-width: 900px) {
   .picker {
     padding-inline: 20px;
-  }
-
-  .toolbar {
-    padding-inline: 12px;
-  }
-
-  .workspaceSelector {
-    max-width: 100%;
-  }
-
-  .context {
-    display: none;
   }
 }

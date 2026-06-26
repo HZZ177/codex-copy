@@ -27,6 +27,14 @@ export interface PreviewQuoteSelectionRequest {
   sourceEnd?: number | null;
 }
 
+export interface PreviewFileRevealTarget {
+  selectedText?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
+}
+
 export interface PreviewAnnotationChatRequest {
   path: string;
   comment: string;
@@ -51,6 +59,7 @@ export interface FilePanelRequest {
   requestId: number;
   scopeKey: string;
   path: string | null;
+  revealTarget: PreviewFileRevealTarget | null;
   renderContext: PreviewRenderContext | null;
 }
 
@@ -72,7 +81,7 @@ export interface PreviewContextValue extends PreviewState {
   activeRenderContext: PreviewRenderContext | null;
   activeScopeKey: string;
   openPreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
-  openFilePanel(path?: string | null, renderContext?: PreviewRenderContext): void;
+  openFilePanel(path?: string | null, renderContext?: PreviewRenderContext, revealTarget?: PreviewFileRevealTarget | null): void;
   togglePreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
   switchPreview(entryId: string): void;
   closePreviewEntry(entryId: string): void;
@@ -115,7 +124,11 @@ export function PreviewProvider({ children }: PropsWithChildren) {
     });
   }, []);
 
-  const openFilePanel = useCallback((path: string | null = null, renderContext?: PreviewRenderContext) => {
+  const openFilePanel = useCallback((
+    path: string | null = null,
+    renderContext?: PreviewRenderContext,
+    revealTarget: PreviewFileRevealTarget | null = null,
+  ) => {
     setState((current) => {
       const context = renderContext ?? current.hostContext;
       return {
@@ -125,6 +138,7 @@ export function PreviewProvider({ children }: PropsWithChildren) {
           requestId: (current.filePanelRequest?.requestId ?? 0) + 1,
           scopeKey: previewScopeKey(context),
           path: path || null,
+          revealTarget,
           renderContext: context,
         },
       };

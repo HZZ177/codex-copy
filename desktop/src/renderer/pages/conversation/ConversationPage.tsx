@@ -13,6 +13,7 @@ import { RuntimeModelSelector, type RuntimeModelSelection, useRuntimeModelSelect
 import {
   usePreview,
   type PreviewAnnotationChatRequest,
+  type PreviewFileRevealTarget,
   type PreviewQuoteSelectionRequest,
 } from "@/renderer/providers/PreviewProvider";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
@@ -295,7 +296,7 @@ export function ConversationPage({
         runtime,
         onQuoteSelection: quoteSelection,
         onStartChatFromAnnotation: startChatFromAnnotation,
-      });
+      }, selectedFileRevealTarget(file));
     },
     [openFilePanel, quoteSelection, runtime, startChatFromAnnotation, threadId, workspaceAvailable, workspaceLabel],
   );
@@ -513,6 +514,19 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
   }));
 }
 
+function selectedFileRevealTarget(file: SelectedFile): PreviewFileRevealTarget | null {
+  if (!file.lineStart && !file.lineEnd && file.sourceStart == null && file.sourceEnd == null) {
+    return null;
+  }
+  return {
+    selectedText: file.selectedText ?? null,
+    lineStart: file.lineStart ?? null,
+    lineEnd: file.lineEnd ?? null,
+    sourceStart: file.sourceStart ?? null,
+    sourceEnd: file.sourceEnd ?? null,
+  };
+}
+
 function agentMessageToConversationMessage(message: AgentChatMessage, index: number): ConversationMessage {
   const kind = conversationKindFromAgent(message);
   const status = conversationStatusFromAgent(message);
@@ -545,6 +559,9 @@ function conversationKindFromAgent(message: AgentChatMessage): ConversationMessa
   if (message.role === "tool") {
     if (message.toolName === "update_plan") {
       return "plan";
+    }
+    if (message.toolName === "load_skill") {
+      return "skill";
     }
     if (isEditToolName(message.toolName) && hasFileChanges(message)) {
       return "file_change";

@@ -31,12 +31,13 @@ test("agent mode remains the full conversation surface and only switches manuall
 
   await page.goto(`${APP_BASE}/#/conversation/${SESSION_A}`);
   await expect(page.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "true");
+  await expectTitlebarModeSwitchGeometry(page);
   await expect(page.getByLabel("继续输入")).toBeVisible();
   await expect(page.getByLabel("展开工作台消息层")).toHaveCount(0);
   await expect(page.getByTestId("workbench-mode-page")).toHaveCount(0);
   await saveEvidence(page, "e2e-001");
 
-  await page.getByRole("button", { name: "Workbench" }).click();
+  await page.getByRole("button", { name: "工作台模式" }).click();
   await expect(page.getByTestId("workbench-mode-page")).toBeVisible();
   await expect(page.getByTestId("workbench-workspace-picker")).toBeVisible();
   await saveEvidence(page, "e2e-002");
@@ -57,13 +58,15 @@ test("workbench picker, workspace switch and scoped session list stay workspace-
   await expect(page).toHaveURL(/\/workbench\/workspace-a$/);
   await expect(page.getByTestId("workbench-workspace-shell")).toBeVisible();
   await expect(page.getByTestId("workspace-file-browser")).toBeVisible();
+  await expect(page.getByTestId("workbench-sidebar-workspace-selector")).toBeVisible();
+  await expect(page.getByRole("main", { name: "工作台" }).getByRole("button", { name: "选择工作区" })).toHaveCount(0);
   await expect(page.getByText("工作台 A 会话")).toBeVisible();
   await expect(page.getByText("工作台 B 会话")).toHaveCount(0);
   await expect(page.getByText("纯对话")).toHaveCount(0);
   await saveEvidence(page, "e2e-004");
   await saveEvidence(page, "e2e-006");
 
-  await page.getByRole("main", { name: "工作台" }).getByRole("button", { name: "选择工作区" }).click();
+  await page.getByTestId("workbench-sidebar-workspace-selector").getByRole("button", { name: "选择工作区" }).click();
   await page.getByRole("option", { name: /other/ }).click();
   await expect(page).toHaveURL(/\/workbench\/workspace-b$/);
   await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-workspace-id", WORKSPACE_B);
@@ -144,9 +147,8 @@ test("workbench file annotation can prefill the assistant without switching mode
   const selectedQuoteChip = page.locator("[data-quote-index='0'][data-source-quote='true']");
   await expect(selectedQuoteChip).toBeVisible();
   await expect(selectedQuoteChip).toContainText("README.md");
-  await expect(page.getByRole("button", { name: "Workbench" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "工作台模式" })).toHaveAttribute("aria-pressed", "true");
   await saveEvidence(page, "e2e-014");
-  await selectedQuoteChip.getByRole("button").click();
 
   await page.getByRole("button", { name: /文件批注/ }).click();
   const panel = page.getByRole("complementary", { name: "文件批注" });
@@ -155,7 +157,7 @@ test("workbench file annotation can prefill the assistant without switching mode
   await panel.getByRole("button", { name: "基于此批注发起对话" }).click();
   await expect(page.getByLabel("工作台助手输入")).toHaveText("Selected E2E note");
   await expect(page.locator("[data-quote-index='0'][data-source-quote='true']")).toContainText("README.md");
-  await expect(page.getByRole("button", { name: "Workbench" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "工作台模式" })).toHaveAttribute("aria-pressed", "true");
   expect(await chatFrameCount(page)).toBe(0);
   await saveEvidence(page, "e2e-015");
 });
@@ -166,6 +168,9 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   await mockWorkbenchBackend(page, backend);
 
   await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
+  await expect(page.getByTestId("app-shell")).toHaveAttribute("data-right-sidebar-enabled", "false");
+  await expect(page.getByTestId("app-shell")).toHaveAttribute("data-right-sidebar", "closed");
+  await expect(page.getByLabel("展开右侧栏")).toHaveCount(0);
   const fileBrowser = page.getByTestId("workspace-file-browser");
   await expect(fileBrowser).toBeVisible();
   const beforeBox = await fileBrowser.boundingBox();
@@ -186,9 +191,16 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   await page.getByRole("button", { name: "停靠到工作台右侧助手栏" }).click();
   const drawer = page.getByTestId("workbench-assistant-drawer");
   await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveCSS("box-shadow", "none");
+  await expect(drawer).toHaveCSS("backdrop-filter", "none");
   const drawerBox = await drawer.boundingBox();
   expect(drawerBox?.width ?? 0).toBeGreaterThanOrEqual(360);
   expect(drawerBox?.width ?? 0).toBeLessThanOrEqual(520);
+  const dockedFileBox = await fileBrowser.boundingBox();
+  expect(dockedFileBox?.width ?? 0).toBeLessThan((beforeBox?.width ?? 0) - 300);
+  expect(Math.round(drawerBox?.x ?? 0)).toBeGreaterThanOrEqual(Math.round((dockedFileBox?.x ?? 0) + (dockedFileBox?.width ?? 0)) - 2);
+  await expect(page.getByTestId("app-shell")).toHaveAttribute("data-right-sidebar", "closed");
+  await expect(page.getByTestId("right-sidebar-initial-page")).toHaveCount(0);
   await expect(page.getByTestId("workbench-expanded-layer")).toHaveCount(0);
   await saveEvidence(page, "e2e-018");
 
@@ -230,7 +242,7 @@ test("workbench running task survives manual mode switching", async ({ page }) =
   await expect(page.getByRole("button", { name: "停止" })).toBeEnabled();
   await expect(page.getByLabel("展开工作台消息层")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Workbench" }).click();
+  await page.getByRole("button", { name: "工作台模式" }).click();
   await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}$`));
   await page.getByRole("button", { name: "工作台 A 会话", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}/session/${SESSION_A}$`));
@@ -275,6 +287,31 @@ async function saveEvidence(page: Page, caseId: string) {
   const directory = path.join(EVIDENCE_ROOT, caseId, E2E_RUN_ID);
   await mkdir(directory, { recursive: true });
   await page.screenshot({ path: path.join(directory, "success.png"), fullPage: true });
+}
+
+async function expectTitlebarModeSwitchGeometry(page: Page) {
+  const metrics = await page.getByTestId("app-mode-switch").evaluate((switchElement) => {
+    const buttons = Array.from(switchElement.querySelectorAll("button"));
+    const [agentButton, workbenchButton] = buttons;
+    if (!(agentButton instanceof HTMLElement) || !(workbenchButton instanceof HTMLElement)) {
+      throw new Error("Titlebar mode switch buttons were not rendered.");
+    }
+    const sliderStyle = window.getComputedStyle(switchElement, "::before");
+    const agentRect = agentButton.getBoundingClientRect();
+    const workbenchRect = workbenchButton.getBoundingClientRect();
+
+    return {
+      sliderBoxSizing: sliderStyle.boxSizing,
+      agentWidth: agentRect.width,
+      workbenchWidth: workbenchRect.width,
+      agentCenterY: agentRect.top + agentRect.height / 2,
+      workbenchCenterY: workbenchRect.top + workbenchRect.height / 2,
+    };
+  });
+
+  expect(metrics.sliderBoxSizing).toBe("border-box");
+  expect(Math.abs(metrics.agentWidth - metrics.workbenchWidth)).toBeLessThan(0.5);
+  expect(Math.abs(metrics.agentCenterY - metrics.workbenchCenterY)).toBeLessThan(0.5);
 }
 
 async function selectVisibleText(page: Page, text: string) {

@@ -61,6 +61,70 @@ async def test_search_text_supports_context_and_include_exclude(tmp_path) -> Non
     ]
 
 
+async def test_search_text_accepts_single_file_path(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("one\nneedle\ntwo\n", encoding="utf-8")
+    (tmp_path / "src" / "other.py").write_text("needle\n", encoding="utf-8")
+
+    result = await _run(
+        "search_text",
+        {"query": "needle", "path": "src/main.py", "regex": False},
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert [item["path"] for item in result.result["results"]] == ["src/main.py"]
+
+
+async def test_search_text_uses_ripgrep_and_respects_gitignore(tmp_path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("dist/\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "src" / "app.py").write_text("needle\n", encoding="utf-8")
+    (tmp_path / "dist" / "bundle.js").write_text("needle\n", encoding="utf-8")
+
+    result = await _run("search_text", {"query": "needle", "regex": False}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["engine"] == "ripgrep"
+    assert [item["path"] for item in result.result["results"]] == ["src/app.py"]
+
+
+async def test_search_text_does_not_require_asyncio_subprocess(tmp_path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("needle\n", encoding="utf-8")
+
+    async def unsupported_subprocess(*_args, **_kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        "backend.app.tools.search.asyncio.create_subprocess_exec",
+        unsupported_subprocess,
+    )
+
+    result = await _run("search_text", {"query": "needle", "regex": False}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["results"][0]["path"] == "README.md"
+
+
+async def test_grep_files_does_not_require_asyncio_subprocess(tmp_path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("needle\n", encoding="utf-8")
+
+    async def unsupported_subprocess(*_args, **_kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        "backend.app.tools.search.asyncio.create_subprocess_exec",
+        unsupported_subprocess,
+    )
+
+    result = await _run("grep_files", {"query": "needle", "regex": False}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["results"][0]["path"] == "README.md"
+
+
 async def test_search_text_returns_empty_results(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")
 
@@ -117,6 +181,31 @@ async def test_grep_files_finds_matching_file_paths(tmp_path) -> None:
     assert result.result["paths"] == ["src/agent.py"]
     assert result.result["results"][0]["matches"] == 1
     assert result.result["results"][0]["first_line"] == 1
+
+
+async def test_grep_files_accepts_single_file_path(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "agent.py").write_text("class LocalAgent:\n    pass\n", encoding="utf-8")
+    (tmp_path / "src" / "other.py").write_text("LocalAgent\n", encoding="utf-8")
+
+    result = await _run(
+        "grep_files",
+        {"query": "LocalAgent", "regex": False, "path": "src/agent.py"},
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert result.result["paths"] == ["src/agent.py"]
+
+
+async def test_grep_files_fails_fast_when_ripgrep_is_missing(tmp_path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("needle\n", encoding="utf-8")
+    monkeypatch.setattr("backend.app.tools.search._resolve_ripgrep_binary", lambda: None)
+
+    result = await _run("grep_files", {"query": "needle", "regex": False}, tmp_path)
+
+    assert result.ok is False
+    assert result.error["code"] == "search_engine_unavailable"
 
 
 async def test_search_tools_reject_workspace_escape(tmp_path) -> None:

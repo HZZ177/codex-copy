@@ -11,11 +11,18 @@ import {
 
 import type { RuntimeBridge } from "@/runtime";
 import type {
+  PreviewFileRevealTarget,
   PreviewAnnotationChatRequest,
   PreviewQuoteSelectionRequest,
 } from "@/renderer/providers/PreviewProvider";
+import { LoadingSkeletonStack } from "@/renderer/components/loading";
 
-import { FilePreview, type MarkdownOutlineItem, type MarkdownOutlineRevealRequest } from "./FilePreview";
+import {
+  FilePreview,
+  type FilePreviewRevealRequest,
+  type MarkdownOutlineItem,
+  type MarkdownOutlineRevealRequest,
+} from "./FilePreview";
 import { WorkspacePanel } from "./WorkspacePanel";
 import styles from "./WorkspaceFileBrowser.module.css";
 
@@ -26,6 +33,7 @@ export interface WorkspaceFileBrowserProps {
   runtime: RuntimeBridge;
   previewPath?: string | null;
   previewRequestId?: number;
+  previewRevealTarget?: PreviewFileRevealTarget | null;
   onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
   onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
   onPreviewPathChange?: (path: string | null) => void;
@@ -54,6 +62,7 @@ export function WorkspaceFileBrowser({
   runtime,
   previewPath = null,
   previewRequestId = 0,
+  previewRevealTarget = null,
   onQuoteSelection,
   onStartChatFromAnnotation,
   onPreviewPathChange,
@@ -76,7 +85,28 @@ export function WorkspaceFileBrowser({
     () => (mountedPreviewPath ? ({ type: "file", path: mountedPreviewPath } as const) : null),
     [mountedPreviewPath],
   );
-  const previewMounted = Boolean(previewRequest);
+  const fileRevealRequest = useMemo<FilePreviewRevealRequest | null>(
+    () =>
+      previewRevealTarget && previewRequestId
+        ? {
+            requestId: previewRequestId,
+            selectedText: previewRevealTarget.selectedText ?? null,
+            lineStart: previewRevealTarget.lineStart ?? null,
+            lineEnd: previewRevealTarget.lineEnd ?? null,
+            sourceStart: previewRevealTarget.sourceStart ?? null,
+            sourceEnd: previewRevealTarget.sourceEnd ?? null,
+          }
+        : null,
+    [
+      previewRequestId,
+      previewRevealTarget?.lineEnd,
+      previewRevealTarget?.lineStart,
+      previewRevealTarget?.selectedText,
+      previewRevealTarget?.sourceEnd,
+      previewRevealTarget?.sourceStart,
+    ],
+  );
+  const previewMounted = Boolean(mountedPreviewPath);
   const outlineAvailable = Boolean(mountedPreviewPath && isMarkdownPath(mountedPreviewPath));
   const outlineVisible = outlineAvailable && navigationMode === "outline";
   const currentPathLabel = formatBrowserPath(mountedPreviewPath);
@@ -311,6 +341,7 @@ export function WorkspaceFileBrowser({
               runtime={runtime}
               workspaceId={workspaceId}
               sessionId={sessionId}
+              revealSelectedPathRequestId={previewRequestId}
               selectedPath={selectedPath}
               onSelectFile={openPreview}
             />
@@ -352,10 +383,7 @@ export function WorkspaceFileBrowser({
               aria-hidden={!previewOpen}
             >
               <div className={styles.previewResizeSkeleton} aria-hidden="true" data-resize-preview-skeleton="true">
-                <span />
-                <span />
-                <span />
-                <span />
+                <LoadingSkeletonStack width="compact" />
               </div>
               <FilePreview
                 breadcrumbRootLabel={label}
@@ -366,6 +394,7 @@ export function WorkspaceFileBrowser({
                 chrome="panel"
                 hideBreadcrumbs
                 outlineRevealRequest={outlineRevealRequest}
+                sourceRevealRequest={fileRevealRequest}
                 onMarkdownOutlineChange={handleMarkdownOutlineChange}
                 onQuoteSelection={onQuoteSelection}
                 onStartChatFromAnnotation={onStartChatFromAnnotation}

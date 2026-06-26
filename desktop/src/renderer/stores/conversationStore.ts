@@ -23,6 +23,7 @@ export type ConversationMessageKind =
   | "assistant"
   | "thinking"
   | "plan"
+  | "skill"
   | "tool"
   | "command"
   | "file_change"

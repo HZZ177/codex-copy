@@ -17,6 +17,7 @@ export interface WorkspaceSelectorProps {
   readOnly?: boolean;
   loading?: boolean;
   placement?: "top" | "bottom";
+  variant?: "default" | "sidebar";
   allowProjectFreeChat?: boolean;
   onSelectChat?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
@@ -31,6 +32,7 @@ export function WorkspaceSelector({
   readOnly = false,
   loading = false,
   placement = "bottom",
+  variant = "default",
   allowProjectFreeChat = true,
   onSelectChat,
   onSelectWorkspace,
@@ -235,7 +237,7 @@ export function WorkspaceSelector({
   };
 
   return (
-    <div className={styles.root} ref={rootRef} data-readonly={readOnly ? "true" : "false"}>
+    <div className={styles.root} ref={rootRef} data-readonly={readOnly ? "true" : "false"} data-variant={variant}>
       <button
         className={styles.trigger}
         type="button"

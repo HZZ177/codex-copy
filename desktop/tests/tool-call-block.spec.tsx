@@ -29,6 +29,54 @@ describe("ToolCallBlock", () => {
     expect(screen.getByText("工具正在执行")).not.toBeNull();
   });
 
+  it("does not render running result envelopes as output", () => {
+    render(
+      <ToolCallBlock
+        message={toolMessage(
+          "running",
+          { status: "running", model_content: "", files: [] },
+          "grep_files",
+          { query: "needle", regex: false },
+        )}
+      />,
+    );
+
+    expect(screen.getByText("正在搜索文件 needle")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+    const blockText = screen.getByTestId("tool-call-block").textContent ?? "";
+    expect(blockText).toContain("工具正在执行");
+    expect(blockText).not.toContain("model_content");
+    expect(blockText).not.toContain('"files"');
+  });
+
+  it("distinguishes file search and content search labels", () => {
+    const { rerender } = render(
+      <ToolCallBlock
+        message={toolMessage(
+          "completed",
+          { status: "success", model_content: "" },
+          "grep_files",
+          { query: "needle", regex: false },
+        )}
+      />,
+    );
+
+    expect(screen.getByText("已搜索文件 needle")).not.toBeNull();
+
+    rerender(
+      <ToolCallBlock
+        message={toolMessage(
+          "completed",
+          { status: "success", model_content: "" },
+          "search_text",
+          { query: "needle", regex: false },
+        )}
+      />,
+    );
+
+    expect(screen.getByText("已搜索内容 needle")).not.toBeNull();
+  });
+
   it("copies completed tool arguments", async () => {
     const clipboard = navigator.clipboard.writeText as unknown as ReturnType<typeof vi.fn>;
     render(<ToolCallBlock message={toolMessage("completed", { status: "success", model_content: "文件内容", duration_ms: 1250 })} />);

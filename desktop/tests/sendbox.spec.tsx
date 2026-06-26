@@ -371,6 +371,51 @@ describe("SendBox", () => {
     }
   });
 
+  it("opens source quote chips with line reveal metadata", async () => {
+    const quote = selectedQuoteFromText("引用文件里的片段", {
+      source: "selection",
+      file: {
+        path: "docs/guide.md",
+        name: "guide.md",
+        lineStart: 12,
+        lineEnd: 14,
+        sourceStart: 120,
+        sourceEnd: 168,
+      },
+    });
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    const onOpenFileReference = vi.fn();
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalQuoteRequest={{ requestId: 1, quote }}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onOpenFileReference={onOpenFileReference}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开引用来源 docs/guide.md" }));
+
+    expect(onOpenFileReference).toHaveBeenCalledWith({
+      path: "docs/guide.md",
+      name: "guide.md",
+      type: "file",
+      source: "workspace",
+      selectedText: "引用文件里的片段",
+      lineStart: 12,
+      lineEnd: 14,
+      sourceStart: 120,
+      sourceEnd: 168,
+    });
+  });
+
   it("submits explicit quote context without hidden composer text", async () => {
     const quote = selectedQuoteFromText("这是一段选中的历史内容");
     if (!quote) {
@@ -536,6 +581,7 @@ describe("SendBox", () => {
       expect(screen.getAllByText(path)).toHaveLength(1);
       expect(hoverCard?.textContent).toContain("FileWithLongName.tsx");
       expect(hoverCard?.textContent).toContain(path);
+      expect(fireEvent.mouseDown(hoverCard as Element)).toBe(true);
     } finally {
       vi.useRealTimers();
     }

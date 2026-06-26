@@ -38,7 +38,7 @@ describe("AtFileMenu", () => {
     );
 
     await screen.findByText("main.ts");
-    expect(screen.getByText("最多返回 50 项 · 最多搜索 2.5 秒")).not.toBeNull();
+    expect(screen.getByText("最多返回 100 项 · 最多搜索 2 秒")).not.toBeNull();
     expectWorkspaceSearch(onSearchWorkspace, "ma");
 
     fireEvent.keyDown(screen.getByLabelText("继续输入"), { key: "Enter" });

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,9 @@ WINDOWS_TAURI_TRIPLE = "x86_64-pc-windows-msvc"
 MANIFEST_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
 ENTRY_POINT = ROOT / "backend" / "packaging" / "agent_server_entry.py"
+BUNDLED_RIPGREP_BINARY = (
+    ROOT / "desktop" / "src-tauri" / "binaries" / f"rg-{WINDOWS_TAURI_TRIPLE}.exe"
+)
 SIDECAR_INPUT_ROOTS = (
     ROOT / "backend" / "app",
     ROOT / "backend" / "packaging",
@@ -52,6 +56,8 @@ def manifest_path(output_dir: Path) -> Path:
 
 def iter_sidecar_inputs() -> list[Path]:
     files: list[Path] = []
+    if BUNDLED_RIPGREP_BINARY.is_file():
+        files.append(BUNDLED_RIPGREP_BINARY)
     for root in SIDECAR_INPUT_ROOTS:
         if root.is_file():
             files.append(root)
@@ -121,6 +127,10 @@ def build_with_pyinstaller(
     clean: bool = False,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not BUNDLED_RIPGREP_BINARY.is_file():
+        raise FileNotFoundError(
+            f"缺少内置 ripgrep 二进制：{BUNDLED_RIPGREP_BINARY}"
+        )
     fingerprint, inputs = sidecar_fingerprint()
     reusable_binary = expected_binary(output_dir)
     if reuse_if_current and not clean and is_current_build(output_dir, fingerprint):
@@ -135,6 +145,12 @@ def build_with_pyinstaller(
         command.append("--clean")
     for package_name in PYINSTALLER_COLLECT_SUBMODULES:
         command.extend(["--collect-submodules", package_name])
+    command.extend(
+        [
+            "--add-binary",
+            f"{BUNDLED_RIPGREP_BINARY}{os.pathsep}.",
+        ]
+    )
     command.extend(
         [
             "--onefile",

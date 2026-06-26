@@ -26,11 +26,16 @@ describe("Titlebar", () => {
     render(<Titlebar title="测试标题" modeSwitch={{ currentMode: "agent", onModeChange }} />);
 
     expect(screen.getByLabelText("Keydex")).not.toBeNull();
-    expect(screen.getByRole("group", { name: "应用模式" })).not.toBeNull();
+    const modeSwitch = screen.getByRole("group", { name: "应用模式" });
+    expect(modeSwitch).not.toBeNull();
+    expect(modeSwitch.getAttribute("data-mode")).toBe("agent");
     expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Workbench" }));
+    fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
+    expect(modeSwitch.getAttribute("data-mode")).toBe("workbench");
+    expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("true");
     expect(onModeChange).toHaveBeenCalledWith("workbench");
   });
 
@@ -58,7 +63,7 @@ describe("Titlebar", () => {
 
     const minimizeIcon = screen.getByLabelText("最小化").querySelector("svg");
     expect(minimizeIcon).not.toBeNull();
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Workbench" }), { button: 0 });
+    fireEvent.mouseDown(screen.getByRole("button", { name: "工作台模式" }), { button: 0 });
     fireEvent.mouseDown(minimizeIcon as SVGElement, { button: 0 });
     fireEvent.click(minimizeIcon as SVGElement);
     fireEvent.click(screen.getByLabelText("最大化或还原"));

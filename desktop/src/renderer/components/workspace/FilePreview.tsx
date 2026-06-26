@@ -1,10 +1,13 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronRight,
   Code2,
   Columns2,
   Copy,
   Eye,
+  Search,
   MessageSquarePlus,
   MessageSquareText,
   Pencil,
@@ -34,8 +37,8 @@ import {
   indentOnInput,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { highlightSelectionMatches, search, SearchQuery, setSearchQuery } from "@codemirror/search";
+import { Compartment, EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -87,10 +90,17 @@ import {
 } from "@/renderer/pages/conversation/messages/markdown";
 import { useTextSelection, type SelectionPosition } from "@/renderer/pages/conversation/messages/useTextSelection";
 import {
+  APP_FIND_SHORTCUT_EVENT,
+  isFindShortcutEvent,
+  type AppFindShortcutDetail,
+} from "@/renderer/events/findShortcut";
+import {
   useOptionalPreview,
   type PreviewAnnotationChatRequest,
+  type PreviewFileRevealTarget,
   type PreviewQuoteSelectionRequest,
 } from "@/renderer/providers/PreviewProvider";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { PreviewContentKind, PreviewRequest } from "@/renderer/providers/previewTypes";
 import {
   centerMermaidViewport,
@@ -120,6 +130,10 @@ export interface MarkdownOutlineRevealRequest {
   line: number;
 }
 
+export interface FilePreviewRevealRequest extends PreviewFileRevealTarget {
+  requestId: number;
+}
+
 type AnnotationWorkspaceRuntime = Pick<
   RuntimeBridge["workspace"],
   "listAnnotations" | "createAnnotation" | "updateAnnotation" | "deleteAnnotation"
@@ -134,6 +148,7 @@ export interface FilePreviewProps {
   onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
   onMarkdownOutlineChange?: (outline: MarkdownOutlineItem[]) => void;
   outlineRevealRequest?: MarkdownOutlineRevealRequest | null;
+  sourceRevealRequest?: FilePreviewRevealRequest | null;
   onClose?: () => void;
   chrome?: "default" | "panel";
   breadcrumbRootLabel?: string;
@@ -149,12 +164,15 @@ export function FilePreview({
   onStartChatFromAnnotation,
   onMarkdownOutlineChange,
   outlineRevealRequest,
+  sourceRevealRequest,
   onClose,
   chrome = "default",
   breadcrumbRootLabel,
   hideBreadcrumbs = false,
 }: FilePreviewProps) {
+  const previewRootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
   const panelChrome = chrome === "panel";
   const kind = useMemo(() => detectPreviewKind(request), [request]);
   const immediateContent = useMemo(() => immediatePreviewContent(request), [request]);
@@ -164,6 +182,21 @@ export function FilePreview({
   const previewContent = immediateContent ?? content;
   const previewLoading = immediateContent === null ? loading : false;
   const [error, setError] = useState<string | null>(null);
+  const panelMarkdownRenderKey =
+    panelChrome &&
+    kind === "markdown" &&
+    request.type === "file" &&
+    !previewLoading &&
+    !error &&
+    previewContent.length >= PANEL_MARKDOWN_RENDER_DEFER_CHARS
+      ? `${request.path}:${previewContent.length}`
+      : "";
+  const [readyPanelMarkdownRenderKey, setReadyPanelMarkdownRenderKey] = useState<string | null>(null);
+  const previewRenderDeferred = Boolean(
+    panelMarkdownRenderKey && readyPanelMarkdownRenderKey !== panelMarkdownRenderKey,
+  );
+  const renderedPreviewContent = previewRenderDeferred ? "" : previewContent;
+  const previewBusy = previewLoading || previewRenderDeferred;
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
   const [splitMode, setSplitMode] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -199,6 +232,14 @@ export function FilePreview({
   }, []);
   const [lineRevealRequest, setLineRevealRequest] = useState<SourceLineRevealRequest | null>(null);
   const [previewRevealRequest, setPreviewRevealRequest] = useState<PreviewAnnotationRevealRequest | null>(null);
+  const [transientRevealAnnotation, setTransientRevealAnnotation] = useState<WorkspaceFileAnnotation | null>(null);
+  const [sourceEditorView, setSourceEditorView] = useState<EditorView | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findFocusRequestId, setFindFocusRequestId] = useState(0);
+  const [findMatchCount, setFindMatchCount] = useState(0);
+  const [findMatchIndex, setFindMatchIndex] = useState(-1);
+  const [sourceFindState, setSourceFindState] = useState<CodeMirrorFindState | null>(null);
   const [annotationPanelOpen, setAnnotationPanelOpen] = useState(false);
   const [annotationPanelClosing, setAnnotationPanelClosing] = useState(false);
   const [activeAnnotationPopover, setActiveAnnotationPopover] = useState<AnnotationPopoverState | null>(null);
@@ -212,6 +253,24 @@ export function FilePreview({
   const annotationPanelCloseTimerRef = useRef<number | null>(null);
   const annotationFlashTimerRef = useRef<number | null>(null);
   const annotationPopoverFrameRef = useRef<number | null>(null);
+  const panelMarkdownRenderTimerRef = useRef<number | null>(null);
+  const transientRevealAnnotationRef = useRef<WorkspaceFileAnnotation | null>(null);
+  const handledSourceRevealRequestIdRef = useRef(0);
+
+  const clearTransientReveal = useCallback(() => {
+    const annotationId = transientRevealAnnotationRef.current?.id ?? null;
+    transientRevealAnnotationRef.current = null;
+    setTransientRevealAnnotation(null);
+    if (!annotationId) {
+      return;
+    }
+    setFocusedAnnotationId((current) => (current === annotationId ? null : current));
+    setFlashAnnotationId((current) => (current === annotationId ? null : current));
+  }, []);
+
+  useEffect(() => {
+    transientRevealAnnotationRef.current = transientRevealAnnotation;
+  }, [transientRevealAnnotation]);
 
   useEffect(() => {
     const themeObserver = new MutationObserver(() => setTheme(getTheme()));
@@ -230,8 +289,33 @@ export function FilePreview({
       if (annotationPopoverFrameRef.current !== null) {
         window.cancelAnimationFrame(annotationPopoverFrameRef.current);
       }
+      if (panelMarkdownRenderTimerRef.current !== null) {
+        window.clearTimeout(panelMarkdownRenderTimerRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (panelMarkdownRenderTimerRef.current !== null) {
+      window.clearTimeout(panelMarkdownRenderTimerRef.current);
+      panelMarkdownRenderTimerRef.current = null;
+    }
+    if (!panelMarkdownRenderKey) {
+      setReadyPanelMarkdownRenderKey(null);
+      return;
+    }
+    setReadyPanelMarkdownRenderKey((current) => (current === panelMarkdownRenderKey ? current : null));
+    panelMarkdownRenderTimerRef.current = window.setTimeout(() => {
+      panelMarkdownRenderTimerRef.current = null;
+      setReadyPanelMarkdownRenderKey(panelMarkdownRenderKey);
+    }, PANEL_MARKDOWN_RENDER_DEFER_MS);
+    return () => {
+      if (panelMarkdownRenderTimerRef.current !== null) {
+        window.clearTimeout(panelMarkdownRenderTimerRef.current);
+        panelMarkdownRenderTimerRef.current = null;
+      }
+    };
+  }, [panelMarkdownRenderKey]);
 
   const hasAnchoredAnnotationPopover = Boolean(activeAnnotationPopover || selectionDraftPopover);
   useEffect(() => {
@@ -446,10 +530,10 @@ export function FilePreview({
   const canRenderPreview = canPreview || kind === "diff";
   const canSplit = kind === "markdown" || kind === "html";
   const sourceLabel = previewSourceLabel(request);
-  const formattedSource = useMemo(() => formatSource(previewContent, kind), [kind, previewContent]);
+  const formattedSource = useMemo(() => formatSource(renderedPreviewContent, kind), [kind, renderedPreviewContent]);
   const markdownOutline = useMemo(
-    () => (kind === "markdown" ? extractMarkdownOutline(previewContent) : []),
-    [kind, previewContent],
+    () => (kind === "markdown" && !previewRenderDeferred ? extractMarkdownOutline(renderedPreviewContent) : []),
+    [kind, previewRenderDeferred, renderedPreviewContent],
   );
   const markdownComponents = useMemo(
     () => ({
@@ -461,7 +545,7 @@ export function FilePreview({
     }),
     [scope, runtime, sourceLabel],
   );
-  const markdownContent = previewContent || "文件为空";
+  const markdownContent = renderedPreviewContent || "文件为空";
 
   useEffect(() => {
     if (!onMarkdownOutlineChange) {
@@ -471,19 +555,23 @@ export function FilePreview({
       onMarkdownOutlineChange([]);
       return;
     }
-    if (previewLoading) {
+    if (previewBusy) {
       return;
     }
     onMarkdownOutlineChange(error ? [] : markdownOutline);
-  }, [error, kind, markdownOutline, onMarkdownOutlineChange, previewLoading]);
+  }, [error, kind, markdownOutline, onMarkdownOutlineChange, previewBusy]);
 
   const selectionAnnotations = useMemo(
-    () =>
-      annotations.filter(
+    () => {
+      const persistedAnnotations = annotations.filter(
         (annotation) =>
           annotation.anchor_type === "selection" && Boolean((annotation.selected_text || "").trim()),
-      ),
-    [annotations],
+      );
+      return transientRevealAnnotation
+        ? [...persistedAnnotations, transientRevealAnnotation]
+        : persistedAnnotations;
+    },
+    [annotations, transientRevealAnnotation],
   );
   const activeAnnotation = useMemo(
     () => annotations.find((annotation) => annotation.id === activeAnnotationPopover?.annotationId) ?? null,
@@ -493,6 +581,9 @@ export function FilePreview({
 
   const activateAnnotation = useCallback(
     (annotation: WorkspaceFileAnnotation, position: AnnotationClientPosition) => {
+      if (isTransientRevealAnnotationId(annotation.id)) {
+        return;
+      }
       closeAnnotationPanel();
       setSelectionDraft(null);
       setSelectionDraftPopover(null);
@@ -516,8 +607,8 @@ export function FilePreview({
   );
 
   const currentContentHash = useMemo(
-    () => (annotationPath && kind !== "image" && previewContent ? hashText(previewContent) : null),
-    [annotationPath, kind, previewContent],
+    () => (annotationPath && kind !== "image" && renderedPreviewContent ? hashText(renderedPreviewContent) : null),
+    [annotationPath, kind, renderedPreviewContent],
   );
 
   const createFileAnnotation = useCallback(async () => {
@@ -755,7 +846,10 @@ export function FilePreview({
   }, []);
 
   const revealAnnotationLine = useCallback(
-    (annotation: WorkspaceFileAnnotation, { flash = true }: { flash?: boolean } = {}) => {
+    (
+      annotation: WorkspaceFileAnnotation,
+      { flash = true, block = "start" }: { flash?: boolean; block?: ScrollLogicalPosition } = {},
+    ) => {
       const range = annotationSourceRange(formattedSource, annotation);
       if (!range) {
         return false;
@@ -763,6 +857,7 @@ export function FilePreview({
       setLineRevealRequest((current) => ({
         requestId: (current?.requestId ?? 0) + 1,
         position: range.from,
+        block,
       }));
       setFocusedAnnotationId(annotation.id);
       if (flash) {
@@ -775,7 +870,7 @@ export function FilePreview({
 
   const scrollAnnotationElementIntoView = useCallback(
     (annotation: WorkspaceFileAnnotation, element: HTMLElement, { flash = true }: { flash?: boolean } = {}) => {
-      element.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "smooth" });
+      element.scrollIntoView?.(FILE_PREVIEW_REVEAL_SCROLL_OPTIONS);
       setFocusedAnnotationId(annotation.id);
       if (flash) {
         flashAnnotation(annotation.id);
@@ -832,9 +927,67 @@ export function FilePreview({
     revealAnnotationLine(annotation);
   }, [annotations, previewRevealRequest, revealAnnotationLine, scrollAnnotationElementIntoView]);
 
+  useEffect(() => {
+    clearTransientReveal();
+    handledSourceRevealRequestIdRef.current = 0;
+  }, [annotationPath, clearTransientReveal]);
+
+  useEffect(() => {
+    if (!sourceRevealRequest || !annotationPath || previewBusy || error) {
+      return;
+    }
+    if (handledSourceRevealRequestIdRef.current === sourceRevealRequest.requestId) {
+      return;
+    }
+    const annotation = transientRevealAnnotationFromRequest(
+      formattedSource,
+      annotationPath,
+      sourceRevealRequest,
+      scope,
+    );
+    handledSourceRevealRequestIdRef.current = sourceRevealRequest.requestId;
+    if (!annotation) {
+      clearTransientReveal();
+      return;
+    }
+    setLocateError(null);
+    setTransientRevealAnnotation(annotation);
+    setFocusedAnnotationId(annotation.id);
+    flashAnnotation(annotation.id);
+  }, [
+    annotationPath,
+    clearTransientReveal,
+    error,
+    flashAnnotation,
+    formattedSource,
+    previewBusy,
+    scope,
+    sourceRevealRequest,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!transientRevealAnnotation) {
+      return;
+    }
+    let located = false;
+    if (viewMode !== "source" || splitMode) {
+      const element = findPreviewAnnotationElement(bodyRef.current, transientRevealAnnotation.id);
+      if (element) {
+        element.scrollIntoView?.(FILE_PREVIEW_TRANSIENT_REVEAL_SCROLL_OPTIONS);
+        located = true;
+      }
+    }
+    if (viewMode === "source" || splitMode) {
+      located = revealAnnotationLine(transientRevealAnnotation, { flash: false, block: "center" }) || located;
+    }
+    if (located) {
+      setLocateError(null);
+    }
+  }, [renderedPreviewContent, revealAnnotationLine, splitMode, transientRevealAnnotation, viewMode]);
+
   useLayoutEffect(() => {
     updatePreviewAnnotationMarkState(bodyRef.current, activeAnnotationId, flashAnnotationId);
-  }, [activeAnnotationId, flashAnnotationId, previewContent, selectionAnnotations, splitMode, viewMode]);
+  }, [activeAnnotationId, flashAnnotationId, renderedPreviewContent, selectionAnnotations, splitMode, viewMode]);
 
   useEffect(() => {
     if (!outlineRevealRequest || kind !== "markdown") {
@@ -843,7 +996,7 @@ export function FilePreview({
     if (viewMode !== "source" || splitMode) {
       const heading = findMarkdownOutlineHeading(bodyRef.current, outlineRevealRequest.id);
       if (heading) {
-        heading.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "smooth" });
+        heading.scrollIntoView?.(FILE_PREVIEW_REVEAL_SCROLL_OPTIONS);
       }
     }
     if (viewMode === "preview" && !splitMode) {
@@ -854,6 +1007,175 @@ export function FilePreview({
       position: sourcePositionForLine(formattedSource, outlineRevealRequest.line),
     }));
   }, [formattedSource, kind, outlineRevealRequest, splitMode, viewMode]);
+
+  const findMode: FilePreviewFindMode = splitMode && canSplit
+    ? "split"
+    : viewMode === "source" || !canRenderPreview
+      ? "source"
+      : "preview";
+
+  const openFind = useCallback(
+    (sourceTarget: EventTarget | null) => {
+      const root = previewRootRef.current;
+      const targetRoot = filePreviewRootForTarget(sourceTarget);
+      const shouldOpen = findOpen || targetRoot === root || (!targetRoot && activeFilePreviewRoot === root);
+      if (!root || !shouldOpen) {
+        return;
+      }
+      const selectedText = selectedFilePreviewTextForFind(root, sourceSelectionRef.current);
+      if (selectedText) {
+        setFindQuery(selectedText);
+        setFindMatchIndex(-1);
+      } else if (!findOpen) {
+        setFindQuery("");
+        setFindMatchIndex(-1);
+      }
+      activeFilePreviewRoot = root;
+      setFindOpen(true);
+      setFindFocusRequestId((current) => current + 1);
+    },
+    [findOpen],
+  );
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindMatchCount(0);
+    setFindMatchIndex(-1);
+    clearDomFindHighlights(bodyRef.current);
+  }, []);
+
+  const activateFindRoot = useCallback(() => {
+    const root = previewRootRef.current;
+    if (root) {
+      activeFilePreviewRoot = root;
+    }
+  }, []);
+
+  const handlePreviewPointerDownCapture = useCallback(() => {
+    activateFindRoot();
+    if (transientRevealAnnotationRef.current) {
+      clearTransientReveal();
+    }
+  }, [activateFindRoot, clearTransientReveal]);
+
+  const handlePreviewKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (!isFindShortcutEvent(event.nativeEvent)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      openFind(event.target);
+    },
+    [openFind],
+  );
+
+  useEffect(() => {
+    const handleFindShortcut = (event: Event) => {
+      openFind((event as CustomEvent<AppFindShortcutDetail>).detail?.sourceTarget ?? null);
+    };
+    document.addEventListener(APP_FIND_SHORTCUT_EVENT, handleFindShortcut);
+    return () => document.removeEventListener(APP_FIND_SHORTCUT_EVENT, handleFindShortcut);
+  }, [openFind]);
+
+  useEffect(() => {
+    if (!findOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      closeFind();
+    };
+    window.addEventListener("keydown", handleEscape, true);
+    return () => window.removeEventListener("keydown", handleEscape, true);
+  }, [closeFind, findOpen]);
+
+  const updateFindQuery = useCallback((value: string) => {
+    setFindQuery(value);
+    setFindMatchIndex(-1);
+  }, []);
+
+  const stepFindMatch = useCallback(
+    (direction: 1 | -1) => {
+      setFindMatchIndex((current) => {
+        if (findMatchCount <= 0) {
+          return -1;
+        }
+        if (current < 0) {
+          return direction > 0 ? 0 : findMatchCount - 1;
+        }
+        const start = current;
+        return (start + direction + findMatchCount) % findMatchCount;
+      });
+    },
+    [findMatchCount],
+  );
+
+  useLayoutEffect(() => {
+    clearDomFindHighlights(bodyRef.current);
+    const shouldSearchSource = Boolean(sourceEditorView && (findMode === "source" || findMode === "split"));
+    if (!findOpen || !findQuery.trim()) {
+      sourceEditorView?.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "" })) });
+      setSourceFindState((current) => (current ? null : current));
+      setFindMatchCount(0);
+      setFindMatchIndex(-1);
+      return;
+    }
+    if (!shouldSearchSource) {
+      sourceEditorView?.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "" })) });
+      setSourceFindState((current) => (current ? null : current));
+    }
+    const query = new SearchQuery({ search: findQuery, caseSensitive: false, literal: true });
+    const codeMirrorMatches =
+      sourceEditorView && shouldSearchSource
+        ? collectCodeMirrorFindMatches(sourceEditorView, query)
+        : [];
+    const domMatches = collectDomFindMatches(filePreviewFindContainers(bodyRef.current, findMode, Boolean(sourceEditorView)), findQuery);
+    const matches: FilePreviewFindMatch[] = [...codeMirrorMatches, ...domMatches];
+    const nextIndex = preferredFindMatchIndex(findMatchIndex, matches, bodyRef.current, sourceEditorView);
+    setFindMatchCount(matches.length);
+    if (nextIndex !== findMatchIndex) {
+      setFindMatchIndex(nextIndex);
+    }
+    const activeMatch = matches[nextIndex] ?? null;
+    applyDomFindHighlights(domMatches, activeMatch?.type === "dom" ? activeMatch.id : null);
+    if (sourceEditorView && (findMode === "source" || findMode === "split")) {
+      const activeCodeMirrorMatch = activeMatch?.type === "codemirror" ? activeMatch : null;
+      const nextSourceFindState: CodeMirrorFindState = {
+        query: findQuery,
+        activeFrom: activeCodeMirrorMatch?.from ?? null,
+        activeTo: activeCodeMirrorMatch?.to ?? null,
+      };
+      setSourceFindState((current) =>
+        sameCodeMirrorFindState(current, nextSourceFindState) ? current : nextSourceFindState,
+      );
+      sourceEditorView.dispatch({
+        effects: [
+          setSearchQuery.of(new SearchQuery({ search: "" })),
+          ...(activeCodeMirrorMatch
+            ? [
+                EditorView.scrollIntoView(
+                  EditorSelection.range(activeCodeMirrorMatch.from, activeCodeMirrorMatch.to),
+                  { y: "center", yMargin: 0 },
+                ),
+              ]
+            : []),
+        ],
+        selection: activeCodeMirrorMatch
+          ? EditorSelection.range(activeCodeMirrorMatch.from, activeCodeMirrorMatch.to)
+          : undefined,
+      });
+    }
+    scrollFindMatchIntoView(activeMatch);
+  }, [findMatchIndex, findMode, findOpen, findQuery, renderedPreviewContent, sourceEditorView]);
+
+  useEffect(() => () => clearDomFindHighlights(bodyRef.current), []);
 
   const renderSourcePane = () => (
     <SourceViewer
@@ -866,13 +1188,15 @@ export function FilePreview({
       flashAnnotationId={flashAnnotationId}
       revealLineRequest={lineRevealRequest}
       onAnnotationActivate={activateAnnotation}
+      onEditorViewChange={setSourceEditorView}
+      sourceFindState={sourceFindState}
       onSelectionChange={updateSourceSelection}
     />
   );
 
   const renderPreviewPane = () => {
     if (kind === "mermaid") {
-      return <NativeMermaidPreview code={previewContent || ""} />;
+      return <NativeMermaidPreview code={renderedPreviewContent || ""} />;
     }
 
     if (kind === "markdown") {
@@ -888,7 +1212,7 @@ export function FilePreview({
     }
 
     if (kind === "html") {
-      const htmlDocument = previewContent || "<p>文件为空</p>";
+      const htmlDocument = renderedPreviewContent || "<p>文件为空</p>";
       return (
         <div className={styles.htmlPane}>
           <iframe
@@ -903,7 +1227,7 @@ export function FilePreview({
     }
 
     if (kind === "diff") {
-      return <DiffPreview diff={previewContent || "暂无 diff"} />;
+      return <DiffPreview diff={renderedPreviewContent || "暂无 diff"} />;
     }
 
     return renderSourcePane();
@@ -984,6 +1308,16 @@ export function FilePreview({
           ) : null}
         </div>
       ) : null}
+      <button
+        className={styles.iconButton}
+        type="button"
+        aria-label="搜索文件内容"
+        title="搜索文件内容"
+        disabled={previewLoading || Boolean(error) || kind === "image"}
+        onClick={() => openFind(previewRootRef.current)}
+      >
+        <Search size={14} />
+      </button>
       {annotationPath ? (
         <button
           className={styles.annotationToggle}
@@ -1031,7 +1365,18 @@ export function FilePreview({
   };
 
   return (
-    <section className={styles.preview} data-chrome={chrome} data-file-preview-root="true" aria-label="文件预览">
+    <section
+      className={styles.preview}
+      data-chrome={chrome}
+      data-file-preview-root="true"
+      aria-label="文件预览"
+      ref={previewRootRef}
+      onKeyDownCapture={handlePreviewKeyDownCapture}
+      onFocusCapture={activateFindRoot}
+      onMouseDownCapture={activateFindRoot}
+      onPointerDownCapture={handlePreviewPointerDownCapture}
+      onMouseEnter={activateFindRoot}
+    >
       {showPreviewTabs && !panelChrome ? (
         <div className={styles.tabs} role="tablist" aria-label="预览历史">
           {previewEntries.map((entry) => {
@@ -1075,15 +1420,27 @@ export function FilePreview({
         {renderActions()}
       </header>
 
-      {previewLoading ? <FilePreviewLoading label="正在读取文件" /> : null}
+      {previewBusy ? <FilePreviewLoading label={previewLoading ? "正在读取文件" : "正在准备预览"} /> : null}
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
-      {!previewLoading && !error ? (
+      {!previewBusy && !error ? (
         <div className={styles.body} data-chrome={chrome} aria-label="预览内容" ref={bodyRef}>
           {renderBodyContent()}
+          {findOpen ? (
+            <FilePreviewFindBar
+              inputRef={findInputRef}
+              query={findQuery}
+              matchCount={findMatchCount}
+              matchIndex={findMatchIndex}
+              focusRequestId={findFocusRequestId}
+              onClose={closeFind}
+              onQueryChange={updateFindQuery}
+              onStep={stepFindMatch}
+            />
+          ) : null}
           {quoteSelectionAvailable || annotationAvailable ? (
             <FilePreviewSelectionLayer
               bodyRef={bodyRef}
-              enabled={kind !== "image" && !previewLoading && !error}
+              enabled={kind !== "image" && !previewBusy && !error}
               quoteSelectionAvailable={quoteSelectionAvailable}
               annotationAvailable={annotationAvailable}
               onQuote={quotePreviewSelection}
@@ -1179,15 +1536,75 @@ export function FilePreview({
 }
 
 function FilePreviewLoading({ label }: { label: string }) {
+  return <LoadingSkeleton className={styles.previewLoading} label={label} />;
+}
+
+function FilePreviewFindBar({
+  inputRef,
+  query,
+  matchCount,
+  matchIndex,
+  focusRequestId,
+  onClose,
+  onQueryChange,
+  onStep,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  query: string;
+  matchCount: number;
+  matchIndex: number;
+  focusRequestId: number;
+  onClose: () => void;
+  onQueryChange: (value: string) => void;
+  onStep: (direction: 1 | -1) => void;
+}) {
+  const status = query.trim() ? (matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : "无结果") : "搜索";
+  useLayoutEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [focusRequestId, inputRef]);
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onStep(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    }
+  };
+
   return (
-    <div className={styles.previewLoading} role="status" aria-label={label}>
-      <div className={styles.previewLoadingSkeleton} aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <span />
-      </div>
-      <span>{label}</span>
+    <div
+      className={styles.findBar}
+      role="search"
+      aria-label="文件内容搜索"
+      data-file-preview-search="true"
+      data-file-preview-selection-excluded="true"
+    >
+      <Search size={14} />
+      <input
+        ref={inputRef}
+        aria-label="搜索文件内容"
+        value={query}
+        placeholder="搜索"
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={handleKeyDown}
+      />
+      <span className={styles.findStatus} data-empty={!query.trim() ? "true" : "false"}>
+        {status}
+      </span>
+      <button type="button" aria-label="上一个搜索结果" disabled={matchCount <= 0} onClick={() => onStep(-1)}>
+        <ArrowUp size={13} />
+      </button>
+      <button type="button" aria-label="下一个搜索结果" disabled={matchCount <= 0} onClick={() => onStep(1)}>
+        <ArrowDown size={13} />
+      </button>
+      <button type="button" aria-label="关闭文件搜索" onClick={onClose}>
+        <X size={13} />
+      </button>
     </div>
   );
 }
@@ -1246,8 +1663,48 @@ function FilePreviewSelectionLayer({
 }
 
 type PreviewKind = "markdown" | "html" | "diff" | "json" | "code" | "text" | "mermaid" | "image";
+type FilePreviewFindMode = "preview" | "source" | "split";
+
+interface DomFindMatch {
+  id: string;
+  type: "dom";
+  container: HTMLElement;
+  element: HTMLElement;
+  ranges: DomFindTextRange[];
+}
+
+interface DomFindTextRange {
+  end: number;
+  start: number;
+  textNode: Text;
+}
+
+interface DomFindTextRef {
+  block: Element | null;
+  end: number;
+  node: Text | null;
+  start: number;
+  text: string;
+}
+
+interface NormalizedSearchText {
+  map: Array<{ end: number; start: number }>;
+  text: string;
+}
+
+interface CodeMirrorFindMatch {
+  id: string;
+  type: "codemirror";
+  from: number;
+  to: number;
+}
+
+type FilePreviewFindMatch = DomFindMatch | CodeMirrorFindMatch;
+
 const HIGHLIGHT_MAX_CHARS = 120_000;
 const HIGHLIGHT_MAX_LINES = 2_000;
+const PANEL_MARKDOWN_RENDER_DEFER_CHARS = 40_000;
+const PANEL_MARKDOWN_RENDER_DEFER_MS = 260;
 const ANNOTATION_PANEL_EXIT_MS = 160;
 const ANNOTATION_FLASH_ITERATIONS = 1;
 const ANNOTATION_FLASH_INTERVAL_MS = 700;
@@ -1256,6 +1713,31 @@ const ANNOTATION_POPOVER_ESTIMATED_HEIGHT = 190;
 const ANNOTATION_POPOVER_GAP = 10;
 const FILE_PREVIEW_SELECTION_EXCLUDE_SELECTOR = "[data-file-preview-selection-excluded='true']";
 const FILE_PREVIEW_ANNOTATION_POPOVER_SELECTOR = "[data-file-preview-annotation-popover='true']";
+const FILE_PREVIEW_FIND_MARK_SELECTOR = "[data-file-preview-find-match='true']";
+const FILE_PREVIEW_FIND_SELECTION_EXCLUDE_SELECTOR = [
+  "[data-file-preview-search='true']",
+  "[data-file-preview-selection-excluded='true']",
+  "input",
+  "textarea",
+].join(",");
+const FILE_PREVIEW_REVEAL_SCROLL_OPTIONS: ScrollIntoViewOptions = {
+  block: "start",
+  inline: "nearest",
+  behavior: "smooth",
+};
+const FILE_PREVIEW_FIND_SCROLL_OPTIONS: ScrollIntoViewOptions = {
+  block: "center",
+  inline: "nearest",
+  behavior: "smooth",
+};
+const FILE_PREVIEW_TRANSIENT_REVEAL_SCROLL_OPTIONS: ScrollIntoViewOptions = {
+  block: "center",
+  inline: "nearest",
+  behavior: "smooth",
+};
+const TRANSIENT_REVEAL_ANNOTATION_ID_PREFIX = "__file-preview-reveal:";
+
+let activeFilePreviewRoot: HTMLElement | null = null;
 
 interface SelectionAnnotationDraft {
   anchor: WorkspaceFileAnnotationAnchorV2;
@@ -1298,6 +1780,13 @@ function sourceSelectionsEqual(a: SourceSelection | null, b: SourceSelection | n
 interface SourceLineRevealRequest {
   requestId: number;
   position: number;
+  block?: ScrollLogicalPosition;
+}
+
+interface CodeMirrorFindState {
+  query: string;
+  activeFrom: number | null;
+  activeTo: number | null;
 }
 
 interface PreviewAnnotationRevealRequest {
@@ -2117,6 +2606,524 @@ function sourcePositionForLine(source: string, line: number): number {
   return source.length;
 }
 
+function transientRevealAnnotationFromRequest(
+  source: string,
+  path: string,
+  request: FilePreviewRevealRequest,
+  scope: WorkspaceScope | null,
+): WorkspaceFileAnnotation | null {
+  const range = sourceRangeFromRevealRequest(source, request);
+  if (!range) {
+    return null;
+  }
+  const selectedText =
+    typeof request.selectedText === "string" && request.selectedText.trim()
+      ? request.selectedText.trim()
+      : source.slice(range.from, range.to).trim();
+  if (!selectedText) {
+    return null;
+  }
+  try {
+    const anchor = createSourceRangeAnchor(source, range.from, range.to, "source", selectedText);
+    const workspaceId = scope && "workspaceId" in scope ? scope.workspaceId ?? "" : "";
+    const sessionId = scope && "sessionId" in scope ? scope.sessionId ?? "" : "";
+    return {
+      id: `${TRANSIENT_REVEAL_ANNOTATION_ID_PREFIX}${request.requestId}`,
+      scope_type: workspaceId ? "workspace" : "session",
+      scope_id: workspaceId || sessionId,
+      workspace_id: workspaceId || null,
+      path,
+      anchor_type: "selection",
+      comment: "跳转定位",
+      selected_text: selectedText,
+      line_start: anchor.lineStart,
+      line_end: anchor.lineEnd,
+      column_start: anchor.columnStart,
+      column_end: anchor.columnEnd,
+      content_hash: anchor.contentHash,
+      anchor_json: anchor,
+      created_at: "",
+      updated_at: "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sourceRangeFromRevealRequest(
+  source: string,
+  request: PreviewFileRevealTarget,
+): Pick<AnnotationTextRange, "from" | "to"> | null {
+  const lineRange =
+    positiveInteger(request.lineStart) && positiveInteger(request.lineEnd)
+      ? sourceRangeForLines(source, request.lineStart, request.lineEnd)
+      : null;
+  if (lineRange) {
+    return lineRange;
+  }
+  if (nonNegativeInteger(request.sourceStart) && positiveInteger(request.sourceEnd)) {
+    return normalizeOffsetRange(source, request.sourceStart, request.sourceEnd);
+  }
+  return null;
+}
+
+function sourceRangeForLines(
+  source: string,
+  lineStart: number,
+  lineEnd: number,
+): Pick<AnnotationTextRange, "from" | "to"> | null {
+  const fromLine = Math.min(lineStart, lineEnd);
+  const toLine = Math.max(lineStart, lineEnd);
+  const from = sourcePositionForLine(source, fromLine);
+  let to = sourcePositionForLine(source, toLine + 1);
+  while (to > from && (source.charCodeAt(to - 1) === 10 || source.charCodeAt(to - 1) === 13)) {
+    to -= 1;
+  }
+  return normalizeOffsetRange(source, from, to);
+}
+
+function isTransientRevealAnnotationId(annotationId: string | null | undefined): boolean {
+  return Boolean(annotationId?.startsWith(TRANSIENT_REVEAL_ANNOTATION_ID_PREFIX));
+}
+
+function filePreviewFindContainers(
+  body: HTMLElement | null,
+  mode: FilePreviewFindMode,
+  sourceUsesCodeMirror: boolean,
+): HTMLElement[] {
+  if (!body) {
+    return [];
+  }
+  if (mode === "preview") {
+    return [filePreviewPanelBody(body, "渲染预览") ?? body];
+  }
+  if (mode === "source") {
+    return sourceUsesCodeMirror ? [] : [filePreviewPanelBody(body, "源码内容") ?? body];
+  }
+  const containers: HTMLElement[] = [];
+  if (!sourceUsesCodeMirror) {
+    const sourcePanel = filePreviewPanelBody(body, "源码内容");
+    if (sourcePanel) {
+      containers.push(sourcePanel);
+    }
+  }
+  const previewPanel = filePreviewPanelBody(body, "渲染预览");
+  if (previewPanel) {
+    containers.push(previewPanel);
+  }
+  return containers.length ? containers : [body];
+}
+
+function filePreviewPanelBody(body: HTMLElement, panelLabel: "源码内容" | "渲染预览"): HTMLElement | null {
+  return body.querySelector<HTMLElement>(`section[aria-label='${panelLabel}'] .${styles.splitPanelBody}`);
+}
+
+function collectDomFindMatches(containers: HTMLElement[], query: string): DomFindMatch[] {
+  const needle = normalizedSearchText(query).text.toLowerCase();
+  if (!containers.length || !needle) {
+    return [];
+  }
+  const matches: DomFindMatch[] = [];
+  containers.forEach((container, containerIndex) => {
+    const refs: DomFindTextRef[] = [];
+    let combinedText = "";
+    let previousBlock: Element | null = null;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const element = node as Element;
+          if (element instanceof HTMLElement && shouldSkipFindTextNode(element)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return element.tagName === "BR" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+        }
+        const element = node.parentElement;
+        if (!element || shouldSkipFindTextNode(element) || !node.textContent?.trim()) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let node = walker.nextNode();
+    while (node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if ((node as Element).tagName === "BR") {
+          combinedText = appendFindTextBoundary(refs, combinedText);
+        }
+        node = walker.nextNode();
+        continue;
+      }
+      const text = node.textContent ?? "";
+      if (text) {
+        const block = closestFindTextBlock(node.parentElement, container);
+        if (previousBlock && block && block !== previousBlock) {
+          combinedText = appendFindTextBoundary(refs, combinedText, text);
+        }
+        const start = combinedText.length;
+        combinedText += text;
+        refs.push({
+          block,
+          node: node as Text,
+          text,
+          start,
+          end: combinedText.length,
+        });
+        previousBlock = block ?? previousBlock;
+      }
+      node = walker.nextNode();
+    }
+    const normalizedHaystack = normalizedSearchText(combinedText);
+    const haystack = normalizedHaystack.text.toLowerCase();
+    let start = haystack.indexOf(needle);
+    while (start >= 0) {
+      const end = start + needle.length;
+      const combinedStart = normalizedHaystack.map[start]?.start ?? 0;
+      const combinedEnd = normalizedHaystack.map[end - 1]?.end ?? combinedStart;
+      const ranges = domTextRangesForCombinedRange(refs, combinedStart, combinedEnd);
+      const firstElement = ranges[0]?.textNode.parentElement;
+      if (ranges.length && firstElement) {
+        matches.push({
+          id: `dom-${containerIndex}-${matches.length}`,
+          type: "dom",
+          container,
+          element: firstElement,
+          ranges,
+        });
+      }
+      start = haystack.indexOf(needle, start + Math.max(needle.length, 1));
+    }
+  });
+  return matches;
+}
+
+function domTextRangesForCombinedRange(
+  refs: DomFindTextRef[],
+  start: number,
+  end: number,
+): DomFindTextRange[] {
+  return refs
+    .map((ref) => {
+      const rangeStart = Math.max(start, ref.start);
+      const rangeEnd = Math.min(end, ref.end);
+      if (rangeEnd <= rangeStart) {
+        return null;
+      }
+      if (!ref.node) {
+        return null;
+      }
+      return {
+        textNode: ref.node,
+        start: rangeStart - ref.start,
+        end: rangeEnd - ref.start,
+      };
+    })
+    .filter((range): range is DomFindTextRange => Boolean(range));
+}
+
+function normalizedSearchText(value: string): NormalizedSearchText {
+  let text = "";
+  const map: NormalizedSearchText["map"] = [];
+  let index = 0;
+  while (index < value.length) {
+    const char = value[index] ?? "";
+    if (/\s/.test(char)) {
+      const start = index;
+      while (index < value.length && /\s/.test(value[index] ?? "")) {
+        index += 1;
+      }
+      if (text.length > 0) {
+        text += " ";
+        map.push({ start, end: index });
+      }
+      continue;
+    }
+    text += char;
+    map.push({ start: index, end: index + 1 });
+    index += 1;
+  }
+  while (text.endsWith(" ")) {
+    text = text.slice(0, -1);
+    map.pop();
+  }
+  return { text, map };
+}
+
+function closestFindTextBlock(element: Element | null, container: HTMLElement): Element | null {
+  let current: Element | null = element;
+  while (current && current !== container) {
+    if (isFindTextBlockElement(current)) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return current;
+}
+
+function isFindTextBlockElement(element: Element): boolean {
+  return /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DD|DETAILS|DIALOG|DIV|DL|DT|FIELDSET|FIGCAPTION|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/.test(
+    element.tagName,
+  );
+}
+
+function appendFindTextBoundary(refs: DomFindTextRef[], combinedText: string, nextText = ""): string {
+  if (!combinedText || /\s$/.test(combinedText) || (nextText && /^\s/.test(nextText))) {
+    return combinedText;
+  }
+  const boundaryStart = combinedText.length;
+  const nextCombinedText = `${combinedText}\n`;
+  refs.push({
+    block: null,
+    node: null,
+    text: "\n",
+    start: boundaryStart,
+    end: nextCombinedText.length,
+  });
+  return nextCombinedText;
+}
+
+function shouldSkipFindTextNode(element: HTMLElement): boolean {
+  return Boolean(
+    element.closest(
+      [
+        "[data-file-preview-search='true']",
+        "[data-file-preview-selection-excluded='true']",
+        "button",
+        "input",
+        "select",
+        "textarea",
+        "script",
+        "style",
+      ].join(","),
+    ),
+  );
+}
+
+function collectCodeMirrorFindMatches(view: EditorView, query: SearchQuery): CodeMirrorFindMatch[] {
+  if (!query.valid) {
+    return [];
+  }
+  const matches: CodeMirrorFindMatch[] = [];
+  const cursor = query.getCursor(view.state);
+  let current = cursor.next();
+  while (!current.done) {
+    if (current.value.to > current.value.from) {
+      matches.push({
+        id: `codemirror-${matches.length}`,
+        type: "codemirror",
+        from: current.value.from,
+        to: current.value.to,
+      });
+    }
+    current = cursor.next();
+  }
+  return matches;
+}
+
+function clampFindIndex(index: number, count: number): number {
+  if (count <= 0) {
+    return -1;
+  }
+  if (index < 0) {
+    return 0;
+  }
+  return Math.min(index, count - 1);
+}
+
+function preferredFindMatchIndex(
+  currentIndex: number,
+  matches: FilePreviewFindMatch[],
+  body: HTMLElement | null,
+  sourceEditorView: EditorView | null,
+): number {
+  if (!matches.length) {
+    return -1;
+  }
+  if (currentIndex >= 0) {
+    return clampFindIndex(currentIndex, matches.length);
+  }
+  const visibleIndex = matches.findIndex((match) => isFindMatchVisible(match, body, sourceEditorView));
+  return visibleIndex >= 0 ? visibleIndex : 0;
+}
+
+function isFindMatchVisible(
+  match: FilePreviewFindMatch,
+  body: HTMLElement | null,
+  sourceEditorView: EditorView | null,
+): boolean {
+  if (match.type === "codemirror") {
+    return Boolean(sourceEditorView && codeMirrorMatchInViewport(sourceEditorView, match));
+  }
+  return domFindMatchInViewport(match, body);
+}
+
+function codeMirrorMatchInViewport(view: EditorView, match: CodeMirrorFindMatch): boolean {
+  return view.visibleRanges.some((range) => match.to > range.from && match.from < range.to);
+}
+
+function domFindMatchInViewport(match: DomFindMatch, body: HTMLElement | null): boolean {
+  const container = match.container || body;
+  if (!container) {
+    return false;
+  }
+  const firstRange = match.ranges[0];
+  if (!firstRange) {
+    return false;
+  }
+  const containerRect = container.getBoundingClientRect();
+  const range = document.createRange();
+  range.setStart(firstRange.textNode, firstRange.start);
+  range.setEnd(firstRange.textNode, firstRange.end);
+  if (typeof range.getBoundingClientRect !== "function") {
+    range.detach();
+    return true;
+  }
+  const matchRect = range.getBoundingClientRect();
+  range.detach();
+  if (matchRect.width === 0 && matchRect.height === 0) {
+    return false;
+  }
+  return matchRect.bottom >= containerRect.top && matchRect.top <= containerRect.bottom;
+}
+
+function applyDomFindHighlights(matches: DomFindMatch[], activeId: string | null): void {
+  const matchesByTextNode = new Map<Text, Array<DomFindTextRange & { match: DomFindMatch }>>();
+  matches.forEach((match) => {
+    match.ranges.forEach((range) => {
+      const current = matchesByTextNode.get(range.textNode);
+      if (current) {
+        current.push({ ...range, match });
+        return;
+      }
+      matchesByTextNode.set(range.textNode, [{ ...range, match }]);
+    });
+  });
+
+  const assignedElements = new Set<string>();
+  matchesByTextNode.forEach((textNodeMatches, textNode) => {
+    const parent = textNode.parentNode;
+    const text = textNode.textContent ?? "";
+    if (!parent || !text) {
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    textNodeMatches
+      .sort((left, right) => left.start - right.start)
+      .forEach((range) => {
+        if (range.start < cursor || range.end > text.length) {
+          return;
+        }
+        if (cursor < range.start) {
+          fragment.appendChild(document.createTextNode(text.slice(cursor, range.start)));
+        }
+        const mark = document.createElement("mark");
+        mark.className = styles.findMark;
+        mark.dataset.filePreviewFindMatch = "true";
+        mark.dataset.active = range.match.id === activeId ? "true" : "false";
+        mark.textContent = text.slice(range.start, range.end);
+        fragment.appendChild(mark);
+        if (!assignedElements.has(range.match.id)) {
+          range.match.element = mark;
+          assignedElements.add(range.match.id);
+        }
+        cursor = range.end;
+      });
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    parent.replaceChild(fragment, textNode);
+  });
+}
+
+function filePreviewRootForTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Node)) {
+    return null;
+  }
+  const element = target instanceof Element ? target : target.parentElement;
+  return element?.closest<HTMLElement>("[data-file-preview-root='true']") ?? null;
+}
+
+function selectedFilePreviewTextForFind(root: HTMLElement, sourceSelection: SourceSelection | null): string {
+  const selection = window.getSelection?.();
+  const domSelectionText = selectedDomTextForFind(root, selection);
+  if (domSelectionText) {
+    return domSelectionText;
+  }
+  return sourceSelection?.selectedText.trim() ?? "";
+}
+
+function selectedDomTextForFind(root: HTMLElement, selection: Selection | null | undefined): string {
+  if (!selection || selection.isCollapsed || selection.rangeCount <= 0) {
+    return "";
+  }
+  const selectedText = selection.toString().trim();
+  if (!selectedText) {
+    return "";
+  }
+  const range = selection.getRangeAt(0);
+  if (!selectionRangeBelongsToRoot(root, range) || selectionRangeTouchesExcludedElement(range)) {
+    return "";
+  }
+  return selectedText;
+}
+
+function selectionRangeBelongsToRoot(root: HTMLElement, range: Range): boolean {
+  const nodes = [
+    range.startContainer,
+    range.endContainer,
+    range.commonAncestorContainer,
+  ];
+  if (nodes.some((node) => nodeBelongsToRoot(root, node))) {
+    return true;
+  }
+  try {
+    return range.intersectsNode(root);
+  } catch {
+    return false;
+  }
+}
+
+function nodeBelongsToRoot(root: HTMLElement, node: Node): boolean {
+  const element = node instanceof Element ? node : node.parentElement;
+  return Boolean(element && root.contains(element));
+}
+
+function selectionRangeTouchesExcludedElement(range: Range): boolean {
+  return [
+    range.startContainer,
+    range.endContainer,
+    range.commonAncestorContainer,
+  ].some((node) => {
+    const element = node instanceof Element ? node : node.parentElement;
+    return Boolean(element?.closest(FILE_PREVIEW_FIND_SELECTION_EXCLUDE_SELECTOR));
+  });
+}
+
+function clearDomFindHighlights(container: HTMLElement | null): void {
+  if (!container) {
+    return;
+  }
+  Array.from(container.querySelectorAll<HTMLElement>(FILE_PREVIEW_FIND_MARK_SELECTOR)).forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) {
+      return;
+    }
+    while (mark.firstChild) {
+      parent.insertBefore(mark.firstChild, mark);
+    }
+    parent.removeChild(mark);
+    parent.normalize();
+  });
+}
+
+function scrollFindMatchIntoView(match: FilePreviewFindMatch | null): void {
+  if (match?.type !== "dom") {
+    return;
+  }
+  match.element.scrollIntoView?.(FILE_PREVIEW_FIND_SCROLL_OPTIONS);
+}
+
 function AnnotatedMarkdownPreview({
   annotations,
   components,
@@ -2502,6 +3509,7 @@ function markdownAnnotationMarkNode(
       "data-preview-source-end": sourceEnd,
       "data-active": "false",
       "data-flash": "false",
+      "data-transient-reveal": isTransientRevealAnnotationId(candidate.annotation.id) ? "true" : "false",
       title: candidate.annotation.comment,
     },
     children: [{ type: "text", value }],
@@ -2972,6 +3980,8 @@ const SourceViewer = memo(function SourceViewer({
   flashAnnotationId = null,
   revealLineRequest,
   onAnnotationActivate,
+  onEditorViewChange,
+  sourceFindState,
   onSelectionChange,
 }: {
   content: string;
@@ -2983,6 +3993,8 @@ const SourceViewer = memo(function SourceViewer({
   flashAnnotationId?: string | null;
   revealLineRequest?: SourceLineRevealRequest | null;
   onAnnotationActivate?: (annotation: WorkspaceFileAnnotation, position: AnnotationClientPosition) => void;
+  onEditorViewChange?: (view: EditorView | null) => void;
+  sourceFindState?: CodeMirrorFindState | null;
   onSelectionChange?: (selection: SourceSelection | null) => void;
 }) {
   const source = content || "文件为空";
@@ -3015,6 +4027,8 @@ const SourceViewer = memo(function SourceViewer({
           flashAnnotationId={flashAnnotationId}
           revealLineRequest={revealLineRequest}
           onAnnotationActivate={onAnnotationActivate}
+          onEditorViewChange={onEditorViewChange}
+          sourceFindState={sourceFindState}
           onSelectionChange={onSelectionChange}
         />
       </div>
@@ -3042,6 +4056,8 @@ function CodeMirrorSourceView({
   flashAnnotationId,
   revealLineRequest,
   onAnnotationActivate,
+  onEditorViewChange,
+  sourceFindState,
   onSelectionChange,
 }: {
   language: string;
@@ -3052,6 +4068,8 @@ function CodeMirrorSourceView({
   flashAnnotationId: string | null;
   revealLineRequest?: SourceLineRevealRequest | null;
   onAnnotationActivate?: (annotation: WorkspaceFileAnnotation, position: AnnotationClientPosition) => void;
+  onEditorViewChange?: (view: EditorView | null) => void;
+  sourceFindState?: CodeMirrorFindState | null;
   onSelectionChange?: (selection: SourceSelection | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -3060,6 +4078,7 @@ function CodeMirrorSourceView({
   const themeCompartmentRef = useRef<Compartment | null>(null);
   const languageCompartmentRef = useRef<Compartment | null>(null);
   const annotationCompartmentRef = useRef<Compartment | null>(null);
+  const findCompartmentRef = useRef<Compartment | null>(null);
   if (themeCompartmentRef.current === null) {
     themeCompartmentRef.current = new Compartment();
   }
@@ -3069,9 +4088,13 @@ function CodeMirrorSourceView({
   if (annotationCompartmentRef.current === null) {
     annotationCompartmentRef.current = new Compartment();
   }
+  if (findCompartmentRef.current === null) {
+    findCompartmentRef.current = new Compartment();
+  }
   const themeCompartment = themeCompartmentRef.current;
   const languageCompartment = languageCompartmentRef.current;
   const annotationCompartment = annotationCompartmentRef.current;
+  const findCompartment = findCompartmentRef.current;
 
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
@@ -3128,15 +4151,18 @@ function CodeMirrorSourceView({
           annotationCompartment.of(
             codeMirrorAnnotationExtension(source, annotations, activeAnnotationId, flashAnnotationId, onAnnotationActivate),
           ),
+          findCompartment.of(codeMirrorFindExtension(source, sourceFindState ?? null)),
         ],
       }),
     });
     viewRef.current = view;
+    onEditorViewChange?.(view);
 
     return () => {
       if (viewRef.current === view) {
         viewRef.current = null;
       }
+      onEditorViewChange?.(null);
       onSelectionChangeRef.current?.(null);
       view.destroy();
     };
@@ -3177,25 +4203,39 @@ function CodeMirrorSourceView({
   }, [activeAnnotationId, annotationCompartment, annotations, flashAnnotationId, onAnnotationActivate, source]);
 
   useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: findCompartment.reconfigure(codeMirrorFindExtension(source, sourceFindState ?? null)),
+    });
+  }, [findCompartment, source, sourceFindState]);
+
+  useEffect(() => {
     const view = viewRef.current;
     if (!view || !revealLineRequest) {
       return;
     }
     const position = Math.max(0, Math.min(revealLineRequest.position, view.state.doc.length));
-    smoothScrollCodeMirrorPositionIntoView(view, position);
+    smoothScrollCodeMirrorPositionIntoView(view, position, revealLineRequest.block ?? "start");
   }, [revealLineRequest]);
 
   return <div ref={hostRef} className={styles.codeMirrorHost} />;
 }
 
-function smoothScrollCodeMirrorPositionIntoView(view: EditorView, position: number): void {
+function smoothScrollCodeMirrorPositionIntoView(
+  view: EditorView,
+  position: number,
+  block: ScrollLogicalPosition = "start",
+): void {
   view.requestMeasure({
     read() {
       const line = view.lineBlockAt(position);
-      const scroll = view.scrollDOM;
-      return Math.max(0, line.top - (scroll.clientHeight - line.height) / 2);
+      return {
+        height: line.height,
+        top: Math.max(0, line.top),
+      };
     },
-    write(top) {
+    write(line) {
+      const centeredTop = line.top - Math.max(0, (view.scrollDOM.clientHeight - line.height) / 2);
+      const top = block === "center" ? Math.max(0, centeredTop) : line.top;
       if (typeof view.scrollDOM.scrollTo === "function") {
         view.scrollDOM.scrollTo({ top, behavior: "smooth" });
         return;
@@ -3219,6 +4259,7 @@ function codeMirrorAnnotationExtension(
         "data-file-annotation-id": annotation.id,
         "data-active": activeAnnotationId === annotation.id ? "true" : "false",
         "data-flash": flashAnnotationId === annotation.id ? "true" : "false",
+        "data-transient-reveal": isTransientRevealAnnotationId(annotation.id) ? "true" : "false",
         title: annotation.comment,
       },
     }).range(from, to),
@@ -3253,6 +4294,54 @@ function codeMirrorAnnotationExtension(
       },
     }),
   ];
+}
+
+function codeMirrorFindExtension(source: string, findState: CodeMirrorFindState | null): Extension {
+  const ranges = codeMirrorFindDecorationRanges(source, findState).map(({ from, to, active }) =>
+    Decoration.mark({
+      class: "cm-fileFindMark",
+      attributes: {
+        "data-file-preview-source-find-match": "true",
+        "data-active": active ? "true" : "false",
+      },
+    }).range(from, to),
+  );
+  return EditorView.decorations.of(Decoration.set(ranges, true));
+}
+
+function codeMirrorFindDecorationRanges(
+  source: string,
+  findState: CodeMirrorFindState | null,
+): Array<{ from: number; to: number; active: boolean }> {
+  const query = findState?.query.trim() ?? "";
+  if (!query) {
+    return [];
+  }
+  const ranges: Array<{ from: number; to: number; active: boolean }> = [];
+  const needle = query.toLowerCase();
+  const haystack = source.toLowerCase();
+  let from = haystack.indexOf(needle);
+  while (from >= 0) {
+    const to = from + query.length;
+    ranges.push({
+      from,
+      to,
+      active: findState?.activeFrom === from && findState.activeTo === to,
+    });
+    from = haystack.indexOf(needle, from + Math.max(query.length, 1));
+  }
+  return ranges;
+}
+
+function sameCodeMirrorFindState(
+  left: CodeMirrorFindState | null,
+  right: CodeMirrorFindState | null,
+): boolean {
+  return (
+    (left?.query ?? "") === (right?.query ?? "") &&
+    (left?.activeFrom ?? null) === (right?.activeFrom ?? null) &&
+    (left?.activeTo ?? null) === (right?.activeTo ?? null)
+  );
 }
 
 function annotationDecorationRanges(source: string, annotations: WorkspaceFileAnnotation[]): AnnotationTextRange[] {
@@ -3294,6 +4383,10 @@ function positiveInteger(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function nonNegativeInteger(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 function codeMirrorBaseExtensions(): Extension[] {
   return [
     lineNumbers(),
@@ -3307,7 +4400,7 @@ function codeMirrorBaseExtensions(): Extension[] {
     highlightSelectionMatches(),
     EditorState.readOnly.of(true),
     EditorView.lineWrapping,
-    keymap.of([...searchKeymap, ...foldKeymap]),
+    keymap.of(foldKeymap),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     syntaxHighlighting(codeMirrorHighlightStyle, { fallback: true }),
   ].filter(Boolean) as Extension[];
@@ -3452,11 +4545,27 @@ function codeMirrorTheme(theme: "light" | "dark"): Extension {
         backgroundColor: "color-mix(in srgb, var(--color-accent) 26%, transparent)",
       },
       ".cm-searchMatch": {
-        backgroundColor: "color-mix(in srgb, var(--color-warning) 22%, transparent)",
-        outline: "1px solid color-mix(in srgb, var(--color-warning) 42%, transparent)",
+        backgroundColor: "rgb(250 204 21 / 42%)",
+        outline: "1px solid rgb(234 179 8 / 42%)",
       },
       ".cm-searchMatch-selected": {
-        backgroundColor: "color-mix(in srgb, var(--color-accent) 28%, transparent)",
+        backgroundColor: "rgb(250 204 21 / 88%)",
+        outline: "2px solid color-mix(in srgb, var(--color-text-primary) 58%, transparent)",
+        outlineOffset: "1px",
+        boxShadow: "0 0 0 4px rgb(250 204 21 / 28%), inset 0 -2px 0 rgb(250 204 21 / 95%)",
+        fontWeight: "700",
+      },
+      ".cm-fileFindMark": {
+        borderRadius: "3px",
+        backgroundColor: "rgb(250 204 21 / 42%)",
+        boxShadow: "0 0 0 1px rgb(250 204 21 / 18%)",
+      },
+      ".cm-fileFindMark[data-active='true']": {
+        backgroundColor: "rgb(250 204 21 / 88%)",
+        outline: "1.5px solid color-mix(in srgb, var(--color-text-primary) 58%, transparent)",
+        outlineOffset: "1px",
+        boxShadow: "0 0 0 4px rgb(250 204 21 / 30%), inset 0 -2px 0 rgb(250 204 21 / 95%)",
+        fontWeight: "700",
       },
       ".cm-fileAnnotationMark": {
         borderBottom: "1px solid color-mix(in srgb, var(--color-warning) 70%, transparent)",
@@ -3474,6 +4583,17 @@ function codeMirrorTheme(theme: "light" | "dark"): Extension {
         animation: "annotationMarkFlash 700ms var(--motion-ease-out) 1 both",
         backgroundColor: "color-mix(in srgb, var(--color-warning) 52%, transparent)",
         boxShadow: "0 0 0 3px color-mix(in srgb, var(--color-warning) 22%, transparent)",
+      },
+      ".cm-fileAnnotationMark[data-transient-reveal='true']": {
+        backgroundColor: "rgb(250 204 21 / 42%)",
+        borderBottom: "1px solid rgb(234 179 8 / 72%)",
+        boxShadow: "0 0 0 1px rgb(234 179 8 / 28%)",
+        cursor: "default",
+      },
+      ".cm-fileAnnotationMark[data-transient-reveal='true'][data-active='true']": {
+        backgroundColor: "rgb(250 204 21 / 66%)",
+        boxShadow:
+          "0 0 0 2px color-mix(in srgb, var(--color-text-primary) 44%, transparent), 0 0 0 5px rgb(250 204 21 / 26%), inset 0 -2px 0 rgb(234 179 8 / 88%)",
       },
       ".cm-foldPlaceholder": {
         display: "inline-flex",

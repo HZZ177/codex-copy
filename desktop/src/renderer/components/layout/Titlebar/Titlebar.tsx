@@ -1,6 +1,6 @@
 import { Minus, Square, X } from "lucide-react";
 import type { MouseEvent } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AppMode } from "@/renderer/components/layout/appMode";
 
@@ -97,16 +97,31 @@ export function Titlebar({
 }
 
 function ModeSwitch({ modeSwitch }: { modeSwitch: NonNullable<TitlebarProps["modeSwitch"]> }) {
+  const [visualMode, setVisualMode] = useState<AppMode>(modeSwitch.currentMode);
+
+  useEffect(() => {
+    setVisualMode(modeSwitch.currentMode);
+  }, [modeSwitch.currentMode]);
+
+  const switchMode = (mode: AppMode) => {
+    if (mode === visualMode) {
+      return;
+    }
+    setVisualMode(mode);
+    modeSwitch.onModeChange(mode);
+  };
+
   return (
     <div
       className={styles.modeSwitch}
       role="group"
       aria-label="应用模式"
+      data-mode={visualMode}
       data-titlebar-interactive="true"
       data-testid="app-mode-switch"
     >
       {(["agent", "workbench"] as const).map((mode) => {
-        const active = modeSwitch.currentMode === mode;
+        const active = visualMode === mode;
         return (
           <button
             className={styles.modeButton}
@@ -114,9 +129,9 @@ function ModeSwitch({ modeSwitch }: { modeSwitch: NonNullable<TitlebarProps["mod
             aria-pressed={active}
             data-active={active ? "true" : "false"}
             key={mode}
-            onClick={() => modeSwitch.onModeChange(mode)}
+            onClick={() => switchMode(mode)}
           >
-            {mode === "agent" ? "Agent" : "Workbench"}
+            {mode === "agent" ? "Agent" : "工作台模式"}
           </button>
         );
       })}

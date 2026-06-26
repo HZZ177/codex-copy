@@ -4,6 +4,7 @@ export { FilePreview } from "./FilePreview";
 export type {
   FilePreviewProps,
   FilePreviewRequest,
+  FilePreviewRevealRequest,
   MarkdownOutlineItem,
   MarkdownOutlineRevealRequest,
 } from "./FilePreview";

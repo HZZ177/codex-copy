@@ -14,5 +14,7 @@ export { MessageThinking } from "./MessageThinking";
 export type { MessageThinkingProps } from "./MessageThinking";
 export { MessageText } from "./MessageText";
 export type { MessageTextProps } from "./MessageText";
+export { SkillActivationBlock } from "./SkillActivationBlock";
+export type { SkillActivationBlockProps } from "./SkillActivationBlock";
 export { ToolCallBlock } from "./ToolCallBlock";
 export type { ToolCallBlockProps } from "./ToolCallBlock";

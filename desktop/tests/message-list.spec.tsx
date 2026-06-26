@@ -14,7 +14,8 @@ describe("MessageList", () => {
     expect(screen.getByTestId("message-empty").textContent).toBe("还没有消息");
 
     rerender(<MessageList messages={[]} loading />);
-    expect(screen.getAllByTestId("message-skeleton").length).toBe(3);
+    expect(screen.getByTestId("message-skeleton")).not.toBeNull();
+    expect(screen.getByRole("status", { name: "正在加载消息" })).not.toBeNull();
   });
 
   it("renders messages with the default lightweight renderer", () => {
@@ -502,6 +503,32 @@ describe("MessageList", () => {
       ),
     ).not.toBeNull();
     expect(screen.queryByText(/查看失败 3 个目录/)).toBeNull();
+  });
+
+  it("groups grep_files as search activity", () => {
+    render(
+      <MessageList
+        messages={[
+          toolMessage("grep-1", "grep_files", { query: "needle" }),
+          toolMessage("grep-2", "grep_files", { query: "other" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "已搜索文件 2 次详情" })).not.toBeNull();
+  });
+
+  it("groups search_text as content search activity", () => {
+    render(
+      <MessageList
+        messages={[
+          toolMessage("search-text-1", "search_text", { query: "needle" }),
+          toolMessage("search-text-2", "search_text", { query: "other" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "已搜索内容 2 次详情" })).not.toBeNull();
   });
 
   it("uses the concrete tool icon for grouped activity with one tool category", () => {

@@ -6,6 +6,7 @@ import mermaid, { type ParseResult, type RenderResult } from "mermaid";
 import type { RuntimeBridge, WorkspaceFileAnnotationAnchorV2 } from "@/runtime";
 import { FilePreview, type MarkdownOutlineItem, type MarkdownOutlineRevealRequest } from "@/renderer/components/workspace";
 import { createSourceRangeAnchor } from "@/renderer/components/workspace/filePreviewAnnotations";
+import { APP_FIND_SHORTCUT_EVENT } from "@/renderer/events/findShortcut";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 
 const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
@@ -57,6 +58,344 @@ describe("FilePreview", () => {
     expect(await screen.findByLabelText("预览内容")).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Hello" })).not.toBeNull();
     expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
+  });
+
+  it("defers large panel markdown rendering until after the open motion window", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: `# Project\n\n${"Large section text.\n".repeat(3000)}`,
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} chrome="panel" />);
+
+    expect(await screen.findByRole("status", { name: "正在准备预览" })).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Project" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Project" })).not.toBeNull();
+  });
+
+  it("opens an in-preview search bar for Ctrl+F and navigates matches", async () => {
+    const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const elementRectDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => testRect({ top: 0, bottom: 100, height: 100 }),
+    });
+    const rangeRectDescriptor = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        return this.startOffset > 0
+          ? testRect({ top: 24, bottom: 44, height: 20 })
+          : testRect({ top: -80, bottom: -60, height: 20 });
+      },
+    });
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "# Guide\n\nAlpha beta alpha",
+        encoding: "utf-8",
+      }),
+    });
+    let selection: ReturnType<typeof mockSelection> | null = null;
+
+    try {
+      render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} />);
+
+      const body = await screen.findByLabelText("预览内容");
+      fireEvent.mouseEnter(body);
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: document.body,
+            },
+          }),
+        );
+      });
+
+      const search = await screen.findByRole("search", { name: "文件内容搜索" });
+      const input = within(search).getByLabelText("搜索文件内容");
+      await waitFor(() => {
+        expect(document.activeElement).toBe(input);
+      });
+      expect((input as HTMLInputElement).value).toBe("");
+      fireEvent.change(input, { target: { value: "alpha" } });
+
+      await waitFor(() => {
+        expect(within(search).getByText("2/2")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(2);
+        expect(body.querySelectorAll("[data-file-preview-find-match='true'][data-active='true']")).toHaveLength(1);
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")[0].getAttribute("data-active")).toBe(
+          "false",
+        );
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")[1].getAttribute("data-active")).toBe(
+          "true",
+        );
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "center",
+          inline: "nearest",
+          behavior: "smooth",
+        });
+      });
+      const firstFindMark = body.querySelector("[data-file-preview-find-match='true']");
+      expect(firstFindMark).not.toBeNull();
+      act(() => {
+        document.dispatchEvent(new Event("selectionchange"));
+        window.dispatchEvent(new Event("pointerup"));
+        window.dispatchEvent(new Event("focusin"));
+      });
+      await act(async () => {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
+      expect(body.querySelector("[data-file-preview-find-match='true']")).toBe(firstFindMark);
+      fireEvent.pointerUp(body);
+      await waitFor(() => {
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(2);
+      });
+      fireEvent.click(within(search).getByRole("button", { name: "下一个搜索结果" }));
+      await waitFor(() => {
+        expect(within(search).getByText("1/2")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true'][data-active='true']")).toHaveLength(1);
+      });
+
+      (input as HTMLInputElement).blur();
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: document.body,
+            },
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(input);
+      });
+      expect((input as HTMLInputElement).value).toBe("alpha");
+
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole("search", { name: "文件内容搜索" })).toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(0);
+      });
+
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: document.body,
+            },
+          }),
+        );
+      });
+      const reopenedSearch = await screen.findByRole("search", { name: "文件内容搜索" });
+      const reopenedInput = within(reopenedSearch).getByLabelText("搜索文件内容");
+      await waitFor(() => {
+        expect(document.activeElement).toBe(reopenedInput);
+      });
+      expect((reopenedInput as HTMLInputElement).value).toBe("");
+
+      selection = mockSelection(body, "beta");
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: document.body,
+            },
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect((reopenedInput as HTMLInputElement).value).toBe("beta");
+        expect(within(reopenedSearch).getByText("1/1")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(1);
+      });
+    } finally {
+      selection?.restore();
+      if (scrollDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", scrollDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
+      }
+      if (elementRectDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", elementRectDescriptor);
+      } else {
+        delete (HTMLElement.prototype as { getBoundingClientRect?: HTMLElement["getBoundingClientRect"] }).getBoundingClientRect;
+      }
+      if (rangeRectDescriptor) {
+        Object.defineProperty(Range.prototype, "getBoundingClientRect", rangeRectDescriptor);
+      } else {
+        delete (Range.prototype as { getBoundingClientRect?: Range["getBoundingClientRect"] }).getBoundingClientRect;
+      }
+    }
+  });
+
+  it("prefills search from selected rendered markdown inline code", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "这里有 `重点`，还有一个重点。",
+        encoding: "utf-8",
+      }),
+    });
+    let selection: ReturnType<typeof mockSelection> | null = null;
+
+    try {
+      render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} />);
+
+      const body = await screen.findByLabelText("预览内容");
+      const inlineCode = body.querySelector("code");
+      expect(inlineCode).not.toBeNull();
+      selection = mockSelection(inlineCode as Element, "重点");
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: inlineCode,
+            },
+          }),
+        );
+      });
+
+      const search = await screen.findByRole("search", { name: "文件内容搜索" });
+      const input = within(search).getByLabelText("搜索文件内容") as HTMLInputElement;
+      await waitFor(() => {
+        expect(input.value).toBe("重点");
+        expect(within(search).getByText("1/2")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(2);
+      });
+    } finally {
+      selection?.restore();
+    }
+  });
+
+  it("finds selected rendered markdown ranges that cross inline syntax nodes", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "前缀 `重点内容` 后缀\n\n前缀 重点内容 后缀",
+        encoding: "utf-8",
+      }),
+    });
+    let selection: ReturnType<typeof mockSelection> | null = null;
+
+    try {
+      render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} />);
+
+      const body = await screen.findByLabelText("预览内容");
+      selection = mockSelection(body, "前缀 重点内容 后缀");
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: body,
+            },
+          }),
+        );
+      });
+
+      const search = await screen.findByRole("search", { name: "文件内容搜索" });
+      const input = within(search).getByLabelText("搜索文件内容") as HTMLInputElement;
+      await waitFor(() => {
+        expect(input.value).toBe("前缀 重点内容 后缀");
+        expect(within(search).getByText("1/2")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(4);
+      });
+    } finally {
+      selection?.restore();
+    }
+  });
+
+  it("finds selected rendered markdown ranges across preview line breaks", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "第一行 `重点`\n第二行 结束\n\n第一行 重点 第二行 结束",
+        encoding: "utf-8",
+      }),
+    });
+    let selection: ReturnType<typeof mockSelection> | null = null;
+
+    try {
+      render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} />);
+
+      const body = await screen.findByLabelText("预览内容");
+      selection = mockSelection(body, "第一行 重点\n第二行 结束");
+      act(() => {
+        document.dispatchEvent(
+          new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+            detail: {
+              sourceTarget: body,
+            },
+          }),
+        );
+      });
+
+      const search = await screen.findByRole("search", { name: "文件内容搜索" });
+      const input = within(search).getByLabelText("搜索文件内容") as HTMLInputElement;
+      await waitFor(() => {
+        expect(input.value).toContain("第一行");
+        expect(input.value).toContain("第二行 结束");
+        expect(within(search).getByText("1/2")).not.toBeNull();
+        expect(body.querySelectorAll("[data-file-preview-find-match='true']")).toHaveLength(4);
+      });
+    } finally {
+      selection?.restore();
+    }
+  });
+
+  it("highlights source search matches and the active source hit", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "# Guide\n\nAlpha beta alpha",
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Guide" });
+    fireEvent.click(screen.getByRole("button", { name: "源码" }));
+    const body = screen.getByLabelText("预览内容");
+    fireEvent.mouseEnter(body);
+    act(() => {
+      document.dispatchEvent(
+        new CustomEvent(APP_FIND_SHORTCUT_EVENT, {
+          detail: {
+            sourceTarget: body,
+          },
+        }),
+      );
+    });
+
+    const search = await screen.findByRole("search", { name: "文件内容搜索" });
+    const input = within(search).getByLabelText("搜索文件内容");
+    fireEvent.change(input, { target: { value: "alpha" } });
+
+    await waitFor(() => {
+      expect(within(search).getByText("1/2")).not.toBeNull();
+      expect(document.querySelectorAll("[data-file-preview-source-find-match='true']")).toHaveLength(2);
+      expect(document.querySelectorAll("[data-file-preview-source-find-match='true'][data-active='true']")).toHaveLength(1);
+    });
   });
 
   it("renders code files with CodeMirror source viewer and line numbers", async () => {
@@ -189,7 +528,7 @@ describe("FilePreview", () => {
 
       await waitFor(() => {
         expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "center",
+          block: "start",
           inline: "nearest",
           behavior: "smooth",
         });
@@ -1395,7 +1734,7 @@ describe("FilePreview", () => {
       fireEvent.click(within(panel).getByRole("button", { name: "定位批注片段" }));
 
       expect(scrollIntoView).toHaveBeenCalledWith({
-        block: "center",
+        block: "start",
         inline: "nearest",
         behavior: "smooth",
       });
@@ -1408,6 +1747,66 @@ describe("FilePreview", () => {
         "false",
       );
       expect(screen.queryByLabelText("选区批注")).toBeNull();
+    } finally {
+      if (scrollDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", scrollDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
+      }
+    }
+  });
+
+  it("centers and clears transient source reveals from quote chips", async () => {
+    const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const content = "# Guide\n\nTarget line\n\nOther line";
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "guide.md",
+        content,
+        encoding: "utf-8",
+      }),
+    });
+
+    try {
+      render(
+        <FilePreview
+          request={{ type: "file", path: "guide.md" }}
+          sessionId="ses-1"
+          runtime={runtime}
+          sourceRevealRequest={{
+            requestId: 7,
+            selectedText: "Target line",
+            lineStart: 3,
+            lineEnd: 3,
+            sourceStart: content.indexOf("Target line"),
+            sourceEnd: content.indexOf("Target line") + "Target line".length,
+          }}
+        />,
+      );
+
+      const body = await screen.findByLabelText("预览内容");
+      await waitFor(() => {
+        const marker = document.querySelector('[data-preview-annotation-id="__file-preview-reveal:7"]');
+        expect(marker).not.toBeNull();
+        expect(marker?.getAttribute("data-transient-reveal")).toBe("true");
+        expect(marker?.getAttribute("data-active")).toBe("true");
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "center",
+          inline: "nearest",
+          behavior: "smooth",
+        });
+      });
+
+      fireEvent.pointerDown(body);
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-preview-annotation-id="__file-preview-reveal:7"]')).toBeNull();
+      });
     } finally {
       if (scrollDescriptor) {
         Object.defineProperty(Element.prototype, "scrollIntoView", scrollDescriptor);
@@ -2115,16 +2514,16 @@ function PreviewScopeHarness() {
 function mockSelection(container: Element, text: string) {
   const removeAllRanges = vi.fn();
   const range = textRange(container, text);
-  range.getBoundingClientRect = () => ({
-    left: 120,
-    top: 140,
-    right: 220,
-    bottom: 160,
-    width: 100,
-    height: 20,
-    x: 120,
-    y: 140,
-    toJSON: () => ({}),
+  Object.defineProperty(range, "getBoundingClientRect", {
+    configurable: true,
+    value: () => testRect({
+      left: 120,
+      top: 140,
+      right: 220,
+      bottom: 160,
+      width: 100,
+      height: 20,
+    }),
   });
   const spy = vi.spyOn(window, "getSelection").mockReturnValue({
     toString: () => text,
@@ -2137,6 +2536,26 @@ function mockSelection(container: Element, text: string) {
     removeAllRanges,
     restore: () => spy.mockRestore(),
   };
+}
+
+function testRect(overrides: Partial<DOMRect> = {}): DOMRect {
+  const left = overrides.left ?? 0;
+  const top = overrides.top ?? 0;
+  const width = overrides.width ?? 0;
+  const height = overrides.height ?? 0;
+  const right = overrides.right ?? left + width;
+  const bottom = overrides.bottom ?? top + height;
+  return {
+    bottom,
+    height,
+    left,
+    right,
+    top,
+    width,
+    x: overrides.x ?? left,
+    y: overrides.y ?? top,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
 
 function textRange(container: Element, text: string): Range {

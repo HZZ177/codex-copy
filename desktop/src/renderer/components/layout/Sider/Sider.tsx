@@ -21,6 +21,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
+import type { AppMode } from "@/renderer/components/layout/appMode";
+import { WorkspaceSelector, type WorkspaceSelectorProps } from "@/renderer/components/workspace";
 import { subscribeSessionCreated } from "@/renderer/events/sessionEvents";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
@@ -61,8 +63,20 @@ const EMPTY_SESSION_INDICATOR: SessionIndicator = {
 const WORKSPACE_SESSION_PREVIEW_LIMIT = 5;
 const WORKSPACE_SESSION_HISTORY_PAGE_SIZE = 100;
 
+export type WorkbenchWorkspaceSelectorProps = Pick<
+  WorkspaceSelectorProps,
+  | "value"
+  | "workspaces"
+  | "loading"
+  | "allowProjectFreeChat"
+  | "onSelectWorkspace"
+  | "onAddWorkspace"
+  | "onPickWorkspacePath"
+>;
+
 export interface SiderProps {
   collapsed?: boolean;
+  appMode?: AppMode;
   projects?: SiderEntry[];
   conversations?: SiderEntry[];
   runtime?: RuntimeBridge;
@@ -72,12 +86,14 @@ export interface SiderProps {
   deleteActiveFallbackPath?: string;
   getSessionPath?: (sessionId: string) => string;
   getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
+  workbenchWorkspaceSelector?: WorkbenchWorkspaceSelectorProps;
   onToggleSidebar?: () => void;
   onNavigate?: (path: string) => void;
 }
 
 export function Sider({
   collapsed = false,
+  appMode = "agent",
   projects = [],
   conversations,
   runtime = runtimeBridge,
@@ -87,6 +103,7 @@ export function Sider({
   deleteActiveFallbackPath = "/guid",
   getSessionPath = conversationPath,
   getWorkspaceNewConversationPath = newWorkspaceConversationPath,
+  workbenchWorkspaceSelector,
   onToggleSidebar,
   onNavigate,
 }: SiderProps) {
@@ -135,6 +152,13 @@ export function Sider({
   const chatGroup = useMemo(() => historyGroups.find((group) => group.kind === "chat") ?? null, [historyGroups]);
   const chatItems = chatGroup?.items ?? [];
   const firstWorkspaceId = workspaceGroups.find((group) => group.workspaceId)?.workspaceId ?? projects[0]?.id;
+  const workbenchGroup = workspaceGroups[0] ?? {
+    id: "workbench:empty",
+    title: projects[0]?.title ?? "工作台会话",
+    kind: "workspace" as const,
+    items: [],
+    workspaceId: projects[0]?.id,
+  };
   const historyItems = useMemo(() => historyGroups.flatMap((group) => group.items), [historyGroups]);
   const searchResults = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -329,6 +353,7 @@ export function Sider({
     <aside
       className={styles.sider}
       aria-label="侧边栏"
+      data-layout-sidebar="true"
       data-collapsed={collapsed ? "true" : "false"}
       data-footer-feather={showFooterFeather ? "true" : "false"}
     >
@@ -369,73 +394,80 @@ export function Sider({
         })}
       </nav>
 
-      <div
-        className={styles.history}
-        aria-label="会话历史"
-        ref={historyRef}
-        onScroll={updateFooterFeather}
-        onTransitionEnd={updateFooterFeather}
-      >
-        {collapsed ? (
-          <>
-            {historyGroups.length === 0 ? (
-              <SiderSection
-                title="对话"
-                items={[]}
-                collapsed={collapsed}
-                emptyText={historyEmptyText}
-                emptyLoading={historyEmptyLoading}
+      {appMode === "workbench" ? (
+        <div className={styles.workbenchHistory} aria-label="工作台会话历史">
+          {!collapsed && workbenchWorkspaceSelector ? (
+            <div className={styles.workbenchWorkspaceSwitcher} data-testid="workbench-sidebar-workspace-selector">
+              <WorkspaceSelector
+                {...workbenchWorkspaceSelector}
+                allowProjectFreeChat={false}
+                placement="bottom"
+                variant="sidebar"
               />
-            ) : null}
-            {historyGroups.map((group) => (
-              <SiderSection
-                title={group.title}
-                kind={group.kind}
-                items={group.items}
-                collapsed={collapsed}
-                emptyText={historyEmptyText}
-                emptyLoading={historyEmptyLoading}
-                activePath={activePath}
-                editing={editing}
-                confirmDeleteId={confirmDeleteId}
-                canMutate={canMutateConversations}
-                sessionIndicators={sessionIndicators}
-                workspaceId={group.workspaceId}
-                getSessionPath={getSessionPath}
-                getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
-                historyExpansionLoading={Boolean(group.workspaceId && loadingWorkspaceHistoryIds.has(group.workspaceId))}
-                historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
-                key={group.id}
-                onDelete={(id) => void deleteConversation(id)}
-                onLoadHistoryExpansion={
-                  group.workspaceId && !controlled ? () => loadWorkspaceSessions(group.workspaceId as string) : undefined
-                }
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                onCancelRename={() => setEditing(null)}
-                onConfirmDelete={setConfirmDeleteId}
-                onRename={(id, title) => void renameConversation(id, title)}
-                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
-                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
-                onNavigate={navigateTo}
-              />
-            ))}
-          </>
-        ) : (
-          <>
-            <HistoryBucket
-              title="项目"
+            </div>
+          ) : null}
+          <div
+            className={styles.history}
+            aria-label="会话历史"
+            ref={historyRef}
+            onScroll={updateFooterFeather}
+            onTransitionEnd={updateFooterFeather}
+          >
+            <SiderSection
+              title={workbenchGroup.title}
               kind="workspace"
-              newConversationPath={getWorkspaceNewConversationPath(firstWorkspaceId)}
+              items={workbenchGroup.items}
+              collapsed={collapsed}
+              emptyText={historyEmptyText}
+              emptyLoading={historyEmptyLoading}
+              activePath={activePath}
+              editing={editing}
+              confirmDeleteId={confirmDeleteId}
+              canMutate={canMutateConversations}
+              sessionIndicators={sessionIndicators}
+              workspaceId={workbenchGroup.workspaceId}
+              disableSectionToggle
+              flat
+              hideTitle
+              getSessionPath={getSessionPath}
+              onDelete={(id) => void deleteConversation(id)}
+              onCancelDelete={() => setConfirmDeleteId(null)}
+              onCancelRename={() => setEditing(null)}
+              onConfirmDelete={setConfirmDeleteId}
+              onRename={(id, title) => void renameConversation(id, title)}
+              onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+              onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
               onNavigate={navigateTo}
-            >
-              {workspaceGroups.map((group) => (
+            />
+          </div>
+        </div>
+      ) : (
+        <div
+          className={styles.history}
+          aria-label="会话历史"
+          ref={historyRef}
+          onScroll={updateFooterFeather}
+          onTransitionEnd={updateFooterFeather}
+        >
+          {collapsed ? (
+            <>
+              {historyGroups.length === 0 ? (
+                <SiderSection
+                  title="对话"
+                  items={[]}
+                  collapsed={collapsed}
+                  emptyText={historyEmptyText}
+                  emptyLoading={historyEmptyLoading}
+                />
+              ) : null}
+              {historyGroups.map((group) => (
                 <SiderSection
                   title={group.title}
                   kind={group.kind}
                   items={group.items}
                   collapsed={collapsed}
                   emptyText={historyEmptyText}
-                  emptyLoading={false}
+                  emptyLoading={historyEmptyLoading}
                   activePath={activePath}
                   editing={editing}
                   confirmDeleteId={confirmDeleteId}
@@ -460,42 +492,88 @@ export function Sider({
                   onNavigate={navigateTo}
                 />
               ))}
-            </HistoryBucket>
-            {showChatBucket ? (
+            </>
+          ) : (
+            <>
               <HistoryBucket
-                title="对话"
-                kind="chat"
-                newConversationPath={newChatConversationPath()}
+                title="项目"
+                kind="workspace"
+                newConversationPath={getWorkspaceNewConversationPath(firstWorkspaceId)}
                 onNavigate={navigateTo}
               >
-                <SiderSection
+                {workspaceGroups.map((group) => (
+                  <SiderSection
+                    title={group.title}
+                    kind={group.kind}
+                    items={group.items}
+                    collapsed={collapsed}
+                    emptyText={historyEmptyText}
+                    emptyLoading={false}
+                    activePath={activePath}
+                    editing={editing}
+                    confirmDeleteId={confirmDeleteId}
+                    canMutate={canMutateConversations}
+                    sessionIndicators={sessionIndicators}
+                    workspaceId={group.workspaceId}
+                    getSessionPath={getSessionPath}
+                    getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
+                    historyExpansionLoading={Boolean(
+                      group.workspaceId && loadingWorkspaceHistoryIds.has(group.workspaceId),
+                    )}
+                    historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
+                    key={group.id}
+                    onDelete={(id) => void deleteConversation(id)}
+                    onLoadHistoryExpansion={
+                      group.workspaceId && !controlled
+                        ? () => loadWorkspaceSessions(group.workspaceId as string)
+                        : undefined
+                    }
+                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    onCancelRename={() => setEditing(null)}
+                    onConfirmDelete={setConfirmDeleteId}
+                    onRename={(id, title) => void renameConversation(id, title)}
+                    onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                    onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                    onNavigate={navigateTo}
+                  />
+                ))}
+              </HistoryBucket>
+              {showChatBucket ? (
+                <HistoryBucket
                   title="对话"
                   kind="chat"
-                  items={chatItems}
-                  collapsed={collapsed}
-                  emptyText={historyEmptyText}
-                  emptyLoading={historyEmptyLoading}
-                  activePath={activePath}
-                  editing={editing}
-                  confirmDeleteId={confirmDeleteId}
-                  canMutate={canMutateConversations}
-                  sessionIndicators={sessionIndicators}
-                  hideTitle
-                  getSessionPath={getSessionPath}
-                  onDelete={(id) => void deleteConversation(id)}
-                  onCancelDelete={() => setConfirmDeleteId(null)}
-                  onCancelRename={() => setEditing(null)}
-                  onConfirmDelete={setConfirmDeleteId}
-                  onRename={(id, title) => void renameConversation(id, title)}
-                  onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
-                  onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                  newConversationPath={newChatConversationPath()}
                   onNavigate={navigateTo}
-                />
-              </HistoryBucket>
-            ) : null}
-          </>
-        )}
-      </div>
+                >
+                  <SiderSection
+                    title="对话"
+                    kind="chat"
+                    items={chatItems}
+                    collapsed={collapsed}
+                    emptyText={historyEmptyText}
+                    emptyLoading={historyEmptyLoading}
+                    activePath={activePath}
+                    editing={editing}
+                    confirmDeleteId={confirmDeleteId}
+                    canMutate={canMutateConversations}
+                    sessionIndicators={sessionIndicators}
+                    hideTitle
+                    getSessionPath={getSessionPath}
+                    onDelete={(id) => void deleteConversation(id)}
+                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    onCancelRename={() => setEditing(null)}
+                    onConfirmDelete={setConfirmDeleteId}
+                    onRename={(id, title) => void renameConversation(id, title)}
+                    onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                    onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                    onNavigate={navigateTo}
+                  />
+                </HistoryBucket>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
 
       <div className={styles.footer}>
         <button
@@ -613,6 +691,8 @@ interface SiderSectionProps {
   emptyText: string;
   emptyLoading?: boolean;
   hideTitle?: boolean;
+  disableSectionToggle?: boolean;
+  flat?: boolean;
   activePath?: string;
   editing?: { id: string; title: string } | null;
   confirmDeleteId?: string | null;
@@ -695,6 +775,8 @@ function SiderSection({
   emptyText,
   emptyLoading = false,
   hideTitle = false,
+  disableSectionToggle = false,
+  flat = false,
   activePath = "",
   editing,
   confirmDeleteId,
@@ -722,7 +804,7 @@ function SiderSection({
   const [localHistoryExpansionLoading, setLocalHistoryExpansionLoading] = useState(false);
   const sectionItemsId = useId();
   const previousActivePathRef = useRef(activePath);
-  const canToggleSection = kind === "workspace";
+  const canToggleSection = kind === "workspace" && !disableSectionToggle;
   const normalizedHistoryLimit = Math.max(0, historyPreviewLimit ?? 0);
   const canPreviewWorkspaceHistory = !collapsed && kind === "workspace" && !hideTitle && normalizedHistoryLimit > 0;
   const shouldLimitHistory = canPreviewWorkspaceHistory && items.length > normalizedHistoryLimit;
@@ -942,7 +1024,12 @@ function SiderSection({
   }
 
   return (
-    <section className={styles.section} aria-label={hideTitle ? `${title}列表` : title} data-kind={kind}>
+    <section
+      className={styles.section}
+      aria-label={hideTitle ? `${title}列表` : title}
+      data-kind={kind}
+      data-flat={flat ? "true" : "false"}
+    >
       {hideTitle ? null : canToggleSection ? (
         <div className={styles.sectionTitleRow} data-kind={kind}>
           <button

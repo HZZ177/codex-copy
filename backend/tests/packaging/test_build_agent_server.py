@@ -18,6 +18,11 @@ def test_build_with_pyinstaller_embeds_system_prompt_in_code(monkeypatch, tmp_pa
     assert check is True
     assert "--clean" not in command
     assert "--add-data" not in command
+    assert "--add-binary" in command
+    add_binary_index = command.index("--add-binary")
+    assert command[add_binary_index + 1].startswith(
+        str(build_agent_server.BUNDLED_RIPGREP_BINARY)
+    )
     for package_name in build_agent_server.PYINSTALLER_COLLECT_SUBMODULES:
         assert_collect_submodules(command, package_name)
     assert str(build_agent_server.ENTRY_POINT) in command

@@ -11,6 +11,7 @@ import type {
 } from "@/runtime";
 import { useWorkspaceFileSearch } from "@/renderer/hooks/useWorkspaceFileSearch";
 import { WORKSPACE_FILE_SEARCH_BUDGET_HINT } from "@/renderer/utils/workspaceFileSearchBudget";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 
 import { useMaterialEntryIcon } from "./materialIconTheme";
 import styles from "./WorkspacePanel.module.css";
@@ -22,6 +23,7 @@ export interface WorkspacePanelProps {
   runtime: RuntimeBridge;
   chrome?: "default" | "panel";
   selectedPath?: string | null;
+  revealSelectedPathRequestId?: number;
   onSelectFile?: (path: string) => void;
 }
 
@@ -37,9 +39,11 @@ export function WorkspacePanel({
   runtime,
   chrome = "default",
   selectedPath: controlledSelectedPath,
+  revealSelectedPathRequestId = 0,
   onSelectFile,
 }: WorkspacePanelProps) {
   const treeRef = useRef<HTMLDivElement | null>(null);
+  const handledRevealSelectedPathRequestIdRef = useRef(0);
   const [entriesByPath, setEntriesByPath] = useState<EntryMap>({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([""]));
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
@@ -81,7 +85,7 @@ export function WorkspacePanel({
         if (!active) {
           return;
         }
-        setEntriesByPath({ "": sortEntries(response.entries) });
+        setEntriesByPath((entries) => ({ ...entries, "": sortEntries(response.entries) }));
       })
       .catch((reason) => {
         if (active) {
@@ -176,10 +180,13 @@ export function WorkspacePanel({
     }
   }
 
-  async function openSearchFile(path: string) {
+  const revealFilePath = useCallback(async (path: string) => {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      return;
+    }
+    const paths = directoryAncestorPaths(normalizedPath);
     setFilterQuery("");
-    selectFile(path);
-    const paths = directoryAncestorPaths(path);
     setExpandedPaths((expanded) => {
       const next = new Set(expanded);
       paths.forEach((entryPath) => next.add(entryPath));
@@ -190,8 +197,13 @@ export function WorkspacePanel({
     }
     setLocateRequest((current) => ({
       id: (current?.id ?? 0) + 1,
-      path,
+      path: normalizedPath,
     }));
+  }, [loadDirectory]);
+
+  async function openSearchFile(path: string) {
+    selectFile(path);
+    await revealFilePath(path);
   }
 
   async function locateCurrentFile() {
@@ -199,21 +211,21 @@ export function WorkspacePanel({
     if (!path) {
       return;
     }
-    const paths = directoryAncestorPaths(path);
-    setFilterQuery("");
-    setExpandedPaths((expanded) => {
-      const next = new Set(expanded);
-      paths.forEach((entryPath) => next.add(entryPath));
-      return next;
-    });
-    for (const entryPath of paths) {
-      await loadDirectory(entryPath);
-    }
-    setLocateRequest((current) => ({
-      id: (current?.id ?? 0) + 1,
-      path,
-    }));
+    await revealFilePath(path);
   }
+
+  useEffect(() => {
+    const path = effectiveSelectedPath?.trim();
+    if (
+      !path ||
+      !revealSelectedPathRequestId ||
+      handledRevealSelectedPathRequestIdRef.current === revealSelectedPathRequestId
+    ) {
+      return;
+    }
+    handledRevealSelectedPathRequestIdRef.current = revealSelectedPathRequestId;
+    void revealFilePath(path);
+  }, [effectiveSelectedPath, revealFilePath, revealSelectedPathRequestId]);
 
   useEffect(() => {
     if (!locateRequest) {
@@ -321,17 +333,7 @@ export function WorkspacePanel({
 }
 
 function WorkspacePanelLoading({ label }: { label: string }) {
-  return (
-    <div className={styles.loadingState} role="status" aria-label={label}>
-      <div className={styles.skeletonStack} aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <span />
-      </div>
-      <span>{label}</span>
-    </div>
-  );
+  return <LoadingSkeleton className={styles.loadingState} label={label} width="compact" />;
 }
 
 function WorkspacePanelState({

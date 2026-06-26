@@ -314,6 +314,14 @@ function toolActivityLabel(
       stats.listedDirectories[countState].add(target);
       return;
     }
+    if (toolName === "grep_files") {
+      stats.fileSearches[countState] += 1;
+      return;
+    }
+    if (toolName === "search_text") {
+      stats.contentSearches[countState] += 1;
+      return;
+    }
     if (isSearchTool(toolName)) {
       stats.searches[countState] += 1;
       return;
@@ -330,6 +338,8 @@ function toolActivityLabel(
   const parts = [
     ...countSetPhrases("readFiles", stats.readFiles),
     ...countSetPhrases("listedDirectories", stats.listedDirectories),
+    ...countNumberPhrases("fileSearches", stats.fileSearches),
+    ...countNumberPhrases("contentSearches", stats.contentSearches),
     ...countNumberPhrases("searches", stats.searches),
     ...countNumberPhrases("commands", stats.commands),
     ...countSetPhrases("createdFiles", stats.createdFiles),
@@ -366,6 +376,8 @@ function fileChangeLabel(messages: ConversationMessage[], state: GroupSummary["s
 type ToolSummaryKind =
   | "readFiles"
   | "listedDirectories"
+  | "fileSearches"
+  | "contentSearches"
   | "searches"
   | "commands"
   | "createdFiles"
@@ -390,6 +402,8 @@ function countPhrase(kind: ToolSummaryKind, count: number, state: CountState): s
       return `${verb} ${count} 个文件`;
     case "listedDirectories":
       return `${verb} ${count} 个目录`;
+    case "fileSearches":
+    case "contentSearches":
     case "searches":
       return `${verb} ${count} 次`;
     case "commands":
@@ -411,6 +425,10 @@ function verbForKind(kind: ToolSummaryKind, state: CountState): string {
       return failed ? "读取失败" : running ? "正在读取" : "读取了";
     case "listedDirectories":
       return failed ? "查看失败" : running ? "正在查看" : "查看了";
+    case "fileSearches":
+      return failed ? "搜索文件失败" : running ? "正在搜索文件" : "已搜索文件";
+    case "contentSearches":
+      return failed ? "搜索内容失败" : running ? "正在搜索内容" : "已搜索内容";
     case "searches":
       return failed ? "搜索失败" : running ? "正在搜索" : "搜索了";
     case "commands":
@@ -433,6 +451,8 @@ function createToolStats() {
   return {
     readFiles: createStateSetBuckets(),
     listedDirectories: createStateSetBuckets(),
+    fileSearches: createStateNumberBuckets(),
+    contentSearches: createStateNumberBuckets(),
     searches: createStateNumberBuckets(),
     commands: createStateNumberBuckets(),
     createdFiles: createStateSetBuckets(),
@@ -635,7 +655,7 @@ function isDirectoryTool(toolName: string): boolean {
 }
 
 function isSearchTool(toolName: string): boolean {
-  return ["search_files", "search_text", "search", "grep"].includes(toolName);
+  return ["search_files", "search_text", "grep_files", "search", "grep"].includes(toolName);
 }
 
 function isEditTool(toolName: string): boolean {

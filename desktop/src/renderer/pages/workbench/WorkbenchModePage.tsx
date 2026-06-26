@@ -119,23 +119,6 @@ export function WorkbenchModePage({
         </main>
       ) : (
         <main className={styles.workspace} data-testid="workbench-workspace-shell" aria-label="工作台">
-          <header className={styles.toolbar}>
-            <div className={styles.workspaceSelector}>
-              <WorkspaceSelector
-                value={selectorValue}
-                workspaces={workspaces}
-                loading={workspaceLoading}
-                placement="bottom"
-                allowProjectFreeChat={false}
-                onSelectWorkspace={onSelectWorkspace}
-                onAddWorkspace={onAddWorkspace}
-                onPickWorkspacePath={onPickWorkspacePath}
-              />
-            </div>
-            <div className={styles.context} title={workspaceLabel}>
-              {selectedSessionId ? <span>session:{selectedSessionId}</span> : <span>workspace</span>}
-            </div>
-          </header>
           <div className={styles.canvas}>
             <WorkspaceFileBrowser
               runtime={runtime}

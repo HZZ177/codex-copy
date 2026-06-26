@@ -1,5 +1,5 @@
 import { ChevronUp, PanelRightOpen, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
   type RuntimeBridge,
@@ -12,6 +12,9 @@ import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/compo
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
+import { ConversationComposerAccessory } from "@/renderer/pages/conversation/ComposerAccessory";
+import type { FileChangePreview } from "@/renderer/pages/conversation/messages";
+import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import type {
   AgentChatMessage,
@@ -21,7 +24,7 @@ import type {
 
 import styles from "./WorkbenchAssistantSurface.module.css";
 
-type AssistantSurfaceMode = "capsule" | "expanded" | "drawer";
+type AssistantSurfaceMode = "capsule" | "composer" | "expanded" | "drawer";
 
 export interface WorkbenchAssistantSurfaceProps {
   runtime: RuntimeBridge;
@@ -39,7 +42,9 @@ export function WorkbenchAssistantSurface({
   creatingSession = false,
 }: WorkbenchAssistantSurfaceProps) {
   const layout = useLayoutState();
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [surfaceMode, setSurfaceMode] = useState<AssistantSurfaceMode>("capsule");
+  const [composerFocusSeq, setComposerFocusSeq] = useState(0);
   const modelSelection = useRuntimeModelSelection(runtime, "");
   const workspaceSkillScope = useMemo(() => ({ workspaceId }), [workspaceId]);
   const { state: workspaceSkillsState } = useWorkspaceSkills({
@@ -50,6 +55,10 @@ export function WorkbenchAssistantSurface({
   const workspaceSkills = workspaceSkillsState.skills;
   const pendingApproval = controller.pendingApproval;
   const projectedMessages = useMemo(() => controller.agentMessages.map(projectAgentMessage), [controller.agentMessages]);
+  const accessoryMessages = useMemo(
+    () => projectWorkbenchAccessoryMessages(controller.agentMessages),
+    [controller.agentMessages],
+  );
   const runtimeState = controller.runtimeState;
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
@@ -63,10 +72,31 @@ export function WorkbenchAssistantSurface({
   }, [workspaceId]);
 
   useEffect(() => {
+    if (surfaceMode === "capsule" && controller.draft.trim()) {
+      setSurfaceMode("composer");
+    }
+  }, [controller.draft, surfaceMode]);
+
+  useEffect(() => {
     if (pendingApproval) {
       setSurfaceMode("drawer");
     }
   }, [pendingApproval]);
+
+  useEffect(() => {
+    if ((surfaceMode !== "composer" && surfaceMode !== "expanded") || controller.draft.trim()) {
+      return;
+    }
+    const collapseOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && surfaceRef.current?.contains(target)) {
+        return;
+      }
+      setSurfaceMode("capsule");
+    };
+    document.addEventListener("pointerdown", collapseOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", collapseOnOutsidePointer);
+  }, [controller.draft, surfaceMode]);
 
   useEffect(() => {
     if (
@@ -97,6 +127,32 @@ export function WorkbenchAssistantSurface({
     [controller, selectedModel],
   );
 
+  const openComposer = useCallback(() => {
+    setSurfaceMode("composer");
+    setComposerFocusSeq((seq) => seq + 1);
+  }, []);
+
+  const closeDrawer = useCallback(() => {
+    setSurfaceMode(controller.draft.trim() ? "composer" : "capsule");
+  }, [controller.draft]);
+
+  const dockToDrawer = useCallback(() => {
+    setSurfaceMode("drawer");
+    setComposerFocusSeq((seq) => seq + 1);
+  }, []);
+
+  const toggleExpandedLayer = useCallback(() => {
+    setSurfaceMode((mode) => {
+      if (mode === "expanded") {
+        return controller.draft.trim() ? "composer" : "capsule";
+      }
+      return "expanded";
+    });
+    setComposerFocusSeq((seq) => seq + 1);
+  }, [controller.draft]);
+
+  const ignoreFilePreview = useCallback((_file: FileChangePreview) => undefined, []);
+
   const submitApproval = useCallback(
     (approved: boolean) =>
       controller.submitApproval({
@@ -119,24 +175,37 @@ export function WorkbenchAssistantSurface({
       fileChipRequest={controller.fileChipRequest}
       quoteChipRequest={controller.quoteChipRequest}
       surfaceMode={surfaceMode}
+      autoFocusKey={surfaceMode === "capsule" ? undefined : `workbench-composer:${composerFocusSeq}`}
       onChange={controller.setDraft}
       onSkillChange={controller.setSelectedSkill}
       onSend={send}
       onStop={controller.stop}
-      onExpand={() => setSurfaceMode(surfaceMode === "expanded" ? "capsule" : "expanded")}
-      onDock={() => setSurfaceMode("drawer")}
+      onExpand={toggleExpandedLayer}
       onSearchWorkspace={searchWorkspace}
       onListWorkspaceDirectory={listWorkspaceDirectory}
     />
   );
 
+  const accessory = (
+    <ConversationComposerAccessory
+      messages={accessoryMessages}
+      showScrollToBottom={false}
+      showScrollButton={false}
+      onFilePreview={ignoreFilePreview}
+      onScrollToBottom={() => undefined}
+    />
+  );
+
   return (
     <div
+      ref={surfaceRef}
       className={styles.surface}
       data-testid="workbench-assistant-surface"
       data-surface-mode={surfaceMode}
+      data-dock-layout={surfaceMode === "drawer" ? "inline" : "overlay"}
       data-running={runtimeState === "running" ? "true" : "false"}
       data-pending-approval={pendingApproval ? "true" : "false"}
+      style={{ "--workbench-assistant-dock-width": `${drawerWidth}px` } as CSSProperties}
     >
       {surfaceMode === "expanded" ? (
         <div className={styles.expandedLayer} data-testid="workbench-expanded-layer">
@@ -160,11 +229,10 @@ export function WorkbenchAssistantSurface({
           className={styles.drawer}
           data-testid="workbench-assistant-drawer"
           aria-label="工作台助手"
-          style={{ width: drawerWidth }}
         >
           <header className={styles.drawerHeader}>
             <span>助手</span>
-            <button type="button" aria-label="关闭工作台助手侧栏" onClick={() => setSurfaceMode("capsule")}>
+            <button type="button" aria-label="关闭工作台助手侧栏" onClick={closeDrawer}>
               <X size={15} />
             </button>
           </header>
@@ -181,10 +249,58 @@ export function WorkbenchAssistantSurface({
               onSubmit={submitApproval}
             />
           ) : null}
-          <div className={styles.drawerComposer}>{composer}</div>
+          <div className={styles.drawerComposer}>
+            <div className={styles.drawerAccessory}>{accessory}</div>
+            {composer}
+          </div>
         </aside>
       ) : null}
-      {surfaceMode !== "drawer" ? <div className={styles.capsule}>{composer}</div> : null}
+      {surfaceMode !== "drawer" ? (
+        <div
+          className={styles.capsule}
+          data-compose-open={surfaceMode === "capsule" ? "false" : "true"}
+          data-testid="workbench-assistant-capsule"
+        >
+          {surfaceMode === "capsule" ? (
+            <div className={styles.capsuleCluster}>
+              <div className={styles.capsuleAccessory}>{accessory}</div>
+              <button
+                className={styles.miniComposer}
+                type="button"
+                aria-label="展开工作台输入框"
+                onClick={openComposer}
+              >
+                <span>要求后续变更</span>
+              </button>
+              <button
+                className={styles.dockHandle}
+                type="button"
+                aria-label="将工作台助手展开到右侧"
+                title="展开到右侧"
+                onClick={dockToDrawer}
+              >
+                <PanelRightOpen size={15} />
+              </button>
+            </div>
+          ) : (
+            <div className={styles.composerStack}>
+              <div className={styles.composerAccessory}>{accessory}</div>
+              <div className={styles.composerShell}>
+                {composer}
+                <button
+                  className={styles.composerDockHandle}
+                  type="button"
+                  aria-label="将工作台助手展开到右侧"
+                  title="展开到右侧"
+                  onClick={dockToDrawer}
+                >
+                  <PanelRightOpen size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -229,12 +345,12 @@ function WorkbenchComposer({
   fileChipRequest,
   quoteChipRequest,
   surfaceMode,
+  autoFocusKey,
   onChange,
   onSkillChange,
   onSend,
   onStop,
   onExpand,
-  onDock,
   onSearchWorkspace,
   onListWorkspaceDirectory,
 }: {
@@ -249,12 +365,12 @@ function WorkbenchComposer({
   fileChipRequest: AgentSessionController["fileChipRequest"];
   quoteChipRequest: AgentSessionController["quoteChipRequest"];
   surfaceMode: AssistantSurfaceMode;
+  autoFocusKey?: string;
   onChange: (value: string) => void;
   onSkillChange: (skill: WorkspaceSkillSummary | null) => void;
   onSend: (files?: SelectedFile[], quotes?: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
   onExpand: () => void;
-  onDock: () => void;
   onSearchWorkspace: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory: (path: string) => Promise<WorkspaceSearchResult[]>;
 }) {
@@ -269,28 +385,18 @@ function WorkbenchComposer({
       placeholder="要求后续变更"
       statusText={composerStatusText(runtimeState, connectionReady)}
       variant="keydex"
+      autoFocusKey={autoFocusKey}
       className={styles.composer}
       controls={
-        <>
-          <button
-            className={styles.iconButton}
-            type="button"
-            aria-label={surfaceMode === "expanded" ? "收起工作台消息层" : "展开工作台消息层"}
-            title={surfaceMode === "expanded" ? "收起消息" : "展开消息"}
-            onClick={onExpand}
-          >
-            <ChevronUp size={15} />
-          </button>
-          <button
-            className={styles.iconButton}
-            type="button"
-            aria-label="停靠到工作台右侧助手栏"
-            title="停靠到右侧"
-            onClick={onDock}
-          >
-            <PanelRightOpen size={15} />
-          </button>
-        </>
+        <button
+          className={styles.iconButton}
+          type="button"
+          aria-label={surfaceMode === "expanded" ? "收起工作台消息层" : "展开工作台消息层"}
+          title={surfaceMode === "expanded" ? "收起消息" : "展开消息"}
+          onClick={onExpand}
+        >
+          <ChevronUp size={15} />
+        </button>
       }
       rightControls={
         <RuntimeModelSelector
@@ -358,6 +464,108 @@ interface ProjectedMessage {
   role: "user" | "assistant" | "tool" | "status" | "error";
   label: string;
   content: string;
+}
+
+function projectWorkbenchAccessoryMessages(messages: AgentChatMessage[]): ConversationMessage[] {
+  return messages
+    .map<ConversationMessage | null>((message, index) => {
+      const createdAt = new Date(message.timestamp || Date.now()).toISOString();
+      const base = {
+        id: `workbench:${message.id}`,
+        threadId: message.sessionId,
+        turnId: message.turnIndex === undefined || message.turnIndex === null ? null : `turn:${message.turnIndex}`,
+        itemId: message.runId ?? message.toolCallId ?? message.id,
+        content: message.content,
+        createdAt,
+        updatedAt: createdAt,
+      };
+      if (message.role === "user") {
+        return {
+          ...base,
+          kind: "user" as const,
+          payload: { text: message.content, _sortSeq: index },
+        };
+      }
+      if (message.toolName === "update_plan") {
+        const parsedResult = parseMaybeJson(message.toolResult);
+        return {
+          ...base,
+          kind: "plan" as const,
+          status: workbenchMessageStatus(message),
+          payload: {
+            call: { name: message.toolName, arguments: message.toolParams },
+            result: parsedResult ?? message.toolResult,
+            ui_payload: message.uiPayload,
+            uiPayload: message.uiPayload,
+            output_data: parsedResult,
+            _sortSeq: index,
+          },
+        };
+      }
+      const fileChanges = message.fileChanges ?? fileChangesFromUiPayload(message.uiPayload);
+      if (message.role === "tool" && fileChanges.length) {
+        return {
+          ...base,
+          kind: "file_change" as const,
+          status: workbenchMessageStatus(message),
+          payload: {
+            tool_name: message.toolName,
+            toolName: message.toolName,
+            params: message.toolParams,
+            files: fileChanges,
+            ui_payload: message.uiPayload,
+            uiPayload: message.uiPayload,
+            result: {
+              status: message.status,
+              files: fileChanges,
+              ui_payload: message.uiPayload,
+            },
+            _sortSeq: index,
+          },
+        };
+      }
+      return null;
+    })
+    .filter((message): message is ConversationMessage => message !== null);
+}
+
+function workbenchMessageStatus(message: AgentChatMessage): ConversationMessage["status"] {
+  if (message.status === "running" || message.status === "pending") {
+    return "running";
+  }
+  if (message.status === "error" || message.status === "failed") {
+    return "failed";
+  }
+  if (message.status === "cancelled") {
+    return "cancelled";
+  }
+  return "completed";
+}
+
+function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): NonNullable<AgentChatMessage["fileChanges"]> {
+  if (!uiPayload) {
+    return [];
+  }
+  const raw = Array.isArray(uiPayload.files)
+    ? uiPayload.files
+    : Array.isArray(uiPayload.changes)
+      ? uiPayload.changes
+      : [];
+  return raw.filter((item): item is NonNullable<AgentChatMessage["fileChanges"]>[number] =>
+    Boolean(item && typeof item === "object" && !Array.isArray(item) && typeof (item as { path?: unknown }).path === "string"),
+  );
+}
+
+function parseMaybeJson(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function projectAgentMessage(message: AgentChatMessage): ProjectedMessage {

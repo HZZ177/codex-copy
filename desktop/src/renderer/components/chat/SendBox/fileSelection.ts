@@ -5,6 +5,11 @@ export interface SelectedFile {
   name: string;
   type: "file" | "directory";
   source: "workspace" | "dropped" | "pasted";
+  selectedText?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
 }
 
 export interface FileSelectionState {

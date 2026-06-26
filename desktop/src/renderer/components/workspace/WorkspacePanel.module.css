@@ -247,38 +247,6 @@
   color: var(--color-danger);
 }
 
-.skeletonStack {
-  display: grid;
-  width: min(260px, 78%);
-  gap: 8px;
-}
-
-.skeletonStack span {
-  display: block;
-  height: 12px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
-    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
-  );
-  background-size: 220% 100%;
-  animation: workspacePanelSkeleton 1.2s ease-in-out infinite;
-}
-
-.skeletonStack span:nth-child(2) {
-  width: 88%;
-}
-
-.skeletonStack span:nth-child(3) {
-  width: 72%;
-}
-
-.skeletonStack span:nth-child(4) {
-  width: 54%;
-}
-
 .node {
   min-width: 0;
 }
@@ -458,16 +426,6 @@
   }
 }
 
-@keyframes workspacePanelSkeleton {
-  0% {
-    background-position: 120% 0;
-  }
-
-  100% {
-    background-position: -80% 0;
-  }
-}
-
 @keyframes nodeNameTooltipIn {
   from {
     opacity: 0;
@@ -483,7 +441,6 @@
 @media (prefers-reduced-motion: reduce) {
   .nodeGroup,
   .chevron,
-  .skeletonStack span,
   .nodeNameTooltip {
     transition: none;
     animation: none;

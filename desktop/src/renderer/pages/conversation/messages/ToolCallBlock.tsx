@@ -205,6 +205,9 @@ function resultText(result: Record<string, unknown> | null, payload: Record<stri
   if (typeof result.error === "string") {
     return result.error;
   }
+  if (result.status === "running") {
+    return "";
+  }
   if (result.ui_payload && typeof result.ui_payload === "object") {
     return stringify(result.ui_payload);
   }
@@ -256,7 +259,25 @@ function toolAction(name: string): ToolAction | null {
       cancelled: "已取消查看目录",
     };
   }
-  if (["search_files", "search_text", "search", "grep"].includes(name)) {
+  if (name === "grep_files") {
+    return {
+      done: "已搜索文件",
+      running: "正在搜索文件",
+      pending: "等待搜索文件",
+      failed: "搜索文件失败",
+      cancelled: "已取消搜索文件",
+    };
+  }
+  if (name === "search_text") {
+    return {
+      done: "已搜索内容",
+      running: "正在搜索内容",
+      pending: "等待搜索内容",
+      failed: "搜索内容失败",
+      cancelled: "已取消搜索内容",
+    };
+  }
+  if (["search_files", "search", "grep"].includes(name)) {
     return {
       done: "已搜索",
       running: "正在搜索",
@@ -305,7 +326,7 @@ function toolIcon(name: string, failed: boolean) {
   if (["list_directory", "list_dir", "read_directory"].includes(name)) {
     return <FolderOpen size={16} />;
   }
-  if (["search_files", "search_text", "search", "grep"].includes(name)) {
+  if (["search_files", "search_text", "grep_files", "search", "grep"].includes(name)) {
     return <Search size={16} />;
   }
   if (["write_file", "apply_patch", "edit_file"].includes(name)) {

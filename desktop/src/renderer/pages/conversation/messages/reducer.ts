@@ -351,6 +351,9 @@ function kindFromItem(item: ThreadItem): ConversationMessageKind {
   if (item.type === "tool_call" && toolCallName(item) === "update_plan") {
     return "plan";
   }
+  if (item.type === "tool_call" && toolCallName(item) === "load_skill") {
+    return "skill";
+  }
   return kindFromItemType(item.type);
 }
 

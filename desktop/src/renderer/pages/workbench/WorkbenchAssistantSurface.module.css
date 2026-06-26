@@ -1,54 +1,221 @@
 .surface {
+  --workbench-assistant-dock-inline-size: min(clamp(320px, var(--workbench-assistant-dock-width), 520px), 46vw);
   position: absolute;
   inset: 0;
   z-index: 50;
   pointer-events: none;
 }
 
+.surface[data-surface-mode="drawer"] {
+  position: relative;
+  inset: auto;
+  z-index: 2;
+  width: var(--workbench-assistant-dock-inline-size);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 var(--workbench-assistant-dock-inline-size);
+  overflow: hidden;
+  border-left: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-bg) 96%, transparent);
+  pointer-events: auto;
+  animation: dockColumnIn 240ms cubic-bezier(0.2, 0.86, 0.22, 1) both;
+}
+
 .capsule {
   position: absolute;
   left: 50%;
-  bottom: 18px;
-  width: min(720px, calc(100% - 48px));
+  bottom: 16px;
+  width: min(640px, calc(100% - 56px));
+  min-width: 0;
   transform: translateX(-50%);
   pointer-events: auto;
+  transition:
+    width 220ms var(--motion-ease-standard),
+    bottom 220ms var(--motion-ease-standard),
+    opacity 180ms ease;
 }
 
-.composer {
-  min-height: 52px;
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--surface-bg) 88%, transparent);
-  box-shadow: var(--shadow-popover);
-  backdrop-filter: blur(18px);
+.capsule[data-compose-open="false"] {
+  width: min(560px, calc(100% - 56px));
 }
 
-.iconButton {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
+.capsuleCluster {
+  display: flex;
+  min-width: 0;
+  width: 100%;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 74%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-bg) 72%, transparent);
+  box-shadow:
+    0 12px 32px rgb(15 23 42 / 8%),
+    0 2px 8px rgb(15 23 42 / 5%);
+  padding: 4px;
+  backdrop-filter: blur(18px);
+  animation: capsuleClusterIn 180ms var(--motion-ease-out) both;
+}
+
+.capsuleAccessory {
+  min-width: 0;
+  max-width: min(300px, 42vw);
+  flex: 0 1 auto;
+}
+
+.capsuleAccessory :global([aria-label="输入框状态"]) {
+  justify-content: flex-start;
+}
+
+.capsuleAccessory :global([aria-label="输入框状态"] > span) {
+  max-width: 100%;
+}
+
+.miniComposer {
+  display: inline-flex;
+  min-width: 0;
+  height: 34px;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 68%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+  color: color-mix(in srgb, var(--color-text-2) 82%, var(--color-text-3));
+  cursor: text;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 14px;
+  text-align: left;
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease-standard);
+}
+
+.miniComposer span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miniComposer:hover,
+.miniComposer:focus-visible {
+  border-color: color-mix(in srgb, var(--color-border-subtle) 66%, var(--color-text-3));
+  background: color-mix(in srgb, var(--color-bg-elevated) 90%, transparent);
+  box-shadow: 0 8px 20px rgb(15 23 42 / 7%);
+  color: var(--color-text-1);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.dockHandle,
+.composerDockHandle,
+.iconButton {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--color-text-3);
   cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease-standard);
 }
 
-.iconButton:hover {
+.dockHandle {
+  width: 34px;
+  height: 34px;
+  background: color-mix(in srgb, var(--surface-hover) 62%, transparent);
+}
+
+.dockHandle:hover,
+.dockHandle:focus-visible,
+.composerDockHandle:hover,
+.composerDockHandle:focus-visible,
+.iconButton:hover,
+.iconButton:focus-visible {
   background: var(--surface-hover);
   color: var(--color-text-1);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.composerStack {
+  display: grid;
+  gap: 7px;
+  animation: composerStackIn 190ms var(--motion-ease-out) both;
+}
+
+.composerAccessory,
+.drawerAccessory {
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.composerShell {
+  position: relative;
+  min-width: 0;
+}
+
+.composer {
+  width: 100%;
+  min-height: 82px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface-bg) 90%, transparent);
+  box-shadow:
+    0 14px 42px rgb(15 23 42 / 9%),
+    0 1px 2px rgb(15 23 42 / 5%);
+  backdrop-filter: blur(18px);
+  --sendbox-keydex-min-height: 82px;
+  --sendbox-keydex-input-min-height: 28px;
+  --sendbox-keydex-input-font-size: 13px;
+  --sendbox-keydex-input-line-height: 1.42;
+  --sendbox-keydex-padding: 10px 12px 0;
+  --sendbox-keydex-toolbar-min-height: 32px;
+  --sendbox-keydex-toolbar-padding-bottom: 6px;
+  --sendbox-keydex-send-button-size: 30px;
+  --sendbox-keydex-action-gap: 6px;
+}
+
+.composerDockHandle {
+  position: absolute;
+  top: 50%;
+  right: -38px;
+  width: 30px;
+  height: 44px;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-bg) 78%, transparent);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 7%);
+  transform: translateY(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.composerDockHandle:hover,
+.composerDockHandle:focus-visible {
+  transform: translateY(-50%) translateX(2px);
 }
 
 .expandedLayer {
   position: absolute;
-  inset: 48px 0 76px;
+  inset: 48px 0 104px;
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  padding: 24px 24px 18px;
+  padding: 24px 24px 16px;
   pointer-events: none;
   backdrop-filter: blur(5px);
+  animation: expandedLayerIn 180ms var(--motion-ease-out) both;
 }
 
 .messages {
@@ -101,26 +268,27 @@
 
 .messageBubble p {
   margin: 0;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  min-width: 360px;
-  max-width: min(520px, 46vw);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) auto;
-  border-left: 1px solid var(--color-border-1);
-  background: color-mix(in srgb, var(--surface-bg) 94%, transparent);
-  box-shadow: -12px 0 36px rgb(15 23 42 / 10%);
+  grid-template-rows: 42px minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   pointer-events: auto;
-  backdrop-filter: blur(18px);
+  animation: dockPanelIn 260ms cubic-bezier(0.2, 0.86, 0.22, 1) both;
 }
 
 .drawerHeader {
@@ -128,29 +296,30 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 46px 0 16px;
-  border-bottom: 1px solid var(--color-border-1);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 80%, transparent);
   color: var(--color-text-2);
   font-size: 13px;
   font-weight: 650;
+  padding: 0 10px 0 14px;
 }
 
 .drawerHeader button {
   width: 28px;
   height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--color-text-3);
   cursor: pointer;
 }
 
-.drawerHeader button:hover {
+.drawerHeader button:hover,
+.drawerHeader button:focus-visible {
   background: var(--surface-hover);
   color: var(--color-text-1);
+  outline: none;
 }
 
 .drawer .messages {
@@ -160,6 +329,18 @@
 
 .drawer .messageBubble {
   max-width: 92%;
+}
+
+.drawerComposer {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 82%, transparent);
+  padding: 8px 10px 10px;
+}
+
+.drawerComposer .composer {
+  min-height: 78px;
+  --sendbox-keydex-min-height: 78px;
 }
 
 .approvalPrompt {
@@ -216,25 +397,123 @@
   cursor: default;
 }
 
-.drawerComposer {
-  padding: 10px;
-  border-top: 1px solid var(--color-border-1);
+@keyframes capsuleClusterIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes composerStackIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes expandedLayerIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dockColumnIn {
+  from {
+    width: 0;
+    flex-basis: 0;
+    opacity: 0.72;
+  }
+  to {
+    width: var(--workbench-assistant-dock-inline-size);
+    flex-basis: var(--workbench-assistant-dock-inline-size);
+    opacity: 1;
+  }
+}
+
+@keyframes dockPanelIn {
+  from {
+    opacity: 0;
+    clip-path: inset(calc(100% - 112px) 0 12px 0 round 18px 0 0 18px);
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0 round 0);
+    transform: translateX(0);
+  }
 }
 
 @media (max-width: 900px) {
-  .capsule {
+  .surface[data-surface-mode="drawer"] {
+    --workbench-assistant-dock-inline-size: min(380px, 48vw);
+  }
+
+  .capsule,
+  .capsule[data-compose-open="false"] {
     width: calc(100% - 24px);
     bottom: 12px;
   }
 
-  .drawer {
-    left: 0;
-    width: 100% !important;
-    min-width: 0;
-    max-width: none;
+  .capsuleAccessory {
+    max-width: 42%;
+  }
+
+  .composerDockHandle {
+    right: 8px;
+    top: auto;
+    bottom: 8px;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .composerDockHandle:hover,
+  .composerDockHandle:focus-visible {
+    transform: translateY(-1px);
   }
 
   .expandedLayer {
     padding-inline: 12px;
+  }
+}
+
+@media (max-width: 680px) {
+  .capsuleCluster {
+    justify-content: stretch;
+  }
+
+  .capsuleAccessory {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capsuleCluster,
+  .composerStack,
+  .expandedLayer,
+  .drawer,
+  .surface[data-surface-mode="drawer"] {
+    animation: none;
+  }
+
+  .dockHandle,
+  .composerDockHandle,
+  .iconButton,
+  .capsule,
+  .miniComposer {
+    transition: none;
   }
 }

@@ -253,6 +253,39 @@
   left: calc(var(--active-sidebar-width) + 10px);
 }
 
+.appModeLoadingSider {
+  order: 1;
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  --loading-skeleton-padding: 0 22px;
+  --loading-skeleton-compact-stack-width: min(180px, 72%);
+}
+
+.shell[data-sidebar-motion="true"] .appModeLoadingSider {
+  transition:
+    width 220ms var(--motion-ease-standard),
+    flex-basis 220ms var(--motion-ease-standard);
+}
+
+.shell[data-sidebar="collapsed"] .appModeLoadingSider {
+  width: var(--sidebar-collapsed-width);
+  flex-basis: var(--sidebar-collapsed-width);
+  --loading-skeleton-padding: 0 12px;
+  --loading-skeleton-compact-stack-width: 24px;
+}
+
+.appModeLoadingContent {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  --loading-skeleton-padding: 24px;
+}
+
 .rightSidebar {
   position: relative;
   order: 5;
@@ -527,35 +560,9 @@
   width: min(260px, 78%);
   z-index: 8;
   display: none;
-  gap: 8px;
+  justify-items: center;
   pointer-events: none;
   transform: translate(-50%, -50%);
-}
-
-.rightSidebarResizeSkeleton span {
-  display: block;
-  height: 12px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
-    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
-  );
-  background-size: 220% 100%;
-  animation: rightSidebarPreviewSkeleton 1.2s ease-in-out infinite;
-}
-
-.rightSidebarResizeSkeleton span:nth-child(2) {
-  width: 88%;
-}
-
-.rightSidebarResizeSkeleton span:nth-child(3) {
-  width: 72%;
-}
-
-.rightSidebarResizeSkeleton span:nth-child(4) {
-  width: 54%;
 }
 
 .shell[data-right-sidebar-resizing="true"] .rightSidebarBody[data-content="preview"] .rightSidebarResizeSkeleton {
@@ -563,69 +570,8 @@
 }
 
 .rightSidebarLoading {
-  display: grid;
   min-width: 0;
   height: 100%;
-  align-content: center;
-  justify-items: center;
-  gap: 12px;
-  padding: 24px;
-  color: var(--color-text-3);
-  font-size: 12px;
-  line-height: 1.5;
-  text-align: center;
-}
-
-.rightSidebarLoadingSkeleton {
-  display: grid;
-  width: min(300px, 76%);
-  gap: 8px;
-}
-
-.rightSidebarLoadingSkeleton span {
-  display: block;
-  height: 12px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 0%,
-    color-mix(in srgb, var(--color-border-subtle) 74%, var(--surface-muted)) 42%,
-    color-mix(in srgb, var(--surface-muted) 86%, transparent) 84%
-  );
-  background-size: 220% 100%;
-  animation: rightSidebarLoadingSkeleton 1.2s ease-in-out infinite;
-}
-
-.rightSidebarLoadingSkeleton span:nth-child(2) {
-  width: 88%;
-}
-
-.rightSidebarLoadingSkeleton span:nth-child(3) {
-  width: 72%;
-}
-
-.rightSidebarLoadingSkeleton span:nth-child(4) {
-  width: 56%;
-}
-
-@keyframes rightSidebarLoadingSkeleton {
-  0% {
-    background-position: 120% 0;
-  }
-
-  100% {
-    background-position: -80% 0;
-  }
-}
-
-@keyframes rightSidebarPreviewSkeleton {
-  0% {
-    background-position: 120% 0;
-  }
-
-  100% {
-    background-position: -80% 0;
-  }
 }
 
 .rightSidebarIconButton {
@@ -667,11 +613,6 @@
   .rightSidebarTab,
   .rightSidebarAddTab {
     transition: none;
-  }
-
-  .rightSidebarLoadingSkeleton span,
-  .rightSidebarResizeSkeleton span {
-    animation: none;
   }
 
   .contentRightSidebarToggle:active,

@@ -213,10 +213,10 @@ def test_workspace_search_includes_requested_binary_archive_and_pdf_suffixes(tmp
         assert expected_by_query[query] in [entry["path"] for entry in response.json()]
 
 
-def test_workspace_search_default_limit_returns_fifty_results(tmp_path) -> None:
+def test_workspace_search_default_limit_returns_one_hundred_results(tmp_path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
-    for index in range(55):
+    for index in range(105):
         (root / f"match-{index:02d}.txt").write_text("x", encoding="utf-8")
 
     with _client(tmp_path) as client:
@@ -227,7 +227,41 @@ def test_workspace_search_default_limit_returns_fifty_results(tmp_path) -> None:
         )
 
     assert response.status_code == 200
-    assert len(response.json()) == 50
+    assert len(response.json()) == 100
+
+
+def test_workspace_search_uses_bundled_ripgrep_without_system_path(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "note.md").write_text("ok", encoding="utf-8")
+    monkeypatch.setenv("PATH", "")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "note"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()[0]["path"] == "note.md"
+
+
+def test_workspace_search_fails_fast_when_ripgrep_is_missing(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "note.md").write_text("ok", encoding="utf-8")
+    monkeypatch.setattr("backend.app.api.workspace.resolve_ripgrep_binary", lambda: None)
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/search",
+            params={"q": "note"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "workspace_search_engine_unavailable"
 
 
 def test_session_bound_workspace_tree_read_and_search(tmp_path) -> None:

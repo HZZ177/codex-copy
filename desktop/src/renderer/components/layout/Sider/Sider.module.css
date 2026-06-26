@@ -28,6 +28,7 @@
 }
 
 .nav,
+.workbenchHistory,
 .history,
 .footer {
   min-width: 0;
@@ -78,6 +79,26 @@
   scrollbar-gutter: stable;
   scrollbar-width: auto;
   scrollbar-color: color-mix(in srgb, var(--color-text-4) 34%, transparent) transparent;
+}
+
+.workbenchHistory {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  overflow: visible;
+}
+
+.workbenchWorkspaceSwitcher {
+  position: relative;
+  z-index: 6;
+  min-width: 0;
+  padding: 5px 5px 0 0;
+}
+
+.workbenchHistory .history {
+  padding-top: 0;
 }
 
 .history::-webkit-scrollbar {
@@ -364,6 +385,18 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 
 .section[data-kind="workspace"] .confirmRow {
   padding-left: 31px;
+}
+
+.section[data-kind="workspace"][data-flat="true"] .historyItem {
+  padding-left: 10px;
+}
+
+.section[data-kind="workspace"][data-flat="true"] .renameForm {
+  padding-left: 8px;
+}
+
+.section[data-kind="workspace"][data-flat="true"] .confirmRow {
+  padding-left: 10px;
 }
 
 .navItem,
@@ -838,6 +871,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 }
 
 .sider[data-collapsed="true"] .nav,
+.sider[data-collapsed="true"] .workbenchHistory,
 .sider[data-collapsed="true"] .footer {
   width: 30px;
   justify-self: start;

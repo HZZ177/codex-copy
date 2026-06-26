@@ -1,7 +1,7 @@
 .titlebar {
   height: var(--titlebar-height);
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(160px, auto) minmax(180px, 1fr);
+  grid-template-columns: minmax(260px, 1fr) minmax(160px, auto) minmax(180px, 1fr);
   align-items: center;
   padding: 0 0 0 10px;
   background: var(--sidebar-bg);
@@ -11,7 +11,7 @@
 .left {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: max(8px, calc(var(--sidebar-collapsed-width) - 40px));
 }
 
 .right {
@@ -22,40 +22,72 @@
 }
 
 .modeSwitch {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  gap: 2px;
+  width: 176px;
+  height: 30px;
   min-width: 0;
-  padding: 2px;
-  border: 1px solid var(--color-border-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface-muted);
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-border-2) 76%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-muted) 82%, var(--sidebar-bg));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 52%, transparent),
+    0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.modeSwitch::before {
+  position: absolute;
+  box-sizing: border-box;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 2);
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 70%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-elevated);
+  box-shadow:
+    0 1px 3px rgb(15 23 42 / 8%),
+    inset 0 0 0 1px color-mix(in srgb, #fff 58%, transparent);
+  content: "";
+  pointer-events: none;
+  transition: transform 180ms var(--motion-ease-standard);
+}
+
+.modeSwitch[data-mode="workbench"]::before {
+  transform: translateX(100%);
 }
 
 .modeButton {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: stretch;
+  width: 100%;
   height: 24px;
-  min-width: 58px;
-  padding: 0 10px;
-  border-radius: var(--radius-xs);
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--color-text-2);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
   transition:
-    background var(--motion-fast) ease,
     color var(--motion-fast) ease;
 }
 
 .modeButton:hover {
-  background: var(--surface-hover);
   color: var(--color-text-1);
 }
 
 .modeButton[data-active="true"] {
-  background: var(--surface-active);
   color: var(--color-text-1);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
 }
 
 .dragRegion {
@@ -127,6 +159,10 @@
   }
 
   .modeButton {
+    transition: none;
+  }
+
+  .modeSwitch::before {
     transition: none;
   }
 }

@@ -18,7 +18,11 @@ import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/component
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
-import { useOptionalPreview, type PreviewQuoteSelectionRequest } from "@/renderer/providers/PreviewProvider";
+import {
+  useOptionalPreview,
+  type PreviewFileRevealTarget,
+  type PreviewQuoteSelectionRequest,
+} from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
 import type { AgentContextItem, Workspace } from "@/types/protocol";
@@ -286,7 +290,7 @@ export function HomePage({
             workspaceLabel: workspaceSelection.workspace.root_path ?? workspaceSelection.workspace.name,
             runtime,
             onQuoteSelection: quoteSelection,
-          });
+          }, selectedFileRevealTarget(file));
         }
       : undefined;
 
@@ -445,6 +449,19 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
     name: entry.name,
     type: entry.type,
   }));
+}
+
+function selectedFileRevealTarget(file: SelectedFile): PreviewFileRevealTarget | null {
+  if (!file.lineStart && !file.lineEnd && file.sourceStart == null && file.sourceEnd == null) {
+    return null;
+  }
+  return {
+    selectedText: file.selectedText ?? null,
+    lineStart: file.lineStart ?? null,
+    lineEnd: file.lineEnd ?? null,
+    sourceStart: file.sourceStart ?? null,
+    sourceEnd: file.sourceEnd ?? null,
+  };
 }
 
 function sessionTitleFromPreparedMessage(text: string, contextItems: AgentContextItem[]): string {

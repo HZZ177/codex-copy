@@ -26,11 +26,13 @@ interface ComposerAccessoryStatusItem {
 export function ConversationComposerAccessory({
   messages,
   showScrollToBottom,
+  showScrollButton = true,
   onFilePreview,
   onScrollToBottom,
 }: {
   messages: ConversationMessage[];
   showScrollToBottom: boolean;
+  showScrollButton?: boolean;
   onFilePreview: (file: FileChangePreview) => void;
   onScrollToBottom: () => void;
 }) {
@@ -108,16 +110,18 @@ export function ConversationComposerAccessory({
           <span className={styles.accessoryContent}>{selectedItem.node}</span>
         </span>
       </span>
-      <button
-        className={styles.scrollBottomButton}
-        type="button"
-        aria-label="滚动到底"
-        title="滚动到底"
-        disabled={!showScrollToBottom}
-        onClick={onScrollToBottom}
-      >
-        <ArrowDown size={15} />
-      </button>
+      {showScrollButton ? (
+        <button
+          className={styles.scrollBottomButton}
+          type="button"
+          aria-label="滚动到底"
+          title="滚动到底"
+          disabled={!showScrollToBottom}
+          onClick={onScrollToBottom}
+        >
+          <ArrowDown size={15} />
+        </button>
+      ) : null}
     </div>
   );
 }

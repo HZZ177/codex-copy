@@ -19,6 +19,7 @@ import {
 } from "react-virtuoso";
 
 import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 
@@ -30,6 +31,7 @@ import { FileChangeBlock, type FileChangePreview } from "./FileChangeBlock";
 import { MessageGroupBlock } from "./MessageGroupBlock";
 import { MessageThinking } from "./MessageThinking";
 import { MessageActionFooter, MessageText, StreamingCursor } from "./MessageText";
+import { SkillActivationBlock } from "./SkillActivationBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { processMessages, type ProcessedMessageItem } from "./processMessages";
 import { useAutoScroll } from "./useAutoScroll";
@@ -583,6 +585,16 @@ function DefaultMessage({
   if (message.kind === "tool") {
     return <ToolCallBlock message={message} />;
   }
+  if (message.kind === "skill") {
+    return (
+      <SkillActivationBlock
+        message={message}
+        workspaceRuntime={workspaceRuntime}
+        workspaceScope={workspaceScope}
+        onQuoteSelection={onQuoteSelection}
+      />
+    );
+  }
   if (message.kind === "command") {
     return <CommandExecutionBlock message={message} />;
   }
@@ -799,13 +811,11 @@ function isStreamingStatus(status: ConversationMessage["status"]): boolean {
 
 function MessageSkeleton() {
   return (
-    <div className={styles.skeletonWrap} aria-label="姝ｅ湪鍔犺浇娑堟伅">
-      {[0, 1, 2].map((item) => (
-        <div className={styles.skeleton} data-testid="message-skeleton" key={item}>
-          <span />
-          <span />
-        </div>
-      ))}
-    </div>
+    <LoadingSkeleton
+      aria-label="正在加载消息"
+      className={styles.skeletonWrap}
+      lineCount={3}
+      testId="message-skeleton"
+    />
   );
 }
