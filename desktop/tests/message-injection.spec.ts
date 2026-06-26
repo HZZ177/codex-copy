@@ -123,6 +123,41 @@ describe("message injection composer helpers", () => {
     expect(injections[0]?.content).not.toContain("comment stays visible");
   });
 
+  it("keeps annotation comments as structured source quote context", () => {
+    const quote = selectedQuoteFromText("selected text", {
+      source: "annotation",
+      annotationComment: "Explain this paragraph",
+      file: {
+        path: "README.md",
+        name: "README.md",
+        lineStart: 3,
+        lineEnd: 3,
+      },
+    });
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    const prepared = prepareComposerMessage("", [], { quotes: [quote] });
+
+    expect(prepared.message).toBe("");
+    expect(prepared.contextItems).toHaveLength(1);
+    expect(prepared.contextItems[0]).toMatchObject({
+      type: "source_quote",
+      content: "selected text",
+      description: expect.stringContaining("批注：Explain this paragraph"),
+      metadata: {
+        annotation_comment: "Explain this paragraph",
+      },
+    });
+    const injection = prepared.runtimeParams?.message_injection?.[0];
+    expect(injection?.content).toContain("引用内容：\nselected text");
+    expect(injection?.content).toContain("批注内容：\nExplain this paragraph");
+    expect(injection?.metadata).toMatchObject({
+      kind: "source_quote",
+      annotation_comment: "Explain this paragraph",
+    });
+  });
+
   it("keeps bracket syntax as ordinary user text", () => {
     const prepared = prepareComposerMessage("please review [[selected text]] now");
 

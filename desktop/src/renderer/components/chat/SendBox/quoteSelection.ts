@@ -3,6 +3,7 @@ export interface SelectedQuote {
   text: string;
   preview: string;
   source: "selection" | "annotation";
+  annotationComment?: string | null;
   file?: SelectedQuoteFileSource | null;
 }
 
@@ -17,6 +18,7 @@ export interface SelectedQuoteFileSource {
 
 export interface SelectedQuoteOptions {
   source?: SelectedQuote["source"];
+  annotationComment?: string | null;
   file?: SelectedQuoteFileSource | null;
 }
 
@@ -67,6 +69,7 @@ export function selectedQuoteFromText(
       : sourceOrOptions;
   const source = options.source ?? "selection";
   const file = normalizeSelectedQuoteFileSource(options.file ?? null);
+  const annotationComment = normalizeQuoteText(options.annotationComment ?? "");
   const idParts = ["quote", source, normalized];
   if (file) {
     idParts.push(
@@ -77,11 +80,15 @@ export function selectedQuoteFromText(
       String(file.sourceEnd ?? ""),
     );
   }
+  if (annotationComment) {
+    idParts.push(annotationComment);
+  }
   return {
     id: `quote:${source}:${hashText(idParts.join("\n"))}`,
     text: normalized,
     preview: selectedQuotePreview(normalized),
     source,
+    annotationComment: annotationComment || null,
     file,
   };
 }

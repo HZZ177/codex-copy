@@ -331,6 +331,7 @@ export function useAgentSessionController({
     const quote = selectedText
       ? selectedQuoteFromText(selectedText, {
           source: "annotation",
+          annotationComment: comment,
           file: {
             path,
             name: fileName(path),
@@ -354,10 +355,10 @@ export function useAgentSessionController({
           name: fileName(path),
           type: "file",
           source: "workspace",
+          annotationComment: comment,
         },
       }));
     }
-    setDraft((current) => appendDraftText(current, comment));
   }, []);
 
   const resolveSessionId = useCallback(
@@ -659,14 +660,6 @@ function isBusy(state: ConversationRuntimeState): boolean {
 function sessionTitleFromPreparedMessage(text: string, contextItems: AgentContextItem[]): string {
   const title = text.trim() || contextItems[0]?.label || "工作台对话";
   return title.slice(0, 32);
-}
-
-function appendDraftText(current: string, addition: string): string {
-  const trimmedAddition = addition.trim();
-  if (!trimmedAddition) {
-    return current;
-  }
-  return current.trim() ? `${current.trimEnd()}\n\n${trimmedAddition}` : trimmedAddition;
 }
 
 function fileName(path: string): string {

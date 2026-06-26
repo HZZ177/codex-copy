@@ -610,6 +610,10 @@
   opacity: 0.45;
 }
 
+.annotationPopoverDeleteIcon {
+  color: var(--color-danger);
+}
+
 .previewAnnotationMark {
   border-radius: 3px;
   background: color-mix(in srgb, var(--color-warning) 20%, transparent);

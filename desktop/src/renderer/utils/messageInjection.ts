@@ -96,13 +96,16 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
     }
     const id = quote.id || `quote:${index}:${hashText(content)}`;
     const preview = quote.preview || selectedQuotePreview(content);
+    const annotationComment = normalizedOptionalText(quote.annotationComment);
     if (quote.file) {
+      const description = sourceQuoteDescription(quote, annotationComment);
       return [
         {
           id,
           type: "source_quote",
           label: sourceQuoteLabel(quote),
           content,
+          description,
           role: "HumanMessage",
           source: "follow",
           path: quote.file.path,
@@ -121,6 +124,8 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
             line_end: quote.file.lineEnd ?? null,
             source_start: quote.file.sourceStart ?? null,
             source_end: quote.file.sourceEnd ?? null,
+            annotation_comment: annotationComment,
+            description,
           },
         },
       ];
@@ -139,6 +144,7 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
           label: "引用片段",
           preview,
           source: quote.source,
+          annotation_comment: annotationComment,
         },
       },
     ];
@@ -147,11 +153,14 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
 
 function fileContextItem(file: SelectedFile, index: number): AgentContextItem {
   const id = `file:${index}:${hashText(file.path)}`;
+  const annotationComment = normalizedOptionalText(file.annotationComment);
+  const description = [file.path, annotationComment ? `批注：${annotationComment}` : ""].filter(Boolean).join("\n\n");
   return {
     id,
     type: "file",
     label: file.name || file.path,
     content: file.type === "directory" ? `工作区目录：${file.path}` : `工作区文件：${file.path}`,
+    description,
     role: "HumanMessage",
     source: "follow",
     path: file.path,
@@ -165,6 +174,8 @@ function fileContextItem(file: SelectedFile, index: number): AgentContextItem {
       name: file.name,
       fileType: file.type,
       source: file.source,
+      annotation_comment: annotationComment,
+      description,
     },
   };
 }
@@ -189,14 +200,18 @@ function contextItemToFollowInjection(item: AgentContextItem): RuntimeMessageInj
 function injectionContent(item: AgentContextItem): string {
   if (item.type === "file") {
     const target = item.fileType === "directory" ? "目录" : "文件";
-    return `用户通过 @ 引用了工作区${target}：${item.path || item.label}\n请在需要时使用文件工具读取或查看该路径，不要把路径当作用户普通文本。`;
+    const annotationComment = normalizedOptionalText(item.metadata?.annotation_comment);
+    const annotationBlock = annotationComment ? `\n批注内容：\n${annotationComment}` : "";
+    return `用户通过 @ 引用了工作区${target}：${item.path || item.label}${annotationBlock}\n请在需要时使用文件工具读取或查看该路径，不要把路径当作用户普通文本。`;
   }
   if (item.type === "source_quote") {
     const lineRange = metadataLineRange(item.metadata);
     const sourceRange = metadataSourceRange(item.metadata);
+    const annotationComment = normalizedOptionalText(item.metadata?.annotation_comment);
     const lineLocation = lineRange ? `行位置：${lineRange}\n` : "";
     const sourceLocation = sourceRange ? `源码范围：${sourceRange}\n` : "";
-    return `用户引用了工作区文件中的一个自洽片段。\n文件：${item.path || item.label}\n${lineLocation}${sourceLocation}引用内容：\n${item.content}\n\n请把这条消息视为一个完整的文件来源片段，不要和其他文件或其他引用片段混淆。如需更多上下文，请使用文件工具读取该文件。`;
+    const annotationBlock = annotationComment ? `批注内容：\n${annotationComment}\n\n` : "";
+    return `用户引用了工作区文件中的一个自洽片段。\n文件：${item.path || item.label}\n${lineLocation}${sourceLocation}引用内容：\n${item.content}\n\n${annotationBlock}请把这条消息视为一个完整的文件来源片段，不要和其他文件或其他引用片段混淆。如需更多上下文，请使用文件工具读取该文件。`;
   }
   if (item.type === "quote") {
     return `用户添加了以下引用片段作为上下文：\n${item.content}`;
@@ -208,6 +223,14 @@ function sourceQuoteLabel(quote: SelectedQuote): string {
   const name = quote.file?.name || (quote.file?.path ? fileName(quote.file.path) : "文件片段");
   const lineRange = sourceQuoteLineRange(quote.file?.lineStart, quote.file?.lineEnd);
   return lineRange ? `${name} · ${lineRange}` : `${name} · 引用`;
+}
+
+function sourceQuoteDescription(quote: SelectedQuote, annotationComment: string): string {
+  const lineRange = sourceQuoteLineRange(quote.file?.lineStart, quote.file?.lineEnd);
+  const location = quote.file?.path ? `${quote.file.path}${lineRange ? ` · ${lineRange}` : ""}` : "";
+  return [location, quote.text, annotationComment ? `批注：${annotationComment}` : ""]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function metadataLineRange(metadata: Record<string, unknown> | undefined): string | null {
@@ -234,6 +257,10 @@ function sourceQuoteLineRange(start?: number | null, end?: number | null): strin
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedOptionalText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function fileName(path: string): string {

@@ -827,6 +827,9 @@ export function FilePreview({
         sourceStart: annotation.anchor_json?.sourceStart ?? null,
         sourceEnd: annotation.anchor_json?.sourceEnd ?? null,
       });
+      setActiveAnnotationPopover((current) =>
+        current?.annotationId === annotation.id ? null : current,
+      );
     },
     [onStartChatFromAnnotation],
   );
@@ -1909,6 +1912,9 @@ function AnnotationPopover({
     >
       <header className={styles.annotationPopoverHeader}>
         <span className={styles.annotationBadge}>{formatAnnotationBadge(annotation)}</span>
+        <button type="button" title="关闭" aria-label="关闭选区批注浮窗" onClick={onClose}>
+          <X size={12} />
+        </button>
       </header>
       {annotation.selected_text ? (
         <blockquote className={styles.annotationPopoverQuote}>{annotation.selected_text}</blockquote>
@@ -1938,7 +1944,7 @@ function AnnotationPopover({
               onClose();
             }}
           >
-            <Trash2 size={12} />
+            <Trash2 className={styles.annotationPopoverDeleteIcon} size={12} />
             <span>删除</span>
           </button>
         </div>

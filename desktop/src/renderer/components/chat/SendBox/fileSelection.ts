@@ -6,6 +6,7 @@ export interface SelectedFile {
   type: "file" | "directory";
   source: "workspace" | "dropped" | "pasted";
   selectedText?: string | null;
+  annotationComment?: string | null;
   lineStart?: number | null;
   lineEnd?: number | null;
   sourceStart?: number | null;

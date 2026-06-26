@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import type { RuntimeBridge } from "@/runtime";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import { WorkspaceFileBrowser, WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
@@ -39,6 +40,7 @@ export function WorkbenchModePage({
   onSessionCreated,
 }: WorkbenchModePageProps) {
   const [creatingSession, setCreatingSession] = useState(false);
+  const [dockTransitioning, setDockTransitioning] = useState(false);
   const selectorValue: WorkspaceSelection = selectedWorkspace
     ? { type: "workspace", workspace: selectedWorkspace }
     : { type: "chat" };
@@ -118,15 +120,34 @@ export function WorkbenchModePage({
           <WorkbenchAssistantPlaceholder disabled label="选择工作空间后启用助手" />
         </main>
       ) : (
-        <main className={styles.workspace} data-testid="workbench-workspace-shell" aria-label="工作台">
+        <main
+          className={styles.workspace}
+          data-testid="workbench-workspace-shell"
+          data-dock-transitioning={dockTransitioning ? "true" : "false"}
+          aria-label="工作台"
+        >
           <div className={styles.canvas}>
-            <WorkspaceFileBrowser
-              runtime={runtime}
-              workspaceId={workspaceId}
-              label={workspaceLabel}
-              onQuoteSelection={assistantController.quoteSelection}
-              onStartChatFromAnnotation={assistantController.startChatFromAnnotation}
-            />
+            <div
+              className={styles.canvasContent}
+              data-testid="workbench-canvas-content"
+              data-render-paused={dockTransitioning ? "true" : "false"}
+            >
+              <WorkspaceFileBrowser
+                runtime={runtime}
+                workspaceId={workspaceId}
+                label={workspaceLabel}
+                onQuoteSelection={assistantController.quoteSelection}
+                onStartChatFromAnnotation={assistantController.startChatFromAnnotation}
+              />
+            </div>
+            {dockTransitioning ? (
+              <LoadingSkeleton
+                className={styles.dockTransitionLoading}
+                testId="workbench-dock-transition-loading"
+                aria-label="工作台布局调整中"
+                width="compact"
+              />
+            ) : null}
           </div>
           <WorkbenchAssistantSurface
             runtime={runtime}
@@ -134,6 +155,7 @@ export function WorkbenchModePage({
             workspace={selectedWorkspace}
             controller={assistantController}
             creatingSession={creatingSession}
+            onDockTransitionChange={setDockTransitioning}
           />
         </main>
       )}

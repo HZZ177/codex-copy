@@ -1502,6 +1502,7 @@ describe("FilePreview", () => {
     expect(popover).not.toBeNull();
     expect(screen.getByText("Explain this paragraph")).not.toBeNull();
     expect(within(popover).queryByRole("button", { name: "定位批注片段" })).toBeNull();
+    expect(within(popover).getByRole("button", { name: "关闭选区批注浮窗" })).not.toBeNull();
     const actions = popover.querySelector<HTMLElement>('[data-layout="annotation"]');
     expect(actions).not.toBeNull();
     const actionButtons = within(actions as HTMLElement).getAllByRole("button");

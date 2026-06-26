@@ -25,6 +25,25 @@ import type {
 import styles from "./WorkbenchAssistantSurface.module.css";
 
 type AssistantSurfaceMode = "capsule" | "composer" | "expanded" | "drawer";
+type DockTransitionPhase = "dock-in" | "dock-out";
+
+const DOCK_MORPH_DURATION_MS = 320;
+
+interface DockMorphRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  radius: number;
+}
+
+interface DockMorphState {
+  phase: DockTransitionPhase;
+  from: DockMorphRect;
+  to: DockMorphRect | null;
+  targetMode: AssistantSurfaceMode;
+  active: boolean;
+}
 
 export interface WorkbenchAssistantSurfaceProps {
   runtime: RuntimeBridge;
@@ -32,6 +51,7 @@ export interface WorkbenchAssistantSurfaceProps {
   workspace?: Workspace | null;
   controller: AgentSessionController;
   creatingSession?: boolean;
+  onDockTransitionChange?: (transitioning: boolean) => void;
 }
 
 export function WorkbenchAssistantSurface({
@@ -40,11 +60,14 @@ export function WorkbenchAssistantSurface({
   workspace,
   controller,
   creatingSession = false,
+  onDockTransitionChange,
 }: WorkbenchAssistantSurfaceProps) {
   const layout = useLayoutState();
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const dockTransitionTimerRef = useRef<number | null>(null);
   const [surfaceMode, setSurfaceMode] = useState<AssistantSurfaceMode>("capsule");
   const [composerFocusSeq, setComposerFocusSeq] = useState(0);
+  const [dockTransition, setDockTransition] = useState<DockMorphState | null>(null);
   const modelSelection = useRuntimeModelSelection(runtime, "");
   const workspaceSkillScope = useMemo(() => ({ workspaceId }), [workspaceId]);
   const { state: workspaceSkillsState } = useWorkspaceSkills({
@@ -66,10 +89,41 @@ export function WorkbenchAssistantSurface({
   const selectedModel = modelSelection.selectedModel.trim();
   const workspaceLabel = workspace?.root_path ?? workspace?.name ?? workspaceId;
   const drawerWidth = layout.state.workbenchAssistantDrawerWidth;
+  const dockLayout = surfaceMode === "drawer" || dockTransition?.phase === "dock-out" ? "inline" : "overlay";
+
+  const finishDockTransition = useCallback(() => {
+    if (dockTransitionTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(dockTransitionTimerRef.current);
+    }
+    dockTransitionTimerRef.current = null;
+    setDockTransition(null);
+    onDockTransitionChange?.(false);
+  }, [onDockTransitionChange]);
+
+  const beginDockTransition = useCallback(
+    (phase: DockTransitionPhase, from: DockMorphRect, targetMode: AssistantSurfaceMode) => {
+      if (dockTransitionTimerRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(dockTransitionTimerRef.current);
+      }
+      dockTransitionTimerRef.current = null;
+      onDockTransitionChange?.(true);
+      setDockTransition({
+        phase,
+        from,
+        targetMode,
+        active: false,
+        to: null,
+      });
+    },
+    [onDockTransitionChange],
+  );
 
   useEffect(() => {
+    finishDockTransition();
     setSurfaceMode("capsule");
-  }, [workspaceId]);
+  }, [finishDockTransition, workspaceId]);
+
+  useEffect(() => () => finishDockTransition(), [finishDockTransition]);
 
   useEffect(() => {
     if (surfaceMode === "capsule" && controller.draft.trim()) {
@@ -79,9 +133,13 @@ export function WorkbenchAssistantSurface({
 
   useEffect(() => {
     if (pendingApproval) {
-      setSurfaceMode("drawer");
+      if (surfaceMode !== "drawer") {
+        const from = measureCapsuleTargetRect(surfaceRef.current, surfaceMode, fallbackDockSourceRect());
+        beginDockTransition("dock-in", from, "drawer");
+        setSurfaceMode("drawer");
+      }
     }
-  }, [pendingApproval]);
+  }, [beginDockTransition, pendingApproval, surfaceMode]);
 
   useEffect(() => {
     if ((surfaceMode !== "composer" && surfaceMode !== "expanded") || controller.draft.trim()) {
@@ -97,6 +155,60 @@ export function WorkbenchAssistantSurface({
     document.addEventListener("pointerdown", collapseOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", collapseOnOutsidePointer);
   }, [controller.draft, surfaceMode]);
+
+  useEffect(() => {
+    if (!dockTransition || dockTransition.to || dockTransition.active) {
+      return;
+    }
+    let cancelled = false;
+    let firstFrame: number | null = null;
+    let secondFrame: number | null = null;
+
+    const activateMorph = () => {
+      if (cancelled) {
+        return;
+      }
+      const to =
+        dockTransition.phase === "dock-in"
+          ? measureDockTargetRect(surfaceRef.current, drawerWidth, dockTransition.from)
+          : measureDockOutTargetRect(surfaceRef.current, dockTransition.targetMode, dockTransition.from);
+      setDockTransition((current) =>
+        current && current.phase === dockTransition.phase
+          ? {
+              ...current,
+              to,
+              active: true,
+            }
+          : current,
+      );
+      if (typeof window === "undefined") {
+        finishDockTransition();
+        return;
+      }
+      dockTransitionTimerRef.current = window.setTimeout(finishDockTransition, DOCK_MORPH_DURATION_MS);
+    };
+
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+      activateMorph();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(activateMorph);
+    });
+
+    return () => {
+      cancelled = true;
+      if (firstFrame !== null) {
+        window.cancelAnimationFrame(firstFrame);
+      }
+      if (secondFrame !== null) {
+        window.cancelAnimationFrame(secondFrame);
+      }
+    };
+  }, [dockTransition, drawerWidth, finishDockTransition]);
 
   useEffect(() => {
     if (
@@ -133,13 +245,18 @@ export function WorkbenchAssistantSurface({
   }, []);
 
   const closeDrawer = useCallback(() => {
-    setSurfaceMode(controller.draft.trim() ? "composer" : "capsule");
-  }, [controller.draft]);
+    const targetMode: AssistantSurfaceMode = controller.draft.trim() ? "composer" : "capsule";
+    const from = measureDockTargetRect(surfaceRef.current, drawerWidth, fallbackDockSourceRect());
+    beginDockTransition("dock-out", from, targetMode);
+    setSurfaceMode(targetMode);
+  }, [beginDockTransition, controller.draft, drawerWidth]);
 
   const dockToDrawer = useCallback(() => {
+    const from = measureCapsuleTargetRect(surfaceRef.current, surfaceMode, fallbackDockSourceRect());
+    beginDockTransition("dock-in", from, "drawer");
     setSurfaceMode("drawer");
     setComposerFocusSeq((seq) => seq + 1);
-  }, []);
+  }, [beginDockTransition, surfaceMode]);
 
   const toggleExpandedLayer = useCallback(() => {
     setSurfaceMode((mode) => {
@@ -202,7 +319,8 @@ export function WorkbenchAssistantSurface({
       className={styles.surface}
       data-testid="workbench-assistant-surface"
       data-surface-mode={surfaceMode}
-      data-dock-layout={surfaceMode === "drawer" ? "inline" : "overlay"}
+      data-dock-layout={dockLayout}
+      data-dock-transition={dockTransition?.phase ?? "idle"}
       data-running={runtimeState === "running" ? "true" : "false"}
       data-pending-approval={pendingApproval ? "true" : "false"}
       style={{ "--workbench-assistant-dock-width": `${drawerWidth}px` } as CSSProperties}
@@ -301,8 +419,142 @@ export function WorkbenchAssistantSurface({
           )}
         </div>
       ) : null}
+      {dockTransition ? <DockMorph transition={dockTransition} /> : null}
     </div>
   );
+}
+
+function DockMorph({ transition }: { transition: DockMorphState }) {
+  const rect = transition.active && transition.to ? transition.to : transition.from;
+  const radius = transition.active && transition.to ? transition.to.radius : transition.from.radius;
+  const style = {
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    borderRadius: `${radius}px`,
+  } as CSSProperties;
+  return (
+    <div
+      className={styles.dockMorph}
+      data-testid="workbench-assistant-dock-morph"
+      data-phase={transition.phase}
+      data-active={transition.active ? "true" : "false"}
+      aria-hidden="true"
+      style={style}
+    >
+      <div className={styles.dockMorphHeader} />
+      <div className={styles.dockMorphLines}>
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className={styles.dockMorphComposer} />
+    </div>
+  );
+}
+
+function measureCapsuleTargetRect(
+  surface: HTMLDivElement | null,
+  mode: AssistantSurfaceMode,
+  fallback: DockMorphRect,
+): DockMorphRect {
+  const capsule = surface?.querySelector<HTMLElement>('[data-testid="workbench-assistant-capsule"]') ?? null;
+  const radius = mode === "capsule" ? 22 : 20;
+  return rectFromElement(capsule, radius) ?? fallbackBottomRect(surface, mode, fallback);
+}
+
+function measureDockOutTargetRect(
+  surface: HTMLDivElement | null,
+  mode: AssistantSurfaceMode,
+  fallback: DockMorphRect,
+): DockMorphRect {
+  return fallbackBottomRect(surface, mode, fallback);
+}
+
+function measureDockTargetRect(
+  surface: HTMLDivElement | null,
+  drawerWidth: number,
+  fallback: DockMorphRect,
+): DockMorphRect {
+  const surfaceRect = rectFromElement(surface, 0);
+  const workspaceRect = rectFromElement(surface?.parentElement ?? null, 0);
+  if (!workspaceRect) {
+    return surfaceRect ?? fallback;
+  }
+  const width = Math.min(resolveDockInlineWidth(drawerWidth), workspaceRect.width);
+  return {
+    left: workspaceRect.left + workspaceRect.width - width,
+    top: workspaceRect.top,
+    width,
+    height: workspaceRect.height,
+    radius: 0,
+  };
+}
+
+function rectFromElement(element: Element | null, radius: number): DockMorphRect | null {
+  if (!element) {
+    return null;
+  }
+  const rect = element.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) {
+    return null;
+  }
+  return {
+    left: Math.round(rect.left),
+    top: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    radius,
+  };
+}
+
+function fallbackBottomRect(
+  surface: HTMLDivElement | null,
+  mode: AssistantSurfaceMode,
+  fallback: DockMorphRect,
+): DockMorphRect {
+  const workspaceRect = rectFromElement(surface?.parentElement ?? null, 0);
+  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
+  const baseLeft = workspaceRect?.left ?? 0;
+  const baseTop = workspaceRect?.top ?? 0;
+  const baseWidth = workspaceRect?.width ?? viewportWidth;
+  const baseHeight = workspaceRect?.height ?? viewportHeight;
+  const width = Math.min(mode === "capsule" ? 560 : 640, Math.max(280, baseWidth - 56));
+  const height = mode === "capsule" ? 44 : 98;
+  if (baseWidth <= 0 || baseHeight <= 0) {
+    return fallback;
+  }
+  return {
+    left: Math.round(baseLeft + (baseWidth - width) / 2),
+    top: Math.round(baseTop + baseHeight - 16 - height),
+    width: Math.round(width),
+    height,
+    radius: mode === "capsule" ? 22 : 20,
+  };
+}
+
+function fallbackDockSourceRect(): DockMorphRect {
+  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
+  const width = Math.min(640, Math.max(280, viewportWidth - 56));
+  const height = 92;
+  return {
+    left: Math.round((viewportWidth - width) / 2),
+    top: Math.round(viewportHeight - 16 - height),
+    width: Math.round(width),
+    height,
+    radius: 20,
+  };
+}
+
+function resolveDockInlineWidth(drawerWidth: number): number {
+  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
+  if (viewportWidth <= 900) {
+    return Math.min(380, Math.max(300, viewportWidth * 0.48));
+  }
+  return Math.min(Math.max(320, drawerWidth), 520, viewportWidth * 0.46);
 }
 
 function WorkbenchApprovalPrompt({

@@ -1,12 +1,13 @@
 .surface {
   --workbench-assistant-dock-inline-size: min(clamp(320px, var(--workbench-assistant-dock-width), 520px), 46vw);
+  --workbench-assistant-transition-bg: var(--color-bg-elevated);
   position: absolute;
   inset: 0;
   z-index: 50;
   pointer-events: none;
 }
 
-.surface[data-surface-mode="drawer"] {
+.surface[data-dock-layout="inline"] {
   position: relative;
   inset: auto;
   z-index: 2;
@@ -17,9 +18,25 @@
   flex: 0 0 var(--workbench-assistant-dock-inline-size);
   overflow: hidden;
   border-left: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
-  background: color-mix(in srgb, var(--surface-bg) 96%, transparent);
+  background: var(--workbench-assistant-transition-bg);
   pointer-events: auto;
+}
+
+.surface[data-dock-transition="dock-in"] {
   animation: dockColumnIn 240ms cubic-bezier(0.2, 0.86, 0.22, 1) both;
+}
+
+.surface[data-dock-transition="dock-out"] {
+  border-left-color: transparent;
+  animation: dockColumnOut 320ms cubic-bezier(0.2, 0.86, 0.22, 1) both;
+}
+
+.surface[data-dock-transition="dock-in"] .drawer {
+  opacity: 0;
+}
+
+.surface[data-dock-transition="dock-out"] .capsule {
+  opacity: 0;
 }
 
 .capsule {
@@ -49,7 +66,7 @@
   gap: 6px;
   border: 1px solid color-mix(in srgb, var(--color-border-subtle) 74%, transparent);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--surface-bg) 72%, transparent);
+  background: color-mix(in srgb, var(--workbench-assistant-transition-bg) 92%, transparent);
   box-shadow:
     0 12px 32px rgb(15 23 42 / 8%),
     0 2px 8px rgb(15 23 42 / 5%);
@@ -171,7 +188,7 @@
   width: 100%;
   min-height: 82px;
   border-radius: 20px;
-  background: color-mix(in srgb, var(--surface-bg) 90%, transparent);
+  background: color-mix(in srgb, var(--workbench-assistant-transition-bg) 96%, transparent);
   box-shadow:
     0 14px 42px rgb(15 23 42 / 9%),
     0 1px 2px rgb(15 23 42 / 5%);
@@ -195,7 +212,7 @@
   height: 44px;
   border: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--surface-bg) 78%, transparent);
+  background: color-mix(in srgb, var(--workbench-assistant-transition-bg) 90%, transparent);
   box-shadow: 0 10px 28px rgb(15 23 42 / 7%);
   transform: translateY(-50%);
   backdrop-filter: blur(16px);
@@ -343,6 +360,86 @@
   --sendbox-keydex-min-height: 78px;
 }
 
+.dockMorph {
+  position: fixed;
+  z-index: 400;
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 84%, transparent);
+  background: var(--workbench-assistant-transition-bg);
+  box-shadow:
+    0 18px 54px rgb(15 23 42 / 14%),
+    0 2px 8px rgb(15 23 42 / 6%);
+  pointer-events: none;
+  transform: translateZ(0);
+  backdrop-filter: blur(18px);
+  transition:
+    left 320ms cubic-bezier(0.2, 0.86, 0.22, 1),
+    top 320ms cubic-bezier(0.2, 0.86, 0.22, 1),
+    width 320ms cubic-bezier(0.2, 0.86, 0.22, 1),
+    height 320ms cubic-bezier(0.2, 0.86, 0.22, 1),
+    border-radius 320ms cubic-bezier(0.2, 0.86, 0.22, 1),
+    opacity 180ms ease;
+  will-change: left, top, width, height, border-radius;
+}
+
+.dockMorph[data-phase="dock-out"] {
+  box-shadow:
+    0 14px 42px rgb(15 23 42 / 10%),
+    0 1px 2px rgb(15 23 42 / 5%);
+}
+
+.dockMorphHeader {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 76%, transparent);
+  background: var(--workbench-assistant-transition-bg);
+}
+
+.dockMorphLines {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px 16px;
+}
+
+.dockMorphLines span,
+.dockMorphComposer {
+  display: block;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-muted) 78%, var(--color-text-4)) 0%,
+    color-mix(in srgb, var(--surface-hover) 68%, var(--color-text-4)) 42%,
+    color-mix(in srgb, var(--surface-muted) 78%, var(--color-text-4)) 84%
+  );
+  background-size: 220% 100%;
+  animation: dockMorphShimmer 1.2s ease-in-out infinite;
+}
+
+.dockMorphLines span {
+  height: 10px;
+}
+
+.dockMorphLines span:nth-child(1) {
+  width: 74%;
+}
+
+.dockMorphLines span:nth-child(2) {
+  width: 58%;
+}
+
+.dockMorphLines span:nth-child(3) {
+  width: 42%;
+}
+
+.dockMorphComposer {
+  height: 44px;
+  margin: 10px;
+  opacity: 0.72;
+}
+
 .approvalPrompt {
   display: grid;
   gap: 8px;
@@ -441,6 +538,19 @@
   }
 }
 
+@keyframes dockColumnOut {
+  from {
+    width: var(--workbench-assistant-dock-inline-size);
+    flex-basis: var(--workbench-assistant-dock-inline-size);
+    opacity: 1;
+  }
+  to {
+    width: 0;
+    flex-basis: 0;
+    opacity: 0;
+  }
+}
+
 @keyframes dockPanelIn {
   from {
     opacity: 0;
@@ -454,8 +564,18 @@
   }
 }
 
+@keyframes dockMorphShimmer {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 @media (max-width: 900px) {
-  .surface[data-surface-mode="drawer"] {
+  .surface[data-dock-layout="inline"] {
     --workbench-assistant-dock-inline-size: min(380px, 48vw);
   }
 
@@ -505,7 +625,17 @@
   .composerStack,
   .expandedLayer,
   .drawer,
-  .surface[data-surface-mode="drawer"] {
+  .surface[data-dock-layout="inline"],
+  .dockMorph {
+    animation: none;
+  }
+
+  .dockMorph {
+    transition: none;
+  }
+
+  .dockMorphLines span,
+  .dockMorphComposer {
     animation: none;
   }
 

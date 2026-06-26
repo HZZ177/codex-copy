@@ -416,6 +416,48 @@ describe("SendBox", () => {
     });
   });
 
+  it("shows annotation comments inside source quote chip details", async () => {
+    const quote = selectedQuoteFromText("引用文件里的片段", {
+      source: "annotation",
+      annotationComment: "Explain this paragraph",
+      file: {
+        path: "docs/guide.md",
+        name: "guide.md",
+        lineStart: 12,
+        lineEnd: 12,
+      },
+    });
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalQuoteRequest={{ requestId: 1, quote }}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const chip = await screen.findByText("guide.md · L12");
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseOver(chip);
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(screen.getByText(/批注：Explain this paragraph/)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("submits explicit quote context without hidden composer text", async () => {
     const quote = selectedQuoteFromText("这是一段选中的历史内容");
     if (!quote) {

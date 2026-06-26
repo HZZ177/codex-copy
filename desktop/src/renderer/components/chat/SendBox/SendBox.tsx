@@ -823,12 +823,14 @@ function selectedFileFromQuote(quote: SelectedQuote): SelectedFile | null {
   if (!quote.file?.path) {
     return null;
   }
+  const annotationComment = quote.annotationComment?.trim();
   return {
     path: quote.file.path,
     name: quote.file.name || fileName(quote.file.path),
     type: "file",
     source: "workspace",
     selectedText: quote.text,
+    ...(annotationComment ? { annotationComment } : {}),
     lineStart: quote.file.lineStart ?? null,
     lineEnd: quote.file.lineEnd ?? null,
     sourceStart: quote.file.sourceStart ?? null,
@@ -873,7 +875,7 @@ function FileContextChip({
       className={styles.fileChipWrapper}
       hoverAnchor="file"
       title={chipLabel}
-      description={file.path}
+      description={fileHoverDescription(file)}
       meta={fileKindLabel}
     >
       <span className={styles.fileChip} data-context-type={file.type} data-openable={onOpen ? "true" : "false"}>
@@ -906,7 +908,18 @@ function FileContextChip({
 function quoteHoverDescription(quote: SelectedQuote): string {
   const lineLabel = quote.file ? quoteLineLabel(quote.file.lineStart, quote.file.lineEnd) : null;
   const location = quote.file?.path ? `${quote.file.path}${lineLabel ? ` · ${lineLabel}` : ""}` : "";
-  return [location, quote.text || quote.preview].filter(Boolean).join("\n\n");
+  return [location, quote.text || quote.preview, annotationCommentDescription(quote.annotationComment)]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function fileHoverDescription(file: SelectedFile): string {
+  return [file.path, annotationCommentDescription(file.annotationComment)].filter(Boolean).join("\n\n");
+}
+
+function annotationCommentDescription(comment?: string | null): string {
+  const value = comment?.trim();
+  return value ? `批注：${value}` : "";
 }
 
 function ComposerContextHover({
