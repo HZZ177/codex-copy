@@ -106,13 +106,13 @@ def _preview_text(value: str, *, max_chars: int = _MAX_ARG_PREVIEW_CHARS) -> str
 
 def _summarize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
     safe_args = redact_sensitive(args)
-    if tool_name == "write_file":
+    if tool_name in {"create_file", "write_file"}:
         content = args.get("content")
         return {
             "path": safe_args.get("path"),
             "content_chars": len(content) if isinstance(content, str) else 0,
         }
-    if tool_name == "apply_patch":
+    if tool_name in {"edit_file", "apply_patch"}:
         patch = args.get("patch")
         return {"patch_chars": len(patch) if isinstance(patch, str) else 0}
     if tool_name == "run_command":

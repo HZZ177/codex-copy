@@ -29,6 +29,7 @@ import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarColl
 import { useOptionalPreview, type PreviewQuoteSelectionRequest } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ConnectionStatus } from "@/renderer/components/runtime";
+import type { AppMode } from "@/renderer/components/layout/appMode";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
 import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
@@ -82,10 +83,17 @@ type ViewTransitionDocument = Document & {
 
 export interface LayoutProps extends PropsWithChildren {
   title?: string;
+  appMode?: AppMode;
+  modeSwitchTargets?: Partial<Record<AppMode, string>>;
   projects?: SiderEntry[];
   conversations?: SiderEntry[];
   activePath?: string;
   contentMode?: "reading" | "full";
+  showChatBucket?: boolean;
+  newConversationPath?: string;
+  deleteActiveFallbackPath?: string;
+  getSessionPath?: (sessionId: string) => string;
+  getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
   resetRightSidebarKey?: string;
   onNavigate?: (path: string) => void;
 }
@@ -93,10 +101,17 @@ export interface LayoutProps extends PropsWithChildren {
 export function Layout({
   children,
   title = "Keydex",
+  appMode = "agent",
+  modeSwitchTargets,
   projects,
   conversations,
   activePath,
   contentMode = "reading",
+  showChatBucket,
+  newConversationPath,
+  deleteActiveFallbackPath,
+  getSessionPath,
+  getWorkspaceNewConversationPath,
   resetRightSidebarKey,
   onNavigate,
 }: LayoutProps) {
@@ -361,7 +376,18 @@ export function Layout({
         } as CSSProperties
       }
     >
-      <Titlebar title={title} />
+      <Titlebar
+        title={title}
+        modeSwitch={{
+          currentMode: appMode,
+          onModeChange: (mode) => {
+            const target = modeSwitchTargets?.[mode];
+            if (target) {
+              onNavigate?.(target);
+            }
+          },
+        }}
+      />
 
       {showRuntimeStatus && runtimeConnection ? (
         <ConnectionStatus
@@ -378,6 +404,11 @@ export function Layout({
           collapsed={collapsed}
           projects={projects}
           conversations={conversations}
+          showChatBucket={showChatBucket}
+          newConversationPath={newConversationPath}
+          deleteActiveFallbackPath={deleteActiveFallbackPath}
+          getSessionPath={getSessionPath}
+          getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
           onToggleSidebar={toggleSidebar}
           onNavigate={navigateFromShell}
         />

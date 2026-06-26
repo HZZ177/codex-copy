@@ -51,6 +51,8 @@ type TokenHeatWallMarker = {
 };
 
 const PAGE_SIZE = 12;
+const TREND_PROGRESSIVE_POINT_THRESHOLD = 240;
+const TREND_BATCH_POINT_LIMIT = 168;
 const EMPTY_SUMMARY: UsageSummary = {
   request_count: 0,
   total_tokens: 0,
@@ -115,9 +117,16 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
     };
     void Promise.all([
       runtime.usage.getSummary(query),
-      runtime.usage.getTrend({
-        ...query,
+      loadUsageTrend({
         bucket: trendBucket,
+        onPoints: (points) => {
+          if (active) {
+            setTrend(points);
+          }
+        },
+        query,
+        range,
+        runtime,
         timezoneOffsetMinutes,
       }),
       runtime.usage.listRequests({ ...query, page, pageSize: PAGE_SIZE }),
@@ -128,7 +137,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
           return;
         }
         setSummary(nextSummary);
-        setTrend(completeUsageTrendPoints(nextTrend.points, trendBucket, range, timezoneOffsetMinutes));
+        setTrend(nextTrend);
         setRequests(nextRequests);
         setModelOptions(collectModelOptions(providers, nextRequests.list, selectedModel));
       })
@@ -488,6 +497,50 @@ function MetricCard({
   );
 }
 
+async function loadUsageTrend({
+  bucket,
+  onPoints,
+  query,
+  range,
+  runtime,
+  timezoneOffsetMinutes,
+}: {
+  bucket: UsageBucket;
+  onPoints: (points: UsageTrendPoint[]) => void;
+  query: { startTime?: string; endTime?: string; model?: string };
+  range: { startTime?: string; endTime?: string };
+  runtime: RuntimeBridge;
+  timezoneOffsetMinutes: number;
+}) {
+  const estimatedPoints = estimateUsageTrendPointCount(range, bucket, timezoneOffsetMinutes);
+  if (estimatedPoints <= TREND_PROGRESSIVE_POINT_THRESHOLD) {
+    const nextTrend = await runtime.usage.getTrend({
+      ...query,
+      bucket,
+      timezoneOffsetMinutes,
+    });
+    const completed = completeUsageTrendPoints(nextTrend.points, bucket, range, timezoneOffsetMinutes);
+    onPoints(completed);
+    return completed;
+  }
+
+  let mergedPoints: UsageTrendPoint[] = [];
+  const chunks = buildUsageTrendChunks(range, bucket, timezoneOffsetMinutes, TREND_BATCH_POINT_LIMIT);
+  for (const chunk of chunks) {
+    const nextTrend = await runtime.usage.getTrend({
+      ...query,
+      ...chunk,
+      bucket,
+      limit: TREND_BATCH_POINT_LIMIT,
+      timezoneOffsetMinutes,
+    });
+    mergedPoints = mergeUsageTrendPoints(mergedPoints, nextTrend.points);
+    const completed = completeUsageTrendPoints(mergedPoints, bucket, range, timezoneOffsetMinutes);
+    onPoints(completed);
+  }
+  return completeUsageTrendPoints(mergedPoints, bucket, range, timezoneOffsetMinutes);
+}
+
 export function TokenHeatWall({ points, bucket }: { points: UsageTrendPoint[]; bucket: TokenHeatBucket }) {
   const [hoveredColumn, setHoveredColumn] = useState<number | null>(null);
   const [hoveredTime, setHoveredTime] = useState<string | null>(null);
@@ -503,57 +556,68 @@ export function TokenHeatWall({ points, bucket }: { points: UsageTrendPoint[]; b
       ) : (
         <>
           <div className={styles.heatWallViewport}>
-            <div className={styles.heatWallGrid} style={heatWallStyle}>
-              {heatWall.cells.map((cell) => {
-                const isWeekly = bucket === "week";
-                const label = isWeekly ? cell.weeklyTooltip : cell.tooltip;
-                const level = isWeekly ? cell.weeklyLevel : cell.level;
-                const value = isWeekly ? cell.weeklyTotalTokens : cell.totalTokens;
-                const active =
-                  isWeekly && hoveredColumn !== null
-                    ? hoveredColumn === cell.column
-                    : hoveredTime === cell.time;
-                return (
-                  <button
-                    aria-label={label}
-                    className={styles.heatCell}
-                    data-active={active ? "true" : "false"}
-                    data-level={level}
-                    data-outside={cell.outsideRange ? "true" : "false"}
-                    key={cell.time}
-                    onBlur={() => {
-                      setHoveredColumn(null);
-                      setHoveredTime(null);
-                    }}
-                    onFocus={() => {
-                      setHoveredColumn(cell.column);
-                      setHoveredTime(cell.time);
-                    }}
-                    onMouseEnter={() => {
-                      setHoveredColumn(cell.column);
-                      setHoveredTime(cell.time);
-                    }}
-                    onMouseLeave={() => {
-                      setHoveredColumn(null);
-                      setHoveredTime(null);
-                    }}
-                    title={label}
-                    type="button"
-                  >
-                    <span className={styles.heatCellTooltip} role="tooltip">
-                      <strong>{isWeekly ? cell.weekLabel : formatHeatCellDate(cell.time)}</strong>
-                      <span>总 Token {formatNumber(value)}</span>
-                    </span>
-                  </button>
-                );
-              })}
+            <div className={styles.heatWallMatrix}>
+              <div className={styles.heatWallWeekdays} aria-hidden="true">
+                {["一", "二", "三", "四", "五", "六", "日"].map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
+              <div className={styles.heatWallGrid} style={heatWallStyle}>
+                {heatWall.cells.map((cell) => {
+                  const isWeekly = bucket === "week";
+                  const label = isWeekly ? cell.weeklyTooltip : cell.tooltip;
+                  const level = isWeekly ? cell.weeklyLevel : cell.level;
+                  const value = isWeekly ? cell.weeklyTotalTokens : cell.totalTokens;
+                  const outsideRange = isWeekly ? false : cell.outsideRange;
+                  const active =
+                    isWeekly && hoveredColumn !== null
+                      ? hoveredColumn === cell.column
+                      : hoveredTime === cell.time;
+                  return (
+                    <button
+                      aria-label={label}
+                      className={styles.heatCell}
+                      data-active={active ? "true" : "false"}
+                      data-level={level}
+                      data-outside={outsideRange ? "true" : "false"}
+                      key={cell.time}
+                      onBlur={() => {
+                        setHoveredColumn(null);
+                        setHoveredTime(null);
+                      }}
+                      onFocus={() => {
+                        setHoveredColumn(cell.column);
+                        setHoveredTime(cell.time);
+                      }}
+                      onMouseEnter={() => {
+                        setHoveredColumn(cell.column);
+                        setHoveredTime(cell.time);
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredColumn(null);
+                        setHoveredTime(null);
+                      }}
+                      title={label}
+                      type="button"
+                    >
+                      <span className={styles.heatCellTooltip} role="tooltip">
+                        <strong>{isWeekly ? cell.weekLabel : formatHeatCellDate(cell.time)}</strong>
+                        <span>总 Token {formatNumber(value)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div aria-hidden="true" className={styles.heatWallAxis} style={heatWallStyle}>
-              {heatWall.markers.map((marker) => (
-                <span key={`${marker.column}-${marker.label}`} style={{ gridColumn: marker.column + 1 }}>
-                  {marker.label}
-                </span>
-              ))}
+            <div className={styles.heatWallAxisRow}>
+              <div aria-hidden="true" />
+              <div aria-hidden="true" className={styles.heatWallAxis} style={heatWallStyle}>
+                {heatWall.markers.map((marker) => (
+                  <span key={`${marker.column}-${marker.label}`} style={{ gridColumn: marker.column + 1 }}>
+                    {marker.label}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
           <div className={styles.heatWallLegend} aria-hidden="true">
@@ -564,7 +628,6 @@ export function TokenHeatWall({ points, bucket }: { points: UsageTrendPoint[]; b
               ))}
             </span>
             <span>多</span>
-            <strong className={styles.heatWallTotal}>{formatNumber(heatWall.totalTokens)} Token</strong>
           </div>
         </>
       )}
@@ -870,6 +933,71 @@ export function completeUsageTrendPoints(
   return completed;
 }
 
+function estimateUsageTrendPointCount(
+  range: { startTime?: string; endTime?: string },
+  bucket: UsageBucket,
+  timezoneOffsetMinutes: number,
+) {
+  if (!range.startTime || !range.endTime) {
+    return 0;
+  }
+  const start = toUsageBucketDate(range.startTime, bucket, timezoneOffsetMinutes);
+  const end = toUsageBucketDate(range.endTime, bucket, timezoneOffsetMinutes);
+  if (!start || !end || end.getTime() < start.getTime()) {
+    return 0;
+  }
+  const bucketMs = bucket === "hour" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return Math.floor((end.getTime() - start.getTime()) / bucketMs) + 1;
+}
+
+function buildUsageTrendChunks(
+  range: { startTime?: string; endTime?: string },
+  bucket: UsageBucket,
+  timezoneOffsetMinutes: number,
+  bucketLimit: number,
+) {
+  if (!range.startTime || !range.endTime) {
+    return [{ startTime: range.startTime, endTime: range.endTime }];
+  }
+  const rangeStart = new Date(range.startTime);
+  const rangeEnd = new Date(range.endTime);
+  const bucketStart = toUsageBucketDate(range.startTime, bucket, timezoneOffsetMinutes);
+  const bucketEnd = toUsageBucketDate(range.endTime, bucket, timezoneOffsetMinutes);
+  if (
+    Number.isNaN(rangeStart.getTime()) ||
+    Number.isNaN(rangeEnd.getTime()) ||
+    !bucketStart ||
+    !bucketEnd ||
+    rangeEnd.getTime() < rangeStart.getTime()
+  ) {
+    return [{ startTime: range.startTime, endTime: range.endTime }];
+  }
+
+  const chunks: Array<{ startTime: string; endTime: string }> = [];
+  const cursor = new Date(bucketStart);
+  while (cursor.getTime() <= bucketEnd.getTime()) {
+    const nextCursor = new Date(cursor);
+    advanceUsageBucketBy(nextCursor, bucket, bucketLimit);
+    const chunkStart = maxDate(new Date(cursor.getTime() - timezoneOffsetMinutes * 60_000), rangeStart);
+    const chunkEnd = minDate(new Date(nextCursor.getTime() - timezoneOffsetMinutes * 60_000 - 1), rangeEnd);
+    if (chunkEnd.getTime() >= chunkStart.getTime()) {
+      chunks.push({
+        startTime: chunkStart.toISOString(),
+        endTime: chunkEnd.toISOString(),
+      });
+    }
+    cursor.setTime(nextCursor.getTime());
+  }
+  return chunks.length ? chunks : [{ startTime: range.startTime, endTime: range.endTime }];
+}
+
+function mergeUsageTrendPoints(left: UsageTrendPoint[], right: UsageTrendPoint[]) {
+  const pointsByTime = new Map<string, UsageTrendPoint>();
+  left.forEach((point) => pointsByTime.set(point.time, point));
+  right.forEach((point) => pointsByTime.set(point.time, point));
+  return Array.from(pointsByTime.values()).sort((a, b) => a.time.localeCompare(b.time));
+}
+
 function UsageRequestTable({
   rows,
   loading,
@@ -1172,6 +1300,14 @@ function advanceUsageBucket(value: Date, bucket: UsageBucket) {
   }
 }
 
+function advanceUsageBucketBy(value: Date, bucket: UsageBucket, amount: number) {
+  if (bucket === "hour") {
+    value.setUTCHours(value.getUTCHours() + amount);
+  } else {
+    value.setUTCDate(value.getUTCDate() + amount);
+  }
+}
+
 function formatUsageBucketKey(value: Date, bucket: UsageBucket) {
   const year = value.getUTCFullYear();
   const month = padDatePart(value.getUTCMonth() + 1);
@@ -1196,6 +1332,14 @@ function emptyTrendPoint(time: string): UsageTrendPoint {
 
 function padDatePart(value: number) {
   return String(value).padStart(2, "0");
+}
+
+function maxDate(left: Date, right: Date) {
+  return left.getTime() >= right.getTime() ? left : right;
+}
+
+function minDate(left: Date, right: Date) {
+  return left.getTime() <= right.getTime() ? left : right;
 }
 
 function formatRange(startTime?: string, endTime?: string) {

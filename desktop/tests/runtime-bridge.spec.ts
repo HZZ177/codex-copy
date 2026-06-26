@@ -516,7 +516,9 @@ describe("RuntimeBridge", () => {
     await expect(
       runtime.usage.getTrend({
         bucket: "day",
+        limit: 168,
         model: "deepseek-v4-flash",
+        startAfter: "2026-06-18",
         timezoneOffsetMinutes: 480,
       }),
     ).resolves.toMatchObject({
@@ -540,7 +542,7 @@ describe("RuntimeBridge", () => {
     );
     expect(fetcher).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:8765/api/usage/trend?model=deepseek-v4-flash&bucket=day&timezone_offset_minutes=480",
+      "http://127.0.0.1:8765/api/usage/trend?model=deepseek-v4-flash&bucket=day&timezone_offset_minutes=480&start_after=2026-06-18&limit=168",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(

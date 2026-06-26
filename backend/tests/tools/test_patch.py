@@ -18,11 +18,11 @@ def _registry() -> ToolRegistry:
 
 
 async def _run(patch: str, tmp_path):
-    return await _registry().require("apply_patch").run({"patch": patch}, _context(tmp_path))
+    return await _registry().require("edit_file").run({"patch": patch}, _context(tmp_path))
 
 
-def test_apply_patch_tool_contract_documents_required_headers() -> None:
-    tool = _registry().require("apply_patch")
+def test_edit_file_tool_contract_documents_required_headers() -> None:
+    tool = _registry().require("edit_file")
 
     assert "*** Update File: <path>" in tool.description
     assert "*** Delete File: <path>" in tool.description

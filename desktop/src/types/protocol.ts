@@ -265,6 +265,8 @@ export interface UsageTrendPoint {
 
 export interface UsageTrendResponse {
   points: UsageTrendPoint[];
+  next_cursor?: string | null;
+  has_more?: boolean;
 }
 
 export interface UsageRequestLog {
@@ -359,6 +361,7 @@ export const AGENT_CHAT_ACTIONS = [
   "session_closed",
   "task_result",
   "reasoning",
+  "workspaceSkillsChanged",
 ] as const;
 
 export type AgentChatAction = (typeof AGENT_CHAT_ACTIONS)[number];
@@ -563,6 +566,10 @@ export interface AgentContextItem {
   source?: "slot" | "follow" | string;
   path?: string;
   name?: string;
+  skill_name?: string;
+  skillName?: string;
+  description?: string;
+  locator?: string;
   fileType?: "file" | "directory" | string;
   timestamp?: number;
   metadata?: Record<string, unknown>;

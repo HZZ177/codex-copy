@@ -101,9 +101,9 @@ async def test_list_dir_tool_returns_depth_limited_tree_and_pagination(tmp_path)
     assert "src/" in result.result["tree"]
 
 
-async def test_write_file_tool_creates_new_file_inside_workspace(tmp_path) -> None:
+async def test_create_file_tool_creates_new_file_inside_workspace(tmp_path) -> None:
     result = await _run(
-        "write_file",
+        "create_file",
         {"path": "out/result.txt", "content": "hello"},
         tmp_path,
     )
@@ -126,13 +126,13 @@ async def test_write_file_tool_creates_new_file_inside_workspace(tmp_path) -> No
     assert (tmp_path / "out" / "result.txt").read_text(encoding="utf-8") == "hello"
 
 
-async def test_write_file_tool_rejects_existing_file(tmp_path) -> None:
+async def test_create_file_tool_rejects_existing_file(tmp_path) -> None:
     target = tmp_path / "docs" / "note.md"
     target.parent.mkdir()
     target.write_text("old", encoding="utf-8")
 
     result = await _run(
-        "write_file",
+        "create_file",
         {"path": "docs/note.md", "content": "new"},
         tmp_path,
     )

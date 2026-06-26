@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import locale
+import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,15 @@ DENIED_FRAGMENTS = (
     "del /f /s c:\\",
     "remove-item -recurse -force c:\\",
 )
+
+
+@dataclass(frozen=True)
+class CommandProcessResult:
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    timed_out: bool
+    truncated: bool
 
 
 def create_shell_tools() -> list[FunctionTool]:
@@ -166,40 +177,12 @@ async def run_command_tool(
 
     started_at = time.perf_counter()
     try:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout_seconds,
-        )
-    except TimeoutError:
-        process.kill()
-        stdout_bytes, stderr_bytes = await process.communicate()
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        stdout, stdout_truncated = _decode_output(stdout_bytes, max_chars=max_capture_chars)
-        stderr, stderr_truncated = _decode_output(stderr_bytes, max_chars=max_capture_chars)
-        logger.warning(
-            "[ShellTool] 命令超时 | "
-            f"cwd={_relative(cwd, context)} | timeout_seconds={timeout_seconds} | "
-            f"duration_ms={duration_ms}"
-        )
-        return _command_result(
+        process_result = await asyncio.to_thread(
+            _run_subprocess,
             command=command,
-            cwd_label=cwd_label,
-            status="timed_out",
-            exit_code=process.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            duration_ms=duration_ms,
-            timed_out=True,
-            truncated=stdout_truncated or stderr_truncated,
-            approval=approval,
-            settings=settings,
+            cwd=cwd,
             timeout_seconds=timeout_seconds,
+            max_capture_chars=max_capture_chars,
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started_at) * 1000)
@@ -230,31 +213,49 @@ async def run_command_tool(
         )
 
     duration_ms = int((time.perf_counter() - started_at) * 1000)
-    stdout, stdout_truncated = _decode_output(stdout_bytes, max_chars=max_capture_chars)
-    stderr, stderr_truncated = _decode_output(stderr_bytes, max_chars=max_capture_chars)
+    if process_result.timed_out:
+        logger.warning(
+            "[ShellTool] 命令超时 | "
+            f"cwd={_relative(cwd, context)} | timeout_seconds={timeout_seconds} | "
+            f"duration_ms={duration_ms}"
+        )
+        return _command_result(
+            command=command,
+            cwd_label=cwd_label,
+            status="timed_out",
+            exit_code=process_result.exit_code,
+            stdout=process_result.stdout,
+            stderr=process_result.stderr,
+            duration_ms=duration_ms,
+            timed_out=True,
+            truncated=process_result.truncated,
+            approval=approval,
+            settings=settings,
+            timeout_seconds=timeout_seconds,
+        )
     result = _command_result(
         command=command,
         cwd_label=cwd_label,
         status="completed",
-        stdout=stdout,
-        stderr=stderr,
-        exit_code=process.returncode,
+        stdout=process_result.stdout,
+        stderr=process_result.stderr,
+        exit_code=process_result.exit_code,
         duration_ms=duration_ms,
         timed_out=False,
-        truncated=stdout_truncated or stderr_truncated,
+        truncated=process_result.truncated,
         approval=approval,
         settings=settings,
     )
-    if process.returncode != 0:
+    if process_result.exit_code != 0:
         logger.warning(
             "[ShellTool] 命令返回非零退出码 | "
-            f"cwd={result['cwd']} | exit_code={process.returncode} | "
+            f"cwd={result['cwd']} | exit_code={process_result.exit_code} | "
             f"duration_ms={duration_ms} | stdout_chars={len(result['stdout'])} | "
             f"stderr_chars={len(result['stderr'])}"
         )
     logger.info(
         "[ShellTool] 命令完成 | "
-        f"cwd={result['cwd']} | exit_code={process.returncode} | "
+        f"cwd={result['cwd']} | exit_code={process_result.exit_code} | "
         f"duration_ms={duration_ms} | stdout_chars={len(result['stdout'])} | "
         f"stderr_chars={len(result['stderr'])}"
     )
@@ -378,6 +379,52 @@ def _require_command(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ToolExecutionError("command 必须是非空字符串", code="invalid_tool_args")
     return value.strip()
+
+
+def _run_subprocess(
+    *,
+    command: str,
+    cwd: Path,
+    timeout_seconds: float,
+    max_capture_chars: int,
+) -> CommandProcessResult:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout, stdout_truncated = _decode_output(_output_bytes(exc.output), max_chars=max_capture_chars)
+        stderr, stderr_truncated = _decode_output(_output_bytes(exc.stderr), max_chars=max_capture_chars)
+        return CommandProcessResult(
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=None,
+            timed_out=True,
+            truncated=stdout_truncated or stderr_truncated,
+        )
+    stdout, stdout_truncated = _decode_output(completed.stdout or b"", max_chars=max_capture_chars)
+    stderr, stderr_truncated = _decode_output(completed.stderr or b"", max_chars=max_capture_chars)
+    return CommandProcessResult(
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=completed.returncode,
+        timed_out=False,
+        truncated=stdout_truncated or stderr_truncated,
+    )
+
+
+def _output_bytes(value: bytes | str | None) -> bytes:
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    return value.encode(locale.getpreferredencoding(False), errors="replace")
 
 
 def _reject_obviously_unsafe(command: str) -> None:

@@ -1,18 +1,54 @@
+import type { WorkspaceSkillSummary } from "@/runtime";
+
 export interface SlashCommand {
-  id: "clear" | "settings" | "model" | "workspace";
+  id: string;
+  kind: "builtin" | "skill_group" | "skill";
   label: string;
   title: string;
   description: string;
+  skill?: WorkspaceSkillSummary;
+  childCount?: number;
+  searchText?: string;
 }
 
 export const defaultSlashCommands: SlashCommand[] = [
   {
     id: "clear",
+    kind: "builtin",
     label: "/clear",
     title: "清空输入",
     description: "清空当前输入框内容",
   },
 ];
+
+export function skillGroupSlashCommand(skills: WorkspaceSkillSummary[] = []): SlashCommand {
+  return {
+    id: "skill",
+    kind: "skill_group",
+    label: "Skill",
+    title: "Skill",
+    description: skills.length ? `选择 ${skills.length} 个工作区 Skill` : "选择工作区 Skill",
+    childCount: skills.length,
+    searchText: skills
+      .map((skill) => `${skill.label} ${skill.name} ${skill.description} ${skill.source}`)
+      .join(" "),
+  };
+}
+
+export function skillToSlashCommand(skill: WorkspaceSkillSummary): SlashCommand {
+  return {
+    id: `skill:${skill.name}`,
+    kind: "skill",
+    label: skill.label || `/${skill.name}`,
+    title: skill.name,
+    description: skill.description,
+    skill,
+  };
+}
+
+export function buildSlashCommands(skills: WorkspaceSkillSummary[] = []): SlashCommand[] {
+  return skills.length ? [skillGroupSlashCommand(skills), ...defaultSlashCommands] : [...defaultSlashCommands];
+}
 
 export function getSlashQuery(value: string): string | null {
   const match = /(?:^|\s)\/([\w-]*)$/.exec(value);
@@ -24,8 +60,19 @@ export function filterSlashCommands(commands: SlashCommand[], query: string): Sl
     return commands;
   }
   return commands.filter((command) => {
-    const haystack = `${command.label} ${command.title} ${command.description}`.toLowerCase();
+    const haystack = `${command.label} ${command.title} ${command.description} ${command.searchText || ""}`.toLowerCase();
     return haystack.includes(query.toLowerCase());
+  });
+}
+
+export function filterSlashSkills(skills: WorkspaceSkillSummary[], query: string): WorkspaceSkillSummary[] {
+  if (!query) {
+    return skills;
+  }
+  const normalizedQuery = query.toLowerCase();
+  return skills.filter((skill) => {
+    const haystack = `${skill.label} ${skill.name} ${skill.description} ${skill.source}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
   });
 }
 
@@ -34,4 +81,8 @@ export function replaceSlashQuery(value: string, replacement: string): string {
     const prefix = match.startsWith(" ") ? " " : "";
     return `${prefix}${replacement}`;
   });
+}
+
+export function removeSlashQuery(value: string): string {
+  return replaceSlashQuery(value, "").trimEnd();
 }

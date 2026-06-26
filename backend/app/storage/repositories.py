@@ -2019,42 +2019,90 @@ class LLMRequestLogsRepository:
         bucket: str = "day",
         timezone_offset_minutes: int = 0,
     ) -> list[dict[str, Any]]:
+        return self.trend_page(
+            start_time=start_time,
+            end_time=end_time,
+            model=model,
+            bucket=bucket,
+            timezone_offset_minutes=timezone_offset_minutes,
+        )["points"]
+
+    def trend_page(
+        self,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        model: str | None = None,
+        bucket: str = "day",
+        timezone_offset_minutes: int = 0,
+        start_after: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         if bucket not in {"hour", "day"}:
             raise ValueError(f"不支持的用量统计粒度: {bucket}")
         _validate_timezone_offset(timezone_offset_minutes)
-        where, params = self._filters(start_time=start_time, end_time=end_time, model=model)
-        with self.db.connect() as conn:
-            rows = conn.execute(
-                f"select * from llm_request_logs {where} order by start_time asc, id asc",
-                params,
-            ).fetchall()
-        points: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            point_key = _usage_bucket_key(
-                row["start_time"],
+        if limit is not None and limit < 1:
+            raise ValueError("趋势分页数量必须大于等于 1")
+        if limit is not None and limit > 2000:
+            raise ValueError("趋势分页数量不能超过 2000")
+
+        cursor_start_time = (
+            _usage_cursor_next_start_time(
+                start_after,
                 bucket=bucket,
                 timezone_offset_minutes=timezone_offset_minutes,
             )
-            point = points.setdefault(
-                point_key,
-                {
-                    "time": point_key,
-                    "request_count": 0,
-                    "input_tokens": 0,
-                    "cache_read_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "failed_count": 0,
-                },
-            )
-            point["request_count"] += 1
-            point["input_tokens"] += int(row["input_tokens"] or 0)
-            point["cache_read_tokens"] += int(row["cache_read_tokens"] or 0)
-            point["output_tokens"] += int(row["output_tokens"] or 0)
-            point["total_tokens"] += int(row["total_tokens"] or 0)
-            if row["status"] == "failed":
-                point["failed_count"] += 1
-        return [points[key] for key in sorted(points)]
+            if start_after
+            else None
+        )
+        effective_start_time = _max_iso_time(start_time, cursor_start_time)
+        where, params = self._filters(start_time=effective_start_time, end_time=end_time, model=model)
+        bucket_expression = _usage_bucket_sql_expression(bucket)
+        timezone_modifier = _sqlite_timezone_modifier(timezone_offset_minutes)
+        query_params: list[Any] = [timezone_modifier, *params]
+        fetch_limit = limit + 1 if limit is not None else None
+        limit_sql = ""
+        if fetch_limit is not None:
+            limit_sql = "limit ?"
+            query_params.append(fetch_limit)
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                f"""
+                select
+                  {bucket_expression} as time,
+                  count(*) as request_count,
+                  coalesce(sum(input_tokens), 0) as input_tokens,
+                  coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+                  coalesce(sum(output_tokens), 0) as output_tokens,
+                  coalesce(sum(total_tokens), 0) as total_tokens,
+                  coalesce(sum(case when status = 'failed' then 1 else 0 end), 0) as failed_count
+                from llm_request_logs
+                {where}
+                group by time
+                order by time asc
+                {limit_sql}
+                """,
+                query_params,
+            ).fetchall()
+        has_more = fetch_limit is not None and len(rows) > limit
+        visible_rows = rows[:limit] if has_more and limit is not None else rows
+        points = [
+            {
+                "time": str(row["time"]),
+                "request_count": int(row["request_count"] or 0),
+                "input_tokens": int(row["input_tokens"] or 0),
+                "cache_read_tokens": int(row["cache_read_tokens"] or 0),
+                "output_tokens": int(row["output_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "failed_count": int(row["failed_count"] or 0),
+            }
+            for row in visible_rows
+        ]
+        return {
+            "points": points,
+            "next_cursor": points[-1]["time"] if has_more and points else None,
+            "has_more": has_more,
+        }
 
     def list_models(self) -> list[str]:
         with self.db.connect() as conn:
@@ -2690,6 +2738,47 @@ def _usage_bucket_key(
     if bucket == "hour":
         return local_time.strftime("%Y-%m-%dT%H:00:00")
     return local_time.strftime("%Y-%m-%d")
+
+
+def _usage_bucket_sql_expression(bucket: str) -> str:
+    if bucket == "hour":
+        return "strftime('%Y-%m-%dT%H:00:00', start_time, ?)"
+    return "strftime('%Y-%m-%d', start_time, ?)"
+
+
+def _sqlite_timezone_modifier(timezone_offset_minutes: int) -> str:
+    sign = "+" if timezone_offset_minutes >= 0 else "-"
+    return f"{sign}{abs(timezone_offset_minutes)} minutes"
+
+
+def _usage_cursor_next_start_time(
+    start_after: str,
+    *,
+    bucket: str,
+    timezone_offset_minutes: int,
+) -> str:
+    if bucket == "hour":
+        try:
+            local_bucket = datetime.strptime(start_after, "%Y-%m-%dT%H:00:00")
+        except ValueError as exc:
+            raise ValueError("趋势游标格式不正确") from exc
+        next_bucket = local_bucket + timedelta(hours=1)
+    else:
+        try:
+            local_bucket = datetime.strptime(start_after, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("趋势游标格式不正确") from exc
+        next_bucket = local_bucket + timedelta(days=1)
+    utc_bucket = next_bucket - timedelta(minutes=timezone_offset_minutes)
+    return to_iso_z(utc_bucket.replace(tzinfo=UTC))
+
+
+def _max_iso_time(left: str | None, right: str | None) -> str | None:
+    if not left:
+        return right
+    if not right:
+        return left
+    return max(left, right)
 
 
 class StorageRepositories:

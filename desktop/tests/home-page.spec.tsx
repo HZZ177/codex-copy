@@ -824,6 +824,13 @@ function fakeRuntime({
       ),
     },
     workspace: {
+      listSkills: vi.fn().mockResolvedValue({
+        workspace_root: "D:/repo",
+        fingerprint: "test-fingerprint",
+        loaded_at: "2026-06-25T12:00:00Z",
+        skills: [],
+        diagnostics: [],
+      }),
       listDirectory: vi.fn((_scope: unknown, path = ""): Promise<WorkspaceTreeResponse> => {
         const entries = workspaceEntriesByPath[path];
         if (!entries) {

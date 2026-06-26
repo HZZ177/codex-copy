@@ -26,6 +26,8 @@ from backend.app.core.config import AppSettings, get_settings
 from backend.app.core.exception_handler import register_exception_handlers
 from backend.app.core.logger import configure_logging, logger
 from backend.app.core.middleware import RequestLoggingMiddleware
+from backend.app.keydex import KeydexWorkspaceRuntimeCache
+from backend.app.keydex.watcher import KeydexWorkspaceWatcher
 from backend.app.model import OpenAICompatibleProviderClient
 from backend.app.model.e2e_transport import create_e2e_model_transport
 from backend.app.runtime import create_desktop_runtime
@@ -73,6 +75,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         transport=getattr(app.state, "model_http_transport", None),
     )
     app.state.tool_registry = create_default_tool_registry()
+    app.state.keydex_runtime_cache = KeydexWorkspaceRuntimeCache()
     app.state.agent_runner = AgentRunner(
         model_settings_provider=lambda: load_effective_model_settings(app.state.repositories),
         model_http_transport_provider=lambda: getattr(app.state, "model_http_transport", None),
@@ -83,8 +86,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         settings=resolved_settings,
         repositories=app.state.repositories,
         agent_runner=app.state.agent_runner,
+        keydex_runtime_cache=app.state.keydex_runtime_cache,
     )
     app.state.chat_stream_manager = ChatStreamManager(app.state.chat_service)
+    app.state.keydex_workspace_watcher = KeydexWorkspaceWatcher(
+        runtime_cache=app.state.keydex_runtime_cache,
+        notifier=lambda session_id, data: app.state.chat_stream_manager.broadcast(
+            session_id=session_id,
+            action="workspaceSkillsChanged",
+            data=data,
+        ),
+    )
     app.state.runtime = create_desktop_runtime(
         settings=resolved_settings,
         database=app.state.database,

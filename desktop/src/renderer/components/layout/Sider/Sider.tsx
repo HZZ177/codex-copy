@@ -67,14 +67,14 @@ export interface SiderProps {
   conversations?: SiderEntry[];
   runtime?: RuntimeBridge;
   activePath?: string;
+  showChatBucket?: boolean;
+  newConversationPath?: string;
+  deleteActiveFallbackPath?: string;
+  getSessionPath?: (sessionId: string) => string;
+  getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
   onToggleSidebar?: () => void;
   onNavigate?: (path: string) => void;
 }
-
-const mainEntries = [
-  { key: "quick-chat", label: "新对话", path: newPromptConversationPath(), icon: SquarePen },
-  { key: "search", label: "搜索", path: "/search", icon: Search },
-];
 
 export function Sider({
   collapsed = false,
@@ -82,6 +82,11 @@ export function Sider({
   conversations,
   runtime = runtimeBridge,
   activePath = "",
+  showChatBucket = true,
+  newConversationPath = newPromptConversationPath(),
+  deleteActiveFallbackPath = "/guid",
+  getSessionPath = conversationPath,
+  getWorkspaceNewConversationPath = newWorkspaceConversationPath,
   onToggleSidebar,
   onNavigate,
 }: SiderProps) {
@@ -149,12 +154,20 @@ export function Sider({
           {
             isStreaming,
             waitingApproval,
-            hasUnread: state.hasUnread && !isStreaming && !waitingApproval && !isActivePath(activePath, conversationPath(sessionId)),
+            hasUnread: state.hasUnread && !isStreaming && !waitingApproval && !isActivePath(activePath, getSessionPath(sessionId)),
           },
         ];
       }),
     );
-  }, [activePath, sharedSessionState]);
+  }, [activePath, getSessionPath, sharedSessionState]);
+
+  const mainEntries = useMemo(
+    () => [
+      { key: "quick-chat", label: "新对话", path: newConversationPath, icon: SquarePen },
+      { key: "search", label: "搜索", path: "/search", icon: Search },
+    ],
+    [newConversationPath],
+  );
 
   const navigateTo = (path: string) => {
     setSearchOpen(false);
@@ -263,8 +276,8 @@ export function Sider({
       setLoadedSessions((items) => items.filter((item) => item.id !== id));
       setConfirmDeleteId(null);
       notifications.success("已删除会话");
-      if (isActivePath(activePath, conversationPath(id))) {
-        onNavigate?.("/guid");
+      if (isActivePath(activePath, getSessionPath(id))) {
+        onNavigate?.(deleteActiveFallbackPath);
       }
     } catch (reason) {
       notifications.error(errorMessage(reason));
@@ -388,6 +401,8 @@ export function Sider({
                 canMutate={canMutateConversations}
                 sessionIndicators={sessionIndicators}
                 workspaceId={group.workspaceId}
+                getSessionPath={getSessionPath}
+                getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
                 historyExpansionLoading={Boolean(group.workspaceId && loadingWorkspaceHistoryIds.has(group.workspaceId))}
                 historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                 key={group.id}
@@ -410,7 +425,7 @@ export function Sider({
             <HistoryBucket
               title="项目"
               kind="workspace"
-              newConversationPath={newWorkspaceConversationPath(firstWorkspaceId)}
+              newConversationPath={getWorkspaceNewConversationPath(firstWorkspaceId)}
               onNavigate={navigateTo}
             >
               {workspaceGroups.map((group) => (
@@ -427,6 +442,8 @@ export function Sider({
                   canMutate={canMutateConversations}
                   sessionIndicators={sessionIndicators}
                   workspaceId={group.workspaceId}
+                  getSessionPath={getSessionPath}
+                  getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
                   historyExpansionLoading={Boolean(group.workspaceId && loadingWorkspaceHistoryIds.has(group.workspaceId))}
                   historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                   key={group.id}
@@ -444,35 +461,38 @@ export function Sider({
                 />
               ))}
             </HistoryBucket>
-            <HistoryBucket
-              title="对话"
-              kind="chat"
-              newConversationPath={newChatConversationPath()}
-              onNavigate={navigateTo}
-            >
-              <SiderSection
+            {showChatBucket ? (
+              <HistoryBucket
                 title="对话"
                 kind="chat"
-                items={chatItems}
-                collapsed={collapsed}
-                emptyText={historyEmptyText}
-                emptyLoading={historyEmptyLoading}
-                activePath={activePath}
-                editing={editing}
-                confirmDeleteId={confirmDeleteId}
-                canMutate={canMutateConversations}
-                sessionIndicators={sessionIndicators}
-                hideTitle
-                onDelete={(id) => void deleteConversation(id)}
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                onCancelRename={() => setEditing(null)}
-                onConfirmDelete={setConfirmDeleteId}
-                onRename={(id, title) => void renameConversation(id, title)}
-                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
-                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                newConversationPath={newChatConversationPath()}
                 onNavigate={navigateTo}
-              />
-            </HistoryBucket>
+              >
+                <SiderSection
+                  title="对话"
+                  kind="chat"
+                  items={chatItems}
+                  collapsed={collapsed}
+                  emptyText={historyEmptyText}
+                  emptyLoading={historyEmptyLoading}
+                  activePath={activePath}
+                  editing={editing}
+                  confirmDeleteId={confirmDeleteId}
+                  canMutate={canMutateConversations}
+                  sessionIndicators={sessionIndicators}
+                  hideTitle
+                  getSessionPath={getSessionPath}
+                  onDelete={(id) => void deleteConversation(id)}
+                  onCancelDelete={() => setConfirmDeleteId(null)}
+                  onCancelRename={() => setEditing(null)}
+                  onConfirmDelete={setConfirmDeleteId}
+                  onRename={(id, title) => void renameConversation(id, title)}
+                  onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                  onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+                  onNavigate={navigateTo}
+                />
+              </HistoryBucket>
+            ) : null}
           </>
         )}
       </div>
@@ -503,6 +523,7 @@ export function Sider({
       {searchOpen ? (
         <SessionSearchDialog
           conversations={searchResults}
+          getSessionPath={getSessionPath}
           loading={loadingHistory}
           onClose={() => setSearchOpen(false)}
           onNavigate={navigateTo}
@@ -516,6 +537,7 @@ export function Sider({
 
 function SessionSearchDialog({
   conversations,
+  getSessionPath,
   loading,
   onClose,
   onNavigate,
@@ -523,6 +545,7 @@ function SessionSearchDialog({
   query,
 }: {
   conversations: SiderEntry[];
+  getSessionPath: (sessionId: string) => string;
   loading: boolean;
   onClose: () => void;
   onNavigate: (path: string) => void;
@@ -569,7 +592,7 @@ function SessionSearchDialog({
               className={styles.searchResult}
               key={item.id}
               type="button"
-              onClick={() => onNavigate(conversationPath(item.id))}
+              onClick={() => onNavigate(getSessionPath(item.id))}
             >
               <MessageCircle size={15} />
               <span>{item.title}</span>
@@ -598,6 +621,8 @@ interface SiderSectionProps {
   workspaceId?: string;
   historyExpansionLoading?: boolean;
   historyPreviewLimit?: number;
+  getSessionPath?: (sessionId: string) => string;
+  getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
   onDelete?: (id: string) => void;
   onCancelDelete?: () => void;
   onCancelRename?: () => void;
@@ -678,6 +703,8 @@ function SiderSection({
   workspaceId,
   historyExpansionLoading = false,
   historyPreviewLimit,
+  getSessionPath = conversationPath,
+  getWorkspaceNewConversationPath = newWorkspaceConversationPath,
   onDelete,
   onCancelDelete,
   onCancelRename,
@@ -709,10 +736,10 @@ function SiderSection({
     if (!canToggleSection || !activePathChanged) {
       return;
     }
-    if (items.some((item) => isActivePath(activePath, conversationPath(item.id)))) {
+    if (items.some((item) => isActivePath(activePath, getSessionPath(item.id)))) {
       setSectionExpanded(true);
     }
-  }, [activePath, canToggleSection, items]);
+  }, [activePath, canToggleSection, getSessionPath, items]);
 
   useEffect(() => {
     if (!shouldLimitHistory && historyExpanded) {
@@ -762,7 +789,7 @@ function SiderSection({
   };
 
   const renderHistoryRow = (item: SiderEntry) => {
-    const path = conversationPath(item.id);
+    const path = getSessionPath(item.id);
     const active = isActivePath(activePath, path);
     const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
     const showUpdatedTime = Boolean(
@@ -839,7 +866,7 @@ function SiderSection({
 
   if (collapsed) {
     const collapsedProjectActive =
-      canToggleSection && items.some((item) => isActivePath(activePath, conversationPath(item.id)));
+      canToggleSection && items.some((item) => isActivePath(activePath, getSessionPath(item.id)));
     return (
       <section className={styles.collapsedSection} aria-label={title} data-kind={kind}>
         {canToggleSection ? (
@@ -872,7 +899,7 @@ function SiderSection({
         >
           <div className={styles.collapsedSectionItemsInner}>
             {items.map((item) => {
-              const path = conversationPath(item.id);
+              const path = getSessionPath(item.id);
               const active = isActivePath(activePath, path);
               const indicator = sessionIndicators[item.id] ?? EMPTY_SESSION_INDICATOR;
               return (
@@ -941,7 +968,7 @@ function SiderSection({
               type="button"
               aria-label={`在项目 ${title} 中新建对话`}
               title={`在项目 ${title} 中新建对话`}
-              onClick={() => onNavigate?.(newWorkspaceConversationPath(workspaceId))}
+              onClick={() => onNavigate?.(getWorkspaceNewConversationPath(workspaceId))}
             >
               <SquarePen size={14} strokeWidth={1.8} aria-hidden="true" />
             </button>

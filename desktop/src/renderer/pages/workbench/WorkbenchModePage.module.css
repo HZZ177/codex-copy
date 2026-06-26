@@ -1,0 +1,130 @@
+.root {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-bg);
+  color: var(--color-text-1);
+  overflow: hidden;
+}
+
+.picker {
+  position: relative;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px 32px 92px;
+}
+
+.pickerContent {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 14px;
+  justify-items: center;
+}
+
+.label {
+  color: var(--color-text-3);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.picker h1 {
+  margin: 0 0 4px;
+  color: var(--color-text-1);
+  font-size: 24px;
+  font-weight: 680;
+  line-height: 1.25;
+}
+
+.error {
+  max-width: 100%;
+  margin: 0;
+  color: var(--color-danger, #c93535);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.workspace {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+  padding-bottom: 76px;
+}
+
+.toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--color-border-1);
+  background: var(--surface-bg);
+}
+
+.workspaceSelector {
+  min-width: 0;
+  max-width: min(420px, 60%);
+}
+
+.context {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas {
+  min-height: 0;
+  min-width: 0;
+}
+
+.assistantCapsule {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 4;
+  width: min(620px, calc(100% - 48px));
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-bg) 82%, transparent);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text-2);
+  font-size: 13px;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.assistantCapsule[data-disabled="true"] {
+  color: var(--color-text-3);
+  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+}
+
+@media (max-width: 900px) {
+  .picker {
+    padding-inline: 20px;
+  }
+
+  .toolbar {
+    padding-inline: 12px;
+  }
+
+  .workspaceSelector {
+    max-width: 100%;
+  }
+
+  .context {
+    display: none;
+  }
+}

@@ -8,11 +8,12 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from backend.app.api.dependencies import get_repositories
 from backend.app.core.logger import logger
+from backend.app.keydex.schemas import WorkspaceSkillsResponse, workspace_skills_response
 from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.services import WorkspaceRuntimeContext, WorkspaceService, WorkspaceServiceError
 from backend.app.storage import StorageRepositories
@@ -209,6 +210,20 @@ async def search_workspace(
 
 
 @router.get(
+    "/api/workspaces/{workspace_id}/skills",
+    response_model=WorkspaceSkillsResponse,
+)
+async def list_workspace_skills(
+    workspace_id: str,
+    request: Request,
+    force_reload: bool = False,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceSkillsResponse:
+    scope = _workspace_scope(repositories, workspace_id)
+    return await _workspace_skills_response(request, scope, force_reload=force_reload)
+
+
+@router.get(
     "/api/workspaces/{workspace_id}/annotations",
     response_model=list[WorkspaceFileAnnotationResponse],
 )
@@ -326,6 +341,35 @@ async def search_session_workspace(
 ) -> list[WorkspaceSearchResult]:
     scope = _session_workspace_scope(repositories, session_id)
     return await asyncio.to_thread(_search, scope, q, limit)
+
+
+@router.get(
+    "/api/sessions/{session_id}/workspace/skills",
+    response_model=WorkspaceSkillsResponse,
+)
+async def list_session_workspace_skills(
+    session_id: str,
+    request: Request,
+    force_reload: bool = False,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceSkillsResponse:
+    scope = _session_workspace_scope(repositories, session_id)
+    return await _workspace_skills_response(request, scope, force_reload=force_reload)
+
+
+async def _workspace_skills_response(
+    request: Request,
+    scope: WorkspaceRuntimeContext,
+    *,
+    force_reload: bool,
+) -> WorkspaceSkillsResponse:
+    runtime_cache = request.app.state.keydex_runtime_cache
+    snapshot = await asyncio.to_thread(
+        runtime_cache.get_snapshot,
+        scope.workspace.root_path,
+        force_reload=force_reload,
+    )
+    return workspace_skills_response(snapshot)
 
 
 @router.get(

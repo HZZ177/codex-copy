@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from backend.app.core.config import AppSettings
+from backend.app.core.config import AppSettings, default_data_dir
 
 
 def test_app_settings_exposes_desktop_runtime_defaults(tmp_path) -> None:
@@ -21,6 +21,12 @@ def test_app_settings_exposes_desktop_runtime_defaults(tmp_path) -> None:
     assert settings.shell_timeout_seconds > 0
     assert settings.e2e_model_transport is False
     assert settings.e2e_stream_delay_ms >= 0
+
+
+def test_app_settings_default_data_dir_is_backend_app_data() -> None:
+    settings = AppSettings()
+
+    assert settings.data_dir == default_data_dir().resolve()
 
 
 def test_app_settings_can_be_overridden_by_environment(monkeypatch, tmp_path) -> None:

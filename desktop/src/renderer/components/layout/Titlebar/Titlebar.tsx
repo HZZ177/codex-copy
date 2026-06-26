@@ -2,6 +2,8 @@ import { Minus, Square, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 
+import type { AppMode } from "@/renderer/components/layout/appMode";
+
 import styles from "./Titlebar.module.css";
 import { createWindowControls } from "./windowControls";
 import type { WindowControls } from "./windowControls";
@@ -11,10 +13,15 @@ const APP_ICON_SRC = "/favicon-32.png";
 export interface TitlebarProps {
   title: string;
   windowControls?: WindowControls;
+  modeSwitch?: {
+    currentMode: AppMode;
+    onModeChange: (mode: AppMode) => void;
+  };
 }
 
 export function Titlebar({
   title,
+  modeSwitch,
   windowControls,
 }: TitlebarProps) {
   const controls = useMemo(() => windowControls ?? createWindowControls(), [windowControls]);
@@ -44,10 +51,7 @@ export function Titlebar({
         <div className={styles.brandMark} role="img" aria-label="Keydex">
           <img alt="" draggable={false} src={APP_ICON_SRC} />
         </div>
-        <div className={styles.navGhost} aria-hidden="true">
-          <span />
-          <span />
-        </div>
+        {modeSwitch ? <ModeSwitch modeSwitch={modeSwitch} /> : null}
       </div>
 
       <div className={styles.dragRegion} data-tauri-drag-region>
@@ -89,6 +93,34 @@ export function Titlebar({
         </div>
       </div>
     </header>
+  );
+}
+
+function ModeSwitch({ modeSwitch }: { modeSwitch: NonNullable<TitlebarProps["modeSwitch"]> }) {
+  return (
+    <div
+      className={styles.modeSwitch}
+      role="group"
+      aria-label="应用模式"
+      data-titlebar-interactive="true"
+      data-testid="app-mode-switch"
+    >
+      {(["agent", "workbench"] as const).map((mode) => {
+        const active = modeSwitch.currentMode === mode;
+        return (
+          <button
+            className={styles.modeButton}
+            type="button"
+            aria-pressed={active}
+            data-active={active ? "true" : "false"}
+            key={mode}
+            onClick={() => modeSwitch.onModeChange(mode)}
+          >
+            {mode === "agent" ? "Agent" : "Workbench"}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

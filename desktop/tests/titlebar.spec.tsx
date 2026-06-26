@@ -21,10 +21,17 @@ describe("Titlebar", () => {
   });
 
   it("keeps the left titlebar area for brand and future top-level actions", () => {
-    render(<Titlebar title="测试标题" />);
+    const onModeChange = vi.fn();
+
+    render(<Titlebar title="测试标题" modeSwitch={{ currentMode: "agent", onModeChange }} />);
 
     expect(screen.getByLabelText("Keydex")).not.toBeNull();
-    expect(screen.getByTestId("titlebar").querySelectorAll("[aria-hidden='true'] span")).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "应用模式" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Workbench" }));
+    expect(onModeChange).toHaveBeenCalledWith("workbench");
   });
 
   it("delegates titlebar gestures to injected Tauri controls", async () => {
@@ -39,6 +46,7 @@ describe("Titlebar", () => {
     render(
       <Titlebar
         title="测试标题"
+        modeSwitch={{ currentMode: "agent", onModeChange: vi.fn() }}
         windowControls={controls}
       />,
     );
@@ -50,6 +58,7 @@ describe("Titlebar", () => {
 
     const minimizeIcon = screen.getByLabelText("最小化").querySelector("svg");
     expect(minimizeIcon).not.toBeNull();
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Workbench" }), { button: 0 });
     fireEvent.mouseDown(minimizeIcon as SVGElement, { button: 0 });
     fireEvent.click(minimizeIcon as SVGElement);
     fireEvent.click(screen.getByLabelText("最大化或还原"));

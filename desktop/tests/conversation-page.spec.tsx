@@ -65,6 +65,41 @@ describe("ConversationPage", () => {
     expect(screen.queryByLabelText("选择工作区")).toBeNull();
   });
 
+  it("force reloads workspace skills when the websocket reports workspace changes", async () => {
+    const workspaceListSkills = vi.fn().mockResolvedValue({
+      workspace_root: "D:/repo",
+      fingerprint: "test-fingerprint",
+      loaded_at: "2026-06-25T12:00:00Z",
+      skills: [],
+      diagnostics: [],
+    });
+    const { runtime, emit } = fakeRuntime({
+      session: agentSession({
+        session_type: "workspace",
+        workspace_id: "ws-1",
+        cwd: "D:/repo",
+        workspace_roots: ["D:/repo"],
+        workspace: workspace("ws-1", "repo", "D:/repo"),
+      }),
+      workspaceListSkills,
+    });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await waitFor(() => {
+      expect(workspaceListSkills).toHaveBeenCalledWith({ sessionId: "ses-1" }, { forceReload: false });
+    });
+
+    act(() => {
+      emit(agentEvent("workspaceSkillsChanged", { session_id: "ses-1" }));
+    });
+
+    await waitFor(() => {
+      expect(workspaceListSkills).toHaveBeenNthCalledWith(2, { sessionId: "ses-1" }, { forceReload: true });
+    });
+  });
+
   it("does not show project-free workspace picker in the bottom composer for a pure chat session", async () => {
     const { runtime } = fakeRuntime();
 
@@ -130,7 +165,8 @@ describe("ConversationPage", () => {
     expect(screen.getByTestId("message-surface").textContent).not.toContain("pnpm test");
     expect(screen.queryByLabelText("继续输入")).toBeNull();
 
-    fireEvent.click(within(dock).getByRole("button", { name: "是，仅允许本次" }));
+    fireEvent.click(within(dock).getByRole("radio", { name: "是" }));
+    fireEvent.click(within(dock).getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("composer-approval-card")).toBeNull();
@@ -985,12 +1021,15 @@ describe("ConversationPage", () => {
     expect(screen.getByLabelText("已添加上下文").textContent).toContain("引用片段");
     vi.useFakeTimers();
     try {
-      fireEvent.mouseOver(screen.getByText("引用片段"));
+      fireEvent.mouseEnter(screen.getByText("引用片段"));
       act(() => {
-        vi.advanceTimersByTime(200);
+        vi.advanceTimersByTime(220);
       });
-      expect(screen.getByRole("button", { name: "复制" })).not.toBeNull();
-      expect(screen.getByRole("button", { name: "删除" })).not.toBeNull();
+      const hoverCard = document.querySelector('[data-sendbox-context-hover-card="true"]');
+      expect(hoverCard?.textContent).toContain("引用片段");
+      expect(hoverCard?.textContent).toContain("可以引用的回答");
+      expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+      expect(screen.getByRole("button", { name: /删除引用片段/ })).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -1552,6 +1591,13 @@ function fakeRuntime({
   chat = vi.fn(),
   cancel = vi.fn(),
   workspaceSearch = vi.fn().mockResolvedValue([]),
+  workspaceListSkills = vi.fn().mockResolvedValue({
+    workspace_root: "D:/repo",
+    fingerprint: "test-fingerprint",
+    loaded_at: "2026-06-25T12:00:00Z",
+    skills: [],
+    diagnostics: [],
+  }),
   workspaceEntriesByPath = { "": [] },
   workspaceFilesByPath = {},
   wsStatus = "open",
@@ -1563,6 +1609,7 @@ function fakeRuntime({
   chat?: ReturnType<typeof vi.fn>;
   cancel?: ReturnType<typeof vi.fn>;
   workspaceSearch?: ReturnType<typeof vi.fn>;
+  workspaceListSkills?: ReturnType<typeof vi.fn>;
   workspaceEntriesByPath?: Record<string, WorkspaceEntry[]>;
   workspaceFilesByPath?: Record<string, string>;
   wsStatus?: WsConnectionStatus;
@@ -1627,6 +1674,7 @@ function fakeRuntime({
       listModels: vi.fn().mockResolvedValue({ models: model ? [{ id: model }] : [], cached: true }),
     },
     workspace: {
+      listSkills: workspaceListSkills,
       listDirectory: vi.fn((_scope: unknown, path = ""): Promise<WorkspaceTreeResponse> => {
         const entries = workspaceEntriesByPath[path];
         if (!entries) {

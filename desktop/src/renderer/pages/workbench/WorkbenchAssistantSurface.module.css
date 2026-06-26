@@ -1,0 +1,240 @@
+.surface {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.capsule {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  width: min(720px, calc(100% - 48px));
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.composer {
+  min-height: 52px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--surface-bg) 88%, transparent);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(18px);
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-1);
+}
+
+.expandedLayer {
+  position: absolute;
+  inset: 48px 0 76px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 24px 24px 18px;
+  pointer-events: none;
+  backdrop-filter: blur(5px);
+}
+
+.messages {
+  width: min(760px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  scrollbar-width: thin;
+  pointer-events: auto;
+}
+
+.messageBubble {
+  width: fit-content;
+  max-width: min(620px, 82%);
+  display: grid;
+  gap: 5px;
+  padding: 10px 13px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 74%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 90%, transparent);
+  box-shadow: 0 10px 34px rgb(15 23 42 / 10%);
+  color: var(--color-text-1);
+  backdrop-filter: blur(16px);
+}
+
+.messageBubble[data-role="user"] {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--surface-active) 78%, var(--color-bg-elevated));
+}
+
+.messageBubble[data-role="assistant"],
+.messageBubble[data-role="tool"],
+.messageBubble[data-role="status"],
+.messageBubble[data-role="error"] {
+  align-self: flex-start;
+}
+
+.messageBubble[data-role="error"] {
+  border-color: color-mix(in srgb, var(--color-danger) 32%, var(--color-border-default));
+  color: var(--color-danger);
+}
+
+.messageBubble span {
+  color: var(--color-text-3);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.messageBubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  min-width: 360px;
+  max-width: min(520px, 46vw);
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr) auto;
+  border-left: 1px solid var(--color-border-1);
+  background: color-mix(in srgb, var(--surface-bg) 94%, transparent);
+  box-shadow: -12px 0 36px rgb(15 23 42 / 10%);
+  pointer-events: auto;
+  backdrop-filter: blur(18px);
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 46px 0 16px;
+  border-bottom: 1px solid var(--color-border-1);
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.drawerHeader button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+
+.drawerHeader button:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-1);
+}
+
+.drawer .messages {
+  width: 100%;
+  padding: 14px;
+}
+
+.drawer .messageBubble {
+  max-width: 92%;
+}
+
+.approvalPrompt {
+  display: grid;
+  gap: 8px;
+  margin: 0 14px 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--color-border-default));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--color-warning));
+  color: var(--color-text-1);
+}
+
+.approvalPrompt strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.approvalPrompt p {
+  margin: 0;
+  color: var(--color-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.approvalError {
+  color: var(--color-danger) !important;
+}
+
+.approvalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.approvalActions button {
+  min-width: 58px;
+  height: 30px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 999px;
+  background: var(--surface-bg);
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.approvalActions button[data-primary="true"] {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border-2));
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.approvalActions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.drawerComposer {
+  padding: 10px;
+  border-top: 1px solid var(--color-border-1);
+}
+
+@media (max-width: 900px) {
+  .capsule {
+    width: calc(100% - 24px);
+    bottom: 12px;
+  }
+
+  .drawer {
+    left: 0;
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .expandedLayer {
+    padding-inline: 12px;
+  }
+}

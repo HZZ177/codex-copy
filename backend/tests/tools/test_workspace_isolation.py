@@ -55,7 +55,7 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
         "ses_a",
     )
     patch_a = await _run(
-        "apply_patch",
+        "edit_file",
         {
             "patch": """*** Begin Patch
 *** Update File: shared.txt
@@ -82,7 +82,7 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     assert (project_b / "shared.txt").read_text(encoding="utf-8") == "B_ONLY\n"
 
 
-async def test_apply_patch_cannot_modify_another_workspace(tmp_path) -> None:
+async def test_edit_file_cannot_modify_another_workspace(tmp_path) -> None:
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
     project_a.mkdir()
@@ -91,7 +91,7 @@ async def test_apply_patch_cannot_modify_another_workspace(tmp_path) -> None:
     target_b.write_text("B_ONLY\n", encoding="utf-8")
 
     result = await _run(
-        "apply_patch",
+        "edit_file",
         {
             "patch": f"""*** Begin Patch
 *** Update File: {target_b}

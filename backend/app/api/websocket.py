@@ -51,6 +51,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
     connection_trace_id = websocket.headers.get("x-trace-id") or new_id()
     trace_token = trace_id_var.set(connection_trace_id)
     runtime = websocket.app.state.runtime
+    keydex_watcher = getattr(websocket.app.state, "keydex_workspace_watcher", None)
     settings = runtime.settings
     repositories = runtime.repositories
     stream_manager = runtime.chat_stream_manager
@@ -127,6 +128,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     bound_session_id = session["id"]
                     bound_session_ids.add(bound_session_id)
                     await stream_manager.subscribe(bound_session_id, adapter)
+                    await _register_keydex_watcher(keydex_watcher, session)
                     logger.info(
                         f"[WebSocket] 会话创建成功 | trace_id={connection_trace_id} | "
                         f"session_id={bound_session_id}"
@@ -142,10 +144,11 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     if not session_id:
                         await send_error("missing_session", "session_id 必填")
                         continue
-                    session_service.get_session_detail(session_id)
+                    session = session_service.get_session_detail(session_id)
                     bound_session_id = session_id
                     bound_session_ids.add(session_id)
                     await stream_manager.subscribe(session_id, adapter)
+                    await _register_keydex_watcher(keydex_watcher, session)
                     logger.info(
                         f"[WebSocket] 会话绑定成功 | trace_id={connection_trace_id} | "
                         f"session_id={session_id}"
@@ -160,6 +163,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     if session_id:
                         bound_session_ids.discard(session_id)
                         await stream_manager.unsubscribe(session_id, adapter)
+                        await _unregister_keydex_watcher(keydex_watcher, session_id)
                     await send("unbind_ok", {"session_id": session_id})
                     continue
 
@@ -168,10 +172,11 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     if not session_id:
                         await send_error("missing_session", "session_id 必填")
                         continue
-                    session_service.get_session_detail(session_id)
+                    session = session_service.get_session_detail(session_id)
                     bound_session_id = session_id
                     bound_session_ids.add(session_id)
                     await stream_manager.subscribe(session_id, adapter)
+                    await _register_keydex_watcher(keydex_watcher, session)
                     await stream_manager.start_chat(
                         ChatRequest(
                             session_id=session_id,
@@ -268,6 +273,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 await send_error("ws_action_error", str(exc))
     finally:
         await stream_manager.unsubscribe_all(adapter)
+        for session_id in list(bound_session_ids):
+            await _unregister_keydex_watcher(keydex_watcher, session_id)
         trace_id_var.reset(trace_token)
         logger.info(
             f"[WebSocket] 连接清理完成 | trace_id={connection_trace_id} | "
@@ -288,3 +295,27 @@ def _runtime_params(payload: dict[str, Any]) -> dict[str, Any] | None:
     if value is None:
         value = payload.get("runtimeParams")
     return value if isinstance(value, dict) else None
+
+
+async def _register_keydex_watcher(watcher: Any, session: dict[str, Any]) -> None:
+    if watcher is None or session.get("session_type") != "workspace":
+        return
+    session_id = str(session.get("id") or "").strip()
+    workspace_root = _workspace_root_for_session(session)
+    if session_id and workspace_root:
+        await watcher.register_session(session_id, workspace_root)
+
+
+async def _unregister_keydex_watcher(watcher: Any, session_id: str) -> None:
+    if watcher is not None and session_id.strip():
+        await watcher.unregister_session(session_id)
+
+
+def _workspace_root_for_session(session: dict[str, Any]) -> str | None:
+    workspace = session.get("workspace")
+    if isinstance(workspace, dict):
+        root_path = str(workspace.get("root_path") or "").strip()
+        if root_path:
+            return root_path
+    cwd = str(session.get("cwd") or "").strip()
+    return cwd or None

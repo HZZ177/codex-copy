@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
+from langgraph.types import Command
 
 from backend.app.agent.factory import (
     get_llm_gateway_trace_id,
@@ -623,6 +624,7 @@ def _cache_read_tokens(usage: Any) -> int:
 
 
 def _tool_output_is_error(output: Any) -> bool:
+    output = _public_tool_output(output)
     if isinstance(output, ToolMessage):
         if getattr(output, "status", None) == "error":
             return True
@@ -649,15 +651,19 @@ def _tool_error_payload(payload: dict[str, Any]) -> bool:
 
 
 def _stringify_tool_output(output: Any) -> str:
+    output = _public_tool_output(output)
     if isinstance(output, ToolMessage):
         content = getattr(output, "content", "")
         return content if isinstance(content, str) else str(content)
+    if isinstance(output, Command):
+        return ""
     if isinstance(output, str):
         return output
     return str(_make_json_serializable(output))
 
 
 def _structured_tool_output(output: Any) -> Any:
+    output = _public_tool_output(output)
     if isinstance(output, ToolMessage):
         return _parse_structured_tool_content(getattr(output, "content", ""))
     if isinstance(output, dict):
@@ -668,9 +674,25 @@ def _structured_tool_output(output: Any) -> Any:
 
 
 def _tool_call_id_from_output(output: Any) -> str:
+    output = _public_tool_output(output)
     if isinstance(output, ToolMessage):
         return str(getattr(output, "tool_call_id", "") or "")
     return ""
+
+
+def _public_tool_output(output: Any) -> Any:
+    if not isinstance(output, Command):
+        return output
+    update = getattr(output, "update", None)
+    if not isinstance(update, dict):
+        return output
+    messages = update.get("messages")
+    if not isinstance(messages, list):
+        return output
+    for message in messages:
+        if isinstance(message, ToolMessage):
+            return message
+    return output
 
 
 def _parse_structured_tool_content(content: Any) -> Any:

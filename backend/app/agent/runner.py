@@ -9,10 +9,13 @@ from langchain_core.messages import SystemMessage
 from backend.app.agent.factory import AgentFactory, agent_factory
 from backend.app.agent.langchain_tools import registry_to_langchain_tools
 from backend.app.agent.middleware import build_default_middleware
+from backend.app.agent.state import KeydexAgentState
 from backend.app.agent.system_prompt import DEFAULT_SYSTEM_PROMPT
 from backend.app.core.logger import logger
+from backend.app.keydex.skills import SkillCatalog, build_skill_index
 from backend.app.model import ModelSettings
 from backend.app.tools import ToolExecutionContext, ToolRegistry
+from backend.app.tools.skill import load_skill
 
 ModelHttpTransportProvider = Callable[
     [],
@@ -76,14 +79,19 @@ class AgentRunner:
             if enable_tools
             else []
         )
+        if enable_tools and isinstance(tool_context.metadata.get("skill_catalog"), SkillCatalog):
+            tools.append(load_skill)
         resolved_system_prompt = (
             system_prompt if system_prompt is not None else self.default_system_prompt
         )
         prompt = resolved_system_prompt.strip() if resolved_system_prompt else ""
+        skill_index = self._skill_index_from_context(tool_context)
+        if skill_index:
+            prompt = f"{prompt}\n\n{skill_index}" if prompt else skill_index
         logger.info(
             f"[AgentRunner] 组装 agent | model={model} | tools={len(tools)} | "
             f"tools_enabled={enable_tools} | prompt_len={len(prompt)} | "
-            f"workspace_root={tool_context.workspace_root}"
+            f"skill_index_len={len(skill_index)} | workspace_root={tool_context.workspace_root}"
         )
         return self.factory.create_agent(
             model=llm,
@@ -91,8 +99,16 @@ class AgentRunner:
             system_prompt=SystemMessage(content=prompt) if prompt else "",
             checkpointer=self.checkpointer,
             middleware=build_default_middleware(),
+            state_schema=KeydexAgentState,
             name="desktop_agent",
         )
+
+    @staticmethod
+    def _skill_index_from_context(tool_context: ToolExecutionContext) -> str:
+        catalog = tool_context.metadata.get("skill_catalog")
+        if not isinstance(catalog, SkillCatalog):
+            return ""
+        return build_skill_index(catalog)
 
     async def get_latest_checkpoint_config(
         self,

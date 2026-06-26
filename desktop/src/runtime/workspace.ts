@@ -36,6 +36,35 @@ export interface WorkspaceSearchOptions {
   signal?: AbortSignal;
 }
 
+export interface KeydexDiagnostic {
+  code: string;
+  reason: string;
+  path?: string | null;
+  severity: "warning" | "error";
+  details: Record<string, unknown>;
+}
+
+export interface WorkspaceSkillSummary {
+  name: string;
+  description: string;
+  source: "workspace" | "system";
+  label: string;
+  locator: string;
+}
+
+export interface WorkspaceSkillsResponse {
+  workspace_root: string;
+  fingerprint: string;
+  loaded_at: string;
+  skills: WorkspaceSkillSummary[];
+  diagnostics: KeydexDiagnostic[];
+}
+
+export interface WorkspaceSkillListOptions {
+  forceReload?: boolean;
+  signal?: AbortSignal;
+}
+
 export type WorkspaceFileAnnotationAnchorType = "file" | "selection";
 
 export interface WorkspaceFileAnnotationAnchorV2 {
@@ -105,11 +134,14 @@ export type WorkspaceScope =
   | { workspaceId: string; sessionId?: never }
   | { sessionId: string; workspaceId?: never };
 
+export type WorkspaceSessionScope = { sessionId: string; workspaceId?: never };
+
 export interface WorkspaceRuntime {
   listDirectory(scope: WorkspaceScope, path?: string): Promise<WorkspaceTreeResponse>;
   readFile(scope: WorkspaceScope, path: string): Promise<WorkspaceFileResponse>;
   readMedia(scope: WorkspaceScope, path: string): Promise<WorkspaceMediaResponse>;
   search(scope: WorkspaceScope, query: string, options?: WorkspaceSearchOptions): Promise<WorkspaceSearchResult[]>;
+  listSkills(scope: WorkspaceScope, options?: WorkspaceSkillListOptions): Promise<WorkspaceSkillsResponse>;
   listAnnotations(
     scope: WorkspaceScope,
     path: string,
@@ -147,6 +179,12 @@ export function createWorkspaceRuntime(http: HttpClient): WorkspaceRuntime {
     search(scope, query, options = {}) {
       return http.request<WorkspaceSearchResult[]>(
         `${workspaceBasePath(scope)}/search?q=${encodeURIComponent(query)}`,
+        { signal: options.signal },
+      );
+    },
+    listSkills(scope, options = {}) {
+      return http.request<WorkspaceSkillsResponse>(
+        `${workspaceBasePath(scope)}/skills${workspaceSkillsQuery(options)}`,
         { signal: options.signal },
       );
     },
@@ -191,4 +229,8 @@ function workspaceBasePath(scope: WorkspaceScope): string {
     return `/api/workspaces/${encodeURIComponent(scope.workspaceId)}`;
   }
   throw new Error("workspace scope requires sessionId or workspaceId");
+}
+
+function workspaceSkillsQuery(options: WorkspaceSkillListOptions): string {
+  return options.forceReload ? "?force_reload=true" : "";
 }

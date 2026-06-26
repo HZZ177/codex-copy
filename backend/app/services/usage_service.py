@@ -55,14 +55,39 @@ class UsageService:
         model: str | None = None,
         bucket: str = "day",
         timezone_offset_minutes: int = 0,
+        start_after: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
+        return self.get_trend_page(
+            start_time=start_time,
+            end_time=end_time,
+            model=model,
+            bucket=bucket,
+            timezone_offset_minutes=timezone_offset_minutes,
+            start_after=start_after,
+            limit=limit,
+        )["points"]
+
+    def get_trend_page(
+        self,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        model: str | None = None,
+        bucket: str = "day",
+        timezone_offset_minutes: int = 0,
+        start_after: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         try:
-            return self.repositories.llm_request_logs.trend(
+            return self.repositories.llm_request_logs.trend_page(
                 start_time=start_time,
                 end_time=end_time,
                 model=model,
                 bucket=bucket,
                 timezone_offset_minutes=timezone_offset_minutes,
+                start_after=start_after,
+                limit=limit,
             )
         except ValueError as exc:
             raise UsageValidationError(str(exc)) from exc

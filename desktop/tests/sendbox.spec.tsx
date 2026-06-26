@@ -268,11 +268,6 @@ describe("SendBox", () => {
     if (!quote) {
       throw new Error("quote not created");
     }
-    vi.stubGlobal("navigator", {
-      clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
-    });
     vi.useFakeTimers();
     try {
       render(
@@ -300,16 +295,12 @@ describe("SendBox", () => {
         vi.advanceTimersByTime(1);
       });
       expect(screen.getByText("这是一段选中的历史内容")).not.toBeNull();
+      expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
     } finally {
       vi.useRealTimers();
     }
 
-    fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("这是一段选中的历史内容");
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: /删除引用片段/ }));
 
     expect(screen.queryByText("引用片段")).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
@@ -343,7 +334,7 @@ describe("SendBox", () => {
       if (element.dataset.sendboxHoverAnchor === "quote") {
         return rect({ x: 48, y: 318, width: 152, height: 30 });
       }
-      if (element.dataset.quoteHoverCard === "true") {
+      if (element.dataset.sendboxContextHoverCard === "true") {
         return rect({ x: -60, y: 120, width: 280, height: 180 });
       }
       return rect({ x: 0, y: 0, width: 0, height: 0 });
@@ -368,7 +359,7 @@ describe("SendBox", () => {
         vi.advanceTimersByTime(200);
       });
 
-      const card = document.querySelector<HTMLElement>("[data-quote-hover-card='true']");
+      const card = document.querySelector<HTMLElement>("[data-sendbox-context-hover-card='true']");
       expect(card).not.toBeNull();
       expect(card?.style.left).toBe("-4px");
       expect(card?.style.maxWidth).toBe("196px");
@@ -540,10 +531,11 @@ describe("SendBox", () => {
         vi.advanceTimersByTime(220);
       });
 
-      expect(screen.getByText("FileWithLongName.tsx")).not.toBeNull();
+      const hoverCard = document.querySelector('[data-sendbox-context-hover-card="true"]');
+      expect(screen.getAllByText("FileWithLongName.tsx").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText(path)).toHaveLength(1);
-      expect(document.querySelector('[data-file-path-hover-title="true"]')?.textContent).toBe(path);
-      expect(document.querySelector('[data-file-path-hover-card="true"]')?.textContent).toContain(path);
+      expect(hoverCard?.textContent).toContain("FileWithLongName.tsx");
+      expect(hoverCard?.textContent).toContain(path);
     } finally {
       vi.useRealTimers();
     }

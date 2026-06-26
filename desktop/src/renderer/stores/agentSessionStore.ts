@@ -171,6 +171,9 @@ export function reduceAgentWsEvent(
     case "session_closed":
       next = handleSessionClosed(state, event.data);
       break;
+    case "workspaceSkillsChanged":
+      next = state;
+      break;
     case "pong":
     case "task_result":
       next = state;
@@ -331,6 +334,7 @@ function loadHistory(
   sessionId: string,
   history: AgentHistoryResponse,
 ): AgentConversationState {
+  const previousView = state.sessionStateById[sessionId];
   let next = upsertSession(state, history.session, { select: true });
   next = cloneState(next);
   const view = ensureSessionState(next, sessionId, metaFromSession(history.session));
@@ -341,12 +345,7 @@ function loadHistory(
   view.historyHasMoreOlder = Boolean(history.has_more_older && history.next_cursor);
   view.hasUnread = false;
   view.stale = false;
-  view.isStreaming = view.messages.some((message) => Boolean(message.streaming));
-  view.pendingApproval = latestPendingApproval(view.messages);
-  view.runtimeState = view.isStreaming ? "running" : runtimeStateFromSessionStatus(view.status);
-  if (view.pendingApproval) {
-    view.runtimeState = "waiting_approval";
-  }
+  applyHydratedRuntimeState(view, previousView);
   return next;
 }
 
@@ -355,6 +354,7 @@ function prependHistory(
   sessionId: string,
   history: AgentHistoryResponse,
 ): AgentConversationState {
+  const previousView = state.sessionStateById[sessionId];
   let next = upsertSession(state, history.session, { select: true });
   next = cloneState(next);
   const view = ensureSessionState(next, sessionId, metaFromSession(history.session));
@@ -367,13 +367,28 @@ function prependHistory(
   view.historyLoading = false;
   view.hydrated = true;
   view.stale = false;
-  view.isStreaming = view.messages.some((message) => Boolean(message.streaming));
-  view.pendingApproval = latestPendingApproval(view.messages);
-  view.runtimeState = view.isStreaming ? "running" : runtimeStateFromSessionStatus(view.status);
-  if (view.pendingApproval) {
-    view.runtimeState = "waiting_approval";
-  }
+  applyHydratedRuntimeState(view, previousView);
   return next;
+}
+
+function applyHydratedRuntimeState(view: AgentSessionViewState, previousView?: AgentSessionViewState): void {
+  const hasStreamingMessage = view.messages.some((message) => Boolean(message.streaming));
+  const pendingApproval = latestPendingApproval(view.messages);
+  let runtimeState = pendingApproval
+    ? "waiting_approval"
+    : hasStreamingMessage
+      ? "running"
+      : runtimeStateFromSessionStatus(view.status);
+
+  if (runtimeState === "idle" && previousView && isActiveRuntimeState(previousView.runtimeState)) {
+    runtimeState = previousView.runtimeState;
+  }
+
+  view.runtimeState = runtimeState;
+  view.pendingApproval =
+    pendingApproval ?? (runtimeState === "waiting_approval" ? previousView?.pendingApproval ?? null : null);
+  view.isStreaming = hasStreamingMessage || (runtimeState === "running" && previousView?.isStreaming === true);
+  view.isCancelling = runtimeState === "cancelling";
 }
 
 function addUserMessage(
@@ -1101,9 +1116,11 @@ function ensureSessionState(
 ): AgentSessionViewState {
   const existing = state.sessionStateById[sessionId];
   if (existing) {
+    const runtimeState = mergeIncomingRuntimeState(existing.runtimeState, meta.runtimeState);
     const cloned = {
       ...existing,
       ...meta,
+      runtimeState,
       messages: existing.messages.map(cloneMessage),
     };
     state.sessionStateById[sessionId] = cloned;
@@ -1673,6 +1690,23 @@ function runtimeStateFromSessionStatus(status: AgentSessionStatus): AgentSession
     return "closed";
   }
   return "idle";
+}
+
+function mergeIncomingRuntimeState(
+  current: AgentSessionRuntimeState,
+  incoming: AgentSessionRuntimeState | undefined,
+): AgentSessionRuntimeState {
+  if (!incoming) {
+    return current;
+  }
+  if (incoming === "idle" && isActiveRuntimeState(current)) {
+    return current;
+  }
+  return incoming;
+}
+
+function isActiveRuntimeState(state: AgentSessionRuntimeState): boolean {
+  return state === "running" || state === "waiting_approval" || state === "cancelling";
 }
 
 function sessionIdFromData(data: Record<string, unknown>): string {

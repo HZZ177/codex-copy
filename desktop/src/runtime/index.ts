@@ -53,6 +53,7 @@ export type {
   UpdateSessionPayload,
 } from "./conversation";
 export type {
+  KeydexDiagnostic,
   WorkspaceAnnotationListOptions,
   WorkspaceEntry,
   WorkspaceFileAnnotation,
@@ -66,6 +67,10 @@ export type {
   WorkspaceScope,
   WorkspaceSearchOptions,
   WorkspaceSearchResult,
+  WorkspaceSessionScope,
+  WorkspaceSkillListOptions,
+  WorkspaceSkillsResponse,
+  WorkspaceSkillSummary,
   WorkspaceTreeResponse,
 } from "./workspace";
 export type {

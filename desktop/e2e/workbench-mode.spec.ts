@@ -1,0 +1,633 @@
+import { mkdir } from "node:fs/promises";
+import * as path from "node:path";
+
+import { expect, test, type Page, type Route } from "@playwright/test";
+
+const API_BASE = "http://127.0.0.1:8765";
+const APP_BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
+const EVIDENCE_ROOT =
+  process.env.E2E_WORKBENCH_EVIDENCE_DIR ??
+  path.resolve("..", ".dev", "e2e", "evidence", "2026-06-25_17-18-19-workbench-mode");
+const E2E_RUN_ID = process.env.E2E_RUN_ID ?? "latest";
+const WORKSPACE_A = "workspace-a";
+const WORKSPACE_B = "workspace-b";
+const SESSION_A = "e2e-session-a";
+const SESSION_B = "e2e-session-b";
+const NEW_SESSION = "e2e-new-workbench-session";
+const README_CONTENT = [
+  "# E2E Workbench File",
+  "",
+  "This file is rendered inside Workbench.",
+  "",
+  "```ts",
+  "const workbenchE2E = true;",
+  "```",
+].join("\n");
+
+test("agent mode remains the full conversation surface and only switches manually", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/conversation/${SESSION_A}`);
+  await expect(page.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("继续输入")).toBeVisible();
+  await expect(page.getByLabel("展开工作台消息层")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-mode-page")).toHaveCount(0);
+  await saveEvidence(page, "e2e-001");
+
+  await page.getByRole("button", { name: "Workbench" }).click();
+  await expect(page.getByTestId("workbench-mode-page")).toBeVisible();
+  await expect(page.getByTestId("workbench-workspace-picker")).toBeVisible();
+  await saveEvidence(page, "e2e-002");
+});
+
+test("workbench picker, workspace switch and scoped session list stay workspace-first", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench`);
+  await expect(page.getByTestId("workbench-workspace-picker")).toBeVisible();
+  await expect(page.getByText("无项目聊天")).toHaveCount(0);
+  await saveEvidence(page, "e2e-003");
+
+  await page.getByRole("button", { name: "选择工作区" }).click();
+  await page.getByRole("option", { name: /keydex/ }).click();
+  await expect(page).toHaveURL(/\/workbench\/workspace-a$/);
+  await expect(page.getByTestId("workbench-workspace-shell")).toBeVisible();
+  await expect(page.getByTestId("workspace-file-browser")).toBeVisible();
+  await expect(page.getByText("工作台 A 会话")).toBeVisible();
+  await expect(page.getByText("工作台 B 会话")).toHaveCount(0);
+  await expect(page.getByText("纯对话")).toHaveCount(0);
+  await saveEvidence(page, "e2e-004");
+  await saveEvidence(page, "e2e-006");
+
+  await page.getByRole("main", { name: "工作台" }).getByRole("button", { name: "选择工作区" }).click();
+  await page.getByRole("option", { name: /other/ }).click();
+  await expect(page).toHaveURL(/\/workbench\/workspace-b$/);
+  await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-workspace-id", WORKSPACE_B);
+  await expect(page.getByText("工作台 B 会话")).toBeVisible();
+  await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-selected-session-id", "");
+  await saveEvidence(page, "e2e-005");
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_B}`);
+  await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}$`));
+  await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-workspace-id", WORKSPACE_A);
+  await saveEvidence(page, "e2e-007");
+});
+
+test("workbench capsule creates workspace-owned sessions, sends, searches and previews files", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}`);
+  const input = page.getByLabel("工作台助手输入");
+  await expect(input).toBeVisible();
+  await input.click();
+  await page.keyboard.type("e2e new task");
+  await page.getByLabel("发送").click();
+
+  await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}/session/${NEW_SESSION}$`));
+  expect(backend.createdSessionPayloads.at(-1)).toMatchObject({
+    session_type: "workspace",
+    workspace_id: WORKSPACE_A,
+    title: "e2e new task",
+  });
+  const chatFrame = await lastChatFrame(page);
+  expect(chatFrame?.data).toMatchObject({
+    session_id: NEW_SESSION,
+    message: "e2e new task",
+    model: "qwen-coder",
+  });
+  await saveEvidence(page, "e2e-008");
+  await saveEvidence(page, "e2e-011");
+  await dispatchAgentEvent(page, {
+    action: "completed",
+    data: { session_id: NEW_SESSION, status: "completed", final_content: "done", events: [] },
+  });
+
+  await page.getByRole("button", { name: "Agent" }).click();
+  await expect(page).toHaveURL(new RegExp(`/conversation/${NEW_SESSION}$`));
+  await expect(page.getByText("e2e new task")).toBeVisible();
+  await expect(page.getByLabel("继续输入")).toBeVisible();
+  await saveEvidence(page, "e2e-009");
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${NEW_SESSION}`);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
+  await saveEvidence(page, "e2e-010");
+
+  await input.click();
+  await page.keyboard.type("@READ");
+  await expect(page.getByTestId("at-file-menu")).toBeVisible();
+  await expect(page.getByRole("option", { name: /README\.md/ })).toBeVisible();
+  expect(backend.workspaceSearchRequests.at(-1)).toMatchObject({ workspaceId: WORKSPACE_A, query: "READ" });
+  await saveEvidence(page, "e2e-012");
+
+  await page.getByRole("button", { name: "选择文件 README.md" }).click();
+  await expect(page.getByRole("heading", { name: "E2E Workbench File" })).toBeVisible();
+  expect(backend.workspaceReadRequests.at(-1)).toMatchObject({ workspaceId: WORKSPACE_A, path: "README.md" });
+  await saveEvidence(page, "e2e-013");
+});
+
+test("workbench file annotation can prefill the assistant without switching mode", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
+  await page.getByRole("button", { name: "选择文件 README.md" }).click();
+  await expect(page.getByRole("heading", { name: "E2E Workbench File" })).toBeVisible();
+  await selectVisibleText(page, "This file is rendered");
+  await page.getByRole("button", { name: "添加选中文本到对话" }).click();
+  const selectedQuoteChip = page.locator("[data-quote-index='0'][data-source-quote='true']");
+  await expect(selectedQuoteChip).toBeVisible();
+  await expect(selectedQuoteChip).toContainText("README.md");
+  await expect(page.getByRole("button", { name: "Workbench" })).toHaveAttribute("aria-pressed", "true");
+  await saveEvidence(page, "e2e-014");
+  await selectedQuoteChip.getByRole("button").click();
+
+  await page.getByRole("button", { name: /文件批注/ }).click();
+  const panel = page.getByRole("complementary", { name: "文件批注" });
+  await expect(panel).toContainText("Selected E2E note");
+
+  await panel.getByRole("button", { name: "基于此批注发起对话" }).click();
+  await expect(page.getByLabel("工作台助手输入")).toHaveText("Selected E2E note");
+  await expect(page.locator("[data-quote-index='0'][data-source-quote='true']")).toContainText("README.md");
+  await expect(page.getByRole("button", { name: "Workbench" })).toHaveAttribute("aria-pressed", "true");
+  expect(await chatFrameCount(page)).toBe(0);
+  await saveEvidence(page, "e2e-015");
+});
+
+test("workbench expanded layer, drawer and approval stay above the workspace", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
+  const fileBrowser = page.getByTestId("workspace-file-browser");
+  await expect(fileBrowser).toBeVisible();
+  const beforeBox = await fileBrowser.boundingBox();
+
+  await page.getByRole("button", { name: "展开工作台消息层" }).click();
+  const expanded = page.getByTestId("workbench-expanded-layer");
+  await expect(expanded).toBeVisible();
+  await expect(fileBrowser).toBeVisible();
+  expect(await expanded.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  const afterBox = await fileBrowser.boundingBox();
+  expect(Math.round(afterBox?.width ?? 0)).toBe(Math.round(beforeBox?.width ?? 0));
+  await saveEvidence(page, "e2e-016");
+
+  await page.getByRole("button", { name: "收起工作台消息层" }).click();
+  await expect(expanded).toHaveCount(0);
+  await saveEvidence(page, "e2e-017");
+
+  await page.getByRole("button", { name: "停靠到工作台右侧助手栏" }).click();
+  const drawer = page.getByTestId("workbench-assistant-drawer");
+  await expect(drawer).toBeVisible();
+  const drawerBox = await drawer.boundingBox();
+  expect(drawerBox?.width ?? 0).toBeGreaterThanOrEqual(360);
+  expect(drawerBox?.width ?? 0).toBeLessThanOrEqual(520);
+  await expect(page.getByTestId("workbench-expanded-layer")).toHaveCount(0);
+  await saveEvidence(page, "e2e-018");
+
+  await dispatchAgentEvent(page, {
+    action: "approval_requested",
+    data: {
+      session_id: SESSION_A,
+      approval: approval("e2e-approval-1"),
+    },
+  });
+  await expect(page.getByTestId("workbench-approval-prompt")).toBeVisible();
+  await page.getByRole("button", { name: "批准" }).click();
+  expect(backend.approvalDecisions.at(-1)).toMatchObject({
+    approvalId: "e2e-approval-1",
+    body: { decision: "approved", trust_scope: "once" },
+  });
+  await saveEvidence(page, "e2e-020");
+
+  await page.getByRole("button", { name: "关闭工作台助手侧栏" }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
+  await saveEvidence(page, "e2e-019");
+});
+
+test("workbench running task survives manual mode switching", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
+  await page.getByLabel("工作台助手输入").click();
+  await page.keyboard.type("keep running while switching");
+  await page.getByLabel("发送").click();
+  await expect(page.getByRole("button", { name: "停止" })).toBeEnabled();
+  const countAfterSend = await chatFrameCount(page);
+
+  await page.getByRole("button", { name: "Agent" }).click();
+  await expect(page).toHaveURL(new RegExp(`/conversation/${SESSION_A}$`));
+  await expect(page.getByRole("button", { name: "停止" })).toBeEnabled();
+  await expect(page.getByLabel("展开工作台消息层")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Workbench" }).click();
+  await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}$`));
+  await page.getByRole("button", { name: "工作台 A 会话", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/workbench/${WORKSPACE_A}/session/${SESSION_A}$`));
+  await expect(page.getByRole("button", { name: "停止" })).toBeEnabled();
+  expect(await chatFrameCount(page)).toBe(countAfterSend);
+  await saveEvidence(page, "e2e-021");
+});
+
+test("workbench keeps controls usable across responsive viewports and reload", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+    { width: 1600, height: 1000 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
+    await expect(page.getByTestId("workspace-file-browser")).toBeVisible();
+    await expect(page.getByLabel("工作台助手输入")).toBeVisible();
+    await page.getByRole("button", { name: "展开工作台消息层" }).click();
+    await expect(page.getByTestId("workbench-expanded-layer")).toBeVisible();
+    await page.getByRole("button", { name: "停靠到工作台右侧助手栏" }).click();
+    await expect(page.getByTestId("workbench-assistant-drawer")).toBeVisible();
+    await saveEvidence(page, viewport.width === 1280 ? "e2e-022" : viewport.width === 1440 ? "e2e-023" : "e2e-024");
+  }
+
+  await page.getByRole("button", { name: "关闭工作台助手侧栏" }).click();
+  await page.getByRole("button", { name: "展开工作台消息层" }).click();
+  await expect(page.getByTestId("workbench-expanded-layer")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-workspace-id", WORKSPACE_A);
+  await expect(page.getByTestId("workbench-mode-page")).toHaveAttribute("data-selected-session-id", SESSION_A);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
+  await saveEvidence(page, "e2e-025");
+  await saveEvidence(page, "e2e-026");
+});
+
+async function saveEvidence(page: Page, caseId: string) {
+  const directory = path.join(EVIDENCE_ROOT, caseId, E2E_RUN_ID);
+  await mkdir(directory, { recursive: true });
+  await page.screenshot({ path: path.join(directory, "success.png"), fullPage: true });
+}
+
+async function selectVisibleText(page: Page, text: string) {
+  await page.evaluate((needle) => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let current = walker.nextNode();
+    while (current) {
+      const value = current.textContent ?? "";
+      const start = value.indexOf(needle);
+      if (start >= 0) {
+        const range = document.createRange();
+        range.setStart(current, start);
+        range.setEnd(current, start + needle.length);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        return;
+      }
+      current = walker.nextNode();
+    }
+    throw new Error(`Text not found: ${needle}`);
+  }, text);
+}
+
+interface MockBackendState {
+  sessions: Record<string, E2ESession>;
+  createdSessionPayloads: Array<Record<string, unknown>>;
+  workspaceSearchRequests: Array<{ workspaceId: string; query: string }>;
+  workspaceReadRequests: Array<{ workspaceId: string; path: string }>;
+  approvalDecisions: Array<{ approvalId: string; body: Record<string, unknown> }>;
+}
+
+interface E2ESession {
+  id: string;
+  title: string;
+  session_type: "chat" | "workspace";
+  workspace_id: string | null;
+  workspace: E2EWorkspace | null;
+}
+
+interface E2EWorkspace {
+  id: string;
+  name: string;
+  root_path: string;
+}
+
+function createWorkbenchBackend(): MockBackendState {
+  return {
+    sessions: {
+      [SESSION_A]: session(SESSION_A, "工作台 A 会话", WORKSPACE_A),
+      [SESSION_B]: session(SESSION_B, "工作台 B 会话", WORKSPACE_B),
+      "e2e-pure-chat": session("e2e-pure-chat", "纯对话", null),
+    },
+    createdSessionPayloads: [],
+    workspaceSearchRequests: [],
+    workspaceReadRequests: [],
+    approvalDecisions: [],
+  };
+}
+
+async function mockWorkbenchBackend(page: Page, backend: MockBackendState) {
+  await page.route(`${API_BASE}/api/**`, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const method = request.method();
+
+    if (path === "/api/settings") {
+      return fulfillJson(route, {
+        model: {
+          base_url: "https://api.example/v1",
+          model: "qwen-coder",
+          timeout_seconds: 60,
+          api_key_set: true,
+          api_key_preview: "sk-***",
+        },
+        command: {
+          command_enabled: true,
+          require_approval_for_untrusted: true,
+          allow_persistent_trust: true,
+        },
+      });
+    }
+    if (path === "/api/models") {
+      return fulfillJson(route, { models: [{ id: "qwen-coder" }], cached: true });
+    }
+    if (path === "/api/workspaces" && method === "GET") {
+      return fulfillJson(route, { list: [workspace(WORKSPACE_A, "keydex"), workspace(WORKSPACE_B, "other")], total: 2 });
+    }
+    if (path.startsWith("/api/workspaces/") && method === "GET" && !path.includes("/tree") && !path.includes("/read") && !path.includes("/search") && !path.includes("/annotations") && !path.includes("/skills")) {
+      return fulfillJson(route, { workspace: workspace(decodeURIComponent(path.split("/").at(-1) ?? ""), "keydex") });
+    }
+    if (path === "/api/sessions" && method === "GET") {
+      const workspaceId = url.searchParams.get("workspace_id");
+      const sessionType = url.searchParams.get("session_type");
+      const sessions = Object.values(backend.sessions).filter((item) => {
+        if (workspaceId) {
+          return item.workspace_id === workspaceId;
+        }
+        if (sessionType === "workspace") {
+          return item.session_type === "workspace";
+        }
+        return true;
+      });
+      return fulfillJson(route, { list: sessions.map(sessionResponse), total: sessions.length, page: 1, page_size: 50 });
+    }
+    if (path === "/api/sessions" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      backend.createdSessionPayloads.push(payload);
+      const created = session(
+        NEW_SESSION,
+        String(payload.title || "e2e new task"),
+        String(payload.workspace_id || WORKSPACE_A),
+      );
+      backend.sessions[created.id] = created;
+      return fulfillJson(route, { session: sessionResponse(created) });
+    }
+    const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sessionMatch && method === "GET") {
+      const id = decodeURIComponent(sessionMatch[1]);
+      return fulfillJson(route, { session: sessionResponse(backend.sessions[id] ?? backend.sessions[SESSION_A]) });
+    }
+    const historyMatch = path.match(/^\/api\/sessions\/([^/]+)\/history$/);
+    if (historyMatch) {
+      const id = decodeURIComponent(historyMatch[1]);
+      const target = backend.sessions[id] ?? backend.sessions[SESSION_A];
+      return fulfillJson(route, {
+        session: sessionResponse(target),
+        list: [
+          {
+            id: `hist-user-${id}`,
+            role: "user",
+            content: "历史问题",
+            timestamp: 1,
+          },
+          {
+            id: `hist-assistant-${id}`,
+            role: "assistant",
+            content: "历史回答",
+            timestamp: 2,
+          },
+        ],
+        next_cursor: null,
+        has_more_older: false,
+      });
+    }
+    const workspaceMatch = path.match(/^\/api\/workspaces\/([^/]+)(\/.*)?$/);
+    if (workspaceMatch) {
+      const workspaceId = decodeURIComponent(workspaceMatch[1]);
+      const suffix = workspaceMatch[2] ?? "";
+      if (suffix === "/tree") {
+        return fulfillJson(route, {
+          root: workspace(workspaceId, workspaceId).root_path,
+          entries: [
+            { name: "README.md", path: "README.md", type: "file", size: 35, modified_at: null },
+            { name: "src", path: "src", type: "directory", size: null, modified_at: null },
+          ],
+        });
+      }
+      if (suffix === "/read") {
+        const filePath = url.searchParams.get("path") ?? "";
+        backend.workspaceReadRequests.push({ workspaceId, path: filePath });
+        return fulfillJson(route, { path: filePath, content: README_CONTENT, encoding: "utf-8" });
+      }
+      if (suffix === "/search") {
+        backend.workspaceSearchRequests.push({ workspaceId, query: url.searchParams.get("q") ?? "" });
+        return fulfillJson(route, [{ name: "README.md", path: "README.md", type: "file" }]);
+      }
+      if (suffix === "/skills") {
+        return fulfillJson(route, {
+          workspace_root: workspace(workspaceId, workspaceId).root_path,
+          fingerprint: "e2e",
+          loaded_at: "2026-06-25T00:00:00Z",
+          skills: [],
+          diagnostics: [],
+        });
+      }
+      if (suffix === "/annotations") {
+        return fulfillJson(route, [
+          {
+            id: "ann-workbench-1",
+            scope_type: "workspace",
+            scope_id: workspaceId,
+            workspace_id: workspaceId,
+            path: "README.md",
+            anchor_type: "selection",
+            comment: "Selected E2E note",
+            selected_text: "This file is rendered inside Workbench.",
+            line_start: 3,
+            line_end: 3,
+            column_start: 1,
+            column_end: 40,
+            content_hash: null,
+            anchor_json: null,
+            created_at: "2026-06-25T00:00:00Z",
+            updated_at: "2026-06-25T00:00:00Z",
+          },
+        ]);
+      }
+    }
+    const approvalMatch = path.match(/^\/api\/approvals\/([^/]+)\/decision$/);
+    if (approvalMatch && method === "POST") {
+      const approvalId = decodeURIComponent(approvalMatch[1]);
+      const body = request.postDataJSON() as Record<string, unknown>;
+      backend.approvalDecisions.push({ approvalId, body });
+      return fulfillJson(route, { ...approval(approvalId), status: "approved", decision: body.decision, trust_scope: body.trust_scope });
+    }
+    return fulfillJson(route, {});
+  });
+}
+
+async function installWebSocketMock(page: Page) {
+  await page.addInitScript(() => {
+    type MockSocket = Record<string, unknown> & {
+      onopen: ((event: Event) => void) | null;
+      onclose: ((event: CloseEvent) => void) | null;
+      onmessage: ((event: MessageEvent) => void) | null;
+      readyState: number;
+    };
+    const sockets: MockSocket[] = [];
+    (window as Window & { __wsSentMessages?: unknown[]; __dispatchAgentEvent?: (event: unknown) => void }).__wsSentMessages = [];
+    const NativeWebSocket = window.WebSocket;
+    const MockWebSocket = function MockWebSocket(this: MockSocket, url: string) {
+      if (!String(url).includes("/agent-base/ws/chat")) {
+        return new NativeWebSocket(url);
+      }
+      this.url = url;
+      this.readyState = MockWebSocket.CONNECTING;
+      this.onopen = null;
+      this.onclose = null;
+      this.onerror = null;
+      this.onmessage = null;
+      sockets.push(this);
+      window.setTimeout(() => {
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+      }, 0);
+      return this;
+    } as unknown as typeof WebSocket & {
+      prototype: WebSocket;
+      CONNECTING: number;
+      OPEN: number;
+      CLOSING: number;
+      CLOSED: number;
+    };
+    MockWebSocket.CONNECTING = 0;
+    MockWebSocket.OPEN = 1;
+    MockWebSocket.CLOSING = 2;
+    MockWebSocket.CLOSED = 3;
+    MockWebSocket.prototype.send = function send(data: string) {
+      const sentMessages = (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages ?? [];
+      try {
+        sentMessages.push(JSON.parse(data));
+      } catch {
+        sentMessages.push(data);
+      }
+      (window as Window & { __wsSentMessages?: unknown[] }).__wsSentMessages = sentMessages;
+    };
+    MockWebSocket.prototype.close = function close(this: MockSocket) {
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.(new CloseEvent("close", { code: 1000 }));
+    };
+    (window as Window & { __dispatchAgentEvent?: (event: unknown) => void }).__dispatchAgentEvent = (event) => {
+      const message = new MessageEvent("message", { data: JSON.stringify(event) });
+      sockets.forEach((socket) => socket.onmessage?.(message));
+    };
+    Object.assign(window, { WebSocket: MockWebSocket as unknown as typeof WebSocket });
+  });
+}
+
+async function dispatchAgentEvent(page: Page, event: unknown) {
+  await page.evaluate((payload) => {
+    (window as Window & { __dispatchAgentEvent?: (event: unknown) => void }).__dispatchAgentEvent?.(payload);
+  }, event);
+}
+
+async function lastChatFrame(page: Page) {
+  const handle = await page.waitForFunction(() => {
+    const sentMessages = (window as Window & { __wsSentMessages?: Array<Record<string, unknown>> }).__wsSentMessages ?? [];
+    return sentMessages.findLast((message) => message.action === "chat") ?? null;
+  });
+  return handle.jsonValue() as Promise<{ action?: string; data?: Record<string, unknown> } | null>;
+}
+
+async function chatFrameCount(page: Page) {
+  return page.evaluate(() => {
+    const sentMessages = (window as Window & { __wsSentMessages?: Array<Record<string, unknown>> }).__wsSentMessages ?? [];
+    return sentMessages.filter((message) => message.action === "chat").length;
+  });
+}
+
+function workspace(id: string, name: string): E2EWorkspace {
+  return {
+    id,
+    name,
+    root_path: `D:/repo/${name}`,
+  };
+}
+
+function session(id: string, title: string, workspaceId: string | null): E2ESession {
+  return {
+    id,
+    title,
+    session_type: workspaceId ? "workspace" : "chat",
+    workspace_id: workspaceId,
+    workspace: workspaceId ? workspace(workspaceId, workspaceId === WORKSPACE_A ? "keydex" : "other") : null,
+  };
+}
+
+function sessionResponse(item: E2ESession) {
+  return {
+    id: item.id,
+    user_id: "local-user",
+    scene_id: "desktop-agent",
+    status: "active",
+    title: item.title,
+    session_tag: "chat",
+    session_type: item.session_type,
+    workspace_id: item.workspace_id,
+    cwd: item.workspace?.root_path ?? null,
+    workspace_roots: item.workspace ? [item.workspace.root_path] : [],
+    workspace: item.workspace,
+    active_session_id: null,
+    parent_session_id: null,
+    child_session_id: null,
+    source_trace_id: null,
+    created_at: "2026-06-25T00:00:00Z",
+    updated_at: "2026-06-25T00:00:00Z",
+    is_debug: false,
+    is_scheduled: false,
+    is_current: false,
+  };
+}
+
+function approval(id: string) {
+  return {
+    id,
+    session_id: SESSION_A,
+    tool_name: "run_command",
+    kind: "exec",
+    title: "是否允许执行命令？",
+    description: "pnpm test",
+    details: { command: "pnpm test", cwd: "D:/repo/keydex" },
+    status: "pending",
+    created_at: "2026-06-25T00:00:00Z",
+  };
+}
+
+function fulfillJson(route: Route, body: unknown, status = 200) {
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}

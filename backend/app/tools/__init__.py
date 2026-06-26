@@ -16,9 +16,11 @@ from backend.app.tools.plan import create_plan_tools, register_plan_tools
 from backend.app.tools.registry import ToolRegistry, ToolRegistryError
 from backend.app.tools.search import create_search_tools, register_search_tools
 from backend.app.tools.shell import create_shell_tools, register_shell_tools
+from backend.app.tools.skill import LOAD_SKILL_TOOL_NAME, load_skill, run_load_skill
 
 __all__ = [
     "FunctionTool",
+    "LOAD_SKILL_TOOL_NAME",
     "LocalTool",
     "ToolDefinitionError",
     "ToolExecutionContext",
@@ -33,9 +35,11 @@ __all__ = [
     "create_plan_tools",
     "create_search_tools",
     "create_shell_tools",
+    "load_skill",
     "register_filesystem_tools",
     "register_patch_tools",
     "register_plan_tools",
     "register_search_tools",
     "register_shell_tools",
+    "run_load_skill",
 ]

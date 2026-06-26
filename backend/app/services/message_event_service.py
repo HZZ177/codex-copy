@@ -33,11 +33,17 @@ class MessageEventService:
                 ReplayAction.USER_MESSAGE.value,
                 ReplayAction.SYSTEM_MESSAGE.value,
                 ReplayAction.AI_MESSAGE.value,
-            } and self._is_message_injection_event(event, data):
-                pending_context_items.append(
-                    self._context_item_from_injected_message(event, data, action)
-                )
-                continue
+            }:
+                if self._is_message_injection_event(event, data):
+                    pending_context_items.append(
+                        self._context_item_from_injected_message(event, data, action)
+                    )
+                    continue
+                if self._is_skill_activation_event(event, data):
+                    pending_context_items.append(
+                        self._context_item_from_skill_activation(event, data)
+                    )
+                    continue
 
             if action == ReplayAction.USER_MESSAGE.value:
                 message = {
@@ -254,6 +260,13 @@ class MessageEventService:
         )
 
     @staticmethod
+    def _is_skill_activation_event(event: MessageEventRecord, data: dict[str, Any]) -> bool:
+        return (
+            data.get("source") == "skill_activation"
+            or MessageEventService._canonical_source(event) == "skill_activation"
+        )
+
+    @staticmethod
     def _context_item_from_injected_message(
         event: MessageEventRecord,
         data: dict[str, Any],
@@ -281,6 +294,35 @@ class MessageEventService:
             if metadata.get(key) is not None:
                 item[key] = metadata.get(key)
         return item
+
+    @staticmethod
+    def _context_item_from_skill_activation(
+        event: MessageEventRecord,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        skill_name = str(
+            data.get("skill_name")
+            or data.get("skillName")
+            or metadata.get("skill_name")
+            or metadata.get("skillName")
+            or ""
+        ).strip()
+        label = str(data.get("label") or metadata.get("label") or f"/{skill_name}").strip()
+        description = str(data.get("description") or metadata.get("description") or "").strip()
+        skill_source = str(data.get("skill_source") or data.get("skillSource") or metadata.get("source") or "workspace")
+        return {
+            "id": str(data.get("id") or metadata.get("id") or f"skill:{skill_name or event.id}"),
+            "type": "skill",
+            "label": label,
+            "content": description,
+            "skill_name": skill_name,
+            "skillName": skill_name,
+            "source": skill_source,
+            "description": description,
+            "timestamp": MessageEventService._event_timestamp_ms(event),
+            "metadata": dict(metadata),
+        }
 
     @staticmethod
     def _is_hidden_internal_system_message(data: dict[str, Any]) -> bool:

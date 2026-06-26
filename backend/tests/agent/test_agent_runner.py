@@ -42,6 +42,7 @@ class RecordingAgentFactory(AgentFactory):
         system_prompt: Any,
         checkpointer: Any,
         middleware: tuple[Any, ...] = (),
+        state_schema: type[Any] | None = None,
         name: str = "desktop_agent",
     ) -> Any:
         self.created_tool_counts.append(len(tools))
@@ -51,6 +52,7 @@ class RecordingAgentFactory(AgentFactory):
             system_prompt=system_prompt,
             checkpointer=checkpointer,
             middleware=middleware,
+            state_schema=state_schema,
             name=name,
         )
 

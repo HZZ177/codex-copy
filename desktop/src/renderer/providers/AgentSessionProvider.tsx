@@ -18,6 +18,7 @@ import {
   type RuntimeBridge,
   type WsConnectionStatus,
 } from "@/runtime";
+import type { AgentActionEnvelope } from "@/types/protocol";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import {
   agentConversationReducer,
@@ -34,6 +35,7 @@ export interface AgentSessionRuntimeContextValue {
   runtimeDetail: string | null;
   setRuntimeDetail: (detail: string | null) => void;
   bindSession: (sessionId: string) => void;
+  subscribeEvent: (listener: (event: AgentActionEnvelope) => void) => () => void;
   chat: (payload: ChatPayload) => void;
   cancel: (sessionId?: string) => void;
   ping: () => void;
@@ -50,6 +52,7 @@ export function AgentSessionProvider({
   const [runtimeDetail, setRuntimeDetail] = useState<string | null>(null);
   const channelRef = useRef<ChatChannel | null>(null);
   const pendingBindSessionIdsRef = useRef(new Set<string>());
+  const eventListenersRef = useRef(new Set<(event: AgentActionEnvelope) => void>());
   const requestedStatusRef = useRef(false);
   const runtimeConnection = useOptionalRuntimeConnection();
   const backendReady = runtimeConnection?.ready ?? true;
@@ -78,22 +81,33 @@ export function AgentSessionProvider({
     [flushPendingBinds],
   );
 
+  const subscribeEvent = useCallback((listener: (event: AgentActionEnvelope) => void) => {
+    eventListenersRef.current.add(listener);
+    return () => {
+      eventListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const receiveRuntimeEvent = useCallback((event: AgentActionEnvelope) => {
+    dispatch({ type: "event/receive", event });
+    for (const listener of eventListenersRef.current) {
+      listener(event);
+    }
+  }, []);
+
   useEffect(() => {
     if (!backendReady) {
       setWsStatus("idle");
       setRuntimeDetail(null);
       return;
     }
-    const channel = runtime.conversation.openChatChannel(
-      (event) => dispatch({ type: "event/receive", event }),
-      {
-        onStatus: setWsStatus,
-        onError: (reason) => {
-          const message = reason instanceof Error ? reason.message : String(reason || "连接异常");
-          setRuntimeDetail(message);
-        },
+    const channel = runtime.conversation.openChatChannel(receiveRuntimeEvent, {
+      onStatus: setWsStatus,
+      onError: (reason) => {
+        const message = reason instanceof Error ? reason.message : String(reason || "连接异常");
+        setRuntimeDetail(message);
       },
-    );
+    });
     channelRef.current = channel;
     return () => {
       channel.close();
@@ -101,7 +115,7 @@ export function AgentSessionProvider({
         channelRef.current = null;
       }
     };
-  }, [backendReady, runtime]);
+  }, [backendReady, receiveRuntimeEvent, runtime]);
 
   useEffect(() => {
     setRuntimeWsStatus?.(wsStatus);
@@ -157,11 +171,12 @@ export function AgentSessionProvider({
       runtimeDetail,
       setRuntimeDetail,
       bindSession,
+      subscribeEvent,
       chat,
       cancel,
       ping,
     }),
-    [bindSession, cancel, chat, ping, runtime, runtimeDetail, state, wsStatus],
+    [bindSession, cancel, chat, ping, runtime, runtimeDetail, state, subscribeEvent, wsStatus],
   );
 
   return (

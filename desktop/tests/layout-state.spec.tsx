@@ -5,17 +5,22 @@ import { describe, expect, it } from "vitest";
 import { LayoutStateProvider, useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import {
   LAYOUT_PREFERENCES_KEY,
+  DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
+  MAX_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
   DEFAULT_RIGHT_SIDEBAR_RATIO,
   MAX_SIDEBAR_WIDTH,
   MAX_PANEL_WIDTH,
   MAX_RIGHT_SIDEBAR_RATIO,
+  MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
   MIN_SIDEBAR_WIDTH,
   MIN_PANEL_WIDTH,
   clampPanelWidth,
   clampRightSidebarRatio,
   clampSidebarWidth,
+  clampWorkbenchAssistantDrawerWidth,
   defaultLayoutState,
   layoutReducer,
+  mergeLayoutPreferences,
   readLayoutPreferences,
   writeLayoutPreferences,
 } from "@/renderer/hooks/layout/layoutStore";
@@ -31,6 +36,8 @@ describe("layout store", () => {
     state = layoutReducer(state, { type: "set-right-sidebar-ratio", ratio: Number.NaN });
     state = layoutReducer(state, { type: "set-workspace-width", width: 100 });
     state = layoutReducer(state, { type: "set-preview-width", width: 9999 });
+    state = layoutReducer(state, { type: "set-workbench-assistant-drawer-width", width: 9999 });
+    state = layoutReducer(state, { type: "set-last-workbench-workspace-id", workspaceId: "workspace-a" });
 
     expect(state.sidebarCollapsed).toBe(true);
     expect(state.rightSidebarOpen).toBe(true);
@@ -41,6 +48,8 @@ describe("layout store", () => {
     expect(state.previewOpen).toBe(true);
     expect(state.workspaceWidth).toBe(MIN_PANEL_WIDTH);
     expect(state.previewWidth).toBe(MAX_PANEL_WIDTH);
+    expect(state.workbenchAssistantDrawerWidth).toBe(MAX_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+    expect(state.lastWorkbenchWorkspaceId).toBe("workspace-a");
   });
 
   it("reads and writes local layout preferences", () => {
@@ -59,6 +68,8 @@ describe("layout store", () => {
       rightSidebarPlacement: "left",
       workspaceWidth: 320,
       previewWidth: 480,
+      workbenchAssistantDrawerWidth: 380,
+      lastWorkbenchWorkspaceId: "workspace-a",
     });
 
     expect(store.has(LAYOUT_PREFERENCES_KEY)).toBe(true);
@@ -69,10 +80,51 @@ describe("layout store", () => {
       rightSidebarPlacement: "left",
       workspaceWidth: 320,
       previewWidth: 480,
+      workbenchAssistantDrawerWidth: 380,
+      lastWorkbenchWorkspaceId: "workspace-a",
     });
     expect(clampPanelWidth(Number.NaN)).toBe(MIN_PANEL_WIDTH);
     expect(clampRightSidebarRatio(9)).toBe(MAX_RIGHT_SIDEBAR_RATIO);
     expect(clampSidebarWidth(1)).toBe(MIN_SIDEBAR_WIDTH);
+    expect(clampWorkbenchAssistantDrawerWidth(Number.NaN)).toBe(DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+    expect(clampWorkbenchAssistantDrawerWidth(1)).toBe(MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+  });
+
+  it("keeps legacy preferences compatible and normalizes invalid workbench preferences", () => {
+    const legacyState = mergeLayoutPreferences(defaultLayoutState, {
+      sidebarWidth: 260,
+    });
+    expect(legacyState.sidebarWidth).toBe(260);
+    expect(legacyState.workbenchAssistantDrawerWidth).toBe(DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+    expect(legacyState.lastWorkbenchWorkspaceId).toBeNull();
+
+    const store = new Map<string, string>([
+      [
+        LAYOUT_PREFERENCES_KEY,
+        JSON.stringify({
+          workbenchAssistantDrawerWidth: 120,
+          lastWorkbenchWorkspaceId: 42,
+        }),
+      ],
+    ]);
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+    };
+
+    expect(readLayoutPreferences(storage)).toEqual({
+      sidebarCollapsed: undefined,
+      sidebarWidth: undefined,
+      rightSidebarRatio: undefined,
+      rightSidebarPlacement: undefined,
+      workspaceWidth: undefined,
+      previewWidth: undefined,
+      workbenchAssistantDrawerWidth: 120,
+      lastWorkbenchWorkspaceId: undefined,
+    });
+
+    const merged = mergeLayoutPreferences(defaultLayoutState, readLayoutPreferences(storage));
+    expect(merged.workbenchAssistantDrawerWidth).toBe(MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+    expect(merged.lastWorkbenchWorkspaceId).toBeNull();
   });
 
 });
@@ -90,6 +142,8 @@ describe("LayoutStateProvider", () => {
       result.current.actions.setRightSidebarRatio(0.42);
       result.current.actions.toggleRightSidebarPlacement();
       result.current.actions.setWorkspaceWidth(500);
+      result.current.actions.setWorkbenchAssistantDrawerWidth(510);
+      result.current.actions.setLastWorkbenchWorkspaceId("workspace-b");
     });
 
     expect(result.current.state.rightSidebarOpen).toBe(true);
@@ -99,5 +153,7 @@ describe("LayoutStateProvider", () => {
     expect(result.current.state.rightSidebarRatio).toBe(0.42);
     expect(result.current.state.rightSidebarPlacement).toBe("left");
     expect(result.current.state.workspaceWidth).toBe(500);
+    expect(result.current.state.workbenchAssistantDrawerWidth).toBe(510);
+    expect(result.current.state.lastWorkbenchWorkspaceId).toBe("workspace-b");
   });
 });

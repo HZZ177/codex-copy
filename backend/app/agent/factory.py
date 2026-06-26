@@ -316,6 +316,7 @@ class AgentFactory:
         system_prompt: str | SystemMessage,
         checkpointer: Any,
         middleware: tuple[Any, ...] = (),
+        state_schema: type[Any] | None = None,
         name: str = "desktop_agent",
     ) -> Any:
         return create_agent(
@@ -323,6 +324,7 @@ class AgentFactory:
             tools=tools,
             system_prompt=system_prompt,
             middleware=middleware,
+            state_schema=state_schema,
             checkpointer=checkpointer,
             name=name,
         )

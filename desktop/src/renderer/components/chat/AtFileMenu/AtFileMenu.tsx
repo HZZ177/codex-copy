@@ -5,6 +5,7 @@ import type { WorkspaceSearchResult } from "@/runtime";
 import { useMaterialEntryIcon } from "@/renderer/components/workspace/materialIconTheme";
 import { WORKSPACE_FILE_SEARCH_BUDGET_HINT } from "@/renderer/utils/workspaceFileSearchBudget";
 
+import popupStyles from "../ComposerPopupMenu/ComposerPopupMenu.module.css";
 import styles from "./AtFileMenu.module.css";
 
 export interface AtFileMenuProps {
@@ -49,11 +50,11 @@ export function AtFileMenu({
   }, [activeIndex, directoryPath, error, loading, results]);
 
   return (
-    <div className={styles.menu} role="listbox" aria-label="文件引用菜单" data-testid="at-file-menu">
-      <div className={styles.header} aria-label="当前引用目录">
+    <div className={popupStyles.menu} role="listbox" aria-label="文件引用菜单" data-testid="at-file-menu">
+      <div className={popupStyles.header} aria-label="当前引用目录">
         {browsing && directoryPath ? (
           <button
-            className={styles.backButton}
+            className={popupStyles.backButton}
             type="button"
             aria-label="返回上一级目录"
             onMouseDown={(event) => {
@@ -64,22 +65,23 @@ export function AtFileMenu({
             <ChevronLeft size={14} />
           </button>
         ) : (
-          <span className={styles.backSpacer} />
+          <span className={popupStyles.backSpacer} />
         )}
-        <span>{headerLabel}</span>
+        <span className={popupStyles.headerTitle}>{headerLabel}</span>
+        <span className={popupStyles.headerMeta}>文件</span>
       </div>
 
       <div className={styles.budgetHint}>{WORKSPACE_FILE_SEARCH_BUDGET_HINT}</div>
 
-      <div ref={bodyRef} className={styles.body}>
-        {loading ? <div className={styles.empty}>{loadingText}</div> : null}
-        {!loading && error ? <div className={styles.error}>{error}</div> : null}
-        {!loading && !error && hint ? <div className={styles.empty}>{hint}</div> : null}
-        {!loading && !error && !hint && !results.length ? <div className={styles.empty}>{emptyText}</div> : null}
+      <div ref={bodyRef} className={popupStyles.body}>
+        {loading ? <div className={popupStyles.empty}>{loadingText}</div> : null}
+        {!loading && error ? <div className={popupStyles.error}>{error}</div> : null}
+        {!loading && !error && hint ? <div className={popupStyles.empty}>{hint}</div> : null}
+        {!loading && !error && !hint && !results.length ? <div className={popupStyles.empty}>{emptyText}</div> : null}
         {!loading && !error && !hint
           ? results.map((result, index) => (
               <button
-                className={styles.item}
+                className={popupStyles.item}
                 type="button"
                 role="option"
                 aria-label={result.type === "directory" ? `打开目录 ${result.path}` : `选择文件 ${result.path}`}
@@ -92,14 +94,14 @@ export function AtFileMenu({
                   onSelect(result);
                 }}
               >
-                <span className={styles.icon} aria-hidden="true">
+                <span className={popupStyles.icon} aria-hidden="true">
                   <MaterialEntryIcon path={result.path || result.name} type={result.type} />
                 </span>
-                <span className={styles.text}>
+                <span className={popupStyles.text}>
                   <strong>{result.name}</strong>
                   <span>{result.path}</span>
                 </span>
-                {result.type === "directory" ? <ChevronRight className={styles.enterIcon} size={13} /> : null}
+                {result.type === "directory" ? <ChevronRight className={popupStyles.enterIcon} size={13} /> : null}
               </button>
             ))
           : null}

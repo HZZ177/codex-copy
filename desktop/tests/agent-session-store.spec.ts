@@ -40,6 +40,7 @@ describe("agentSessionStore reducer", () => {
       "session_closed",
       "task_result",
       "reasoning",
+      "workspaceSkillsChanged",
       "approval_requested",
       "approval_resolved",
     ]);
@@ -105,6 +106,27 @@ describe("agentSessionStore reducer", () => {
     ]);
     expect(selectAgentSessionState(state, "ses-1")?.hydrated).toBe(true);
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
+  });
+
+  it("keeps an active local runtime state when stale active history is hydrated", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "sessions/set",
+      sessions: [session("ses-1", "2026-06-18T08:00:00Z")],
+    });
+    state = agentConversationReducer(state, {
+      type: "runtime/setState",
+      sessionId: "ses-1",
+      runtimeState: "running",
+    });
+
+    state = agentConversationReducer(state, {
+      type: "history/loaded",
+      sessionId: "ses-1",
+      history: history([{ role: "user", content: "运行中的问题" }]),
+    });
+
+    expect(selectAgentRuntimeState(state, "ses-1")).toBe("running");
+    expect(selectAgentSessionState(state, "ses-1")?.isStreaming).toBe(true);
   });
 
   it("restores pending command approval from history", () => {

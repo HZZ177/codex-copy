@@ -135,7 +135,7 @@ class ToolCallChunkPipeline:
 
 
 class ApplyPatchProgressCollector:
-    tool_names = frozenset({"apply_patch"})
+    tool_names = frozenset({"edit_file", "apply_patch"})
 
     def collect(self, state: ToolCallChunkState) -> dict[str, Any] | None:
         patch = string_value(state.args.get("patch"))
@@ -151,7 +151,7 @@ class ApplyPatchProgressCollector:
 
 
 class WriteFileProgressCollector:
-    tool_names = frozenset({"write_file"})
+    tool_names = frozenset({"create_file", "write_file"})
 
     def collect(self, state: ToolCallChunkState) -> dict[str, Any] | None:
         path = string_value(state.args.get("path"))

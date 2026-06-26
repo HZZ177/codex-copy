@@ -142,6 +142,26 @@ describe("UsageStatsPage", () => {
     });
   });
 
+  it("uses progressive trend loading for large hourly ranges", async () => {
+    const runtime = fakeRuntime();
+
+    render(<UsageStatsPage runtime={runtime} />);
+
+    await screen.findByText("24");
+    runtime.usage.getTrend.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
+
+    await waitFor(() => {
+      expect(runtime.usage.getTrend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bucket: "hour",
+          limit: 168,
+          timezoneOffsetMinutes: expect.any(Number),
+        }),
+      );
+    });
+  });
+
   it("shows empty state without mock fallback data", async () => {
     const runtime = fakeRuntime({
       summary: emptySummary(),
@@ -259,7 +279,9 @@ describe("UsageStatsPage", () => {
     const heatWall = screen.getByTestId("usage-token-heatwall");
     const cell = screen.getByRole("button", { name: "06/19 · 总 Token 18,445" });
 
-    expect(heatWall.textContent).toContain("18,445 Token");
+    expect(heatWall.textContent).toContain("一");
+    expect(heatWall.textContent).toContain("日");
+    expect(screen.queryByText("18,445 Token")).toBeNull();
     expect(cell.getAttribute("title")).toBe("06/19 · 总 Token 18,445");
     expect(cell.getAttribute("data-level")).toBe("4");
     expect(screen.getByText("总 Token 18,445")).not.toBeNull();
@@ -285,6 +307,8 @@ describe("UsageStatsPage", () => {
     const weekCells = screen.getAllByRole("button", { name: "06/15 - 06/21 · 总 Token 18,445" });
 
     expect(weekCells).toHaveLength(7);
+    expect(weekCells.every((cell) => cell.getAttribute("data-level") === "4")).toBe(true);
+    expect(weekCells.every((cell) => cell.getAttribute("data-outside") === "false")).toBe(true);
     fireEvent.mouseEnter(weekCells[4]);
     expect(weekCells.every((cell) => cell.getAttribute("data-active") === "true")).toBe(true);
   });

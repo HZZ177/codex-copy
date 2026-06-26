@@ -41,6 +41,8 @@ class UsageTrendPoint(BaseModel):
 
 class UsageTrendResponse(BaseModel):
     points: list[UsageTrendPoint]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class UsageRequestListResponse(BaseModel):
@@ -79,19 +81,23 @@ def get_usage_trend(
     bucket: Literal["hour", "day"] = "day",
     timezone_offset_minutes: int = 0,
     model: str | None = None,
+    start_after: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=2000),
     repositories: StorageRepositories = RepositoriesDep,
 ) -> UsageTrendResponse:
     try:
-        points = _service(repositories).get_trend(
+        result = _service(repositories).get_trend_page(
             start_time=start_time,
             end_time=end_time,
             model=model,
             bucket=bucket,
             timezone_offset_minutes=timezone_offset_minutes,
+            start_after=start_after,
+            limit=limit,
         )
     except UsageValidationError as exc:
         raise _bad_request("invalid_usage_query", str(exc)) from exc
-    return UsageTrendResponse(points=points)
+    return UsageTrendResponse(**result)
 
 
 @router.get("/requests", response_model=UsageRequestListResponse)

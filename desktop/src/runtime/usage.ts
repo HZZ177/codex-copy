@@ -18,6 +18,8 @@ export interface UsageQueryOptions {
 export interface UsageTrendOptions extends UsageQueryOptions {
   bucket?: UsageBucket;
   timezoneOffsetMinutes?: number;
+  startAfter?: string;
+  limit?: number;
 }
 
 export interface UsageRequestListOptions extends UsageQueryOptions {
@@ -59,6 +61,8 @@ function usageQuery(options: UsageQueryOptions & Partial<UsageTrendOptions & Usa
   appendParam(params, "model", options.model);
   appendParam(params, "bucket", options.bucket);
   appendParam(params, "timezone_offset_minutes", options.timezoneOffsetMinutes);
+  appendParam(params, "start_after", options.startAfter);
+  appendParam(params, "limit", options.limit);
   appendParam(params, "status", options.status);
   appendParam(params, "page", options.page);
   appendParam(params, "page_size", options.pageSize);

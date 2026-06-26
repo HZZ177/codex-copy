@@ -38,9 +38,9 @@ READ_FILE_DESCRIPTION = (
     "总行数、截断信息和用于继续分页的 next_start_line。"
 )
 
-WRITE_FILE_DESCRIPTION = (
-    "在工作区内创建新的 UTF-8 文本文件，并返回文件 diff。"
-    "如果目标文件已存在会失败；修改、删除或移动已有文件必须使用 apply_patch。"
+CREATE_FILE_DESCRIPTION = (
+    "在当前工作区内创建新的 UTF-8 文本文件，并返回文件变更 diff。"
+    "目标文件已存在时会失败；修改、删除或移动已有文件请使用 edit_file。"
 )
 
 LIST_DIR_DESCRIPTION = (
@@ -114,8 +114,8 @@ def create_filesystem_tools() -> list[FunctionTool]:
             handler=read_file_tool,
         ),
         FunctionTool(
-            name="write_file",
-            description=WRITE_FILE_DESCRIPTION,
+            name="create_file",
+            description=CREATE_FILE_DESCRIPTION,
             parameters={
                 "type": "object",
                 "properties": {
@@ -265,7 +265,7 @@ async def write_file_tool(
     existed = path.exists()
     if existed:
         raise ToolExecutionError(
-            "文件已存在，write_file 只允许创建新文件；修改已有文件请使用 apply_patch",
+            "文件已存在，create_file 只用于创建新文件；修改已有文件请使用 edit_file",
             code="file_exists",
             details={"path": _relative(path, context)},
         )

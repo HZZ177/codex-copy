@@ -8,6 +8,8 @@ export interface LayoutState {
   previewOpen: boolean;
   workspaceWidth: number;
   previewWidth: number;
+  workbenchAssistantDrawerWidth: number;
+  lastWorkbenchWorkspaceId: string | null;
   isMobileLike: boolean;
 }
 
@@ -28,6 +30,8 @@ export type LayoutAction =
   | { type: "set-preview-open"; open: boolean }
   | { type: "set-workspace-width"; width: number }
   | { type: "set-preview-width"; width: number }
+  | { type: "set-workbench-assistant-drawer-width"; width: number }
+  | { type: "set-last-workbench-workspace-id"; workspaceId: string | null }
   | { type: "set-mobile-like"; value: boolean };
 
 export const LAYOUT_PREFERENCES_KEY = "keydex.layout.preferences";
@@ -40,6 +44,9 @@ export const MIN_RIGHT_SIDEBAR_RATIO = 0.2;
 export const MAX_RIGHT_SIDEBAR_RATIO = 0.8;
 export const MIN_PANEL_WIDTH = 280;
 export const MAX_PANEL_WIDTH = 760;
+export const DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 400;
+export const MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 360;
+export const MAX_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 520;
 
 export const defaultLayoutState: LayoutState = {
   sidebarCollapsed: false,
@@ -51,6 +58,8 @@ export const defaultLayoutState: LayoutState = {
   previewOpen: false,
   workspaceWidth: 360,
   previewWidth: 460,
+  workbenchAssistantDrawerWidth: DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
+  lastWorkbenchWorkspaceId: null,
   isMobileLike: false,
 };
 
@@ -61,6 +70,8 @@ export interface LayoutPreferences {
   rightSidebarPlacement?: RightSidebarPlacement;
   workspaceWidth?: number;
   previewWidth?: number;
+  workbenchAssistantDrawerWidth?: number;
+  lastWorkbenchWorkspaceId?: string | null;
 }
 
 export function clampSidebarWidth(width: number) {
@@ -82,6 +93,16 @@ export function clampRightSidebarRatio(ratio: number) {
     return DEFAULT_RIGHT_SIDEBAR_RATIO;
   }
   return Math.min(MAX_RIGHT_SIDEBAR_RATIO, Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.round(ratio * 1000) / 1000));
+}
+
+export function clampWorkbenchAssistantDrawerWidth(width: number) {
+  if (!Number.isFinite(width)) {
+    return DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH;
+  }
+  return Math.min(
+    MAX_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
+    Math.max(MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH, Math.round(width)),
+  );
 }
 
 function normalizeRightSidebarPlacement(value: unknown): RightSidebarPlacement | undefined {
@@ -145,6 +166,18 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
         const previewWidth = clampPanelWidth(action.width);
         return previewWidth === state.previewWidth ? state : { ...state, previewWidth };
       }
+    case "set-workbench-assistant-drawer-width":
+      {
+        const workbenchAssistantDrawerWidth = clampWorkbenchAssistantDrawerWidth(action.width);
+        return workbenchAssistantDrawerWidth === state.workbenchAssistantDrawerWidth
+          ? state
+          : { ...state, workbenchAssistantDrawerWidth };
+      }
+    case "set-last-workbench-workspace-id":
+      if (state.lastWorkbenchWorkspaceId === action.workspaceId) {
+        return state;
+      }
+      return { ...state, lastWorkbenchWorkspaceId: action.workspaceId };
     case "set-mobile-like":
       if (state.isMobileLike === action.value) {
         return state;
@@ -169,6 +202,14 @@ export function mergeLayoutPreferences(state: LayoutState, preferences: LayoutPr
     workspaceWidth:
       preferences.workspaceWidth === undefined ? state.workspaceWidth : clampPanelWidth(preferences.workspaceWidth),
     previewWidth: preferences.previewWidth === undefined ? state.previewWidth : clampPanelWidth(preferences.previewWidth),
+    workbenchAssistantDrawerWidth:
+      preferences.workbenchAssistantDrawerWidth === undefined
+        ? state.workbenchAssistantDrawerWidth
+        : clampWorkbenchAssistantDrawerWidth(preferences.workbenchAssistantDrawerWidth),
+    lastWorkbenchWorkspaceId:
+      preferences.lastWorkbenchWorkspaceId === undefined
+        ? state.lastWorkbenchWorkspaceId
+        : preferences.lastWorkbenchWorkspaceId,
   };
 }
 
@@ -188,6 +229,14 @@ export function readLayoutPreferences(storage: Pick<Storage, "getItem">): Layout
       rightSidebarPlacement: normalizeRightSidebarPlacement(parsed.rightSidebarPlacement),
       workspaceWidth: typeof parsed.workspaceWidth === "number" ? parsed.workspaceWidth : undefined,
       previewWidth: typeof parsed.previewWidth === "number" ? parsed.previewWidth : undefined,
+      workbenchAssistantDrawerWidth:
+        typeof parsed.workbenchAssistantDrawerWidth === "number" ? parsed.workbenchAssistantDrawerWidth : undefined,
+      lastWorkbenchWorkspaceId:
+        typeof parsed.lastWorkbenchWorkspaceId === "string"
+          ? parsed.lastWorkbenchWorkspaceId
+          : parsed.lastWorkbenchWorkspaceId === null
+            ? null
+            : undefined,
     };
   } catch {
     return {};
@@ -198,7 +247,14 @@ export function writeLayoutPreferences(
   storage: Pick<Storage, "setItem">,
   state: Pick<
     LayoutState,
-    "sidebarCollapsed" | "sidebarWidth" | "rightSidebarRatio" | "rightSidebarPlacement" | "workspaceWidth" | "previewWidth"
+    | "sidebarCollapsed"
+    | "sidebarWidth"
+    | "rightSidebarRatio"
+    | "rightSidebarPlacement"
+    | "workspaceWidth"
+    | "previewWidth"
+    | "workbenchAssistantDrawerWidth"
+    | "lastWorkbenchWorkspaceId"
   >,
 ) {
   storage.setItem(
@@ -210,6 +266,8 @@ export function writeLayoutPreferences(
       rightSidebarPlacement: state.rightSidebarPlacement,
       workspaceWidth: clampPanelWidth(state.workspaceWidth),
       previewWidth: clampPanelWidth(state.previewWidth),
+      workbenchAssistantDrawerWidth: clampWorkbenchAssistantDrawerWidth(state.workbenchAssistantDrawerWidth),
+      lastWorkbenchWorkspaceId: state.lastWorkbenchWorkspaceId,
     }),
   );
 }

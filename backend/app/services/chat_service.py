@@ -10,12 +10,16 @@ from langchain_core.messages import RemoveMessage, SystemMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from backend.app.agent import AgentRunner
+from backend.app.agent.tool_call_preset import ToolCallPreset, ToolCallPresetItem
 from backend.app.agent.event_processor import AgentEventResult, process_agent_events
 from backend.app.command_approval import ApprovalService
 from backend.app.core.config import AppSettings
 from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.core.request_context import reset_request_context, set_request_context
+from backend.app.keydex import KeydexWorkspaceRuntimeCache
+from backend.app.keydex.runtime import KeydexWorkspaceRuntimeSnapshot
+from backend.app.keydex.skills import SkillCatalog
 from backend.app.events import (
     ChatProjection,
     ChatProjectionAdapter,
@@ -64,6 +68,26 @@ class InjectedMessage:
     content: str
     message_time: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SkillActivationRequest:
+    skill_name: str
+    source: str = "workspace"
+    origin: str | None = None
+
+
+class SkillActivationError(ValueError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -151,6 +175,78 @@ def _build_message_injection_items(runtime_params: dict[str, Any] | None) -> lis
     return items
 
 
+def _build_skill_activation_request(
+    runtime_params: dict[str, Any] | None,
+) -> SkillActivationRequest | None:
+    if not runtime_params:
+        return None
+    if not isinstance(runtime_params, dict):
+        raise SkillActivationError("skill_activation_invalid", "runtime_params must be an object")
+    if "tool_call_preset" in runtime_params or "toolCallPreset" in runtime_params:
+        raise SkillActivationError(
+            "skill_activation_invalid",
+            "runtime_params.tool_call_preset is not supported",
+        )
+    raw_activation = runtime_params.get("skill_activation")
+    if raw_activation is None:
+        raw_activation = runtime_params.get("skillActivation")
+    if raw_activation is None:
+        return None
+    if not isinstance(raw_activation, dict):
+        raise SkillActivationError(
+            "skill_activation_invalid",
+            "runtime_params.skill_activation must be an object",
+        )
+
+    raw_skill_name = raw_activation.get("skill_name")
+    if raw_skill_name is None:
+        raw_skill_name = raw_activation.get("skillName")
+    skill_name = str(raw_skill_name or "").strip()
+    if not skill_name:
+        raise SkillActivationError(
+            "skill_activation_invalid",
+            "runtime_params.skill_activation.skill_name must not be empty",
+        )
+
+    source = str(raw_activation.get("source") or "workspace").strip() or "workspace"
+    if source != "workspace":
+        raise SkillActivationError(
+            "skill_source_unsupported",
+            "System-level Skills are not enabled yet",
+            {"source": source},
+        )
+    raw_origin = raw_activation.get("origin")
+    origin = str(raw_origin).strip() if raw_origin else None
+    return SkillActivationRequest(skill_name=skill_name, source=source, origin=origin)
+
+
+def _build_skill_activation_preset(
+    activation: SkillActivationRequest | None,
+) -> ToolCallPreset | None:
+    if activation is None:
+        return None
+    metadata: dict[str, Any] = {"source": activation.source}
+    if activation.origin:
+        metadata["origin"] = activation.origin
+    return ToolCallPreset(
+        type="force",
+        producer="skill_activation",
+        calls=[
+            ToolCallPresetItem(
+                name="load_skill",
+                args={"skill_name": activation.skill_name},
+            )
+        ],
+        metadata=metadata,
+    )
+
+
+def _chat_turn_error(exc: Exception) -> tuple[str | int, str, dict[str, Any]]:
+    if isinstance(exc, SkillActivationError):
+        return exc.code, exc.message, exc.details
+    return 500, str(exc), {}
+
+
 def _runtime_role_for_injection(role: MessageInjectionRole) -> str:
     if role == MessageInjectionRole.SYSTEM:
         return "system"
@@ -222,10 +318,12 @@ class ChatService:
         settings: AppSettings,
         repositories: StorageRepositories,
         agent_runner: AgentRunner,
+        keydex_runtime_cache: KeydexWorkspaceRuntimeCache | None = None,
     ) -> None:
         self.settings = settings
         self.repositories = repositories
         self.agent_runner = agent_runner
+        self.keydex_runtime_cache = keydex_runtime_cache or KeydexWorkspaceRuntimeCache()
         self.message_event_service = MessageEventService(repositories.message_events)
         self.workspace_service = WorkspaceService(repositories.workspaces)
 
@@ -237,11 +335,15 @@ class ChatService:
         cancellation: ChatCancellationToken | None = None,
     ) -> ChatTurnResult:
         message_injection_items = _build_message_injection_items(request.runtime_params)
+        skill_activation = _build_skill_activation_request(request.runtime_params)
         if not request.message.strip() and not message_injection_items:
+            if skill_activation is not None:
+                raise ValueError("请输入要使用该 Skill 处理的内容")
             raise ValueError("用户消息不能为空")
 
         token = cancellation or ChatCancellationToken()
         session = self._ensure_session(request)
+        skill_activation_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None
         _, max_turn = self.repositories.message_events.get_max_seq_and_turn(session.id)
         turn_index = max_turn + 1
         trace_id = new_id()
@@ -294,6 +396,7 @@ class ChatService:
                 )
                 raise ValueError("模型不能为空")
 
+            skill_activation_snapshot = self._validate_skill_activation(skill_activation, session)
             await self._emit_turn_started(
                 dispatcher=dispatcher,
                 request=request,
@@ -311,6 +414,16 @@ class ChatService:
                 turn_index=turn_index,
                 message_injection=message_injection_items,
             )
+            await self._emit_skill_activation_context(
+                dispatcher=dispatcher,
+                request=request,
+                session=session,
+                trace_id=trace_id,
+                root_node_id=root_node_id,
+                turn_index=turn_index,
+                skill_activation=skill_activation,
+                keydex_snapshot=skill_activation_snapshot,
+            )
             await self._emit_user_message(
                 dispatcher=dispatcher,
                 request=request,
@@ -327,6 +440,8 @@ class ChatService:
                 dispatcher=dispatcher,
                 cancellation=token,
                 injected_runtime_messages=injected_runtime_messages,
+                skill_activation=skill_activation,
+                keydex_snapshot=skill_activation_snapshot,
             )
 
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
@@ -466,7 +581,7 @@ class ChatService:
             )
         except Exception as exc:
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
-            error_message = str(exc)
+            error_code, error_message, error_details = _chat_turn_error(exc)
             logger.opt(exception=True).error(
                 f"[ChatTurn] 对话失败 | session_id={session.id} | turn_index={turn_index} | "
                 f"trace_id={trace_id} | duration_ms={duration_ms} | error={error_message}"
@@ -480,7 +595,8 @@ class ChatService:
                         "trace_id": trace_id,
                         "message": error_message,
                         "error": error_message,
-                        "code": 500,
+                        "code": error_code,
+                        "details": error_details,
                     },
                     trace_id=trace_id,
                     user_id=request.user_id or session.user_id,
@@ -511,6 +627,8 @@ class ChatService:
         dispatcher: EventDispatcher,
         cancellation: ChatCancellationToken,
         injected_runtime_messages: list[dict[str, Any]] | None = None,
+        skill_activation: SkillActivationRequest | None = None,
+        keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None,
     ) -> AgentLoopOutcome:
         active_session_id = session.active_session_id or session.id
         tool_context, enable_tools = self._build_tool_context(
@@ -518,6 +636,7 @@ class ChatService:
             session=session,
             trace_id=trace_id,
             turn_index=turn_index,
+            keydex_snapshot=keydex_snapshot,
         )
         tool_context.metadata["repositories"] = self.repositories
         tool_context.metadata["dispatcher"] = dispatcher
@@ -528,56 +647,63 @@ class ChatService:
             f"session_type={session.session_type} | tools_enabled={enable_tools} | "
             f"workspace_root={workspace_root_label}"
         )
-        agent = self.agent_runner.create_agent(
-            model=request.model.strip(),
-            system_prompt=request.system_prompt,
+        agent_context_token = self._set_agent_runtime_context(
             tool_context=tool_context,
-            enable_tools=enable_tools,
+            skill_activation=skill_activation,
         )
-        run_config = {
-            "configurable": {
-                "thread_id": active_session_id,
-                "checkpoint_ns": "",
-            },
-            "recursion_limit": max(4, self.settings.max_tool_calls * 2 + 4),
-        }
-        slot_items = [
-            item
-            for item in _build_message_injection_items(request.runtime_params)
-            if item.type == MessageInjectionType.SLOT
-        ]
-        if slot_items:
-            await _sync_slot_to_checkpoint(
-                agent,
-                {"configurable": {"thread_id": active_session_id, "checkpoint_ns": ""}},
-                slot_items[0].content,
+        try:
+            agent = self.agent_runner.create_agent(
+                model=request.model.strip(),
+                system_prompt=request.system_prompt,
+                tool_context=tool_context,
+                enable_tools=enable_tools,
             )
-        messages_to_send = list(injected_runtime_messages or [])
-        if request.message.strip():
-            messages_to_send.append({"role": "user", "content": request.message})
-        if not messages_to_send:
-            messages_to_send.append({"role": "user", "content": "请根据已附加的上下文继续处理。"})
-        event_stream = agent.astream_events(
-            {"messages": messages_to_send},
-            config=run_config,
-            version="v2",
-        )
-        logger.info(
-            f"[AgentLoop] 开始事件流 | session_id={session.id} | turn_index={turn_index} | "
-            f"trace_id={trace_id} | active_session_id={active_session_id}"
-        )
-        event_result = await process_agent_events(
-            event_stream,
-            dispatcher=dispatcher,
-            cancellation=cancellation,
-            session_id=session.id,
-            trace_id=trace_id,
-            user_id=request.user_id or session.user_id,
-            active_session_id=active_session_id,
-            turn_index=turn_index,
-            model=request.model.strip(),
-            llm_request_logs=self.repositories.llm_request_logs,
-        )
+            run_config = {
+                "configurable": {
+                    "thread_id": active_session_id,
+                    "checkpoint_ns": "",
+                },
+                "recursion_limit": max(4, self.settings.max_tool_calls * 2 + 4),
+            }
+            slot_items = [
+                item
+                for item in _build_message_injection_items(request.runtime_params)
+                if item.type == MessageInjectionType.SLOT
+            ]
+            if slot_items:
+                await _sync_slot_to_checkpoint(
+                    agent,
+                    {"configurable": {"thread_id": active_session_id, "checkpoint_ns": ""}},
+                    slot_items[0].content,
+                )
+            messages_to_send = list(injected_runtime_messages or [])
+            if request.message.strip():
+                messages_to_send.append({"role": "user", "content": request.message})
+            if not messages_to_send:
+                messages_to_send.append({"role": "user", "content": "请根据已附加的上下文继续处理。"})
+            event_stream = agent.astream_events(
+                {"messages": messages_to_send},
+                config=run_config,
+                version="v2",
+            )
+            logger.info(
+                f"[AgentLoop] 开始事件流 | session_id={session.id} | turn_index={turn_index} | "
+                f"trace_id={trace_id} | active_session_id={active_session_id}"
+            )
+            event_result = await process_agent_events(
+                event_stream,
+                dispatcher=dispatcher,
+                cancellation=cancellation,
+                session_id=session.id,
+                trace_id=trace_id,
+                user_id=request.user_id or session.user_id,
+                active_session_id=active_session_id,
+                turn_index=turn_index,
+                model=request.model.strip(),
+                llm_request_logs=self.repositories.llm_request_logs,
+            )
+        finally:
+            reset_request_context(agent_context_token)
         checkpoint_config = await self.agent_runner.get_latest_checkpoint_config(
             thread_id=active_session_id,
             checkpoint_ns="",
@@ -602,9 +728,13 @@ class ChatService:
         session: SessionRecord,
         trace_id: str,
         turn_index: int,
+        keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None,
     ) -> tuple[ToolExecutionContext, bool]:
         if session.session_type == "workspace":
             workspace_context = self.workspace_service.runtime_context_for_session(session)
+            resolved_keydex_snapshot = keydex_snapshot or self.keydex_runtime_cache.get_snapshot(
+                workspace_context.workspace.root_path
+            )
             return (
                 ToolExecutionContext(
                     session_id=session.id,
@@ -617,6 +747,10 @@ class ChatService:
                         "workspace_roots": [
                             str(root) for root in workspace_context.workspace_roots
                         ],
+                        "keydex_snapshot": resolved_keydex_snapshot,
+                        "keydex_profile": resolved_keydex_snapshot.keydex_profile,
+                        "skill_catalog": resolved_keydex_snapshot.skill_catalog,
+                        "keydex_fingerprint": resolved_keydex_snapshot.fingerprint,
                     },
                 ),
                 True,
@@ -634,6 +768,47 @@ class ChatService:
                 False,
             )
         raise ValueError(f"不支持的 session 类型: {session.session_type}")
+
+    def _validate_skill_activation(
+        self,
+        activation: SkillActivationRequest | None,
+        session: SessionRecord,
+    ) -> KeydexWorkspaceRuntimeSnapshot | None:
+        if activation is None:
+            return None
+        if session.session_type != "workspace":
+            raise SkillActivationError(
+                "skill_session_unsupported",
+                "Workspace Skills can only be used in workspace sessions",
+                {"session_type": session.session_type},
+            )
+        workspace_context = self.workspace_service.runtime_context_for_session(session)
+        snapshot = self.keydex_runtime_cache.get_snapshot(workspace_context.workspace.root_path)
+        if activation.skill_name not in snapshot.skill_catalog.skills:
+            raise SkillActivationError(
+                "skill_not_found",
+                "Skill does not exist or has been deleted",
+                {"skill_name": activation.skill_name},
+            )
+        return snapshot
+
+    def _set_agent_runtime_context(
+        self,
+        *,
+        tool_context: ToolExecutionContext,
+        skill_activation: SkillActivationRequest | None,
+    ):
+        skill_catalog = tool_context.metadata.get("skill_catalog")
+        if not isinstance(skill_catalog, SkillCatalog):
+            skill_catalog = None
+        keydex_snapshot = tool_context.metadata.get("keydex_snapshot")
+        if not isinstance(keydex_snapshot, KeydexWorkspaceRuntimeSnapshot):
+            keydex_snapshot = None
+        return set_request_context(
+            tool_call_preset=_build_skill_activation_preset(skill_activation),
+            skill_catalog=skill_catalog,
+            keydex_snapshot=keydex_snapshot,
+        )
 
     def _build_turn_dispatcher(
         self,
@@ -772,6 +947,62 @@ class ChatService:
                 ),
                 "metadata": item.metadata or {},
                 "fallbackUserMessage": request.message,
+            },
+            trace_id=trace_id,
+            user_id=request.user_id or session.user_id,
+            original_session_id=session.id,
+            active_session_id=session.active_session_id or session.id,
+            turn_index=turn_index,
+            tags={"messageTimeMs": int(time.time() * 1000)},
+        )
+
+    async def _emit_skill_activation_context(
+        self,
+        *,
+        dispatcher: EventDispatcher,
+        request: ChatRequest,
+        session: SessionRecord,
+        trace_id: str,
+        root_node_id: str,
+        turn_index: int,
+        skill_activation: SkillActivationRequest | None,
+        keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None,
+    ) -> None:
+        if skill_activation is None or keydex_snapshot is None:
+            return
+        skill = keydex_snapshot.skill_catalog.skills.get(skill_activation.skill_name)
+        if skill is None:
+            return
+        label = f"/{skill.name}"
+        await dispatcher.emit_event(
+            event_type=DomainEventType.MESSAGE_SYSTEM_CREATED.value,
+            source="skill_activation",
+            payload={
+                "id": f"skill:{skill.name}",
+                "content": skill.description,
+                "session_id": session.id,
+                "trace_id": trace_id,
+                "trace_record_id": trace_id,
+                "root_node_id": root_node_id,
+                "messageTimeMs": int(time.time() * 1000),
+                "source": "skill_activation",
+                "skill_name": skill.name,
+                "skillName": skill.name,
+                "skill_source": skill.source,
+                "skillSource": skill.source,
+                "label": label,
+                "description": skill.description,
+                "origin": skill_activation.origin,
+                "metadata": {
+                    "id": f"skill:{skill.name}",
+                    "type": "skill",
+                    "label": label,
+                    "skill_name": skill.name,
+                    "skillName": skill.name,
+                    "source": skill.source,
+                    "description": skill.description,
+                    "origin": skill_activation.origin,
+                },
             },
             trace_id=trace_id,
             user_id=request.user_id or session.user_id,

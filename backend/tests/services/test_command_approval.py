@@ -105,10 +105,10 @@ async def test_run_command_rejects_without_execution(tmp_path) -> None:
 async def test_run_command_preserves_approval_when_executor_fails(tmp_path, monkeypatch) -> None:
     repositories = _repositories(tmp_path)
 
-    async def raise_not_implemented(*args, **kwargs):
+    def raise_not_implemented(*args, **kwargs):
         raise NotImplementedError()
 
-    monkeypatch.setattr(asyncio, "create_subprocess_shell", raise_not_implemented)
+    monkeypatch.setattr("backend.app.tools.shell._run_subprocess", raise_not_implemented)
     tool = _registry().require("run_command")
     task = asyncio.create_task(
         tool.run({"command": "echo approved-before-executor-failure"}, _context(tmp_path, repositories))

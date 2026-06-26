@@ -149,7 +149,7 @@ describe("MessageText", () => {
     fireEvent.mouseEnter(screen.getByRole("button", { name: new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }));
 
     const preview = await screen.findByText(path);
-    expect(preview.getAttribute("data-floating-preview-title")).toBe("true");
+    expect(document.querySelector('[data-floating-preview-title="true"]')?.textContent).toBe("FileWithLongName.tsx");
     expect(preview.closest('[data-testid="message-text"]')).toBeNull();
   });
 

@@ -1,3 +1,4 @@
+import type { WorkspaceSkillSummary } from "@/runtime";
 import type { SelectedFile } from "@/renderer/components/chat/SendBox/fileSelection";
 import { selectedQuotePreview, type SelectedQuote } from "@/renderer/components/chat/SendBox/quoteSelection";
 import type { AgentContextItem } from "@/types/protocol";
@@ -9,8 +10,15 @@ export interface RuntimeMessageInjectionItem {
   metadata?: Record<string, unknown>;
 }
 
+export interface RuntimeSkillActivation {
+  skill_name: string;
+  source: "workspace";
+  origin: "slash";
+}
+
 export interface RuntimeParamsWithInjection extends Record<string, unknown> {
-  message_injection: RuntimeMessageInjectionItem[];
+  message_injection?: RuntimeMessageInjectionItem[];
+  skill_activation?: RuntimeSkillActivation;
 }
 
 export interface PreparedComposerMessage {
@@ -21,6 +29,7 @@ export interface PreparedComposerMessage {
 
 export interface PrepareComposerMessageOptions {
   quotes?: SelectedQuote[];
+  selectedSkill?: WorkspaceSkillSummary | null;
 }
 
 export function prepareComposerMessage(
@@ -31,12 +40,51 @@ export function prepareComposerMessage(
   const message = value.trim();
   const quoteItems = quoteContextItems(options.quotes ?? []);
   const fileItems = files.map(fileContextItem);
-  const contextItems = [...quoteItems, ...fileItems];
-  const messageInjection = contextItems.map(contextItemToFollowInjection);
+  const skillItems = options.selectedSkill ? [skillContextItem(options.selectedSkill)] : [];
+  const contextItems = [...skillItems, ...quoteItems, ...fileItems];
+  const injectableContextItems = [...quoteItems, ...fileItems];
+  const messageInjection = injectableContextItems.map(contextItemToFollowInjection);
+  const runtimeParams: RuntimeParamsWithInjection = {};
+  if (messageInjection.length) {
+    runtimeParams.message_injection = messageInjection;
+  }
+  if (options.selectedSkill) {
+    runtimeParams.skill_activation = {
+      skill_name: options.selectedSkill.name,
+      source: "workspace",
+      origin: "slash",
+    };
+  }
   return {
     message,
     contextItems,
-    runtimeParams: messageInjection.length ? { message_injection: messageInjection } : undefined,
+    runtimeParams: Object.keys(runtimeParams).length ? runtimeParams : undefined,
+  };
+}
+
+function skillContextItem(skill: WorkspaceSkillSummary): AgentContextItem {
+  const label = skill.label || `/${skill.name}`;
+  const id = `skill:${skill.name}`;
+  return {
+    id,
+    type: "skill",
+    label,
+    content: skill.description,
+    source: skill.source,
+    skill_name: skill.name,
+    skillName: skill.name,
+    description: skill.description,
+    locator: skill.locator,
+    metadata: {
+      id,
+      kind: "skill",
+      label,
+      skill_name: skill.name,
+      skillName: skill.name,
+      source: skill.source,
+      description: skill.description,
+      locator: skill.locator,
+    },
   };
 }
 

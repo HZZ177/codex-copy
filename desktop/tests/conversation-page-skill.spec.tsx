@@ -1,0 +1,199 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { describe, expect, it, vi } from "vitest";
+
+import type { ChatChannel, RuntimeBridge, WorkspaceSkillsResponse, WsConnectionStatus } from "@/runtime";
+import { ConversationPage } from "@/renderer/pages/conversation";
+import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
+import type { AgentActionEnvelope, AgentHistoryResponse, AgentSession, Workspace } from "@/types/protocol";
+
+describe("ConversationPage skill activation", () => {
+  it("sends selected workspace skill as runtime skill activation", async () => {
+    const chat = vi.fn();
+    const workspaceListSkills = vi.fn().mockResolvedValue(skillsResponse());
+    const { runtime } = fakeRuntime({ chat, workspaceListSkills });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await waitFor(() => {
+      expect(workspaceListSkills).toHaveBeenCalledWith({ sessionId: "ses-1" }, { forceReload: false });
+    });
+    typeComposer("/");
+    await screen.findByRole("option", { name: /Skill/ });
+    const input = screen.getByLabelText("继续输入");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByRole("option", { name: /dev-plan/ });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByText("dev-plan")).not.toBeNull();
+
+    typeComposer("implement this design");
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() => {
+      expect(chat).toHaveBeenCalledWith({
+        session_id: "ses-1",
+        message: "implement this design",
+        model: "qwen-coder",
+        runtime_params: {
+          skill_activation: {
+            skill_name: "dev-plan",
+            source: "workspace",
+            origin: "slash",
+          },
+        },
+      });
+    });
+  });
+});
+
+function renderConversation(ui: ReactElement) {
+  return render(<PreviewProvider>{ui}</PreviewProvider>);
+}
+
+function typeComposer(value: string) {
+  const input = screen.getByLabelText("继续输入");
+  input.textContent = value;
+  fireEvent.input(input);
+  return input;
+}
+
+function fakeRuntime({
+  chat = vi.fn(),
+  workspaceListSkills = vi.fn().mockResolvedValue(skillsResponse()),
+  wsStatus = "open",
+}: {
+  chat?: ReturnType<typeof vi.fn>;
+  workspaceListSkills?: ReturnType<typeof vi.fn>;
+  wsStatus?: WsConnectionStatus;
+} = {}) {
+  let handler: ((event: AgentActionEnvelope) => void) | null = null;
+  const session = agentSession({
+    session_type: "workspace",
+    workspace_id: "ws-1",
+    cwd: "D:/repo",
+    workspace_roots: ["D:/repo"],
+    workspace: workspace("ws-1", "repo", "D:/repo"),
+  });
+  const channel: ChatChannel = {
+    close: vi.fn(),
+    getStatus: vi.fn(() => wsStatus),
+    getSessionId: vi.fn(() => session.id),
+    createSession: vi.fn(),
+    bindSession: vi.fn(),
+    unbindSession: vi.fn(),
+    chat,
+    approvalDecision: vi.fn(),
+    cancel: vi.fn(),
+    requestStatus: vi.fn(),
+    ping: vi.fn(),
+  };
+  const runtime = {
+    conversation: {
+      loadHistory: vi.fn().mockResolvedValue(historyResponse(session)),
+      openChatChannel: vi.fn((onEvent: (event: AgentActionEnvelope) => void, options?: { onStatus?: (status: WsConnectionStatus) => void }) => {
+        handler = onEvent;
+        options?.onStatus?.(wsStatus);
+        return channel;
+      }),
+    },
+    settings: {
+      getSettings: vi.fn().mockResolvedValue({
+        model: {
+          base_url: "https://api.example/v1",
+          model: "qwen-coder",
+          timeout_seconds: 60,
+          api_key_set: true,
+          api_key_preview: "sk-***",
+        },
+      }),
+    },
+    models: {
+      listModels: vi.fn().mockResolvedValue({ models: [{ id: "qwen-coder" }], cached: true }),
+    },
+    workspace: {
+      listSkills: workspaceListSkills,
+      listDirectory: vi.fn().mockResolvedValue({ root: "D:/repo", entries: [] }),
+      readFile: vi.fn(),
+      readMedia: vi.fn(),
+      search: vi.fn().mockResolvedValue([]),
+    },
+  } as unknown as RuntimeBridge;
+  return {
+    runtime,
+    channel,
+    emit(event: AgentActionEnvelope) {
+      handler?.(event);
+    },
+  };
+}
+
+function historyResponse(session: AgentSession): AgentHistoryResponse {
+  return {
+    list: [],
+    total: 0,
+    page: 1,
+    page_size: 50,
+    session,
+    event_total: 0,
+    turn_indexes: [],
+  };
+}
+
+function agentSession(patch: Partial<AgentSession> = {}): AgentSession {
+  return {
+    id: "ses-1",
+    user_id: "local-user",
+    scene_id: "desktop-agent",
+    status: "active",
+    title: "test",
+    session_tag: "chat",
+    session_type: "chat",
+    workspace_id: null,
+    cwd: null,
+    workspace_roots: [],
+    workspace: null,
+    active_session_id: null,
+    parent_session_id: null,
+    child_session_id: null,
+    source_trace_id: null,
+    created_at: "2026-06-17T10:00:00Z",
+    updated_at: "2026-06-17T10:00:00Z",
+    is_debug: false,
+    is_scheduled: false,
+    is_current: false,
+    ...patch,
+  };
+}
+
+function workspace(id: string, name: string, rootPath: string): Workspace {
+  return {
+    id,
+    name,
+    root_path: rootPath,
+    normalized_root_path: rootPath.replace(/\\/g, "/").toLowerCase(),
+    type: "project",
+    created_at: "2026-06-21T00:00:00Z",
+    updated_at: "2026-06-21T00:00:00Z",
+    last_opened_at: null,
+    is_deleted: false,
+  };
+}
+
+function skillsResponse(): WorkspaceSkillsResponse {
+  return {
+    workspace_root: "D:/repo",
+    fingerprint: "fp-1",
+    loaded_at: "2026-06-25T12:00:00Z",
+    skills: [
+      {
+        name: "dev-plan",
+        description: "Plan work from a design doc",
+        source: "workspace",
+        label: "/dev-plan",
+        locator: ".keydex/skills/dev-plan/SKILL.md",
+      },
+    ],
+    diagnostics: [],
+  };
+}

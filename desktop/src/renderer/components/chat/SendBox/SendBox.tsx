@@ -18,17 +18,21 @@ import {
   useState,
 } from "react";
 
-import type { WorkspaceSearchResult } from "@/runtime";
+import type { WorkspaceSearchResult, WorkspaceSkillSummary } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import { getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu/atFiles";
 import {
-  defaultSlashCommands,
+  buildSlashCommands,
   filterSlashCommands,
+  filterSlashSkills,
   getSlashQuery,
+  removeSlashQuery,
   replaceSlashQuery,
   SlashCommandMenu,
   type SlashCommand,
+  skillToSlashCommand,
 } from "@/renderer/components/chat/SlashCommandMenu";
+import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
 import { useWorkspaceFileSearch, type WorkspaceFileSearchFn } from "@/renderer/hooks/useWorkspaceFileSearch";
 
 import styles from "./SendBox.module.css";
@@ -73,6 +77,9 @@ export interface SendBoxProps {
   externalFileRequest?: SendBoxExternalFileRequest | null;
   externalQuoteRequest?: SendBoxExternalQuoteRequest | null;
   leftHint?: ReactNode;
+  workspaceSkills?: WorkspaceSkillSummary[];
+  selectedSkill?: WorkspaceSkillSummary | null;
+  onSkillChange?: (skill: WorkspaceSkillSummary | null) => void;
   onChange: (value: string) => void;
   onSend: (files: SelectedFile[], quotes: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
@@ -113,6 +120,9 @@ export function SendBox({
   externalFileRequest = null,
   externalQuoteRequest = null,
   leftHint = null,
+  workspaceSkills = [],
+  selectedSkill: controlledSelectedSkill,
+  onSkillChange,
   onChange,
   onSend,
   onStop,
@@ -125,6 +135,7 @@ export function SendBox({
   const handledExternalFileRequestIdRef = useRef<number | null>(null);
   const handledExternalQuoteRequestIdRef = useRef<number | null>(null);
   const [focused, setFocused] = useState(false);
+  const [slashMode, setSlashMode] = useState<"root" | "skills">("root");
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(null);
   const [atActiveIndex, setAtActiveIndex] = useState(0);
@@ -134,6 +145,7 @@ export function SendBox({
   const [atDirectoryResults, setAtDirectoryResults] = useState<WorkspaceSearchResult[]>([]);
   const [atDirectoryLoading, setAtDirectoryLoading] = useState(false);
   const [atDirectoryError, setAtDirectoryError] = useState<string | null>(null);
+  const [uncontrolledSelectedSkill, setUncontrolledSelectedSkill] = useState<WorkspaceSkillSummary | null>(null);
   const [fileSelection, dispatchFileSelection] = useReducer(
     fileSelectionReducer,
     initialFileSelectionState,
@@ -145,6 +157,16 @@ export function SendBox({
   const editorValue = value;
   const busy = isBusy(runtimeState);
   const inputDisabled = disabled || (busy && runtimeState !== "running");
+  const selectedSkill = controlledSelectedSkill !== undefined ? controlledSelectedSkill : uncontrolledSelectedSkill;
+  const setSelectedSkill = useCallback(
+    (skill: WorkspaceSkillSummary | null) => {
+      if (controlledSelectedSkill === undefined) {
+        setUncontrolledSelectedSkill(skill);
+      }
+      onSkillChange?.(skill);
+    },
+    [controlledSelectedSkill, onSkillChange],
+  );
   const canSubmit = !busy && (canSend || fileSelection.files.length > 0 || quoteSelection.quotes.length > 0);
   const showSendLoading = sendLoading && !busy;
   const requestSend = useCallback(() => {
@@ -153,16 +175,27 @@ export function SendBox({
       if (sent !== false) {
         dispatchFileSelection({ type: "clear" });
         dispatchQuoteSelection({ type: "clear" });
+        setSelectedSkill(null);
       }
     });
-  }, [fileSelection.files, onSend, quoteSelection.quotes]);
+  }, [fileSelection.files, onSend, quoteSelection.quotes, setSelectedSkill]);
   const SendIcon = variant === "keydex" ? ArrowUp : SendHorizontal;
   const slashQuery = getSlashQuery(editorValue);
+  const availableSlashCommands = useMemo(
+    () => buildSlashCommands(workspaceSkills),
+    [workspaceSkills],
+  );
   const slashCommands = useMemo(
-    () => (slashQuery === null ? [] : filterSlashCommands(defaultSlashCommands, slashQuery)),
-    [slashQuery],
+    () => (slashQuery === null ? [] : filterSlashCommands(availableSlashCommands, slashQuery)),
+    [availableSlashCommands, slashQuery],
+  );
+  const slashSkills = useMemo(
+    () => (slashQuery === null ? [] : filterSlashSkills(workspaceSkills, slashQuery)),
+    [slashQuery, workspaceSkills],
   );
   const slashOpen = slashQuery !== null && dismissedSlashValue !== editorValue && !busy;
+  const slashItemCount = slashMode === "skills" ? slashSkills.length : slashCommands.length;
+  const visibleSlashActiveIndex = Math.min(slashActiveIndex, Math.max(slashItemCount - 1, 0));
   const atQuery = getAtQuery(editorValue);
   const atBrowsePath = atBrowseState && atBrowseState.value === editorValue ? atBrowseState.path : null;
   const atOpen =
@@ -190,7 +223,22 @@ export function SendBox({
 
   useEffect(() => {
     setSlashActiveIndex(0);
-  }, [slashQuery]);
+  }, [slashMode, slashQuery]);
+
+  useEffect(() => {
+    if (slashQuery === null && dismissedSlashValue !== null) {
+      setDismissedSlashValue(null);
+    }
+    if (slashQuery === null && slashMode !== "root") {
+      setSlashMode("root");
+    }
+  }, [dismissedSlashValue, slashMode, slashQuery]);
+
+  useEffect(() => {
+    if (slashMode === "skills" && workspaceSkills.length === 0) {
+      setSlashMode("root");
+    }
+  }, [slashMode, workspaceSkills.length]);
 
   useEffect(() => {
     setAtActiveIndex(0);
@@ -293,13 +341,46 @@ export function SendBox({
   }, [autoFocusKey, inputDisabled]);
 
   const selectSlashCommand = (command: SlashCommand) => {
+    if (command.kind === "skill_group") {
+      setSlashMode("skills");
+      setSlashActiveIndex(0);
+      if (slashQuery && slashSkills.length === 0) {
+        onChange(replaceSlashQuery(editorValue, "/"));
+      }
+      return;
+    }
     onSlashCommand?.(command);
+    if (command.kind === "skill" && command.skill) {
+      selectSlashSkill(command.skill);
+      return;
+    }
     if (command.id === "clear") {
+      setDismissedSlashValue(editorValue);
+      setSlashMode("root");
       onChange("");
       dispatchQuoteSelection({ type: "clear" });
+      setSelectedSkill(null);
       return;
     }
     onChange(replaceSlashQuery(editorValue, `${command.label} `));
+  };
+
+  const selectSlashSkill = (skill: WorkspaceSkillSummary) => {
+    const command = skillToSlashCommand(skill);
+    onSlashCommand?.(command);
+    setSelectedSkill(skill);
+    setSlashMode("root");
+    const nextValue = removeSlashQuery(editorValue);
+    setDismissedSlashValue(editorValue);
+    onChange(nextValue);
+  };
+
+  const navigateSlashRoot = () => {
+    setSlashMode("root");
+    setSlashActiveIndex(0);
+    if (slashQuery) {
+      onChange(replaceSlashQuery(editorValue, "/"));
+    }
   };
 
   const selectFile = (result: WorkspaceSearchResult) => {
@@ -382,24 +463,32 @@ export function SendBox({
     if (slashOpen) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setSlashActiveIndex((index) => Math.min(index + 1, Math.max(slashCommands.length - 1, 0)));
+        setSlashActiveIndex((index) => nextMenuIndex(index, slashItemCount, 1));
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setSlashActiveIndex((index) => Math.max(index - 1, 0));
+        setSlashActiveIndex((index) => nextMenuIndex(index, slashItemCount, -1));
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
         setDismissedSlashValue(editorValue);
+        setSlashMode("root");
         return;
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        const command = slashCommands[slashActiveIndex];
-        if (command) {
-          selectSlashCommand(command);
+        if (slashMode === "skills") {
+          const skill = slashSkills[visibleSlashActiveIndex];
+          if (skill) {
+            selectSlashSkill(skill);
+          }
+        } else {
+          const command = slashCommands[visibleSlashActiveIndex];
+          if (command) {
+            selectSlashCommand(command);
+          }
         }
         return;
       }
@@ -477,13 +566,21 @@ export function SendBox({
         }
       }}
     >
-      {quoteSelection.quotes.length || fileSelection.files.length ? (
+      {selectedSkill || quoteSelection.quotes.length || fileSelection.files.length ? (
         <div className={styles.fileChips} aria-label="已添加上下文">
+          {selectedSkill ? (
+            <SkillContextChip
+              skill={selectedSkill}
+              onOpen={onOpenFileReference}
+              onRemove={() => setSelectedSkill(null)}
+            />
+          ) : null}
           {quoteSelection.quotes.map((quote, index) => (
             <QuoteContextChip
               key={quote.id}
               quote={quote}
               index={index}
+              onOpen={onOpenFileReference}
               onRemove={() => handleQuoteRemove(quote.id)}
             />
           ))}
@@ -517,7 +614,16 @@ export function SendBox({
       />
 
       {slashOpen ? (
-        <SlashCommandMenu commands={slashCommands} activeIndex={slashActiveIndex} onSelect={selectSlashCommand} />
+        <SlashCommandMenu
+          mode={slashMode}
+          query={slashQuery ?? ""}
+          commands={slashCommands}
+          skills={slashSkills}
+          activeIndex={visibleSlashActiveIndex}
+          onBack={navigateSlashRoot}
+          onSelectCommand={selectSlashCommand}
+          onSelectSkill={selectSlashSkill}
+        />
       ) : null}
       {atOpen ? (
         <Suspense fallback={null}>
@@ -579,95 +685,123 @@ function nextMenuIndex(index: number, length: number, delta: 1 | -1): number {
   return (index + delta + length) % length;
 }
 
+function SkillContextChip({
+  skill,
+  onOpen,
+  onRemove,
+}: {
+  skill: WorkspaceSkillSummary;
+  onOpen?: (file: SelectedFile) => void;
+  onRemove: () => void;
+}) {
+  const label = skill.label || `/${skill.name}`;
+  const displayName = skillDisplayName(skill);
+  const skillFile = selectedFileFromSkill(skill);
+  const canOpen = Boolean(skillFile && onOpen);
+  return (
+    <ComposerContextHover
+      className={styles.skillChipWrapper}
+      hoverAnchor="skill"
+      title={displayName}
+      description={skill.description}
+      meta={skill.locator || null}
+    >
+      <span className={styles.skillChip} data-context-type="skill" data-openable={canOpen ? "true" : "false"}>
+        <button
+          className={styles.contextChipMain}
+          type="button"
+          aria-label={`打开 Skill ${displayName}`}
+          data-clickable={canOpen ? "true" : "false"}
+          disabled={!canOpen}
+          onClick={() => {
+            if (skillFile) {
+              onOpen?.(skillFile);
+            }
+          }}
+        >
+          <span className={styles.contextChipIcon} data-context-chip-icon="skill" aria-hidden="true">
+            <ContextChipIcon kind="skill" />
+          </span>
+          <span className={styles.contextChipLabel}>{displayName}</span>
+        </button>
+        <button
+          className={styles.skillChipRemove}
+          type="button"
+          aria-label={`删除 Skill ${label}`}
+          onClick={onRemove}
+        >
+          <X size={12} />
+        </button>
+      </span>
+    </ComposerContextHover>
+  );
+}
+
+function skillDisplayName(skill: WorkspaceSkillSummary): string {
+  const raw = skill.name || skill.label;
+  const normalized = raw.replace(/^\//, "").trim();
+  return normalized || "Skill";
+}
+
+function selectedFileFromSkill(skill: WorkspaceSkillSummary): SelectedFile | null {
+  const path = skill.locator?.trim();
+  if (!path) {
+    return null;
+  }
+  return {
+    path,
+    name: skill.name || fileName(path),
+    type: "file",
+    source: "workspace",
+  };
+}
+
 function QuoteContextChip({
   quote,
   index,
+  onOpen,
   onRemove,
 }: {
   quote: SelectedQuote;
   index: number;
+  onOpen?: (file: SelectedFile) => void;
   onRemove: () => void;
 }) {
-  const showTimerRef = useRef<number | null>(null);
-  const hideTimerRef = useRef<number | null>(null);
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const hoverPlacement = useHoverCardPlacement(open, QUOTE_HOVER_CARD_MAX_WIDTH);
-
-  const clearShowTimer = useCallback(() => {
-    if (showTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(showTimerRef.current);
-    showTimerRef.current = null;
-  }, []);
-
-  const clearHideTimer = useCallback(() => {
-    if (hideTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = null;
-  }, []);
-
-  const scheduleOpen = useCallback(() => {
-    clearShowTimer();
-    clearHideTimer();
-    showTimerRef.current = window.setTimeout(() => {
-      showTimerRef.current = null;
-      setOpen(true);
-    }, QUOTE_CARD_SHOW_DELAY_MS);
-  }, [clearHideTimer, clearShowTimer]);
-
-  const scheduleClose = useCallback(() => {
-    clearShowTimer();
-    clearHideTimer();
-    hideTimerRef.current = window.setTimeout(() => {
-      hideTimerRef.current = null;
-      setOpen(false);
-      setCopied(false);
-    }, 120);
-  }, [clearHideTimer, clearShowTimer]);
-
-  useEffect(
-    () => () => {
-      clearShowTimer();
-      clearHideTimer();
-    },
-    [clearHideTimer, clearShowTimer],
-  );
-
-  const handleCopyQuote = async () => {
-    await copyToClipboard(quote.text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
-  };
   const chipLabel = quoteChipLabel(quote);
-  const lineLabel = quote.file ? quoteLineLabel(quote.file.lineStart, quote.file.lineEnd) : null;
+  const quoteFile = selectedFileFromQuote(quote);
+  const canOpen = Boolean(quoteFile && onOpen);
 
   return (
-    <span
-      ref={hoverPlacement.wrapperRef}
+    <ComposerContextHover
       className={styles.quoteChipWrapper}
-      data-sendbox-hover-anchor="quote"
-      onBlur={(event) => {
-        const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-        if (!event.currentTarget.contains(relatedTarget)) {
-          scheduleClose();
-        }
-      }}
-      onFocus={scheduleOpen}
-      onMouseEnter={scheduleOpen}
-      onMouseLeave={scheduleClose}
+      hoverAnchor="quote"
+      title={chipLabel}
+      description={quoteHoverDescription(quote)}
     >
       <span
         className={styles.quoteInputChip}
-        tabIndex={0}
-        aria-label={`${chipLabel}：${quote.preview}`}
+        data-context-type="quote"
+        data-openable={canOpen ? "true" : "false"}
         data-quote-index={index}
         data-source-quote={quote.file ? "true" : "false"}
       >
-        <span className={styles.quoteInputChipLabel}>{chipLabel}</span>
+        <button
+          className={styles.contextChipMain}
+          type="button"
+          aria-label={canOpen && quoteFile ? `打开引用来源 ${quoteFile.path}` : `${chipLabel}：${quote.preview}`}
+          data-clickable={canOpen ? "true" : "false"}
+          disabled={!canOpen}
+          onClick={() => {
+            if (quoteFile) {
+              onOpen?.(quoteFile);
+            }
+          }}
+        >
+          <span className={styles.contextChipIcon} data-context-chip-icon="quote" aria-hidden="true">
+            <ContextChipIcon kind="quote" />
+          </span>
+          <span className={styles.contextChipLabel}>{chipLabel}</span>
+        </button>
         <button
           className={styles.quoteInputChipRemove}
           type="button"
@@ -681,35 +815,20 @@ function QuoteContextChip({
           <X size={11} strokeWidth={2} />
         </button>
       </span>
-      {open ? (
-        <span
-          ref={hoverPlacement.cardRef}
-          className={styles.quoteHoverCard}
-          data-quote-hover-card="true"
-          style={hoverPlacement.style}
-          onMouseDown={(event) => event.preventDefault()}
-          onMouseEnter={clearHideTimer}
-          onMouseLeave={scheduleClose}
-        >
-          {quote.file ? (
-            <span className={styles.quoteHoverMeta}>
-              <span>{quote.file.path}</span>
-              {lineLabel ? <span>{lineLabel}</span> : null}
-            </span>
-          ) : null}
-          <span className={styles.quoteHoverBody}>{quote.text}</span>
-          <span className={styles.quoteHoverActions}>
-            <button type="button" onClick={handleCopyQuote}>
-              {copied ? "已复制" : "复制"}
-            </button>
-            <button type="button" data-danger="true" onClick={onRemove}>
-              删除
-            </button>
-          </span>
-        </span>
-      ) : null}
-    </span>
+    </ComposerContextHover>
   );
+}
+
+function selectedFileFromQuote(quote: SelectedQuote): SelectedFile | null {
+  if (!quote.file?.path) {
+    return null;
+  }
+  return {
+    path: quote.file.path,
+    name: quote.file.name || fileName(quote.file.path),
+    type: "file",
+    source: "workspace",
+  };
 }
 
 function quoteChipLabel(quote: SelectedQuote): string {
@@ -741,12 +860,69 @@ function FileContextChip({
   onOpen?: (file: SelectedFile) => void;
   onRemove: () => void;
 }) {
+  const fileKindLabel = file.type === "directory" ? "工作区目录" : "工作区文件";
+  const chipLabel = fileName(file.name || file.path);
+
+  return (
+    <ComposerContextHover
+      className={styles.fileChipWrapper}
+      hoverAnchor="file"
+      title={chipLabel}
+      description={file.path}
+      meta={fileKindLabel}
+    >
+      <span className={styles.fileChip} data-context-type={file.type} data-openable={onOpen ? "true" : "false"}>
+        <button
+          className={styles.contextChipMain}
+          type="button"
+          aria-label={`打开文件引用 ${file.path}`}
+          data-clickable={onOpen ? "true" : "false"}
+          disabled={!onOpen}
+          onClick={() => onOpen?.(file)}
+        >
+          <span className={styles.contextChipIcon} data-context-chip-icon={file.type} aria-hidden="true">
+            <ContextChipIcon kind={file.type === "directory" ? "directory" : "file"} />
+          </span>
+          <span className={styles.contextChipLabel}>{chipLabel}</span>
+        </button>
+        <button
+          className={styles.fileChipRemove}
+          type="button"
+          aria-label={`移除文件引用 ${file.path}`}
+          onClick={onRemove}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      </span>
+    </ComposerContextHover>
+  );
+}
+
+function quoteHoverDescription(quote: SelectedQuote): string {
+  const lineLabel = quote.file ? quoteLineLabel(quote.file.lineStart, quote.file.lineEnd) : null;
+  const location = quote.file?.path ? `${quote.file.path}${lineLabel ? ` · ${lineLabel}` : ""}` : "";
+  return [location, quote.text || quote.preview].filter(Boolean).join("\n\n");
+}
+
+function ComposerContextHover({
+  className,
+  hoverAnchor,
+  title,
+  description,
+  meta,
+  children,
+}: {
+  className: string;
+  hoverAnchor: "skill" | "quote" | "file";
+  title: string;
+  description: string;
+  meta?: string | null;
+  children: ReactNode;
+}) {
   const showTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
-  const hoverPlacement = useHoverCardPlacement(open, FILE_HOVER_CARD_MAX_WIDTH);
-  const fileKindLabel = file.type === "directory" ? "工作区目录" : "工作区文件";
-  const chipLabel = fileName(file.name || file.path);
+  const hoverPlacement = useHoverCardPlacement(open, CONTEXT_HOVER_CARD_MAX_WIDTH);
 
   const clearShowTimer = useCallback(() => {
     if (showTimerRef.current === null) {
@@ -793,8 +969,8 @@ function FileContextChip({
   return (
     <span
       ref={hoverPlacement.wrapperRef}
-      className={styles.fileChipWrapper}
-      data-sendbox-hover-anchor="file"
+      className={className}
+      data-sendbox-hover-anchor={hoverAnchor}
       onBlur={(event) => {
         const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
         if (!event.currentTarget.contains(relatedTarget)) {
@@ -805,39 +981,21 @@ function FileContextChip({
       onMouseEnter={scheduleOpen}
       onMouseLeave={scheduleClose}
     >
-      <span className={styles.fileChip}>
-        <button
-          className={styles.fileChipMain}
-          type="button"
-          aria-label={`打开文件引用 ${file.path}`}
-          disabled={!onOpen}
-          onClick={() => onOpen?.(file)}
-        >
-          <span className={styles.fileChipText}>{chipLabel}</span>
-        </button>
-        <button
-          className={styles.fileChipRemove}
-          type="button"
-          aria-label={`移除文件引用 ${file.path}`}
-          onClick={onRemove}
-        >
-          <X size={12} strokeWidth={2} />
-        </button>
-      </span>
+      {children}
       {open ? (
         <span
           ref={hoverPlacement.cardRef}
-          className={styles.filePathHoverCard}
-          data-file-path-hover-card="true"
+          className={styles.contextHoverCard}
+          data-sendbox-context-hover-card="true"
+          data-context-type={hoverAnchor}
           style={hoverPlacement.style}
           onMouseDown={(event) => event.preventDefault()}
           onMouseEnter={clearHideTimer}
           onMouseLeave={scheduleClose}
         >
-          <span className={styles.filePathHoverTitle} data-file-path-hover-title="true">
-            {file.path}
-          </span>
-          <span className={styles.filePathHoverMeta}>{fileKindLabel}</span>
+          <span className={styles.contextHoverTitle}>{title}</span>
+          {description ? <span className={styles.contextHoverDescription}>{description}</span> : null}
+          {meta ? <span className={styles.contextHoverMeta}>{meta}</span> : null}
         </span>
       ) : null}
     </span>
@@ -997,8 +1155,7 @@ function ContentEditableInput({
 }
 
 const QUOTE_CARD_SHOW_DELAY_MS = 200;
-const QUOTE_HOVER_CARD_MAX_WIDTH = 280;
-const FILE_HOVER_CARD_MAX_WIDTH = 420;
+const CONTEXT_HOVER_CARD_MAX_WIDTH = 420;
 const HOVER_CARD_EDGE_GAP = 12;
 const HOVER_CARD_ARROW_PADDING = 16;
 
@@ -1108,14 +1265,6 @@ function insertPlainText(text: string) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
-}
-
-async function copyToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  document.execCommand("copy", false, text);
 }
 
 function errorMessage(reason: unknown): string {

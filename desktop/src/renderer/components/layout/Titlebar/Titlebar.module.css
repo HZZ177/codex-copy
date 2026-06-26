@@ -21,18 +21,41 @@
   min-width: 0;
 }
 
-.navGhost {
+.modeSwitch {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--color-text-4);
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
 }
 
-.navGhost span {
-  width: 18px;
-  height: 18px;
+.modeButton {
+  height: 24px;
+  min-width: 58px;
+  padding: 0 10px;
   border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border-2);
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.modeButton:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-1);
+}
+
+.modeButton[data-active="true"] {
+  background: var(--surface-active);
+  color: var(--color-text-1);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
 }
 
 .dragRegion {
@@ -100,6 +123,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .windowControl {
+    transition: none;
+  }
+
+  .modeButton {
     transition: none;
   }
 }

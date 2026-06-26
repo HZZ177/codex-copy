@@ -25,6 +25,8 @@ export interface LayoutStateActions {
   setPreviewOpen(open: boolean): void;
   setWorkspaceWidth(width: number): void;
   setPreviewWidth(width: number): void;
+  setWorkbenchAssistantDrawerWidth(width: number): void;
+  setLastWorkbenchWorkspaceId(workspaceId: string | null): void;
   setMobileLike(value: boolean): void;
 }
 
@@ -55,6 +57,8 @@ export function LayoutStateProvider({ children }: PropsWithChildren) {
     state.rightSidebarPlacement,
     state.workspaceWidth,
     state.previewWidth,
+    state.workbenchAssistantDrawerWidth,
+    state.lastWorkbenchWorkspaceId,
   ]);
 
   const actions = useMemo<LayoutStateActions>(
@@ -100,6 +104,12 @@ export function LayoutStateProvider({ children }: PropsWithChildren) {
       },
       setPreviewWidth(width) {
         dispatch({ type: "set-preview-width", width });
+      },
+      setWorkbenchAssistantDrawerWidth(width) {
+        dispatch({ type: "set-workbench-assistant-drawer-width", width });
+      },
+      setLastWorkbenchWorkspaceId(workspaceId) {
+        dispatch({ type: "set-last-workbench-workspace-id", workspaceId });
       },
       setMobileLike(value) {
         dispatch({ type: "set-mobile-like", value });

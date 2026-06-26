@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { runtimeBridge, type RuntimeBridge, type WorkspaceEntry, type WorkspaceSearchResult } from "@/runtime";
+import {
+  runtimeBridge,
+  type RuntimeBridge,
+  type WorkspaceEntry,
+  type WorkspaceSearchResult,
+  type WorkspaceSkillSummary,
+} from "@/runtime";
 import {
   SendBox,
   selectedQuoteFromText,
@@ -10,6 +16,7 @@ import {
 import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
 import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace/WorkspaceSelector";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
+import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalPreview, type PreviewQuoteSelectionRequest } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
@@ -49,6 +56,7 @@ export function HomePage({
   const [quoteChipRequest, setQuoteChipRequest] = useState<{ requestId: number; quote: SelectedQuote } | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>({ type: "chat" });
+  const [selectedSkill, setSelectedSkill] = useState<WorkspaceSkillSummary | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const selectionTouchedRef = useRef(false);
   const pendingWorkspaceRegistrationRef = useRef<PendingWorkspaceRegistration | null>(null);
@@ -59,6 +67,17 @@ export function HomePage({
   const notifications = useNotifications();
   const previewContext = useOptionalPreview();
   const setPreviewHostContext = previewContext?.setPreviewHostContext;
+  const selectedWorkspaceId = workspaceSelection.type === "workspace" ? workspaceSelection.workspace.id : "";
+  const workspaceSkillScope = useMemo(
+    () => (selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : null),
+    [selectedWorkspaceId],
+  );
+  const { state: workspaceSkillsState } = useWorkspaceSkills({
+    runtime,
+    scope: workspaceSkillScope,
+    enabled: backendReady && Boolean(selectedWorkspaceId),
+  });
+  const workspaceSkills = selectedWorkspaceId ? workspaceSkillsState.skills : [];
 
   const upsertWorkspace = useCallback((workspace: Workspace) => {
     setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
@@ -134,6 +153,17 @@ export function HomePage({
     },
     [setPreviewHostContext],
   );
+
+  useEffect(() => {
+    setSelectedSkill((current) => {
+      if (!current || !selectedWorkspaceId) {
+        return null;
+      }
+      return workspaceSkills.some((skill) => skill.name === current.name && skill.source === current.source)
+        ? current
+        : null;
+    });
+  }, [selectedWorkspaceId, workspaceSkills]);
 
   useEffect(() => {
     if (!backendReady) {
@@ -261,7 +291,7 @@ export function HomePage({
       : undefined;
 
   const submit = async (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) => {
-    const prepared = prepareComposerMessage(draft, files, { quotes });
+    const prepared = prepareComposerMessage(draft, files, { quotes, selectedSkill });
     const text = prepared.message;
     if ((!text && !prepared.contextItems.length) || submitting) {
       return false;
@@ -308,6 +338,7 @@ export function HomePage({
       const session = await runtime.conversation.createSession(sessionPayload);
       emitSessionCreated(session);
       setDraft("");
+      setSelectedSkill(null);
       const injectionOptions = prepared.runtimeParams || prepared.contextItems.length
         ? {
             runtimeParams: prepared.runtimeParams,
@@ -347,6 +378,8 @@ export function HomePage({
           autoFocusKey={autoFocusInputKey}
           className={styles.compactComposer}
           allowFileSelection={workspaceSelection.type === "workspace"}
+          workspaceSkills={workspaceSkills}
+          selectedSkill={selectedSkill}
           onListWorkspaceDirectory={listWorkspaceDirectory}
           onSearchWorkspace={searchWorkspace}
           contextBar={
@@ -357,14 +390,17 @@ export function HomePage({
               disabled={submitting}
               onSelectChat={() => {
                 selectionTouchedRef.current = true;
+                setSelectedSkill(null);
                 setWorkspaceSelection({ type: "chat" });
               }}
               onSelectWorkspace={(workspace) => {
                 selectionTouchedRef.current = true;
+                setSelectedSkill(null);
                 setWorkspaceSelection({ type: "workspace", workspace });
               }}
               onAddWorkspace={async (rootPath) => {
                 selectionTouchedRef.current = true;
+                setSelectedSkill(null);
                 if (!backendReady) {
                   setWorkspaceSelection({
                     type: "pending",
@@ -392,6 +428,7 @@ export function HomePage({
             />
           }
           onChange={setDraft}
+          onSkillChange={setSelectedSkill}
           onSend={submit}
           onStop={() => undefined}
           onOpenFileReference={openFileReference}

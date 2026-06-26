@@ -7,16 +7,16 @@ import { describe, expect, it } from "vitest";
 const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
 
 describe("composer menu layout", () => {
-  it("keeps slash and file mention menus within the composer width", () => {
-    const atFileMenu = readSource("renderer/components/chat/AtFileMenu/AtFileMenu.module.css");
-    const slashCommandMenu = readSource("renderer/components/chat/SlashCommandMenu/SlashCommandMenu.module.css");
+  it("keeps composer popup menus on the shared picker surface", () => {
+    const popupMenu = readSource("renderer/components/chat/ComposerPopupMenu/ComposerPopupMenu.module.css");
+    const atFileMenu = readSource("renderer/components/chat/AtFileMenu/AtFileMenu.tsx");
+    const slashCommandMenu = readSource("renderer/components/chat/SlashCommandMenu/SlashCommandMenu.tsx");
 
-    expect(atFileMenu).toMatch(/\.menu\s*{[^}]*box-sizing:\s*border-box/s);
-    expect(atFileMenu).toMatch(/\.menu\s*{[^}]*width:\s*min\(520px,\s*100%,\s*calc\(100vw - 56px\)\)/s);
-    expect(slashCommandMenu).toMatch(/\.menu\s*{[^}]*box-sizing:\s*border-box/s);
-    expect(slashCommandMenu).toMatch(
-      /\.menu\s*{[^}]*width:\s*min\(360px,\s*100%,\s*calc\(100vw - 52px\)\)/s,
-    );
+    expect(popupMenu).toMatch(/\.menu\s*{[^}]*box-sizing:\s*border-box/s);
+    expect(popupMenu).toMatch(/\.menu\s*{[^}]*width:\s*min\(736px,\s*100%,\s*calc\(100vw - 56px\)\)/s);
+    expect(popupMenu).toMatch(/\.item\[data-active="true"\]/);
+    expect(atFileMenu).toContain("ComposerPopupMenu/ComposerPopupMenu.module.css");
+    expect(slashCommandMenu).toContain("ComposerPopupMenu/ComposerPopupMenu.module.css");
   });
 });
 

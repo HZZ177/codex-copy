@@ -164,6 +164,62 @@ def test_llm_request_logs_validates_trend_bucket(tmp_path) -> None:
         repositories.llm_request_logs.trend(bucket="minute")
 
 
+def test_llm_request_logs_trend_pages_by_bucket_cursor(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    for index, start_time in enumerate(
+        [
+            "2026-06-18T10:00:00Z",
+            "2026-06-18T11:00:00Z",
+            "2026-06-18T12:00:00Z",
+        ],
+        start=1,
+    ):
+        request_id = f"llm_req_page_{index}"
+        repositories.llm_request_logs.start(
+            request_id=request_id,
+            trace_id="trace_usage",
+            trace_record_id="trace_usage",
+            session_id="ses_usage",
+            model="model-a",
+            start_time=start_time,
+        )
+        repositories.llm_request_logs.finish(
+            request_id,
+            input_tokens=index,
+            output_tokens=1,
+            end_time=start_time,
+        )
+
+    first_page = repositories.llm_request_logs.trend_page(bucket="hour", limit=2)
+    second_page = repositories.llm_request_logs.trend_page(
+        bucket="hour",
+        start_after=first_page["next_cursor"],
+        limit=2,
+    )
+
+    assert first_page["has_more"] is True
+    assert first_page["next_cursor"] == "2026-06-18T11:00:00"
+    assert [point["time"] for point in first_page["points"]] == [
+        "2026-06-18T10:00:00",
+        "2026-06-18T11:00:00",
+    ]
+    assert second_page == {
+        "points": [
+            {
+                "time": "2026-06-18T12:00:00",
+                "request_count": 1,
+                "input_tokens": 3,
+                "cache_read_tokens": 0,
+                "output_tokens": 1,
+                "total_tokens": 4,
+                "failed_count": 0,
+            }
+        ],
+        "next_cursor": None,
+        "has_more": False,
+    }
+
+
 def test_llm_request_logs_trend_groups_by_requested_timezone(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     repositories.llm_request_logs.start(

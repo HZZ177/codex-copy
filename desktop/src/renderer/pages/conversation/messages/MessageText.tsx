@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 
 import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
+import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
 import { useOptionalPreview, type PreviewRenderContext } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { AgentContextItem } from "@/types/protocol";
@@ -135,11 +136,12 @@ export function MessageText({
   );
   const openContextFile = useCallback(
     (item: AgentContextItem) => {
-      if (item.type !== "file" || !item.path || !previewContext) {
+      const path = contextItemOpenPath(item);
+      if (!path || !previewContext) {
         return;
       }
       previewContext.openFilePanel(
-        item.path,
+        path,
         previewRenderContextFromWorkspaceScope(
           workspaceScope,
           workspaceRuntime,
@@ -235,6 +237,9 @@ function MessageContextChip({
   if (item.type === "source_quote") {
     return <MessageSourceQuoteContextChip item={item} onOpenFile={onOpenFile} />;
   }
+  if (item.type === "skill") {
+    return <MessageSkillContextChip item={item} onOpenFile={onOpenFile} />;
+  }
   if (item.type === "quote") {
     return <MessageQuoteContextChip item={item} />;
   }
@@ -251,10 +256,11 @@ function MessageFileContextChip({
   const canOpen = Boolean(item.path && onOpenFile);
   const pathPreview = item.path || item.content || item.label;
   const chipLabel = contextFileName(item.name || item.label || pathPreview);
+  const description = contextItemDescription(item, pathPreview || fileContextKindLabel(item));
   return (
     <FloatingQuotePreview
-      quoteText={fileContextKindLabel(item)}
-      titleText={pathPreview}
+      quoteText={description}
+      titleText={chipLabel}
       wrapperClassName={styles.contextItemWrapper}
       chipClassName={styles.contextItemChip}
       cardClassName={`${styles.contextItemCard} ${styles.contextItemPathCard}`}
@@ -273,7 +279,10 @@ function MessageFileContextChip({
       }}
       showCopyAction={false}
     >
-      @{chipLabel}
+      <span className={styles.contextItemIcon} data-context-chip-icon={item.fileType === "directory" ? "directory" : "file"} aria-hidden="true">
+        <ContextChipIcon kind={item.fileType === "directory" ? "directory" : "file"} />
+      </span>
+      <span className={styles.contextItemLabel}>@{chipLabel}</span>
     </FloatingQuotePreview>
   );
 }
@@ -297,15 +306,16 @@ function MessageSourceQuoteContextChip({
   const lineLabel = contextItemLineLabel(item);
   const path = item.path || item.label;
   const preview = `${path}${lineLabel ? `\n${lineLabel}` : ""}\n\n${item.content || item.label}`;
+  const description = contextItemDescription(item, preview);
   return (
     <FloatingQuotePreview
-      quoteText={preview}
-      copyValue={item.content || item.path || item.label}
+      quoteText={description}
+      titleText={item.label}
       wrapperClassName={styles.contextItemWrapper}
       chipClassName={styles.contextItemChip}
       cardClassName={styles.contextItemCard}
+      titleClassName={styles.contextItemPathTitle}
       bodyClassName={styles.contextItemBody}
-      actionsClassName={styles.contextItemActions}
       chipElement="button"
       chipButtonProps={{
         type: "button",
@@ -317,39 +327,124 @@ function MessageSourceQuoteContextChip({
         "data-clickable": canOpen ? "true" : "false",
         "data-context-type": item.type,
       }}
+      showCopyAction={false}
     >
-      {item.label}
+      <span className={styles.contextItemIcon} data-context-chip-icon="quote" aria-hidden="true">
+        <ContextChipIcon kind="quote" />
+      </span>
+      <span className={styles.contextItemLabel}>{item.label}</span>
     </FloatingQuotePreview>
   );
 }
 
-function MessageQuoteContextChip({ item }: { item: AgentContextItem }) {
-  const preview = item.content || item.label;
+function MessageSkillContextChip({
+  item,
+  onOpenFile,
+}: {
+  item: AgentContextItem;
+  onOpenFile?: (item: AgentContextItem) => void;
+}) {
+  const skillName =
+    item.skill_name ||
+    item.skillName ||
+      stringValue(item.metadata?.skill_name) ||
+      stringValue(item.metadata?.skillName);
+  const label = skillContextLabel(item.label, skillName);
+  const canOpen = Boolean(contextItemOpenPath(item) && onOpenFile);
+  const description =
+    stringValue(item.metadata?.description) ||
+    item.description ||
+    item.content ||
+    "No description";
   return (
     <FloatingQuotePreview
-      quoteText={preview}
-      copyValue={item.content || item.path || item.label}
+      quoteText={description}
+      titleText={label}
       wrapperClassName={styles.contextItemWrapper}
       chipClassName={styles.contextItemChip}
       cardClassName={styles.contextItemCard}
+      titleClassName={styles.contextItemPathTitle}
       bodyClassName={styles.contextItemBody}
-      actionsClassName={styles.contextItemActions}
-      chipProps={{ "data-context-type": item.type }}
+      chipElement={canOpen ? "button" : "span"}
+      chipButtonProps={{
+        type: "button",
+        "aria-label": `打开 Skill ${label}`,
+        disabled: !canOpen,
+        onClick: () => onOpenFile?.(item),
+      }}
+      chipProps={{
+        "data-context-type": item.type,
+        "data-clickable": canOpen ? "true" : "false",
+      }}
+      showCopyAction={false}
     >
-      {item.type === "file" ? "@" : ""}
-      {item.label}
+      <span className={styles.contextItemIcon} data-context-chip-icon="skill" aria-hidden="true">
+        <ContextChipIcon kind="skill" />
+      </span>
+      <span className={styles.contextItemLabel}>{label}</span>
+    </FloatingQuotePreview>
+  );
+}
+
+function skillContextLabel(label: string, skillName: string): string {
+  const value = skillName || label || "Skill";
+  const normalized = value.replace(/^\//, "").trim();
+  return normalized || "Skill";
+}
+
+function MessageQuoteContextChip({ item }: { item: AgentContextItem }) {
+  const preview = contextItemDescription(item, item.content || item.label);
+  return (
+    <FloatingQuotePreview
+      quoteText={preview}
+      titleText={item.label}
+      wrapperClassName={styles.contextItemWrapper}
+      chipClassName={styles.contextItemChip}
+      cardClassName={styles.contextItemCard}
+      titleClassName={styles.contextItemPathTitle}
+      bodyClassName={styles.contextItemBody}
+      chipProps={{ "data-context-type": item.type }}
+      showCopyAction={false}
+    >
+      <span className={styles.contextItemIcon} data-context-chip-icon="quote" aria-hidden="true">
+        <ContextChipIcon kind="quote" />
+      </span>
+      <span className={styles.contextItemLabel}>
+        {item.type === "file" ? "@" : ""}
+        {item.label}
+      </span>
     </FloatingQuotePreview>
   );
 }
 
 function MessagePlainContextChip({ item }: { item: AgentContextItem }) {
+  const description = contextItemDescription(item, item.content || item.label);
   return (
-    <span className={styles.contextItemWrapper}>
-      <span className={styles.contextItemChip} tabIndex={0} data-context-type={item.type}>
-        {item.label}
+    <FloatingQuotePreview
+      quoteText={description}
+      titleText={item.label}
+      wrapperClassName={styles.contextItemWrapper}
+      chipClassName={styles.contextItemChip}
+      cardClassName={styles.contextItemCard}
+      titleClassName={styles.contextItemPathTitle}
+      bodyClassName={styles.contextItemBody}
+      chipProps={{ "data-context-type": item.type }}
+      showCopyAction={false}
+    >
+      <span className={styles.contextItemIcon} data-context-chip-icon="context" aria-hidden="true">
+        <ContextChipIcon kind="context" />
       </span>
-    </span>
+      <span className={styles.contextItemLabel}>{item.label}</span>
+    </FloatingQuotePreview>
   );
+}
+
+function contextItemDescription(item: AgentContextItem, fallback: string): string {
+  return stringValue(item.metadata?.description) || item.description || fallback;
+}
+
+function contextItemOpenPath(item: AgentContextItem): string {
+  return item.path || item.locator || stringValue(item.metadata?.locator);
 }
 
 function contextItemLineLabel(item: AgentContextItem): string | null {
@@ -412,6 +507,12 @@ function contextItemsFromPayload(payload: Record<string, unknown>): AgentContext
     const record = item as Record<string, unknown>;
     const content = stringValue(record.content);
     const path = stringValue(record.path);
+    const metadata = objectValue(record.metadata);
+    const skillName =
+      stringValue(record.skill_name) ||
+      stringValue(record.skillName) ||
+      stringValue(metadata?.skill_name) ||
+      stringValue(metadata?.skillName);
     const label = stringValue(record.label) || stringValue(record.name) || path || "上下文";
     return [
       {
@@ -423,9 +524,13 @@ function contextItemsFromPayload(payload: Record<string, unknown>): AgentContext
         source: stringValue(record.source),
         path,
         name: stringValue(record.name),
+        skill_name: skillName,
+        skillName,
+        description: stringValue(record.description) || stringValue(metadata?.description),
+        locator: stringValue(record.locator) || stringValue(metadata?.locator),
         fileType: stringValue(record.fileType) || stringValue(record.file_type),
         timestamp: numberValue(record.timestamp),
-        metadata: objectValue(record.metadata),
+        metadata,
       },
     ];
   });

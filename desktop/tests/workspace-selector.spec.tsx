@@ -54,6 +54,27 @@ describe("WorkspaceSelector", () => {
     expect(screen.queryByRole("dialog", { name: "工作区选择" })).toBeNull();
   });
 
+  it("can hide project-free chat for workbench workspace selection", () => {
+    const onSelectChat = vi.fn();
+
+    render(
+      <WorkspaceSelector
+        value={{ type: "chat" }}
+        workspaces={[workspace("ws-1", "keydex")]}
+        allowProjectFreeChat={false}
+        onSelectChat={onSelectChat}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "选择工作区" }).textContent).toContain("选择工作区");
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+
+    expect(screen.getByRole("option", { name: /keydex/ })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /无项目聊天/ })).toBeNull();
+    expect(onSelectChat).not.toHaveBeenCalled();
+  });
+
   it("shows path validation errors when adding a workspace fails", async () => {
     const onAddWorkspace = vi.fn().mockRejectedValue(new Error("工作区路径不存在"));
 

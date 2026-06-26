@@ -109,6 +109,43 @@ def test_usage_api_returns_summary_trend_list_and_detail(tmp_path) -> None:
     assert detail.json()["events"][0]["event_type"] == "turn.completed"
 
 
+def test_usage_api_trend_supports_cursor_pagination(tmp_path) -> None:
+    client = _client(tmp_path)
+    _seed_usage(client)
+    repositories = client.app.state.repositories
+    for index, start_time in enumerate(["2026-06-19T10:00:00Z", "2026-06-20T10:00:00Z"], start=2):
+        request_id = f"llm_req_api_page_{index}"
+        repositories.llm_request_logs.start(
+            request_id=request_id,
+            trace_id="trace_usage_api",
+            trace_record_id="trace_usage_api",
+            session_id="ses_usage_api",
+            active_session_id="ses_usage_api",
+            model="deepseek-v4-flash",
+            start_time=start_time,
+        )
+        repositories.llm_request_logs.finish(
+            request_id,
+            input_tokens=index,
+            output_tokens=1,
+            end_time=start_time,
+        )
+
+    first_page = client.get("/api/usage/trend?bucket=day&limit=1")
+    second_page = client.get(
+        "/api/usage/trend"
+        f"?bucket=day&limit=1&start_after={first_page.json()['next_cursor']}"
+    )
+
+    assert first_page.status_code == 200
+    assert first_page.json()["points"][0]["time"] == "2026-06-18"
+    assert first_page.json()["has_more"] is True
+    assert first_page.json()["next_cursor"] == "2026-06-18"
+    assert second_page.status_code == 200
+    assert second_page.json()["points"][0]["time"] == "2026-06-19"
+    assert second_page.json()["has_more"] is True
+
+
 def test_usage_api_filters_requests_and_returns_404(tmp_path) -> None:
     client = _client(tmp_path)
     _seed_usage(client)

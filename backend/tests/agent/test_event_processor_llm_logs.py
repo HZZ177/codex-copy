@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langgraph.types import Command
 
 from backend.app.agent.event_processor import process_agent_events
 from backend.app.agent.factory import register_llm_gateway_trace_id
@@ -499,3 +500,69 @@ async def test_process_agent_events_includes_structured_tool_files_on_tool_end()
     }
     assert finished.payload["ui_payload"]["files"][0]["path"] == "src/app.py"
     assert finished.payload["output_data"]["result"]["files"][0]["added_lines"] == 2
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_projects_command_tool_message_without_private_update() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_tool_start",
+                    "run_id": "tool_skill",
+                    "name": "load_skill",
+                    "data": {"input": {"skill_name": "dev-plan"}},
+                },
+                {
+                    "event": "on_tool_end",
+                    "run_id": "tool_skill",
+                    "name": "load_skill",
+                    "data": {
+                        "output": Command(
+                            update={
+                                "messages": [
+                                    ToolMessage(
+                                        content=(
+                                            '{"skill_name":"dev-plan","found":true,'
+                                            '"loaded":true,"injected":true}'
+                                        ),
+                                        tool_call_id="call_skill",
+                                        name="load_skill",
+                                    )
+                                ],
+                                "pending_skill_activations": [
+                                    {
+                                        "skill_name": "dev-plan",
+                                        "content": "PRIVATE SKILL BODY",
+                                    }
+                                ],
+                            }
+                        )
+                    },
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+        model="runtime-model",
+    )
+
+    finished = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_TOOL_FINISHED.value
+    ][0]
+    assert finished.payload["tool_call_id"] == "call_skill"
+    assert finished.payload["result"] == (
+        '{"skill_name":"dev-plan","found":true,"loaded":true,"injected":true}'
+    )
+    assert finished.payload["output_data"]["result"]["skill_name"] == "dev-plan"
+    assert "PRIVATE SKILL BODY" not in str(finished.payload)

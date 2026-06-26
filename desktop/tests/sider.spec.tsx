@@ -57,6 +57,37 @@ describe("Sider", () => {
     expect(screen.getByRole("button", { name: "会话 A" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("uses controlled conversations without loading global history and supports workbench session paths", () => {
+    const onNavigate = vi.fn();
+    const runtime = fakeRuntime([thread({ id: "global-chat", title: "全局会话" })]);
+
+    renderSider(
+      <Sider
+        activePath="/workbench/ws-1/session/workbench-thread"
+        runtime={runtime}
+        projects={[{ id: "ws-1", title: "keydex" }]}
+        conversations={[{ id: "workbench-thread", title: "工作台会话" }]}
+        showChatBucket={false}
+        newConversationPath="/workbench/ws-1"
+        getSessionPath={(sessionId) => `/workbench/ws-1/session/${sessionId}`}
+        getWorkspaceNewConversationPath={(workspaceId) => `/workbench/${workspaceId ?? "ws-1"}`}
+        deleteActiveFallbackPath="/workbench/ws-1"
+        onNavigate={onNavigate}
+      />,
+    );
+
+    expect(runtime.conversation.listSessions).not.toHaveBeenCalled();
+    expect(screen.getByText("keydex")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "工作台会话" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("region", { name: "对话" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "工作台会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "在项目 keydex 中新建对话" }));
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, "/workbench/ws-1/session/workbench-thread");
+    expect(onNavigate).toHaveBeenNthCalledWith(2, "/workbench/ws-1");
+  });
+
   it("opens a new chat page scoped to a project from the project header", () => {
     const onNavigate = vi.fn();
     renderSider(

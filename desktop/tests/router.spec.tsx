@@ -1,9 +1,16 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AgentActionEnvelope } from "@/types/protocol";
 import type { ChatChannel, ChatChannelOptions, RuntimeBridge, WsConnectionStatus } from "@/runtime";
+import {
+  appModeFromPath,
+  conversationPath,
+  modeSwitchTargetsForPath,
+  parseWorkbenchPath,
+  workbenchPath,
+} from "@/renderer/components/layout/appMode";
 import { AppRouter } from "@/renderer/components/layout/Router";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
@@ -12,11 +19,14 @@ import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
 import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 import { FontProvider } from "@/renderer/providers/FontProvider";
-import type { AgentSession } from "@/types/protocol";
+import type { AgentSession, CommandApprovalRequest, Workspace } from "@/types/protocol";
 
-function renderRouter(initialEntries: Array<string | { pathname: string; state?: unknown }>) {
-  const runtime = fakeRuntime();
-  return render(
+function renderRouter(
+  initialEntries: Array<string | { pathname: string; state?: unknown }>,
+  options: FakeRuntimeOptions = {},
+) {
+  const runtime = fakeRuntime(options);
+  const result = render(
     <ThemeProvider>
       <FontProvider>
         <NotificationProvider>
@@ -35,9 +45,35 @@ function renderRouter(initialEntries: Array<string | { pathname: string; state?:
       </FontProvider>
     </ThemeProvider>,
   );
+  return { ...result, runtime };
 }
 
 describe("AppRouter", () => {
+  it("builds and detects mode-aware route helpers", () => {
+    expect(conversationPath("thread 1")).toBe("/conversation/thread%201");
+    expect(workbenchPath()).toBe("/workbench");
+    expect(workbenchPath("workspace A")).toBe("/workbench/workspace%20A");
+    expect(workbenchPath("workspace A", "session 1")).toBe("/workbench/workspace%20A/session/session%201");
+    expect(parseWorkbenchPath("/workbench")).toEqual({});
+    expect(parseWorkbenchPath("/workbench/workspace%20A/session/session%201")).toEqual({
+      workspaceId: "workspace A",
+      sessionId: "session 1",
+    });
+    expect(parseWorkbenchPath("/conversation/thread-1")).toBeNull();
+    expect(appModeFromPath("/workbench/workspace-a")).toBe("workbench");
+    expect(appModeFromPath("/conversation/thread-1")).toBe("agent");
+    expect(appModeFromPath("/settings/general")).toBe("agent");
+    expect(modeSwitchTargetsForPath("/conversation/session%201", "workspace A")).toEqual({
+      agent: "/conversation/session%201",
+      workbench: "/workbench/workspace%20A",
+    });
+    expect(modeSwitchTargetsForPath("/workbench/workspace%20A/session/session%201", "workspace B")).toEqual({
+      agent: "/conversation/session%201",
+      workbench: "/workbench/workspace%20A/session/session%201",
+    });
+    expect(modeSwitchTargetsForPath("/guid", null).workbench).toBe("/workbench");
+  });
+
   it("redirects root to the guide page", async () => {
     renderRouter(["/"]);
 
@@ -81,10 +117,229 @@ describe("AppRouter", () => {
     fireEvent.click(screen.getByText("返回应用"));
     expect(await screen.findByTestId("home-page", undefined, { timeout: 10000 })).not.toBeNull();
   });
+
+  it("opens the workbench picker route", async () => {
+    renderRouter(["/workbench"]);
+
+    expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("workbench-workspace-picker")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-capsule").getAttribute("data-disabled")).toBe("true");
+    expect(screen.queryByRole("button", { name: /无项目聊天/ })).toBeNull();
+  });
+
+  it("selects a workspace from the workbench picker", async () => {
+    renderRouter(["/workbench"]);
+
+    expect(await screen.findByTestId("workbench-workspace-picker", undefined, { timeout: 10000 })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+    fireEvent.click(screen.getByRole("option", { name: /keydex/ }));
+
+    expect(await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByTestId("workbench-mode-page").getAttribute("data-workspace-id")).toBe("workspace A");
+  });
+
+  it("opens a workbench workspace session route", async () => {
+    const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);
+
+    expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByTestId("workspace-file-browser")).not.toBeNull();
+    expect(screen.getByTestId("workbench-mode-page").getAttribute("data-workspace-id")).toBe("workspace A");
+    expect(screen.getByTestId("workbench-mode-page").getAttribute("data-selected-session-id")).toBe("session 1");
+    expect(screen.getByRole("button", { name: "Workbench" }).getAttribute("aria-pressed")).toBe("true");
+    expect(runtime.workspace.listDirectory).toHaveBeenCalledWith({ workspaceId: "workspace A" }, "");
+    expect(runtime.conversation.listSessions).toHaveBeenCalledWith({
+      sessionType: "workspace",
+      workspaceId: "workspace A",
+      pageSize: 50,
+    });
+  });
+
+  it("drops a mismatched workbench session without switching workspace", async () => {
+    renderRouter(["/workbench/workspace%20A/session/session%201"], {
+      sessionWorkspaceId: "workspace B",
+    });
+
+    expect(await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 })).not.toBeNull();
+    await screen.findByTestId("workspace-file-browser", undefined, { timeout: 10000 });
+
+    expect(screen.getByTestId("workbench-mode-page").getAttribute("data-workspace-id")).toBe("workspace A");
+    await waitFor(() => {
+      expect(screen.getByTestId("workbench-mode-page").getAttribute("data-selected-session-id")).toBe("");
+    });
+  });
+
+  it("creates a workspace-owned session from the workbench assistant capsule", async () => {
+    const { runtime } = renderRouter(["/workbench/workspace%20A"]);
+
+    const input = await screen.findByLabelText("工作台助手输入", undefined, { timeout: 10000 });
+    input.textContent = "生成验收说明";
+    fireEvent.input(input);
+    const sendButton = screen.getByRole("button", { name: "发送" }) as HTMLButtonElement;
+    await waitFor(() => {
+      expect(sendButton.disabled).toBe(false);
+    });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(runtime.conversation.createSession).toHaveBeenCalledWith({
+        title: "生成验收说明",
+        session_tag: "chat",
+        sessionType: "workspace",
+        workspaceId: "workspace A",
+      });
+    });
+    expect(runtime.__spies.chat).toHaveBeenCalledWith({
+      session_id: "new-workbench-session",
+      message: "生成验收说明",
+      model: "qwen-coder",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("workbench-mode-page").getAttribute("data-selected-session-id")).toBe(
+        "new-workbench-session",
+      );
+    });
+  });
+
+  it("searches files from the workbench assistant with the current workspace scope", async () => {
+    const workspaceSearch = vi.fn().mockResolvedValue([{ path: "README.md", name: "README.md", type: "file" }]);
+    renderRouter(["/workbench/workspace%20A/session/session%201"], { workspaceSearch });
+
+    const input = await screen.findByLabelText("工作台助手输入", undefined, { timeout: 10000 });
+    input.textContent = "@READ";
+    fireEvent.input(input);
+
+    expect(await screen.findByTestId("at-file-menu", undefined, { timeout: 10000 })).not.toBeNull();
+    await waitFor(() => {
+      expect(workspaceSearch).toHaveBeenCalledWith(
+        { workspaceId: "workspace A" },
+        "READ",
+        expect.objectContaining({ signal: expect.any(Object) }),
+      );
+    });
+  });
+
+  it("switches the workbench assistant between capsule, expanded layer and drawer", async () => {
+    renderRouter(["/workbench/workspace%20A/session/session%201"]);
+
+    const surface = await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
+    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
+    expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起工作台消息层" }));
+    expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+
+    fireEvent.click(screen.getByRole("button", { name: "停靠到工作台右侧助手栏" }));
+    expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+    expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
+    expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+  });
+
+  it("surfaces pending approval in the workbench assistant drawer", async () => {
+    const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);
+
+    const surface = await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
+    await waitFor(() => {
+      expect(runtime.conversation.openChatChannel).toHaveBeenCalled();
+    });
+    act(() => {
+      runtime.__spies.emit({
+        action: "approval_requested",
+        data: {
+          session_id: "session 1",
+          approval: commandApproval("session 1", "approval-1"),
+        },
+      });
+    });
+
+    expect(await screen.findByTestId("workbench-approval-prompt", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+    expect(screen.getByText("是否允许执行命令？")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+
+    await waitFor(() => {
+      expect(runtime.settings.resolveApproval).toHaveBeenCalledWith("approval-1", {
+        decision: "approved",
+        trust_scope: "once",
+      });
+    });
+  });
+
+  it("switches to workbench only when the user clicks the titlebar mode control", async () => {
+    renderRouter(["/conversation/thread-1"]);
+
+    expect(await screen.findByRole("heading", { name: /thread-1/ }, { timeout: 10000 })).not.toBeNull();
+    expect(screen.queryByTestId("workbench-mode-page")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Workbench" }));
+    expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+  });
 });
 
-function fakeRuntime(): RuntimeBridge {
+interface FakeRuntimeOptions {
+  sessionWorkspaceId?: string;
+  workspaceSearch?: ReturnType<typeof vi.fn>;
+}
+
+type TestRuntimeBridge = RuntimeBridge & {
+  __spies: {
+    chat: ReturnType<typeof vi.fn>;
+    emit: (event: AgentActionEnvelope) => void;
+  };
+};
+
+function fakeRuntime(options: FakeRuntimeOptions = {}): TestRuntimeBridge {
+  const sessionWorkspaceId = options.sessionWorkspaceId ?? "workspace A";
+  const workspaceSearch = options.workspaceSearch ?? vi.fn().mockResolvedValue([]);
+  let emit: (event: AgentActionEnvelope) => void = () => undefined;
+  const chat = vi.fn();
+  const listSessions = vi.fn(() =>
+    Promise.resolve({
+      list: [
+        agentSession({
+          id: "session 1",
+          title: "工作台会话",
+          session_type: "workspace",
+          workspace_id: sessionWorkspaceId,
+          workspace: workspace(sessionWorkspaceId, sessionWorkspaceId === "workspace A" ? "keydex" : "other"),
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    }),
+  );
+  const listDirectory = vi.fn(() =>
+    Promise.resolve({
+      root: "",
+      entries: [{ name: "README.md", path: "README.md", type: "file", size: 12, modified_at: null }],
+    }),
+  );
+  const createSession = vi.fn(() =>
+    Promise.resolve(
+      agentSession({
+        id: "new-workbench-session",
+        title: "生成验收说明",
+        session_type: "workspace",
+        workspace_id: "workspace A",
+        workspace: workspace("workspace A", "keydex"),
+      }),
+    ),
+  );
+
   return {
+    __spies: { chat, emit: (event: AgentActionEnvelope) => emit(event) },
     settings: {
       getSettings: () =>
         Promise.resolve({
@@ -96,25 +351,33 @@ function fakeRuntime(): RuntimeBridge {
             api_key_preview: "sk-***",
           },
         }),
+      resolveApproval: vi.fn((approvalId: string) =>
+        Promise.resolve({
+          ...commandApproval("session 1", approvalId),
+          status: "approved",
+          resolved_at: "2026-06-25T12:00:02Z",
+        }),
+      ),
     },
     models: {
       listModels: () => Promise.resolve({ models: [{ id: "qwen-coder" }], cached: true }),
       listProviders: () => Promise.resolve([]),
     },
     workspaces: {
-      list: () => Promise.resolve({ list: [], total: 0 }),
+      list: () => Promise.resolve({ list: [workspace("workspace A", "keydex")], total: 1 }),
       create: () => Promise.reject(new Error("not implemented")),
+      get: (workspaceId: string) => Promise.resolve(workspace(workspaceId, workspaceId)),
     },
     workspace: {
-      listDirectory: () => Promise.resolve({ root: "", entries: [] }),
-      search: () => Promise.resolve([]),
+      listDirectory,
+      search: workspaceSearch,
     },
     desktopPicker: {
       isDirectoryPickerAvailable: () => false,
       pickDirectory: () => Promise.resolve(null),
     },
     conversation: {
-      listSessions: () => Promise.resolve({ items: [], total: 0 }),
+      listSessions,
       loadHistory: () =>
         Promise.resolve({
           session: agentSession(),
@@ -122,11 +385,22 @@ function fakeRuntime(): RuntimeBridge {
           next_cursor: null,
           has_more_older: false,
         }),
-      createSession: () => Promise.resolve(agentSession()),
-      openChatChannel(_onEvent: (event: AgentActionEnvelope) => void, options?: ChatChannelOptions) {
-        const channel = fakeChannel(options?.onStatus);
+      createSession,
+      getSession: () =>
+        Promise.resolve(
+          agentSession({
+            id: "session 1",
+            title: "工作台会话",
+            session_type: "workspace",
+            workspace_id: sessionWorkspaceId,
+            workspace: workspace(sessionWorkspaceId, sessionWorkspaceId === "workspace A" ? "keydex" : "other"),
+          }),
+        ),
+      openChatChannel: vi.fn((onEvent: (event: AgentActionEnvelope) => void, options?: ChatChannelOptions) => {
+        emit = onEvent;
+        const channel = fakeChannel(options?.onStatus, chat);
         return channel;
-      },
+      }),
     },
     usage: {
       getSummary: () =>
@@ -144,10 +418,10 @@ function fakeRuntime(): RuntimeBridge {
       listRequests: () => Promise.resolve({ list: [], total: 0, page: 1, page_size: 12 }),
       getRequestDetail: () => Promise.reject(new Error("not implemented")),
     },
-  } as unknown as RuntimeBridge;
+  } as unknown as TestRuntimeBridge;
 }
 
-function fakeChannel(onStatus?: (status: WsConnectionStatus) => void): ChatChannel {
+function fakeChannel(onStatus?: (status: WsConnectionStatus) => void, chat: ReturnType<typeof vi.fn> = vi.fn()): ChatChannel {
   let status: WsConnectionStatus = "open";
   let sessionId: string | null = null;
   queueMicrotask(() => onStatus?.("open"));
@@ -159,7 +433,7 @@ function fakeChannel(onStatus?: (status: WsConnectionStatus) => void): ChatChann
     unbindSession: () => {
       sessionId = null;
     },
-    chat: () => undefined,
+    chat,
     approvalDecision: () => undefined,
     cancel: () => undefined,
     ping: () => undefined,
@@ -182,7 +456,7 @@ function agentConnection() {
   };
 }
 
-function agentSession(): AgentSession {
+function agentSession(patch: Partial<AgentSession> = {}): AgentSession {
   return {
     id: "thread-1",
     user_id: "local-user",
@@ -204,5 +478,40 @@ function agentSession(): AgentSession {
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    ...patch,
+  };
+}
+
+function workspace(id: string, name: string): Workspace {
+  return {
+    id,
+    name,
+    root_path: `D:/Pycharm Projects/${name}`,
+    normalized_root_path: `d:/pycharm projects/${name.toLowerCase()}`,
+    type: "project",
+    created_at: "2026-06-21T00:00:00Z",
+    updated_at: "2026-06-21T00:00:00Z",
+    last_opened_at: null,
+    is_deleted: false,
+  };
+}
+
+function commandApproval(sessionId: string, id: string): CommandApprovalRequest {
+  return {
+    id,
+    session_id: sessionId,
+    thread_id: sessionId,
+    turn_id: "turn-1",
+    item_id: "item-command",
+    call_id: "call-command",
+    run_id: "run-command",
+    tool_name: "run_command",
+    kind: "exec",
+    title: "是否允许执行命令？",
+    description: "请求执行命令。",
+    details: { command: "pnpm test", cwd: "D:/repo" },
+    status: "pending",
+    created_at: "2026-06-25T12:00:01Z",
+    resolved_at: null,
   };
 }

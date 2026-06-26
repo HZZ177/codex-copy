@@ -39,6 +39,8 @@ class FakeAgentFactory(AgentFactory):
         self.model = model
         self.requested_models: list[str] = []
         self.created_tool_counts: list[int] = []
+        self.created_tool_names: list[list[str]] = []
+        self.system_prompts: list[str] = []
 
     def get_or_create_llm(
         self,
@@ -61,15 +63,19 @@ class FakeAgentFactory(AgentFactory):
         system_prompt: Any,
         checkpointer: Any,
         middleware: tuple[Any, ...] = (),
+        state_schema: type[Any] | None = None,
         name: str = "desktop_agent",
     ) -> Any:
         self.created_tool_counts.append(len(tools))
+        self.created_tool_names.append([str(getattr(tool, "name", "")) for tool in tools])
+        self.system_prompts.append(str(getattr(system_prompt, "content", system_prompt) or ""))
         return super().create_agent(
             model=model,
             tools=tools,
             system_prompt=system_prompt,
             checkpointer=checkpointer,
             middleware=middleware,
+            state_schema=state_schema,
             name=name,
         )
 
@@ -100,6 +106,30 @@ def _service(
         repositories,
         checkpointer,
         factory,
+    )
+
+
+def _write_workspace_skill(
+    workspace: Path,
+    name: str = "dev-plan",
+    description: str = "Build a structured development plan.",
+    body: str = "Skill body marker.",
+) -> None:
+    skill_dir = workspace / ".keydex" / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                f"name: {name}",
+                f"description: {description}",
+                "---",
+                "",
+                f"# {name}",
+                body,
+            ]
+        ),
+        encoding="utf-8",
     )
 
 
@@ -290,6 +320,92 @@ async def test_chat_service_routes_langchain_tool_events(tmp_path) -> None:
     assert [message["role"] for message in history] == ["user", "tool", "assistant"]
     assert history[1]["toolName"] == "read_file"
     assert history[2]["content"] == "已读取"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_runs_skill_activation_chain_with_message_injection(
+    tmp_path,
+) -> None:
+    project = tmp_path / "project"
+    _write_workspace_skill(project, body="Use the project planning workflow.")
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="已按 Skill 处理")])
+    service, repositories, checkpointer, factory = _service(tmp_path, model)
+    workspace = repositories.workspaces.create(workspace_id="ws_project", root_path=project)
+    session = repositories.sessions.create(
+        session_id="ses_project",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        session_type="workspace",
+        workspace_id=workspace.id,
+        cwd=str(project),
+        workspace_roots=[str(project)],
+    )
+    chat_adapter = RecordingChatAdapter()
+
+    result = await service.handle_chat(
+        ChatRequest(
+            session_id=session.id,
+            message="拆成开发 issues",
+            model="qwen-coder",
+            runtime_params={
+                "skill_activation": {
+                    "skill_name": "dev-plan",
+                    "origin": "slash",
+                },
+                "message_injection": [
+                    {
+                        "type": "follow",
+                        "role": "HumanMessage",
+                        "content": "用户通过 @ 引用了工作区文件：DES.md",
+                        "metadata": {
+                            "id": "file:des",
+                            "kind": "file",
+                            "label": "DES.md",
+                            "path": "DES.md",
+                        },
+                    }
+                ],
+            },
+        ),
+        chat_adapter=chat_adapter,
+    )
+
+    assert result.status == "completed"
+    assert factory.requested_models == ["qwen-coder"]
+    assert factory.created_tool_names == [["load_skill"]]
+    assert "<keydex_skills>" in factory.system_prompts[0]
+    assert 'load_skill(skill_name="dev-plan")' in factory.system_prompts[0]
+    assert "Use the project planning workflow." not in factory.system_prompts[0]
+
+    actions = [item["action"] for item in chat_adapter.sent]
+    assert actions == ["tool_start", "tool_end", "stream", "completed"]
+    assert chat_adapter.sent[0]["data"]["tool"] == "load_skill"
+    tool_result = json.loads(chat_adapter.sent[1]["data"]["result"])
+    assert tool_result["skill_name"] == "dev-plan"
+    assert tool_result["found"] is True
+    assert tool_result["loaded"] is True
+    assert tool_result["injected"] is True
+
+    checkpoint = await checkpointer.aget_tuple(
+        {"configurable": {"thread_id": session.id, "checkpoint_ns": ""}}
+    )
+    messages = checkpoint.checkpoint["channel_values"]["messages"]
+    assert any(
+        message.type == "system" and "Use the project planning workflow." in message.content
+        for message in messages
+    )
+
+    history = service.message_event_service.get_display_messages(result.session_id)
+    assert [message["role"] for message in history] == ["user", "tool", "assistant"]
+    assert history[0]["content"] == "拆成开发 issues"
+    assert history[0]["contextItems"][0]["type"] == "file"
+    assert history[0]["contextItems"][0]["path"] == "DES.md"
+    assert history[0]["contextItems"][1]["type"] == "skill"
+    assert history[0]["contextItems"][1]["skill_name"] == "dev-plan"
+    assert history[0]["contextItems"][1]["description"] == "Build a structured development plan."
+    assert "Use the project planning workflow." not in str(history[0]["contextItems"])
+    assert history[1]["toolName"] == "load_skill"
+    assert history[2]["content"] == "已按 Skill 处理"
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,6 @@ import {
   useEffect,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { ChevronsLeftRight } from "lucide-react";
 
 import {
   DEFAULT_RIGHT_SIDEBAR_RATIO,
@@ -28,6 +27,34 @@ interface RightSidebarResizeHandleProps {
 }
 
 const KEYBOARD_STEP = 0.01;
+
+function HalfSwapIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      focusable="false"
+      height="14"
+      viewBox="0 0 24 24"
+      width="14"
+    >
+      <path
+        d="M18.5 7.5H6.5l5-3"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.1"
+      />
+      <path
+        d="M5.5 16.5h12l-5 3"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.1"
+      />
+    </svg>
+  );
+}
 
 export function RightSidebarResizeHandle({
   disabled = false,
@@ -122,7 +149,7 @@ export function RightSidebarResizeHandle({
           title="交换对话区和侧边栏位置"
           type="button"
         >
-          <ChevronsLeftRight size={11} strokeWidth={2.25} />
+          <HalfSwapIcon />
         </button>
       ) : null}
     </div>

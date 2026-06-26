@@ -15,7 +15,7 @@ from backend.app.security.workspace import WorkspacePathError, resolve_workspace
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
 from backend.app.tools.registry import ToolRegistry
 
-APPLY_PATCH_USAGE = """在当前工作区内应用 Codex apply_patch 风格的文本补丁。
+EDIT_FILE_USAGE = """在当前工作区内修改、删除或移动已有 UTF-8 文本文件，并返回文件变更 diff。
 
 patch 必须使用以下文件操作头；不接受普通 unified diff 文件头：
 - *** Update File: <path>
@@ -24,10 +24,10 @@ patch 必须使用以下文件操作头；不接受普通 unified diff 文件头
 
 更新文件示例：
 *** Begin Patch
-*** Update File: docs/project-structure.md
+*** Update File: docs/note.md
 @@
- # Keydex 项目结构
-+> 使用 Mermaid 绘制的完整项目结构图，可在支持 Mermaid 的 Markdown 预览中查看。
+ 原有内容
++新增内容
 *** End Patch
 
 删除文件示例：
@@ -47,7 +47,7 @@ patch 必须使用以下文件操作头；不接受普通 unified diff 文件头
 禁止写法：不要写 `*** docs/file.md`、`--- docs/file.md`、`+++ docs/file.md`，
 也不要只写普通 unified diff hunk，例如 `@@ -1,2 +1,3 @@`。"""
 
-PATCH_PARAMETER_DESCRIPTION = """完整 patch 文本。必须以 `*** Begin Patch` 开始，
+PATCH_PARAMETER_DESCRIPTION = """完整的结构化文本编辑补丁。必须以 `*** Begin Patch` 开始，
 并以 `*** End Patch` 结束。
 每个文件操作必须使用 `*** Update File: <path>` 或 `*** Delete File: <path>`。
 Update File 内容行必须以空格、+、-、@@、`*** Move to: <path>` 或
@@ -89,8 +89,8 @@ class PlannedChange:
 def create_patch_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
-            name="apply_patch",
-            description=APPLY_PATCH_USAGE,
+            name="edit_file",
+            description=EDIT_FILE_USAGE,
             parameters={
                 "type": "object",
                 "properties": {
@@ -126,7 +126,7 @@ async def apply_patch_tool(
     changes = [_change_result(change, context) for change in planned_changes]
 
     logger.info(
-        "[PatchTool] 应用补丁完成 | "
+        "[EditFileTool] 应用文件编辑补丁完成 | "
         f"changes={len(changes)} | summary={_summarize_changes(changes)}"
     )
     return {"changes": changes, "files": changes}
@@ -198,7 +198,7 @@ def _raise_unrecognized_patch_line(line: str, line_number: int) -> None:
     hint = "文件操作头必须写成 `*** Update File: <path>` 或 `*** Delete File: <path>`。"
     if line.startswith("*** ") and ":" not in line:
         hint = (
-            "看起来你写成了 `*** <path>`。这不是有效的 apply_patch 文件头；"
+            "看起来你写成了 `*** <path>`。这不是有效的 edit_file 文件操作头；"
             "如果要修改已有文件，请改成 `*** Update File: <path>`。"
         )
     elif line.startswith("--- ") or line.startswith("+++ ") or line.startswith("@@ -"):

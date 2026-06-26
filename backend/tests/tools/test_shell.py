@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from backend.app.tools import ToolExecutionContext, ToolRegistry
@@ -34,6 +35,19 @@ async def test_shell_tool_runs_successful_command(tmp_path) -> None:
     assert result.result["exit_code"] == 0
     assert result.result["stdout"].strip() == "ok"
     assert result.result["cwd"] == "."
+
+
+async def test_shell_tool_does_not_depend_on_asyncio_subprocess_support(tmp_path, monkeypatch) -> None:
+    async def raise_not_implemented(*args, **kwargs):
+        raise NotImplementedError()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", raise_not_implemented)
+
+    result = await _run({"command": _python_command("print('ok')")}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["status"] == "completed"
+    assert result.result["stdout"].strip() == "ok"
 
 
 async def test_shell_tool_returns_nonzero_exit_as_completed_result(tmp_path) -> None:

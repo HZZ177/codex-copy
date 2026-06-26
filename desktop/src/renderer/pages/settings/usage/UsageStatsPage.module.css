@@ -433,24 +433,16 @@
 }
 
 .heatWall {
+  --heat-empty: #eeeeee;
+  --heat-level-1: #ffd9bf;
+  --heat-level-2: #ffad66;
+  --heat-level-3: #ff7438;
+  --heat-level-4: #d93c22;
+  --heat-glow: 217 60 34;
+
   display: grid;
   min-width: 0;
   gap: 10px;
-}
-
-.heatWallTotal {
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  margin-left: auto;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-accent) 12%, var(--surface-muted));
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 650;
-  padding: 0 9px;
-  white-space: nowrap;
 }
 
 .heatWallViewport {
@@ -460,6 +452,29 @@
   min-width: 0;
   overflow: visible;
   padding-top: 2px;
+}
+
+.heatWallMatrix,
+.heatWallAxisRow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.heatWallWeekdays {
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--heat-gap);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.heatWallWeekdays span {
+  display: grid;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .heatWallGrid {
@@ -477,7 +492,7 @@
   aspect-ratio: 1;
   border: 0;
   border-radius: 4px;
-  background: #eeeeee;
+  background: var(--heat-empty);
   padding: 0;
   transition:
     background-color var(--motion-fast) var(--motion-ease-out),
@@ -491,20 +506,20 @@
 }
 
 .heatCell[data-level="1"] {
-  background: #cde4ff;
+  background: var(--heat-level-1);
 }
 
 .heatCell[data-level="2"] {
-  background: #9fcaff;
+  background: var(--heat-level-2);
 }
 
 .heatCell[data-level="3"] {
-  background: #529cff;
+  background: var(--heat-level-3);
 }
 
 .heatCell[data-level="4"] {
-  background: #1f6fff;
-  box-shadow: 0 0 0 1px rgb(31 111 255 / 14%);
+  background: var(--heat-level-4);
+  box-shadow: 0 0 0 1px rgb(var(--heat-glow) / 14%);
 }
 
 .heatCell[data-outside="true"] {
@@ -513,8 +528,8 @@
 
 .heatCell[data-active="true"] {
   box-shadow:
-    0 0 0 1px rgb(31 111 255 / 42%),
-    0 8px 18px rgb(31 111 255 / 15%);
+    0 0 0 1px rgb(var(--heat-glow) / 42%),
+    0 8px 18px rgb(var(--heat-glow) / 15%);
 }
 
 .heatCellTooltip {
@@ -579,6 +594,9 @@
   color: var(--color-text-tertiary);
   font-size: 10px;
   line-height: 1;
+}
+
+.heatWallAxisRow {
   margin-top: 6px;
 }
 
@@ -589,7 +607,7 @@
 .heatWallLegend {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 6px;
   color: var(--color-text-tertiary);
   font-size: 10px;
@@ -607,23 +625,23 @@
   height: 10px;
   border: 0;
   border-radius: 3px;
-  background: #eeeeee;
+  background: var(--heat-empty);
 }
 
 .heatWallLegendLevels i[data-level="1"] {
-  background: #cde4ff;
+  background: var(--heat-level-1);
 }
 
 .heatWallLegendLevels i[data-level="2"] {
-  background: #9fcaff;
+  background: var(--heat-level-2);
 }
 
 .heatWallLegendLevels i[data-level="3"] {
-  background: #529cff;
+  background: var(--heat-level-3);
 }
 
 .heatWallLegendLevels i[data-level="4"] {
-  background: #1f6fff;
+  background: var(--heat-level-4);
 }
 
 .heatWallEmpty {
@@ -1009,11 +1027,17 @@
 
   .heatWallLegend {
     align-items: flex-start;
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .heatWallViewport {
     --heat-gap: 4px;
+  }
+
+  .heatWallMatrix,
+  .heatWallAxisRow {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 6px;
   }
 
   .filterButton {

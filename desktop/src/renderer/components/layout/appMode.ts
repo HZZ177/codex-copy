@@ -1,0 +1,85 @@
+export type AppMode = "agent" | "workbench";
+
+export const HOME_PATH = "/guid";
+export const WORKBENCH_PATH = "/workbench";
+
+export interface WorkbenchRouteParams {
+  workspaceId?: string;
+  sessionId?: string;
+}
+
+export function appModeFromPath(pathname: string): AppMode {
+  return isWorkbenchPath(pathname) ? "workbench" : "agent";
+}
+
+export function isWorkbenchPath(pathname: string): boolean {
+  const path = stripQuery(pathname);
+  return path === WORKBENCH_PATH || path.startsWith(`${WORKBENCH_PATH}/`);
+}
+
+export function conversationPath(sessionId: string): string {
+  return `/conversation/${encodeURIComponent(sessionId)}`;
+}
+
+export function workbenchPath(workspaceId?: string, sessionId?: string): string {
+  if (!workspaceId) {
+    return WORKBENCH_PATH;
+  }
+  const base = `${WORKBENCH_PATH}/${encodeURIComponent(workspaceId)}`;
+  return sessionId ? `${base}/session/${encodeURIComponent(sessionId)}` : base;
+}
+
+export function parseWorkbenchPath(pathname: string): WorkbenchRouteParams | null {
+  const path = stripQuery(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (segments[0] !== "workbench") {
+    return null;
+  }
+  const workspaceId = decodeSegment(segments[1]);
+  const sessionId = segments[2] === "session" ? decodeSegment(segments[3]) : undefined;
+  return { workspaceId, sessionId };
+}
+
+export function newPromptConversationPath(params: { sessionType?: string; workspaceId?: string } = {}): string {
+  const query = new URLSearchParams();
+  if (params.sessionType) {
+    query.set("sessionType", params.sessionType);
+  }
+  if (params.workspaceId) {
+    query.set("workspaceId", params.workspaceId);
+  }
+  query.set("focus", "prompt");
+  return `${HOME_PATH}?${query.toString()}`;
+}
+
+export function modeSwitchTargetsForPath(
+  pathname: string,
+  lastWorkbenchWorkspaceId?: string | null,
+): Record<AppMode, string> {
+  const mode = appModeFromPath(pathname);
+  const workbenchRoute = parseWorkbenchPath(pathname);
+  return {
+    agent: mode === "agent" ? pathname : workbenchRoute?.sessionId ? conversationPath(workbenchRoute.sessionId) : HOME_PATH,
+    workbench:
+      mode === "workbench"
+        ? pathname
+        : lastWorkbenchWorkspaceId
+          ? workbenchPath(lastWorkbenchWorkspaceId)
+          : WORKBENCH_PATH,
+  };
+}
+
+function stripQuery(pathname: string): string {
+  return pathname.split("?")[0] ?? pathname;
+}
+
+function decodeSegment(segment: string | undefined): string | undefined {
+  if (!segment) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}

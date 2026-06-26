@@ -11,13 +11,17 @@ from backend.app.core.env import ENV_PREFIX
 DEFAULT_PROTOCOL_VERSION = "2026-06-15"
 
 
+def default_data_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / ".data"
+
+
 class AppSettings(BaseSettings):
     app_name: str = "Keydex"
     version: str = "0.1.0"
     protocol_version: str = DEFAULT_PROTOCOL_VERSION
     host: str = "127.0.0.1"
     port: int = 8765
-    data_dir: Path = Field(default_factory=lambda: Path(".data").resolve())
+    data_dir: Path = Field(default_factory=default_data_dir)
     workspace_root: Path = Field(default_factory=lambda: Path.cwd().resolve())
     default_user_id: str = "local-user"
     default_scene_id: str = "desktop-agent"

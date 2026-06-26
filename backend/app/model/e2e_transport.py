@@ -256,7 +256,7 @@ def _file_edit_progress_chunks(payload: dict[str, Any]) -> list[str]:
             payload,
             delta={
                 "reasoning_content": (
-                    "准备通过 apply_patch 编辑 src/app.ts，并实时返回文件变更进度。"
+                    "准备通过 edit_file 编辑 src/app.ts，并实时返回文件变更进度。"
                 )
             },
         ),
@@ -266,10 +266,10 @@ def _file_edit_progress_chunks(payload: dict[str, Any]) -> list[str]:
                 "tool_calls": [
                     {
                         "index": 0,
-                        "id": "call_e2e_apply_patch_progress",
+                        "id": "call_e2e_edit_file_progress",
                         "type": "function",
                         "function": {
-                            "name": "apply_patch",
+                            "name": "edit_file",
                             "arguments": "",
                         },
                     }

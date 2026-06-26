@@ -17,6 +17,7 @@ export interface WorkspaceSelectorProps {
   readOnly?: boolean;
   loading?: boolean;
   placement?: "top" | "bottom";
+  allowProjectFreeChat?: boolean;
   onSelectChat?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onAddWorkspace?: (path: string) => Promise<void> | void;
@@ -30,6 +31,7 @@ export function WorkspaceSelector({
   readOnly = false,
   loading = false,
   placement = "bottom",
+  allowProjectFreeChat = true,
   onSelectChat,
   onSelectWorkspace,
   onAddWorkspace,
@@ -49,13 +51,21 @@ export function WorkspaceSelector({
   const canOpen = !disabled && !readOnly;
   const selectedWorkspaceId = value.type === "workspace" ? value.workspace.id : null;
   const displayText =
-    value.type === "workspace" ? value.workspace.name : value.type === "pending" ? value.name : "无项目聊天";
+    value.type === "workspace"
+      ? value.workspace.name
+      : value.type === "pending"
+        ? value.name
+        : allowProjectFreeChat
+          ? "无项目聊天"
+          : "选择工作区";
   const displayHint =
     value.type === "workspace"
       ? value.workspace.root_path
       : value.type === "pending"
         ? `${value.rootPath} - 本地服务启动后启用项目工具`
-        : "不挂载工作区，不启用项目工具";
+        : allowProjectFreeChat
+          ? "不挂载工作区，不启用项目工具"
+          : "工作台模式需要先选择工作区";
   const filteredWorkspaces = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
@@ -237,7 +247,7 @@ export function WorkspaceSelector({
         disabled={!canOpen}
         onClick={toggleOpen}
       >
-        {value.type === "workspace" || value.type === "pending" ? (
+        {value.type === "workspace" || value.type === "pending" || !allowProjectFreeChat ? (
           <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
         ) : (
           <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -372,21 +382,23 @@ export function WorkspaceSelector({
             </div>
           ) : null}
 
-          <div className={`${styles.section} ${styles.chatSection}`}>
-            <button
-              className={styles.option}
-              type="button"
-              aria-selected={value.type === "chat" ? "true" : "false"}
-              onClick={chooseChat}
-            >
-              <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
-              <span className={styles.optionText}>
-                <span>无项目聊天</span>
-                <small>只对话，不启用项目工具</small>
-              </span>
-              {value.type === "chat" ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
-            </button>
-          </div>
+          {allowProjectFreeChat ? (
+            <div className={`${styles.section} ${styles.chatSection}`}>
+              <button
+                className={styles.option}
+                type="button"
+                aria-selected={value.type === "chat" ? "true" : "false"}
+                onClick={chooseChat}
+              >
+                <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
+                <span className={styles.optionText}>
+                  <span>无项目聊天</span>
+                  <small>只对话，不启用项目工具</small>
+                </span>
+                {value.type === "chat" ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

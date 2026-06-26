@@ -8,6 +8,8 @@ from langchain.agents.middleware import AgentMiddleware, ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from backend.app.agent.skill_activation_middleware import SkillActivationInjectionMiddleware
+from backend.app.agent.tool_call_preset_middleware import ToolCallPresetMiddleware
 from backend.app.core.logger import logger
 
 
@@ -83,6 +85,8 @@ class DuplicateToolCallGuardMiddleware(AgentMiddleware):
 
 def build_default_middleware() -> tuple[AgentMiddleware, ...]:
     return (
+        ToolCallPresetMiddleware(),
+        SkillActivationInjectionMiddleware(),
         ToolErrorHandlingMiddleware(),
         DuplicateToolCallGuardMiddleware(),
     )

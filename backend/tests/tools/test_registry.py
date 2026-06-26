@@ -173,7 +173,8 @@ def test_default_tool_registry_exposes_phase_one_tool_contracts(tmp_path) -> Non
     registry = create_default_tool_registry()
 
     assert registry.names() == [
-        "apply_patch",
+        "create_file",
+        "edit_file",
         "grep_files",
         "list_dir",
         "read_file",
@@ -181,16 +182,16 @@ def test_default_tool_registry_exposes_phase_one_tool_contracts(tmp_path) -> Non
         "search_files",
         "search_text",
         "update_plan",
-        "write_file",
     ]
     specs = {spec.name: spec for spec in registry.to_tool_specs()}
     assert "带行号的 numbered_content" in specs["read_file"].description
-    assert "创建新的 UTF-8 文本文件" in specs["write_file"].description
-    assert "目标文件已存在会失败" in specs["write_file"].description
+    assert "创建新的 UTF-8 文本文件" in specs["create_file"].description
+    assert "目标文件已存在时会失败" in specs["create_file"].description
     assert "有界目录树" in specs["list_dir"].description
     assert "不搜索文件内容" in specs["search_files"].description
     assert "发现候选文件" in specs["grep_files"].description
-    assert "*** Move to: <path>" in specs["apply_patch"].description
+    assert "修改、删除或移动已有 UTF-8 文本文件" in specs["edit_file"].description
+    assert "*** Move to: <path>" in specs["edit_file"].description
     assert "一次性 shell 命令" in specs["run_command"].description
     assert "最多只能有一个步骤处于 in_progress" in specs["update_plan"].description
     status_enum = specs["update_plan"].parameters["properties"]["plan"]["items"]["properties"][
@@ -198,8 +199,8 @@ def test_default_tool_registry_exposes_phase_one_tool_contracts(tmp_path) -> Non
     ]["enum"]
     assert "failed" in status_enum
     assert specs["list_dir"].parameters["properties"]["depth"]["maximum"] == 5
-    assert "mode" not in specs["write_file"].parameters["properties"]
-    assert "append" not in specs["write_file"].parameters["properties"]
+    assert "mode" not in specs["create_file"].parameters["properties"]
+    assert "append" not in specs["create_file"].parameters["properties"]
     assert "offset" not in specs["read_file"].parameters["properties"]
     assert "grep_files" in specs
 

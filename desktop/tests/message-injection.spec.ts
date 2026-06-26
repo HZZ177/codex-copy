@@ -122,4 +122,63 @@ describe("message injection composer helpers", () => {
     expect(prepared.contextItems).toEqual([]);
     expect(prepared.runtimeParams).toBeUndefined();
   });
+
+  it("adds selected skill as context item and skill_activation without message injection", () => {
+    const prepared = prepareComposerMessage("拆 issues", [], {
+      selectedSkill: {
+        name: "dev-plan",
+        label: "/dev-plan",
+        description: "Plan work from a design doc",
+        source: "workspace",
+        locator: ".keydex/skills/dev-plan/SKILL.md",
+      },
+    });
+
+    expect(prepared.contextItems).toHaveLength(1);
+    expect(prepared.contextItems[0]).toMatchObject({
+      id: "skill:dev-plan",
+      type: "skill",
+      label: "/dev-plan",
+      content: "Plan work from a design doc",
+      source: "workspace",
+      skill_name: "dev-plan",
+      description: "Plan work from a design doc",
+    });
+    expect(prepared.runtimeParams).toEqual({
+      skill_activation: {
+        skill_name: "dev-plan",
+        source: "workspace",
+        origin: "slash",
+      },
+    });
+  });
+
+  it("keeps skill out of message_injection when files or quotes are also attached", () => {
+    const quote = selectedQuoteFromText("selected text");
+    if (!quote) {
+      throw new Error("quote not created");
+    }
+    const prepared = prepareComposerMessage(
+      "拆 issues",
+      [{ path: "README.md", name: "README.md", type: "file", source: "workspace" }],
+      {
+        quotes: [quote],
+        selectedSkill: {
+          name: "dev-plan",
+          label: "/dev-plan",
+          description: "Plan work from a design doc",
+          source: "workspace",
+          locator: ".keydex/skills/dev-plan/SKILL.md",
+        },
+      },
+    );
+
+    expect(prepared.contextItems.map((item) => item.type)).toEqual(["skill", "quote", "file"]);
+    expect(prepared.runtimeParams?.skill_activation?.skill_name).toBe("dev-plan");
+    expect(prepared.runtimeParams?.message_injection).toHaveLength(2);
+    expect(prepared.runtimeParams?.message_injection?.map((item) => item.metadata?.kind)).toEqual([
+      "quote",
+      "file",
+    ]);
+  });
 });

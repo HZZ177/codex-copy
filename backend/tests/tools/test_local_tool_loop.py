@@ -33,12 +33,12 @@ async def test_local_workspace_tool_loop_search_read_create_patch_verify(tmp_pat
         tmp_path,
     )
     created = await _run(
-        "write_file",
+        "create_file",
         {"path": "docs/result.md", "content": "# Result\n\nCreated by loop.\n"},
         tmp_path,
     )
     patched = await _run(
-        "apply_patch",
+        "edit_file",
         {
             "patch": """*** Begin Patch
 *** Update File: src/app.py
