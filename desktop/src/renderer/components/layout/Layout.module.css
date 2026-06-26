@@ -193,6 +193,7 @@
 }
 
 .content[data-content="full"] {
+  min-width: var(--content-min-width, 420px);
   overflow: hidden;
   scrollbar-gutter: auto;
 }
@@ -200,6 +201,7 @@
 .shell[data-right-sidebar-mode="maximized"] .content {
   flex-grow: 0;
   flex-basis: 0;
+  min-width: 0;
   border-color: transparent;
   opacity: 0;
   overflow: hidden;

@@ -243,6 +243,82 @@ describe("Layout", () => {
     expect(screen.getByRole("separator", { name: "调整右侧栏宽度" })).not.toBeNull();
   });
 
+  it("keeps a full-width conversation inside the shell when the side panel is widened on either side", async () => {
+    renderLayout(
+      <Layout contentMode="full">
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+
+    const rightHandle = screen.getByRole("separator", { name: "调整右侧栏宽度" });
+    expect(rightHandle.getAttribute("aria-valuemax")).toBe("43");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.431");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 318px");
+
+    act(() => {
+      dispatchPointer(rightHandle, "pointerdown", { button: 0, pointerId: 8, clientX: 400 });
+    });
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBe("true");
+    });
+    act(() => {
+      dispatchPointer(window, "pointermove", { pointerId: 8, clientX: 410 });
+    });
+    await waitFor(() => {
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.417");
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 308px");
+    });
+    act(() => {
+      dispatchPointer(window, "pointerup", { pointerId: 8, clientX: 410 });
+    });
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBeUndefined();
+    });
+
+    fireEvent.keyDown(rightHandle, { key: "End" });
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.431");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 318px");
+
+    fireEvent.click(screen.getByLabelText("交换对话区和侧边栏位置"));
+    const leftHandle = screen.getByRole("separator", { name: "调整左侧栏宽度" });
+    expect(leftHandle.getAttribute("aria-valuemax")).toBe("43");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.431");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 318px");
+
+    fireEvent.keyDown(leftHandle, { key: "ArrowRight" });
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.431");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 318px");
+
+    act(() => {
+      dispatchPointer(leftHandle, "pointerdown", { button: 0, pointerId: 9, clientX: 400 });
+    });
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBe("true");
+    });
+    act(() => {
+      dispatchPointer(window, "pointermove", { pointerId: 9, clientX: 390 });
+    });
+    await waitFor(() => {
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.417");
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 308px");
+    });
+    act(() => {
+      dispatchPointer(window, "pointerup", { pointerId: 9, clientX: 390 });
+    });
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebarResizing).toBeUndefined();
+    });
+
+    fireEvent.click(screen.getByLabelText("交换对话区和侧边栏位置"));
+    const restoredRightHandle = screen.getByRole("separator", { name: "调整右侧栏宽度" });
+    fireEvent.doubleClick(restoredRightHandle);
+    expect(shell.dataset.rightSidebarPlacement).toBe("right");
+    expect(shell.getAttribute("style")).toContain("--right-sidebar-ratio: 0.431");
+  });
+
   it("collapses the right sidebar from its panel controls", () => {
     renderLayout(
       <Layout>

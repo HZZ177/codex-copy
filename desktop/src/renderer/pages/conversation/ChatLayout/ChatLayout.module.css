@@ -3,6 +3,7 @@
   --composer-accessory-gap: 8px;
   --composer-fade-height: 44px;
   --conversation-scrollbar-gutter-width: 17px;
+  --conversation-document-min-width: 420px;
 
   position: relative;
   display: grid;
@@ -21,7 +22,7 @@
   grid-row: 2;
   width: 100%;
   min-height: 0;
-  min-width: min(100%, 320px);
+  min-width: min(100%, var(--conversation-document-min-width));
   overflow: hidden;
 }
 
@@ -39,7 +40,7 @@
 .topBarInner {
   display: flex;
   width: 100%;
-  min-width: min(100%, 320px);
+  min-width: min(100%, var(--conversation-document-min-width));
   align-items: center;
   margin: 0;
 }

@@ -67,6 +67,7 @@ describe("style foundation", () => {
     expect(layout).toContain("overflow-x: hidden");
     expect(layout).toContain("scrollbar-gutter: stable");
     expect(layout).toMatch(/\.content\[data-content="full"\]\s*{[^}]*overflow:\s*hidden/s);
+    expect(layout).toMatch(/\.content\[data-content="full"\]\s*{[^}]*min-width:\s*var\(--content-min-width,\s*420px\)/s);
     expect(layout).toMatch(/\.readingColumn\[data-content="full"\]\s*{[^}]*height:\s*100%/s);
     expect(chatLayout).toMatch(/\.chatLayout\s*{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto/s);
     expect(chatLayout).toMatch(/\.document\s*{[^}]*overflow:\s*hidden/s);
@@ -95,7 +96,13 @@ describe("style foundation", () => {
     expect(messageList).toMatch(/\.list\s*{[^}]*display:\s*block/s);
     expect(messageList).toMatch(/\.list\s*{[^}]*width:\s*min\(var\(--composer-width\)/s);
     expect(messageList).toMatch(/\.root\s*{[^}]*--message-list-bottom-buffer:\s*80px/s);
-    expect(messageList).toMatch(/\.list\s*{[^}]*padding:\s*22px 0 var\(--message-list-bottom-buffer\)/s);
+    expect(messageList).toMatch(
+      /\.list\s*{[^}]*padding:\s*22px var\(--turn-navigator-list-padding-right,\s*0px\) var\(--message-list-bottom-buffer\) 0/s,
+    );
+    expect(messageList).toMatch(/--turn-navigator-edge:\s*clamp\(8px/s);
+    expect(messageList).toMatch(/--turn-navigator-gap:\s*clamp\(4px/s);
+    expect(messageList).toMatch(/--turn-navigator-right:\s*max\(\s*var\(--turn-navigator-edge\)/s);
+    expect(messageList).not.toContain("@container (max-width: 1052px)");
     expect(messageList).toMatch(/\.virtualList\s*{[^}]*padding-bottom:\s*0/s);
     expect(messageList).toMatch(/\.virtualBottomSpacer\s*{[^}]*height:\s*var\(--message-list-bottom-buffer\)/s);
     expect(messageList).not.toMatch(/\.list\s*{[^}]*justify-content:\s*flex-end/s);

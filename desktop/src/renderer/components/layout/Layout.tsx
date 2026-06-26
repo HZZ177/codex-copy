@@ -23,7 +23,12 @@ import {
 import { flushSync } from "react-dom";
 
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
-import { SIDEBAR_COLLAPSED_WIDTH } from "@/renderer/hooks/layout/layoutStore";
+import {
+  MAX_RIGHT_SIDEBAR_RATIO,
+  MIN_RIGHT_SIDEBAR_RATIO,
+  SIDEBAR_COLLAPSED_WIDTH,
+  clampRightSidebarRatio,
+} from "@/renderer/hooks/layout/layoutStore";
 import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 import { useSidebarCollapseMotion } from "@/renderer/hooks/layout/useSidebarCollapseMotion";
 import {
@@ -58,6 +63,8 @@ const FILES_PANEL_ID_PREFIX = "right-sidebar:files:";
 const INITIAL_PANEL_ID_PREFIX = "right-sidebar:initial:";
 const GLOBAL_RIGHT_SIDEBAR_SCOPE = "global";
 const APP_MODE_SWITCH_NAVIGATION_DELAY_MS = 180;
+const FULL_CONTENT_MIN_WIDTH = 420;
+const RATIO_PRECISION = 1000;
 
 interface RightSidebarFilePanelState {
   id: string;
@@ -87,6 +94,24 @@ const EMPTY_RIGHT_SIDEBAR_SCOPE_STATE: RightSidebarScopePanelState = {
 type ViewTransitionDocument = Document & {
   startViewTransition?: (callback: () => void) => unknown;
 };
+
+function roundSidebarRatio(ratio: number) {
+  return Math.round(ratio * RATIO_PRECISION) / RATIO_PRECISION;
+}
+
+function maxRightSidebarRatioWithContentGuard(availableWidth: number, guardContentMinWidth: boolean) {
+  if (!guardContentMinWidth || availableWidth <= 0) {
+    return MAX_RIGHT_SIDEBAR_RATIO;
+  }
+  const maxRatioForContent = (availableWidth - FULL_CONTENT_MIN_WIDTH) / availableWidth;
+  return roundSidebarRatio(
+    Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.min(MAX_RIGHT_SIDEBAR_RATIO, maxRatioForContent)),
+  );
+}
+
+function clampRightSidebarRatioForLayout(ratio: number, maxRatio: number) {
+  return Math.min(maxRatio, clampRightSidebarRatio(ratio));
+}
 
 export interface LayoutProps extends PropsWithChildren {
   title?: string;
@@ -155,7 +180,17 @@ export function Layout({
     return Math.max(0, Math.round(liveShellWidth - activeSidebarWidth));
   }, [activeSidebarWidth, shellWidth]);
   const rightSidebarAvailableWidth = Math.max(0, shellWidth - activeSidebarWidth);
-  const rightSidebarWidth = Math.round(rightSidebarAvailableWidth * state.rightSidebarRatio);
+  const guardContentMinWidth = contentMode === "full";
+  const rightSidebarMaxRatio = maxRightSidebarRatioWithContentGuard(
+    rightSidebarAvailableWidth,
+    guardContentMinWidth,
+  );
+  const rightSidebarRatio = clampRightSidebarRatioForLayout(state.rightSidebarRatio, rightSidebarMaxRatio);
+  const rightSidebarWidth = Math.round(rightSidebarAvailableWidth * rightSidebarRatio);
+  const getRightSidebarMaxRatio = useCallback(
+    (availableWidth: number) => maxRightSidebarRatioWithContentGuard(availableWidth, guardContentMinWidth),
+    [guardContentMinWidth],
+  );
   const previewSidebarWidth = useCallback(
     (width: number) => setLivePanelWidth("--sidebar-width", width),
     [setLivePanelWidth],
@@ -166,10 +201,12 @@ export function Layout({
       if (!shell) {
         return;
       }
-      shell.style.setProperty("--right-sidebar-ratio", String(ratio));
-      shell.style.setProperty("--right-sidebar-width", `${Math.round(getRightSidebarAvailableWidth() * ratio)}px`);
+      const availableWidth = getRightSidebarAvailableWidth();
+      const nextRatio = clampRightSidebarRatioForLayout(ratio, getRightSidebarMaxRatio(availableWidth));
+      shell.style.setProperty("--right-sidebar-ratio", String(nextRatio));
+      shell.style.setProperty("--right-sidebar-width", `${Math.round(availableWidth * nextRatio)}px`);
     },
-    [getRightSidebarAvailableWidth],
+    [getRightSidebarAvailableWidth, getRightSidebarMaxRatio],
   );
   const setRightSidebarResizing = useCallback((resizing: boolean) => {
     const shell = shellRef.current;
@@ -447,7 +484,8 @@ export function Layout({
       style={
         {
           "--sidebar-width": `${state.sidebarWidth}px`,
-          "--right-sidebar-ratio": String(state.rightSidebarRatio),
+          "--content-min-width": `${FULL_CONTENT_MIN_WIDTH}px`,
+          "--right-sidebar-ratio": String(rightSidebarRatio),
           "--right-sidebar-width": `${rightSidebarWidth}px`,
           "--workspace-panel-width": `${state.workspaceWidth}px`,
           "--preview-panel-width": `${state.previewWidth}px`,
@@ -516,7 +554,8 @@ export function Layout({
           <>
             <RightSidebarResizeHandle
               disabled={!rightSidebarOpen || rightSidebarMaximized}
-              ratio={state.rightSidebarRatio}
+              ratio={rightSidebarRatio}
+              maxRatio={rightSidebarMaxRatio}
               placement={state.rightSidebarPlacement}
               getAvailableWidth={getRightSidebarAvailableWidth}
               onResizePreview={previewRightSidebarRatio}

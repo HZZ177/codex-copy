@@ -8,7 +8,6 @@ import {
   DEFAULT_RIGHT_SIDEBAR_RATIO,
   MAX_RIGHT_SIDEBAR_RATIO,
   MIN_RIGHT_SIDEBAR_RATIO,
-  clampRightSidebarRatio,
 } from "@/renderer/hooks/layout/layoutStore";
 import type { RightSidebarPlacement } from "@/renderer/hooks/layout/layoutStore";
 
@@ -18,6 +17,7 @@ import { useRafPanelResize } from "./useRafPanelResize";
 interface RightSidebarResizeHandleProps {
   disabled?: boolean;
   ratio: number;
+  maxRatio?: number;
   placement: RightSidebarPlacement;
   getAvailableWidth: () => number;
   onResizePreview?: (ratio: number) => void;
@@ -59,6 +59,7 @@ function HalfSwapIcon() {
 export function RightSidebarResizeHandle({
   disabled = false,
   ratio,
+  maxRatio = MAX_RIGHT_SIDEBAR_RATIO,
   placement,
   getAvailableWidth,
   onResizePreview,
@@ -66,12 +67,25 @@ export function RightSidebarResizeHandle({
   onResizeDragChange,
   onSwapPlacement,
 }: RightSidebarResizeHandleProps) {
+  const boundedMaxRatio = Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.min(MAX_RIGHT_SIDEBAR_RATIO, maxRatio));
+  const clampRatio = useCallback(
+    (nextRatio: number) => {
+      if (!Number.isFinite(nextRatio)) {
+        return Math.min(DEFAULT_RIGHT_SIDEBAR_RATIO, boundedMaxRatio);
+      }
+      return Math.min(
+        boundedMaxRatio,
+        Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.round(nextRatio * 1000) / 1000),
+      );
+    },
+    [boundedMaxRatio],
+  );
   const getDragRatio = useCallback(
     (startRatio: number, startX: number, clientX: number) => {
       const direction = placement === "right" ? -1 : 1;
-      return clampRightSidebarRatio(startRatio + direction * ((clientX - startX) / Math.max(1, getAvailableWidth())));
+      return clampRatio(startRatio + direction * ((clientX - startX) / Math.max(1, getAvailableWidth())));
     },
-    [getAvailableWidth, placement],
+    [clampRatio, getAvailableWidth, placement],
   );
   const { dragging, startDrag, finishDrag } = useRafPanelResize({
     disabled,
@@ -102,13 +116,13 @@ export function RightSidebarResizeHandle({
     } else if (event.key === "Home") {
       nextRatio = MIN_RIGHT_SIDEBAR_RATIO;
     } else if (event.key === "End") {
-      nextRatio = MAX_RIGHT_SIDEBAR_RATIO;
+      nextRatio = boundedMaxRatio;
     }
     if (nextRatio === null) {
       return;
     }
     event.preventDefault();
-    onResize(clampRightSidebarRatio(nextRatio));
+    onResize(clampRatio(nextRatio));
   };
 
   const resetWidth = () => {
@@ -116,8 +130,9 @@ export function RightSidebarResizeHandle({
       return;
     }
     finishDrag();
-    onResizePreview?.(DEFAULT_RIGHT_SIDEBAR_RATIO);
-    onResize(DEFAULT_RIGHT_SIDEBAR_RATIO);
+    const resetRatio = clampRatio(DEFAULT_RIGHT_SIDEBAR_RATIO);
+    onResizePreview?.(resetRatio);
+    onResize(resetRatio);
   };
 
   const placementLabel = placement === "left" ? "左侧栏" : "右侧栏";
@@ -127,7 +142,7 @@ export function RightSidebarResizeHandle({
       <div
         aria-label={`调整${placementLabel}宽度`}
         aria-orientation="vertical"
-        aria-valuemax={Math.round(MAX_RIGHT_SIDEBAR_RATIO * 100)}
+        aria-valuemax={Math.round(boundedMaxRatio * 100)}
         aria-valuemin={Math.round(MIN_RIGHT_SIDEBAR_RATIO * 100)}
         aria-valuenow={Math.round(ratio * 100)}
         className={styles.handle}

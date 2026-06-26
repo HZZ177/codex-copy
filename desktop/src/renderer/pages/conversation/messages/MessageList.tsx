@@ -382,7 +382,12 @@ export function MessageList({
   );
 
   const list = (
-    <section className={styles.root} data-list-mode={listMode} data-testid="message-list">
+    <section
+      className={styles.root}
+      data-list-mode={listMode}
+      data-turn-navigator={turnNavigationItems.length >= 2 ? "true" : "false"}
+      data-testid="message-list"
+    >
       {loading ? (
         <div className={styles.scroller} data-testid="message-list-scroll">
           <MessageSkeleton />
