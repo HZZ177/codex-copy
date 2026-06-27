@@ -411,7 +411,11 @@ def test_session_service_pages_history_by_turn_without_splitting_messages(tmp_pa
     assert all_history["total"] == 6
     assert all_history["has_more_older"] is False
     assert all_history["next_cursor"] is None
-    assert [message["turnIndex"] for message in all_history["list"] if message["role"] == "user"] == [
+    assert [
+        message["turnIndex"]
+        for message in all_history["list"]
+        if message["role"] == "user"
+    ] == [
         1,
         2,
         3,

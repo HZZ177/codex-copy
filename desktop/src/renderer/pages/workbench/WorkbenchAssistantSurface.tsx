@@ -659,8 +659,12 @@ export function WorkbenchAssistantSurface({
   const toggleExpandedLayer = useCallback(() => {
     finishMessageTriggerPriming();
     setUnreadAssistantMessageKey(null);
+    if (surfaceMode === "expanded") {
+      dispatchAssistantState({ type: "close-expanded", returnMode: "composer" });
+      return;
+    }
     dispatchAssistantState({ type: "toggle-expanded", hasDraft: Boolean(controller.draft.trim()) });
-  }, [controller.draft, finishMessageTriggerPriming]);
+  }, [controller.draft, finishMessageTriggerPriming, surfaceMode]);
 
   const openExpandedLayerAtTurn = useCallback(
     (targetIndex: number) => {
@@ -685,7 +689,10 @@ export function WorkbenchAssistantSurface({
     if (surfaceMode !== "expanded") {
       return;
     }
-    dispatchAssistantState({ type: "toggle-expanded", hasDraft: Boolean(controller.draft.trim()) });
+    dispatchAssistantState({
+      type: "close-expanded",
+      returnMode: controller.draft.trim() ? "composer" : "capsule",
+    });
   }, [controller.draft, surfaceMode]);
 
   useEffect(() => {

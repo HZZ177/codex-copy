@@ -1547,7 +1547,6 @@
   background: transparent;
   box-shadow: none;
   backdrop-filter: blur(16px);
-  animation: assistantPanelContentReveal 140ms var(--motion-ease-out) both;
 }
 
 .approvalPrompt {

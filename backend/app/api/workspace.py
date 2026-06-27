@@ -358,7 +358,10 @@ async def list_session_workspace_tree(
     return _list_tree(scope, path)
 
 
-@router.get("/api/sessions/{session_id}/workspace/tree/subtree", response_model=WorkspaceSubtreeResponse)
+@router.get(
+    "/api/sessions/{session_id}/workspace/tree/subtree",
+    response_model=WorkspaceSubtreeResponse,
+)
 async def list_session_workspace_subtree(
     session_id: str,
     path: str = "",

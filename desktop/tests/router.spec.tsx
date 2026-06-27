@@ -346,8 +346,9 @@ describe("AppRouter", () => {
     expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-header")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-middle")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
     expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
-    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
     expect(screen.getByLabelText("工作台助手输入").textContent).toContain("保留草稿");
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
     expect(shell.dataset.rightSidebar).toBe("closed");
@@ -384,8 +385,9 @@ describe("AppRouter", () => {
     expect(canvasContent.isConnected).toBe(true);
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
     expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
-    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
     expect(screen.getByLabelText("工作台助手输入").textContent).toContain("保留草稿");
     await waitFor(
       () => {

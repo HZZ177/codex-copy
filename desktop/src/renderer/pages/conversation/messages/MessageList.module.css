@@ -117,8 +117,9 @@
 
 .list {
   display: block;
-  width: min(var(--message-list-max-width), calc(100% - (var(--message-list-inline-padding) * 2)));
+  width: min(var(--composer-width), calc(100% - (var(--message-list-inline-padding) * 2)));
   min-width: 0;
+  max-width: var(--message-list-max-width);
   box-sizing: border-box;
   margin: 0 auto;
   padding: 22px var(--turn-navigator-list-padding-right, 0px) var(--message-list-bottom-buffer) 0;
@@ -272,7 +273,7 @@
   .list,
   .empty,
   .skeletonWrap {
-    width: min(var(--message-list-max-width), calc(100% - (var(--message-list-inline-padding) * 2)));
+    width: min(var(--composer-width), calc(100% - (var(--message-list-inline-padding) * 2)));
   }
 }
 

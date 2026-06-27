@@ -1,8 +1,8 @@
 .page {
-  width: min(860px, calc(100% - 96px));
+  width: min(672px, calc(100% - 136px));
   min-height: 100%;
   margin: 0 auto;
-  padding: 76px 0 116px;
+  padding: 92px 0 128px;
   color: var(--color-text-primary);
 }
 

@@ -11,6 +11,7 @@ export type WorkbenchAssistantAction =
   | { type: "context-injected" }
   | { type: "open-composer" }
   | { type: "toggle-expanded"; hasDraft: boolean }
+  | { type: "close-expanded"; returnMode: "capsule" | "composer" }
   | { type: "dock-to-drawer" }
   | { type: "close-drawer"; hasDraft: boolean }
   | { type: "approval-pending" };
@@ -53,6 +54,14 @@ export function workbenchAssistantReducer(
       return {
         mode: "expanded",
         focusSeq: state.focusSeq + 1,
+      };
+    case "close-expanded":
+      if (state.mode !== "expanded") {
+        return state;
+      }
+      return {
+        mode: action.returnMode,
+        focusSeq: state.focusSeq + (action.returnMode === "composer" ? 1 : 0),
       };
     case "dock-to-drawer":
     case "approval-pending":

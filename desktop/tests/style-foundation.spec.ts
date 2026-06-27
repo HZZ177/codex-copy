@@ -184,8 +184,12 @@ describe("style foundation", () => {
     expect(filePreview).not.toMatch(/\.mermaidSvgContent svg\s*{[^}]*width:\s*auto !important/s);
     expect(filePreview).toMatch(/\.mermaidSvgContent svg\s*{[^}]*max-width:\s*none !important/s);
     expect(filePreview).toMatch(/\.mermaidControls\s*{[^}]*position:\s*absolute/s);
-    expect(filePreview).toMatch(/\.markdownCodeFrame\s*{[^}]*background:\s*var\(--surface-muted\)/s);
-    expect(filePreview).toMatch(/\.markdownCodeBlock\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
+    expect(filePreview).toMatch(
+      /\.markdownPane\s+\[data-markdown-code-frame="true"\]\s*{[^}]*background:\s*var\(--surface-muted\)/s,
+    );
+    expect(filePreview).toMatch(
+      /\.markdownPane\s+\[data-markdown-code-frame="true"\]\s+pre\[data-testid="markdown-code-viewport"\]\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s,
+    );
     expect(filePreview).toMatch(/\.sourceViewer\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
     expect(filePreview).toMatch(/\.sourceLineNumbers\s*{[^}]*background:\s*var\(--surface-muted\)/s);
     expect(filePreview).toMatch(/\.diffPane\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
@@ -193,7 +197,7 @@ describe("style foundation", () => {
     expect(filePreview).not.toContain("background: #fff");
     expect(sider).toMatch(/\.historyMeta\s*{[^}]*white-space:\s*nowrap/s);
     expect(sider).toMatch(/\.historyItem\s*{[^}]*position:\s*relative/s);
-    expect(sider).toMatch(/\.historyItem\[data-active="true"\]\s*{[^}]*background:\s*color-mix/s);
+    expect(sider).toMatch(/\.historyItem\[data-active="true"\]\s*{[^}]*background:\s*var\(--sidebar-pill-active\)/s);
     expect(sider).toMatch(/\.sectionChevron\s*{[^}]*transition:\s*transform 160ms var\(--motion-ease-standard\)/s);
     expect(sider).toMatch(/\.sectionTitle\[aria-expanded="false"\]\s+\.sectionChevron\s*{[^}]*transform:\s*rotate\(-90deg\)/s);
     expect(sider).toMatch(/\.sectionItems\s*{[^}]*grid-template-rows:\s*1fr/s);
@@ -219,22 +223,28 @@ describe("style foundation", () => {
       expect(css).toContain("overflow-y: visible");
     });
     [commandBlock, toolBlock].forEach((css) => {
-      expect(css).toMatch(/\.codeViewport\s*{[^}]*max-height:\s*196px/s);
+      expect(css).toMatch(/\.codeViewport\s*{[^}]*max-height:\s*144px/s);
       expect(css).toMatch(/\.sectionHeader\[data-kind="output"\]\s+\+\s+\.codeViewport\s*{[^}]*max-height:\s*260px/s);
-      expect(css).toMatch(/\.sectionHeader\s*{[^}]*background:\s*var\(--surface-muted\)/s);
-      expect(css).toMatch(/\.outputHeader\s*{[^}]*color:\s*var\(--color-text-tertiary\)/s);
+      expect(css).toMatch(/\.sectionHeader\s*{[^}]*background:\s*transparent/s);
+      expect(css).toMatch(
+        /\.outputHeader\s*{[^}]*color:\s*color-mix\(in srgb, var\(--color-text-secondary\) 82%, transparent\)/s,
+      );
       expect(css).not.toContain("var(--color-accent) 54%");
       expect(css).not.toContain("var(--color-success-6) 56%");
       expect(css).toMatch(/\.codeViewport\s*{[^}]*overflow-y:\s*auto/s);
-      expect(css).toMatch(/\.codeViewport\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
-      expect(css).toMatch(/\.codeViewport\s*{[^}]*inset 0 0 0 1px color-mix\(in srgb, var\(--color-border-default\) 34%, transparent\)/s);
+      expect(css).toMatch(/\.codeViewport\s*{[^}]*background:\s*transparent/s);
+      expect(css).toMatch(/\.codeViewport\s*{[^}]*box-shadow:\s*none/s);
       expect(css).toContain("overflow: visible");
       expect(css).not.toContain("background: var(--code-bg)");
     });
-    expect(commandBlock).toMatch(/\.outputInner\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
-    expect(toolBlock).toMatch(/\.detailsInner\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
-    expect(commandBlock).toMatch(/\.outputInner\s*{[^}]*0 8px 22px rgb\(15 23 42 \/ 5%\)/s);
-    expect(toolBlock).toMatch(/\.detailsInner\s*{[^}]*0 8px 22px rgb\(15 23 42 \/ 5%\)/s);
+    expect(commandBlock).toMatch(
+      /\.outputInner\s*{[^}]*background:\s*color-mix\(in srgb, var\(--surface-muted\) 72%, var\(--color-bg-elevated\)\)/s,
+    );
+    expect(toolBlock).toMatch(
+      /\.detailsInner\s*{[^}]*background:\s*color-mix\(in srgb, var\(--surface-muted\) 72%, var\(--color-bg-elevated\)\)/s,
+    );
+    expect(commandBlock).toMatch(/\.outputInner\s*{[^}]*box-shadow:\s*none/s);
+    expect(toolBlock).toMatch(/\.detailsInner\s*{[^}]*box-shadow:\s*none/s);
     expect(fileChangeBlock).toMatch(/\.previewHeader\s*{[^}]*background:\s*var\(--surface-muted\)/s);
     expect(fileChangeBlock).toMatch(/\.errorHeader\s*{[^}]*background:\s*var\(--surface-muted\)/s);
     expect(fileChangeBlock).toMatch(/\.diff,\s*\.diffPreview\s*{[^}]*background:\s*var\(--color-bg-elevated\)/s);
