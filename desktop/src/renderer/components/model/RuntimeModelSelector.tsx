@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Search } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { ModelLoadState } from "./useRuntimeModelSelection";
 import styles from "./RuntimeModelSelector.module.css";
@@ -27,8 +27,10 @@ export function RuntimeModelSelector({
 }: RuntimeModelSelectorProps) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const hasModels = modelOptions.length > 0;
   const modelHint = getModelHint(model, modelOptions, modelLoadState, modelError);
   const showSettingsAction = Boolean(onOpenModelSettings) && (modelLoadState === "error" || (!model && !modelOptions.length));
@@ -72,8 +74,34 @@ export function RuntimeModelSelector({
     if (disabledButton) {
       setOpen(false);
       setQuery("");
+      setActiveModelIndex(-1);
     }
   }, [disabledButton]);
+
+  useEffect(() => {
+    if (!open) {
+      setActiveModelIndex(-1);
+      return;
+    }
+    setActiveModelIndex((current) => {
+      if (!filteredModels.length) {
+        return -1;
+      }
+      if (current >= 0 && current < filteredModels.length) {
+        return current;
+      }
+      const selectedIndex = filteredModels.indexOf(selectedModel);
+      return selectedIndex >= 0 ? selectedIndex : 0;
+    });
+  }, [filteredModels, open, selectedModel]);
+
+  useEffect(() => {
+    if (!open || activeModelIndex < 0) {
+      return;
+    }
+    const activeModel = filteredModels[activeModelIndex];
+    optionRefs.current.get(activeModel)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeModelIndex, filteredModels, open]);
 
   const toggleMenu = () => {
     if (open) {
@@ -87,8 +115,49 @@ export function RuntimeModelSelector({
   const chooseModel = (modelId: string) => {
     onModelChange(modelId);
     setQuery("");
+    setActiveModelIndex(-1);
     setOpen(false);
   };
+
+  const moveActiveModel = (direction: 1 | -1) => {
+    if (!filteredModels.length) {
+      return;
+    }
+    setActiveModelIndex((current) => {
+      const base = current >= 0 ? current : direction > 0 ? -1 : 0;
+      return (base + direction + filteredModels.length) % filteredModels.length;
+    });
+  };
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActiveModel(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActiveModel(-1);
+      return;
+    }
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      const activeModel = activeModelIndex >= 0 ? filteredModels[activeModelIndex] : null;
+      if (activeModel) {
+        event.preventDefault();
+        chooseModel(activeModel);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const activeOptionId =
+    open && activeModelIndex >= 0 && filteredModels[activeModelIndex]
+      ? `${menuId}-option-${activeModelIndex}`
+      : undefined;
 
   return (
     <div className={styles.modelCluster} ref={rootRef} aria-label="运行模型">
@@ -115,23 +184,36 @@ export function RuntimeModelSelector({
               <Search size={13} strokeWidth={1.9} aria-hidden="true" />
               <input
                 aria-label="筛选模型"
+                aria-activedescendant={activeOptionId}
+                aria-controls={menuId}
                 autoFocus
                 placeholder="搜索模型"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
               />
             </label>
             <div className={styles.optionList} id={menuId} role="listbox" aria-label="模型">
               {filteredModels.length ? (
-                filteredModels.map((modelId) => {
+                filteredModels.map((modelId, index) => {
                   const selected = modelId === selectedModel;
+                  const active = index === activeModelIndex;
                   return (
                     <button
                       className={styles.option}
                       key={modelId}
+                      id={`${menuId}-option-${index}`}
                       type="button"
                       role="option"
                       aria-selected={selected ? "true" : "false"}
+                      data-active={active ? "true" : undefined}
+                      ref={(element) => {
+                        if (element) {
+                          optionRefs.current.set(modelId, element);
+                        } else {
+                          optionRefs.current.delete(modelId);
+                        }
+                      }}
                       onClick={() => chooseModel(modelId)}
                     >
                       <span>{modelId}</span>

@@ -261,21 +261,16 @@ describe("AppRouter", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
     expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
-    expect(assistantShell.getAttribute("data-shell-mode")).toBe("expanded");
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("composer");
     expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
 
     fireEvent.click(screen.getByRole("button", { name: "收起工作台消息层" }));
-    expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
-    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    await waitFor(() => expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull(), { timeout: 2000 });
+    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("composer");
+    expect(screen.getByLabelText("工作台助手输入")).not.toBeNull();
 
-    await waitFor(
-      () => {
-        expect(screen.getByRole("button", { name: "展开工作台输入框" })).not.toBeNull();
-      },
-      { timeout: 2000 },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
-    const emptyInput = await screen.findByLabelText("工作台助手输入");
+    const emptyInput = screen.getByLabelText("工作台助手输入");
     fireEvent.pointerDown(screen.getByTestId("workspace-file-browser"));
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
     await waitFor(

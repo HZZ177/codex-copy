@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useEffect, useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import mermaid, { type ParseResult, type RenderResult } from "mermaid";
+import { EditorState } from "@codemirror/state";
 
 import type { RuntimeBridge, WorkspaceFileAnnotationAnchorV2 } from "@/runtime";
 import { FilePreview, type MarkdownOutlineItem, type MarkdownOutlineRevealRequest } from "@/renderer/components/workspace";
@@ -826,6 +827,51 @@ describe("FilePreview", () => {
       expect(sourceViewer.textContent).toContain("const");
       expect(sourceViewer.textContent).toContain("1");
       expect(sourceViewer.textContent).toContain("2");
+    });
+  });
+
+  it("falls back to the plain source viewer when CodeMirror setup fails", async () => {
+    const createSpy = vi.spyOn(EditorState, "create").mockImplementationOnce(() => {
+      throw new Error("CodeMirror extension mismatch");
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "package.json",
+        content: '{"name":"keydex","private":true}',
+        encoding: "utf-8",
+      }),
+    });
+
+    try {
+      render(<FilePreview request={{ type: "file", path: "package.json" }} sessionId="ses-1" runtime={runtime} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("file-source-viewer").getAttribute("data-renderer")).toBe("plain");
+      });
+      expect(screen.getByTestId("file-source-viewer").textContent).toContain("keydex");
+    } finally {
+      createSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("renders toml files in the source viewer", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "pyproject.toml",
+        content: '[tool.pytest.ini_options]\nasyncio_mode = "auto"\n',
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "pyproject.toml" }} sessionId="ses-1" runtime={runtime} />);
+
+    const sourceViewer = await screen.findByTestId("file-source-viewer");
+    expect(sourceViewer.getAttribute("data-renderer")).toBe("codemirror");
+    await waitFor(() => {
+      expect(sourceViewer.textContent).toContain("tool.pytest.ini_options");
+      expect(sourceViewer.textContent).toContain("asyncio_mode");
     });
   });
 

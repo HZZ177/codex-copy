@@ -83,6 +83,8 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
     expect(screen.getByLabelText("工作台助手输入").textContent).toContain("继续修改 README");
     await waitForSurfaceMode("drawer");
+    expect(screen.queryByRole("button", { name: "展开工作台消息层" })).toBeNull();
+    expect(screen.getByRole("button", { name: "收回工作台助手为胶囊" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
 
@@ -121,8 +123,10 @@ describe("WorkbenchAssistantSurface", () => {
     const surface = screen.getByTestId("workbench-assistant-surface");
     fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
     await waitForSurfaceMode("drawer");
+    expect(screen.queryByRole("button", { name: "展开工作台消息层" })).toBeNull();
+    expect(screen.getByRole("button", { name: "收回工作台助手为胶囊" })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
+    fireEvent.click(screen.getByRole("button", { name: "收回工作台助手为胶囊" }));
 
     expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
     expect(surface.getAttribute("data-visual-mode")).toBe("dock-out-morph");
@@ -272,7 +276,12 @@ describe("WorkbenchAssistantSurface", () => {
 
     expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
-    expect(screen.getByTestId("workbench-assistant-chrome").getAttribute("data-shell-mode")).toBe("expanded");
+    const chrome = screen.getByTestId("workbench-assistant-chrome");
+    const expandedLayer = screen.getByTestId("workbench-expanded-layer");
+    expect(chrome.getAttribute("data-shell-mode")).toBe("composer");
+    expect(chrome.contains(expandedLayer)).toBe(false);
+    expect(screen.getByTestId("workbench-expanded-panel-frame")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "收起工作台消息层" }).closest("form")).toBeNull();
     expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("overlay");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
@@ -282,6 +291,44 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-capsule")).not.toBeNull();
     expect(screen.getByRole("button", { name: "收起工作台消息层" })).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+  });
+
+  it("closes the expanded overlay from backdrop and Escape without collapsing a draft composer", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchDraftHarness initialDraft="保留展开层草稿" />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    const surface = screen.getByTestId("workbench-assistant-surface");
+    const input = await screen.findByRole("textbox", { name: "工作台助手输入" });
+    expect(input.textContent).toContain("保留展开层草稿");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+    });
+    expect(screen.queryByRole("button", { name: "展开工作台消息层" })).toBeNull();
+    expect(screen.getByRole("button", { name: "收起工作台消息层" })).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("workbench-expanded-panel-frame"));
+    expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+
+    fireEvent.click(screen.getByTestId("workbench-expanded-layer"));
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    });
+    expect(screen.getByRole("textbox", { name: "工作台助手输入" }).textContent).toContain("保留展开层草稿");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+    });
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    });
+    expect(screen.getByRole("textbox", { name: "工作台助手输入" }).textContent).toContain("保留展开层草稿");
   });
 
   it("opens the composer when an external quote chip is injected", async () => {
@@ -423,6 +470,7 @@ describe("WorkbenchAssistantSurface", () => {
       expect(document.activeElement).toBe(input);
     });
     expect(screen.getByRole("button", { name: "展开工作台消息层" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "展开工作台消息层" }).closest("form")).toBeNull();
     expect(screen.getByRole("button", { name: "将工作台助手展开到右侧" })).not.toBeNull();
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -433,6 +481,8 @@ describe("WorkbenchAssistantSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
     await waitForSurfaceMode("drawer");
     expect(await screen.findByRole("button", { name: "关闭工作台助手侧栏" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "收回工作台助手为胶囊" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "展开工作台消息层" })).toBeNull();
   });
 
   it("keeps draft text and input focus across composer, drawer and undock modes", async () => {

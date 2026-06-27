@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   APP_BASE,
@@ -26,6 +26,7 @@ test("workbench drawer renders the reused Agent conversation panel and message c
 
   const drawer = page.getByTestId("workbench-assistant-drawer");
   await expect(drawer).toBeVisible();
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
   await expect(drawer.getByTestId("conversation-panel")).toHaveAttribute("data-conversation-panel-variant", "compact");
   await expect(drawer.getByTestId("message-list")).toHaveAttribute("data-message-list-variant", "compact");
   await expect(page.locator("[data-testid='workbench-message-projection']")).toHaveCount(0);
@@ -43,7 +44,9 @@ test("workbench drawer renders the reused Agent conversation panel and message c
   });
   const group = drawer.getByTestId("message-group-block").first();
   await expect(group).toBeVisible();
-  await group.getByRole("button").click();
+  const groupToggle = group.getByRole("button");
+  await groupToggle.focus();
+  await groupToggle.press("Enter");
   await expect(drawer.getByTestId("tool-call-block")).toBeVisible();
   await expect(drawer.getByTestId("command-execution-block")).toBeVisible();
   await expect(drawer.getByTestId("file-change-block")).toBeVisible();
@@ -78,13 +81,20 @@ test("workbench expanded overlay uses the same panel without reflowing the works
   await expect(workspace).toBeVisible();
   const beforeBox = await workspace.boundingBox();
   await openWorkbenchComposer(page);
+  await waitForAssistantChromeStable(page);
+  const beforeAssistantBox = await page.getByTestId("workbench-assistant-chrome").boundingBox();
   await page.getByRole("button", { name: "展开工作台消息层" }).click();
 
   const expanded = page.getByTestId("workbench-expanded-layer");
   await expect(expanded).toBeVisible();
+  await expect(page.getByTestId("workbench-expanded-panel-frame")).toBeVisible();
+  await expect(page.getByTestId("workbench-assistant-chrome")).toHaveAttribute("data-shell-mode", "composer");
   await expect(expanded.getByTestId("conversation-panel")).toHaveAttribute("data-conversation-panel-variant", "overlay");
   await expect(expanded.getByTestId("message-list")).toHaveAttribute("data-message-list-variant", "overlay");
   expect(await expanded.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await expect
+    .poll(() => assistantChromeBoxDelta(page, beforeAssistantBox), { timeout: 3000 })
+    .toBeLessThanOrEqual(3);
   const afterBox = await workspace.boundingBox();
   expect(Math.round(afterBox?.width ?? 0)).toBe(Math.round(beforeBox?.width ?? 0));
   await expect(page.getByTestId("app-shell")).toHaveAttribute("data-right-sidebar-enabled", "false");
@@ -270,4 +280,37 @@ function e2eHistoryMessage(role: "user" | "assistant", content: string, id: stri
     content,
     timestamp,
   };
+}
+
+type BoundingBox = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+async function assistantChromeBoxDelta(page: Page, baseline: BoundingBox | null) {
+  const current = await page.getByTestId("workbench-assistant-chrome").boundingBox();
+  if (!baseline || !current) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(
+    Math.abs(current.x - baseline.x),
+    Math.abs(current.y - baseline.y),
+    Math.abs(current.width - baseline.width),
+    Math.abs(current.height - baseline.height),
+  );
+}
+
+async function waitForAssistantChromeStable(page: Page) {
+  await expect
+    .poll(
+      async () => {
+        const first = await page.getByTestId("workbench-assistant-chrome").boundingBox();
+        await page.waitForTimeout(120);
+        return assistantChromeBoxDelta(page, first);
+      },
+      { timeout: 3000 },
+    )
+    .toBeLessThanOrEqual(1);
 }

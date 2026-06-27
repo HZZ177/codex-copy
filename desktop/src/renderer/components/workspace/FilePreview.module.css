@@ -1496,6 +1496,116 @@
   padding: 14px;
 }
 
+.markdownPreviewBlock {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 50px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+}
+
+.markdownPreviewBlock[data-fold-motion="true"] .markdownPreviewBlockContent {
+  animation: markdownPreviewFoldContentIn 160ms var(--motion-ease-out) both;
+}
+
+.markdownPreviewBlock[data-fold-exiting="true"] {
+  pointer-events: none;
+}
+
+.markdownPreviewBlock[data-fold-exiting="true"] .markdownPreviewBlockContent,
+.markdownPreviewBlock[data-fold-exiting="true"] .markdownPreviewGutter {
+  animation: markdownPreviewFoldContentOut 180ms var(--motion-ease-standard) both;
+}
+
+.markdownPreviewBlockContent {
+  min-width: 0;
+}
+
+.markdownPreviewBlock:first-child .markdownPreviewBlockContent > :where(p, h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+.markdownPreviewBlock:last-child .markdownPreviewBlockContent > :where(p, ul, ol, blockquote, pre):last-child {
+  margin-bottom: 0;
+}
+
+.markdownPreviewGutter {
+  display: grid;
+  grid-template-columns: 18px minmax(22px, 1fr);
+  column-gap: 4px;
+  align-items: center;
+  justify-items: end;
+  min-height: 24px;
+  padding-top: 2px;
+  color: color-mix(in srgb, var(--color-text-tertiary) 74%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.markdownPreviewLineNumber {
+  min-width: 22px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.markdownPreviewFoldButton,
+.markdownPreviewFoldPlaceholder {
+  width: 18px;
+  height: 18px;
+}
+
+.markdownPreviewFoldButton {
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text-tertiary) 82%, transparent);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-standard),
+    color var(--motion-fast) var(--motion-ease-standard);
+}
+
+.markdownPreviewFoldButton svg {
+  transition: transform var(--motion-panel) var(--motion-ease-standard);
+}
+
+.markdownPreviewFoldButton[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.markdownPreviewFoldButton:hover,
+.markdownPreviewFoldButton:focus-visible {
+  background: var(--surface-hover);
+  color: var(--color-text-secondary);
+}
+
+.markdownPreviewFoldButton:focus-visible {
+  outline: none;
+}
+
+.markdownPreviewCollapsedBlock {
+  margin: 8px 0;
+  padding: 7px 10px;
+  border: 1px dashed color-mix(in srgb, var(--color-border-default) 82%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-muted) 58%, transparent);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: var(--ui-line-height-normal);
+  user-select: none;
+}
+
+.markdownPreviewBlock[data-fold-motion="true"] .markdownPreviewCollapsedBlock {
+  animation: markdownPreviewFoldSummaryIn 160ms var(--motion-ease-out) both;
+}
+
 .markdownPane [data-markdown-code-frame="true"] {
   position: relative;
   overflow: hidden;
@@ -2204,18 +2314,55 @@
   }
 }
 
+@keyframes markdownPreviewFoldContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes markdownPreviewFoldContentOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes markdownPreviewFoldSummaryIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .body,
   .annotationPanel,
   .annotationPopover,
   .findBar,
   .splitPanel,
-  .imageFrame {
+  .imageFrame,
+  .markdownPreviewBlockContent,
+  .markdownPreviewGutter,
+  .markdownPreviewCollapsedBlock {
     animation: none;
     transition: none;
   }
 
-  .tab {
+  .tab,
+  .markdownPreviewFoldButton svg {
     transition: none;
   }
 }

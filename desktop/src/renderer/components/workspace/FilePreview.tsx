@@ -1400,6 +1400,7 @@ export function FilePreview({
               model={markdownModel}
               registry={markdownRendererRegistry}
               renderImage={renderMarkdownImage}
+              showSourceGutter
             />
           )}
         </PreviewScrollPane>
@@ -3744,14 +3745,24 @@ const SourceViewer = memo(function SourceViewer({
     kind === "diff";
   const shouldHighlight =
     canHighlight && source.length <= HIGHLIGHT_MAX_CHARS && lineCount <= HIGHLIGHT_MAX_LINES;
+  const highlightSignature = useMemo(
+    () => `${kind}\0${language}\0${source.length}\0${hashText(source)}`,
+    [kind, language, source],
+  );
+  const [failedCodeMirrorSignature, setFailedCodeMirrorSignature] = useState<string | null>(null);
+  const codeMirrorFailed = failedCodeMirrorSignature === highlightSignature;
 
   useEffect(() => {
-    if (!shouldHighlight) {
+    if (!shouldHighlight || codeMirrorFailed) {
       onSelectionChange?.(null);
     }
-  }, [onSelectionChange, shouldHighlight]);
+  }, [codeMirrorFailed, onSelectionChange, shouldHighlight]);
 
-  if (shouldHighlight) {
+  const handleCodeMirrorCreateError = useCallback(() => {
+    setFailedCodeMirrorSignature(highlightSignature);
+  }, [highlightSignature]);
+
+  if (shouldHighlight && !codeMirrorFailed) {
     return (
       <div className={styles.sourceViewer} data-renderer="codemirror" data-testid="file-source-viewer">
         <CodeMirrorSourceView
@@ -3766,11 +3777,16 @@ const SourceViewer = memo(function SourceViewer({
           onEditorViewChange={onEditorViewChange}
           sourceFindState={sourceFindState}
           onSelectionChange={onSelectionChange}
+          onCreateError={handleCodeMirrorCreateError}
         />
       </div>
     );
   }
 
+  return <PlainSourceView source={source} lineCount={lineCount} />;
+});
+
+function PlainSourceView({ source, lineCount }: { source: string; lineCount: number }) {
   return (
     <div className={styles.sourceViewer} data-renderer="plain" data-testid="file-source-viewer">
       <pre className={styles.sourceLineNumbers} aria-hidden="true">
@@ -3781,7 +3797,7 @@ const SourceViewer = memo(function SourceViewer({
       </pre>
     </div>
   );
-});
+}
 
 function CodeMirrorSourceView({
   language,
@@ -3795,6 +3811,7 @@ function CodeMirrorSourceView({
   onEditorViewChange,
   sourceFindState,
   onSelectionChange,
+  onCreateError,
 }: {
   language: string;
   source: string;
@@ -3807,6 +3824,7 @@ function CodeMirrorSourceView({
   onEditorViewChange?: (view: EditorView | null) => void;
   sourceFindState?: CodeMirrorFindState | null;
   onSelectionChange?: (selection: SourceSelection | null) => void;
+  onCreateError?: (error: unknown) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -3876,22 +3894,37 @@ function CodeMirrorSourceView({
     if (!host) {
       return;
     }
-    const view = new EditorView({
-      parent: host,
-      state: EditorState.create({
-        doc: source,
-        extensions: [
-          ...codeMirrorBaseExtensions(),
-          selectionExtension,
-          themeCompartment.of(codeMirrorTheme(theme)),
-          languageCompartment.of(codeMirrorLanguage(language) ?? []),
-          annotationCompartment.of(
-            codeMirrorAnnotationExtension(source, annotations, activeAnnotationId, flashAnnotationId, onAnnotationActivate),
-          ),
-          findCompartment.of(codeMirrorFindExtension(source, sourceFindState ?? null)),
-        ],
-      }),
-    });
+    let view: EditorView;
+    try {
+      view = new EditorView({
+        parent: host,
+        state: EditorState.create({
+          doc: source,
+          extensions: [
+            ...codeMirrorBaseExtensions(),
+            selectionExtension,
+            themeCompartment.of(codeMirrorTheme(theme)),
+            languageCompartment.of(codeMirrorLanguage(language) ?? []),
+            annotationCompartment.of(
+              codeMirrorAnnotationExtension(
+                source,
+                annotations,
+                activeAnnotationId,
+                flashAnnotationId,
+                onAnnotationActivate,
+              ),
+            ),
+            findCompartment.of(codeMirrorFindExtension(source, sourceFindState ?? null)),
+          ],
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to initialize CodeMirror source preview", error);
+      onEditorViewChange?.(null);
+      onSelectionChangeRef.current?.(null);
+      onCreateError?.(error);
+      return;
+    }
     viewRef.current = view;
     setScrollElement(view.scrollDOM);
     onEditorViewChange?.(view);

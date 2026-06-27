@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,6 +69,72 @@ describe("VirtualMarkdownPreview", () => {
     expect(await screen.findByText("E2E Large Markdown Title")).not.toBeNull();
     expect(mountedChanges.at(-1)).toHaveLength(8);
     expect(Number(root.dataset.markdownMountedHeavyBlockCount)).toBeGreaterThan(0);
+  });
+
+  it("renders source line gutter only when enabled", () => {
+    const model = buildMarkdownDocumentModel(["# Title", "", "Paragraph text", "", "- item"].join("\n"));
+
+    const { rerender } = render(<VirtualMarkdownPreview model={model} />);
+
+    expect(document.querySelector("[data-markdown-preview-line-number='true']")).toBeNull();
+
+    rerender(<VirtualMarkdownPreview model={model} showSourceGutter />);
+
+    expect(Array.from(document.querySelectorAll("[data-markdown-preview-line-number='true']")).map((node) => node.textContent)).toEqual([
+      "1",
+      "3",
+      "5",
+    ]);
+    expect(screen.getByRole("button", { name: "折叠第 1 行章节" })).not.toBeNull();
+  });
+
+  it("folds heading sections and multiline preview blocks from the gutter", async () => {
+    const source = [
+      "# Title",
+      "",
+      "intro text",
+      "",
+      "## Child",
+      "",
+      "child text",
+      "",
+      "# Next",
+      "",
+      "next text",
+      "",
+      "line one",
+      "line two",
+    ].join("\n");
+    const model = buildMarkdownDocumentModel(source);
+    const ref = createRef<VirtualMarkdownPreviewHandle>();
+
+    render(<VirtualMarkdownPreview model={model} ref={ref} showSourceGutter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠第 1 行章节" }));
+
+    expect(screen.getByRole("heading", { name: "Title" })).not.toBeNull();
+    expect(screen.getByText("intro text").closest("[data-markdown-preview-block-frame='true']")?.getAttribute("data-fold-exiting")).toBe("true");
+    expect(screen.getByText("已折叠 6 行")).not.toBeNull();
+    await waitFor(() => expect(screen.queryByText("intro text")).toBeNull());
+    expect(screen.queryByRole("heading", { name: "Child" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Next" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开第 1 行章节" }));
+    expect(screen.getByText("intro text")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Child" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠第 13 行内容" }));
+    expect(screen.queryByText("line one")).toBeNull();
+    expect(screen.getByText("已折叠 2 行")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开第 13 行内容" }));
+    expect(screen.getByText("line one")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠第 1 行章节" }));
+    act(() => {
+      expect(ref.current?.scrollToBlock(model.blocks[2].id, "center")).toBe(true);
+    });
+    expect(virtuosoMock.scrollToIndex).toHaveBeenCalledWith({ align: "center", index: 2 });
   });
 
   it("provides scrollToBlock and marks the pending reveal target", () => {

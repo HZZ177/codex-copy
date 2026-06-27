@@ -45,7 +45,7 @@ export function workbenchAssistantReducer(
       };
     case "toggle-expanded":
       return {
-        mode: state.mode === "expanded" ? (action.hasDraft ? "composer" : "capsule") : "expanded",
+        mode: state.mode === "expanded" ? "composer" : "expanded",
         focusSeq: state.focusSeq + 1,
       };
     case "dock-to-drawer":

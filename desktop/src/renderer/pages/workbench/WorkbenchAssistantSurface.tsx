@@ -1,5 +1,5 @@
-import { ChevronUp, SquareArrowOutUpRight, X } from "lucide-react";
-import { motion } from "motion/react";
+import { ChevronDown, ChevronUp, Minimize2, SquareArrowOutUpRight, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
@@ -44,6 +44,11 @@ const DOCK_TRANSITION_DURATION_MS = 1200;
 const WORKBENCH_ASSISTANT_MOTION_TRANSITION = {
   type: "tween",
   duration: 1.2,
+  ease: [0.2, 0.82, 0.22, 1],
+} as const;
+const WORKBENCH_EXPANDED_PANEL_TRANSITION = {
+  type: "tween",
+  duration: 0.26,
   ease: [0.2, 0.82, 0.22, 1],
 } as const;
 
@@ -105,14 +110,21 @@ export function WorkbenchAssistantSurface({
   const dockInlineWidth = resolveDockInlineWidth(drawerWidth);
   const surfaceMode = assistantState.mode;
   const dockOutTargetMode = dockReturnMode ?? (controller.draft.trim() ? "composer" : "capsule");
+  const restingVisualSurfaceMode: AssistantVisualMode = surfaceMode === "expanded" ? "composer" : surfaceMode;
   const visualSurfaceMode: AssistantVisualMode =
     dockTransitionPhase === "dock-in"
       ? "dock-morph"
       : dockTransitionPhase === "dock-out"
         ? "dock-out-morph"
-        : surfaceMode;
+        : restingVisualSurfaceMode;
   const bottomSurfaceMode: AssistantSurfaceMode =
-    dockTransitionPhase === "dock-in" ? "composer" : dockTransitionPhase === "dock-out" ? dockOutTargetMode : surfaceMode;
+    dockTransitionPhase === "dock-in"
+      ? "composer"
+      : dockTransitionPhase === "dock-out"
+        ? dockOutTargetMode
+        : surfaceMode === "expanded"
+          ? "composer"
+          : surfaceMode;
   const composerFocusSeq = assistantState.focusSeq;
   const composeOpen = bottomSurfaceMode !== "capsule";
   const dockOutCollapsingToCapsule = dockTransitionPhase === "dock-out" && dockOutTargetMode === "capsule";
@@ -124,15 +136,21 @@ export function WorkbenchAssistantSurface({
   const renderBottomContent = true;
   const reducedMotion = prefersReducedMotion();
   const visualComposeOpen = composeOpen || dockOutCollapsingToCapsule;
-  const enableDockChildLayout = !reducedMotion && dockTransitionPhase !== "dock-out";
+  const enableDockChildLayout = !reducedMotion && dockTransitionPhase === null;
   const geometryMode: AssistantSurfaceMode =
-    dockTransitionPhase === "dock-in" ? "drawer" : dockTransitionPhase === "dock-out" ? dockOutTargetMode : surfaceMode;
+    dockTransitionPhase === "dock-in"
+      ? "drawer"
+      : dockTransitionPhase === "dock-out"
+        ? dockOutTargetMode
+        : surfaceMode === "expanded"
+          ? "composer"
+          : surfaceMode;
   const geometryVars = workbenchAssistantGeometryCssVars(geometryMode, {
     drawerWidth,
     viewportWidth: typeof window === "undefined" ? 1440 : window.innerWidth,
   });
 
-  const finishDockTransition = useCallback(() => {
+  const finishDockTransition = useCallback((reservedWidth = 0) => {
     dockTransitionRunIdRef.current += 1;
     if (dockTransitionTimerRef.current !== null && typeof window !== "undefined") {
       window.clearTimeout(dockTransitionTimerRef.current);
@@ -140,7 +158,7 @@ export function WorkbenchAssistantSurface({
     dockTransitionTimerRef.current = null;
     setDockTransitionPhase(null);
     onDockTransitionChange?.(false);
-    onDockTransitionLayoutChange?.({ phase: "idle", reservedWidth: 0 });
+    onDockTransitionLayoutChange?.({ phase: "idle", reservedWidth });
   }, [onDockTransitionChange, onDockTransitionLayoutChange]);
 
   const finishComposeCollapse = useCallback(() => {
@@ -182,8 +200,13 @@ export function WorkbenchAssistantSurface({
         if (dockTransitionRunIdRef.current !== transitionRunId) {
           return;
         }
+        if (phase === "dock-out") {
+          finishDockTransition(0);
+          onComplete();
+          return;
+        }
         onComplete();
-        finishDockTransition();
+        finishDockTransition(dockInlineWidth);
       };
       if (reducedMotion) {
         completeTransition();
@@ -332,6 +355,14 @@ export function WorkbenchAssistantSurface({
     });
   }, [beginDockTransition, controller.draft]);
 
+  const collapseDrawerToCapsule = useCallback(() => {
+    setDockReturnMode("capsule");
+    beginDockTransition("dock-out", () => {
+      dispatchAssistantState({ type: "close-drawer", hasDraft: false });
+      setDockReturnMode(null);
+    });
+  }, [beginDockTransition]);
+
   const dockToDrawer = useCallback(() => {
     setDockReturnMode(null);
     beginDockTransition("dock-in", () => {
@@ -340,11 +371,30 @@ export function WorkbenchAssistantSurface({
   }, [beginDockTransition]);
 
   const toggleExpandedLayer = useCallback(() => {
-    if (surfaceMode === "expanded" && !controller.draft.trim()) {
-      beginComposeCollapse();
+    dispatchAssistantState({ type: "toggle-expanded", hasDraft: Boolean(controller.draft.trim()) });
+  }, [controller.draft]);
+
+  const closeExpandedLayer = useCallback(() => {
+    if (surfaceMode !== "expanded") {
+      return;
     }
     dispatchAssistantState({ type: "toggle-expanded", hasDraft: Boolean(controller.draft.trim()) });
-  }, [beginComposeCollapse, controller.draft, surfaceMode]);
+  }, [controller.draft, surfaceMode]);
+
+  useEffect(() => {
+    if (surfaceMode !== "expanded") {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      closeExpandedLayer();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [closeExpandedLayer, surfaceMode]);
 
   const submitApproval = useCallback(
     (approved: boolean) =>
@@ -367,13 +417,11 @@ export function WorkbenchAssistantSurface({
       selectedSkill={controller.selectedSkill}
       fileChipRequest={controller.fileChipRequest}
       quoteChipRequest={controller.quoteChipRequest}
-      surfaceMode={surfaceMode}
       autoFocusKey={surfaceMode === "capsule" ? undefined : `workbench-composer:${composerFocusSeq}`}
       onChange={controller.setDraft}
       onSkillChange={controller.setSelectedSkill}
       onSend={send}
       onStop={controller.stop}
-      onExpand={toggleExpandedLayer}
       onSearchWorkspace={searchWorkspace}
       onListWorkspaceDirectory={listWorkspaceDirectory}
     />
@@ -491,6 +539,43 @@ export function WorkbenchAssistantSurface({
         } as CSSProperties
       }
     >
+      <AnimatePresence initial={false}>
+        {surfaceMode === "expanded" && dockTransitionPhase === null ? (
+          <motion.div
+            key="workbench-expanded-layer"
+            className={styles.expandedLayer}
+            data-testid="workbench-expanded-layer"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 1 }}
+            transition={reducedMotion ? { duration: 0 } : WORKBENCH_EXPANDED_PANEL_TRANSITION}
+            onClick={(event) => {
+              event.preventDefault();
+              closeExpandedLayer();
+            }}
+          >
+            <motion.div
+              className={styles.expandedPanelFrame}
+              data-testid="workbench-expanded-panel-frame"
+              initial={{ opacity: 0, y: 16, clipPath: "inset(100% 0 0 0 round 18px)" }}
+              animate={{ opacity: 1, y: 0, clipPath: "inset(0% 0 0 0 round 18px)" }}
+              exit={{ opacity: 1, y: 18, clipPath: "inset(100% 0 0 0 round 18px)" }}
+              transition={reducedMotion ? { duration: 0 } : WORKBENCH_EXPANDED_PANEL_TRANSITION}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {overlayConversationPanel}
+              {pendingApproval ? (
+                <WorkbenchApprovalPrompt
+                  approval={pendingApproval}
+                  error={controller.approvalError}
+                  submitting={controller.approvalSubmitting}
+                  onSubmit={submitApproval}
+                />
+              ) : null}
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       <WorkbenchAssistantShell
         mode={visualSurfaceMode}
         geometryMode={geometryMode}
@@ -499,19 +584,6 @@ export function WorkbenchAssistantSurface({
         transitionPhase={dockTransitionPhase ?? "idle"}
         reducedMotion={reducedMotion}
       >
-        {surfaceMode === "expanded" && dockTransitionPhase === null ? (
-          <div className={styles.expandedLayer} data-testid="workbench-expanded-layer">
-            {overlayConversationPanel}
-            {pendingApproval ? (
-              <WorkbenchApprovalPrompt
-                approval={pendingApproval}
-                error={controller.approvalError}
-                submitting={controller.approvalSubmitting}
-                onSubmit={submitApproval}
-              />
-            ) : null}
-          </div>
-        ) : null}
         {stableAssistantPanel}
         {renderBottomContent ? (
           <motion.div
@@ -536,15 +608,39 @@ export function WorkbenchAssistantSurface({
                 >
                   {accessory}
                 </motion.div>
-                <motion.button
-                  className={styles.dockHandle}
-                  type="button"
-                  aria-label="将工作台助手展开到右侧"
-                  title="展开到右侧"
-                  onClick={dockToDrawer}
-                >
-                  <SquareArrowOutUpRight size={15} />
-                </motion.button>
+                {renderDrawerContent ? (
+                  <motion.button
+                    className={styles.headerActionButton}
+                    type="button"
+                    aria-label="收回工作台助手为胶囊"
+                    title="收回胶囊"
+                    onClick={collapseDrawerToCapsule}
+                  >
+                    <Minimize2 size={15} />
+                  </motion.button>
+                ) : renderMorphContent ? null : (
+                  <>
+                    <motion.button
+                      className={styles.headerActionButton}
+                      type="button"
+                      aria-label={surfaceMode === "expanded" ? "收起工作台消息层" : "展开工作台消息层"}
+                      title={surfaceMode === "expanded" ? "收起消息" : "展开消息"}
+                      data-expanded={surfaceMode === "expanded" ? "true" : "false"}
+                      onClick={toggleExpandedLayer}
+                    >
+                      {surfaceMode === "expanded" ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                    </motion.button>
+                    <motion.button
+                      className={styles.dockHandle}
+                      type="button"
+                      aria-label="将工作台助手展开到右侧"
+                      title="展开到右侧"
+                      onClick={dockToDrawer}
+                    >
+                      <SquareArrowOutUpRight size={15} />
+                    </motion.button>
+                  </>
+                )}
               </div>
               <motion.div
                 className={styles.inputSurface}
@@ -596,7 +692,7 @@ function WorkbenchAssistantShell({
   transitionPhase: DockTransitionPhase | "idle";
 }) {
   const chromeLayout =
-    reducedMotion || mode === "dock-out-morph" ? false : dockLayout === "inline" || transitionPhase !== "idle" ? true : "position";
+    reducedMotion || transitionPhase !== "idle" ? false : "position";
 
   return (
     <div
@@ -688,13 +784,11 @@ function WorkbenchComposer({
   selectedSkill,
   fileChipRequest,
   quoteChipRequest,
-  surfaceMode,
   autoFocusKey,
   onChange,
   onSkillChange,
   onSend,
   onStop,
-  onExpand,
   onSearchWorkspace,
   onListWorkspaceDirectory,
 }: {
@@ -708,13 +802,11 @@ function WorkbenchComposer({
   selectedSkill: WorkspaceSkillSummary | null;
   fileChipRequest: AgentSessionController["fileChipRequest"];
   quoteChipRequest: AgentSessionController["quoteChipRequest"];
-  surfaceMode: AssistantSurfaceMode;
   autoFocusKey?: string;
   onChange: (value: string) => void;
   onSkillChange: (skill: WorkspaceSkillSummary | null) => void;
   onSend: (files?: SelectedFile[], quotes?: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
-  onExpand: () => void;
   onSearchWorkspace: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory: (path: string) => Promise<WorkspaceSearchResult[]>;
 }) {
@@ -730,17 +822,6 @@ function WorkbenchComposer({
       selectedSkill={selectedSkill}
       autoFocusKey={autoFocusKey}
       className={styles.composer}
-      controls={
-        <button
-          className={styles.iconButton}
-          type="button"
-          aria-label={surfaceMode === "expanded" ? "收起工作台消息层" : "展开工作台消息层"}
-          title={surfaceMode === "expanded" ? "收起消息" : "展开消息"}
-          onClick={onExpand}
-        >
-          <ChevronUp size={15} />
-        </button>
-      }
       placeholder="要求后续变更"
       ariaLabel="工作台助手表单"
       inputLabel="工作台助手输入"

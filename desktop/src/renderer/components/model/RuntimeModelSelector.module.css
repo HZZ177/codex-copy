@@ -92,9 +92,11 @@
 }
 
 .menu[data-placement="top"] {
+  right: 0;
+  left: auto;
   top: auto;
   bottom: calc(100% + 8px);
-  transform-origin: left bottom;
+  transform-origin: right bottom;
   animation-name: menuEnterFromBottom;
 }
 
@@ -165,6 +167,7 @@
 
 .option:hover,
 .option:focus-visible,
+.option[data-active="true"],
 .option[aria-selected="true"] {
   outline: none;
   background: var(--surface-hover);

@@ -32,8 +32,8 @@ test("workbench assistant shell morphs from bottom composer to right drawer with
   await page.evaluate(() => {
     type DockSample = {
       drawerExists: boolean;
-      dockOutChromeAnimation: string | null;
       dockOutChromeHasShell: boolean;
+      dockOutChromeTransition: string | null;
       dockOutMorphAnimation: string | null;
       dockOutMorphMode: string | null;
       hasInputDraft: boolean;
@@ -66,13 +66,13 @@ test("workbench assistant shell morphs from bottom composer to right drawer with
       const morphStyle = morphPanel instanceof HTMLElement ? getComputedStyle(morphPanel) : null;
       samples.push({
         drawerExists: Boolean(document.querySelector("[data-testid='workbench-assistant-drawer']")),
-        dockOutChromeAnimation: chromeStyle?.animationName ?? null,
         dockOutChromeHasShell: Boolean(
           chromeStyle &&
             chromeStyle.backgroundColor !== "rgba(0, 0, 0, 0)" &&
             chromeStyle.borderLeftWidth === "1px" &&
             chromeStyle.boxShadow !== "none",
         ),
+        dockOutChromeTransition: chromeStyle?.transitionProperty ?? null,
         dockOutMorphAnimation: morphStyle?.animationName ?? null,
         dockOutMorphMode: morphPanel?.getAttribute("data-panel-mode") ?? null,
         hasInputDraft: document.querySelector("[aria-label='工作台助手输入']")?.textContent?.includes("draft before morph") ?? false,
@@ -115,8 +115,8 @@ test("workbench assistant shell morphs from bottom composer to right drawer with
               sample.phase === "dock-in" &&
               sample.visualMode === "dock-morph" &&
               sample.shellMode === "dock-morph" &&
-              sample.shellPaddingTop === "6px" &&
-              sample.shellPaddingBottom === "8px" &&
+              sample.shellPaddingTop === "0px" &&
+              sample.shellPaddingBottom === "0px" &&
               sample.hasMorphPanel === true &&
               sample.hasMorphHeader === true &&
               sample.hasMorphMiddle === true &&
@@ -212,9 +212,9 @@ test("workbench assistant shell morphs from bottom composer to right drawer with
           return samples.some(
             (sample) =>
               sample.phase === "dock-out" &&
-              typeof sample.dockOutChromeAnimation === "string" &&
-              sample.dockOutChromeAnimation.includes("dockOutChromeToTarget") &&
-              sample.dockOutChromeHasShell === true &&
+              typeof sample.dockOutChromeTransition === "string" &&
+              sample.dockOutChromeTransition.includes("left") &&
+              sample.dockOutChromeTransition.includes("height") &&
               sample.visualMode === "dock-out-morph" &&
               sample.shellMode === "dock-out-morph" &&
               typeof sample.dockOutMorphAnimation === "string" &&
@@ -227,6 +227,9 @@ test("workbench assistant shell morphs from bottom composer to right drawer with
     .toBe(true);
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "composer");
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-layout", "overlay");
+  await expect
+    .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+    .toBeLessThanOrEqual(3);
   await expect(page.locator("[data-e2e-stable-shell='true']")).toHaveCount(1);
   await expect(page.locator("[data-e2e-stable-chrome='true']")).toHaveCount(1);
   await expect(page.getByLabel("工作台助手输入")).toContainText("draft before morph");
@@ -263,5 +266,63 @@ test("workbench assistant preserves composer state while docking and running, wi
   await page.getByRole("button", { name: "关闭工作台助手侧栏" }).click();
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
+  await expect
+    .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+    .toBeLessThanOrEqual(3);
   await saveEvidence(page, "was-047-reduced-motion-state");
 });
+
+test("workbench assistant bottom chrome stays centered after repeated overlay and drawer cycles", async ({ page }) => {
+  const backend = createWorkbenchBackend();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await installWebSocketMock(page);
+  await mockWorkbenchBackend(page, backend);
+
+  await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${RICH_SESSION}`);
+  await openWorkbenchComposer(page);
+
+  for (let index = 0; index < 3; index += 1) {
+    await expect
+      .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+      .toBeLessThanOrEqual(3);
+
+    await page.getByRole("button", { name: "展开工作台消息层" }).click();
+    await expect(page.getByTestId("workbench-expanded-layer")).toBeVisible();
+    await expect(page.getByTestId("workbench-assistant-chrome")).toHaveAttribute("data-shell-mode", "composer");
+    await expect
+      .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+      .toBeLessThanOrEqual(3);
+
+    await page.getByRole("button", { name: "收起工作台消息层" }).click();
+    await expect(page.getByTestId("workbench-expanded-layer")).toHaveCount(0);
+    await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "composer");
+    await expect
+      .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+      .toBeLessThanOrEqual(3);
+
+    await page.getByRole("button", { name: "将工作台助手展开到右侧" }).click();
+    await expect(page.getByTestId("workbench-assistant-drawer")).toBeVisible();
+    await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
+    await expect(page.getByRole("button", { name: "展开工作台消息层" })).toHaveCount(0);
+    await page.getByRole("button", { name: "收回工作台助手为胶囊" }).click();
+    await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
+    await expect
+      .poll(() => page.evaluate(bottomAssistantCenterDelta), { timeout: 3000 })
+      .toBeLessThanOrEqual(3);
+
+    await openWorkbenchComposer(page);
+  }
+
+  await saveEvidence(page, "was-070-bottom-chrome-repeat-center");
+});
+
+function bottomAssistantCenterDelta() {
+  const chrome = document.querySelector("[data-testid='workbench-assistant-chrome']");
+  const canvas = document.querySelector("[data-testid='workbench-canvas-content']");
+  if (!(chrome instanceof HTMLElement) || !(canvas instanceof HTMLElement)) {
+    throw new Error("assistant or canvas not found");
+  }
+  const chromeRect = chrome.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+  return Math.abs(chromeRect.left + chromeRect.width / 2 - (canvasRect.left + canvasRect.width / 2));
+}

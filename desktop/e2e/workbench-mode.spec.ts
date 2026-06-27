@@ -175,7 +175,9 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   const beforeBox = await fileBrowser.boundingBox();
 
   await openWorkbenchComposer(page);
+  await expect(page.getByRole("button", { name: "展开工作台消息层" })).toBeVisible();
   await page.getByRole("button", { name: "展开工作台消息层" }).click();
+  await expect(page.getByRole("button", { name: "收起工作台消息层" })).toBeVisible();
   const expanded = page.getByTestId("workbench-expanded-layer");
   await expect(expanded).toBeVisible();
   await expect(fileBrowser).toBeVisible();
@@ -184,13 +186,29 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   expect(Math.round(afterBox?.width ?? 0)).toBe(Math.round(beforeBox?.width ?? 0));
   await saveEvidence(page, "e2e-016");
 
+  await expanded.click({ position: { x: 12, y: 12 } });
+  await expect(expanded).toHaveCount(0);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "composer");
+  await page.getByRole("button", { name: "展开工作台消息层" }).click();
+  await expect(expanded).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(expanded).toHaveCount(0);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "composer");
+  await page.getByRole("button", { name: "展开工作台消息层" }).click();
+  await expect(expanded).toBeVisible();
+
   await page.getByRole("button", { name: "收起工作台消息层" }).click();
   await expect(expanded).toHaveCount(0);
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "composer");
+  await expect(page.getByTestId("workbench-assistant-chrome")).toHaveAttribute("data-shell-mode", "composer");
+  await expect(page.getByLabel("工作台助手输入")).toBeVisible();
   await saveEvidence(page, "e2e-017");
 
   await page.getByRole("button", { name: "将工作台助手展开到右侧" }).click();
   const drawer = page.getByTestId("workbench-assistant-drawer");
   await expect(drawer).toBeVisible();
+  await expect(page.getByRole("button", { name: "展开工作台消息层" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "收回工作台助手为胶囊" })).toBeVisible();
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
   await expect(drawer).toHaveCSS("box-shadow", "none");
   await expect(drawer).toHaveCSS("backdrop-filter", "none");
@@ -304,16 +322,38 @@ test("workbench keeps controls usable across responsive viewports and reload", a
   ]) {
     await page.setViewportSize(viewport);
     await page.goto(`${APP_BASE}/#/workbench/${WORKSPACE_A}/session/${SESSION_A}`);
-    await expect(page.getByTestId("workspace-file-browser")).toBeVisible();
+    await expect(page.getByRole("region", { name: "工作区文件浏览器" })).toBeVisible();
     await openWorkbenchComposer(page);
+    if (viewport.width === 1280) {
+      const inputSurface = page.getByTestId("workbench-assistant-input-surface");
+      await expect
+        .poll(async () => Math.round((await inputSurface.boundingBox())?.width ?? 0), { timeout: 3000 })
+        .toBeGreaterThan(620);
+      const inputSurfaceBox = await inputSurface.boundingBox();
+      const sendButton = page.getByRole("button", { name: "发送" });
+      await expect(page.getByRole("button", { name: "选择模型" })).toBeEnabled();
+      const sendBeforeBox = await sendButton.boundingBox();
+      await page.getByRole("button", { name: "选择模型" }).click();
+      const modelMenu = page.locator("[data-placement='top']").last();
+      await expect(modelMenu).toBeVisible();
+      const modelMenuBox = await modelMenu.boundingBox();
+      const sendAfterBox = await sendButton.boundingBox();
+      expect(modelMenuBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan((inputSurfaceBox?.y ?? 0) - 4);
+      expect(Math.abs((sendAfterBox?.x ?? 0) - (sendBeforeBox?.x ?? 0))).toBeLessThanOrEqual(2);
+      await page.keyboard.press("Escape");
+      await expect(modelMenu).toHaveCount(0);
+    }
     await page.getByRole("button", { name: "展开工作台消息层" }).click();
     await expect(page.getByTestId("workbench-expanded-layer")).toBeVisible();
     await page.getByRole("button", { name: "将工作台助手展开到右侧" }).click();
     await expect(page.getByTestId("workbench-assistant-drawer")).toBeVisible();
+    await expect(page.getByRole("button", { name: "展开工作台消息层" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "收回工作台助手为胶囊" })).toBeVisible();
     await saveEvidence(page, viewport.width === 1280 ? "e2e-022" : viewport.width === 1440 ? "e2e-023" : "e2e-024");
+    await page.getByRole("button", { name: "收回工作台助手为胶囊" }).click();
+    await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-surface-mode", "capsule");
   }
 
-  await page.getByRole("button", { name: "关闭工作台助手侧栏" }).click();
   await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
   await openWorkbenchComposer(page);
   await page.getByRole("button", { name: "展开工作台消息层" }).click();

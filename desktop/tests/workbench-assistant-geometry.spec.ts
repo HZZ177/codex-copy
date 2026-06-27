@@ -64,10 +64,13 @@ describe("workbench assistant geometry", () => {
     );
 
     expect(css).toContain("--workbench-assistant-dock-inline-size: min(clamp(320px, var(--workbench-assistant-dock-width), 520px), 46vw)");
+    expect(css).toContain("--workbench-assistant-dock-out-target-width: min(420px, calc(100% - 56px))");
     expect(css).toContain(".chrome[data-shell-mode=\"capsule\"]");
-    expect(css).toContain("width: min(560px, 100%)");
+    expect(css).toMatch(/\.chrome\[data-shell-mode="capsule"\]\s*\{[\s\S]*width: var\(--workbench-assistant-dock-out-target-width\)/);
     expect(css).toContain(".overlayPanel");
+    expect(css).toContain(".expandedPanelFrame");
     expect(css).toContain("width: min(760px, 100%)");
+    expect(css).not.toContain(".chrome[data-shell-mode=\"expanded\"]");
     expect(css).toContain("--workbench-assistant-dock-inline-size: min(380px, 48vw)");
   });
 
@@ -78,19 +81,21 @@ describe("workbench assistant geometry", () => {
     );
 
     expect(css).toContain(".chrome[data-shell-mode=\"dock-morph\"]");
-    expect(css).toMatch(/\.shell\[data-shell-mode="dock-morph"\]\[data-dock-layout="overlay"\]\s*\{[\s\S]*padding: 6px 0 8px/);
-    expect(css).toMatch(/\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*background: var\(--workbench-assistant-transition-bg\)/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\],\s*\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*background: var\(--workbench-assistant-transition-bg\)/);
     expect(css).toContain(".chrome[data-shell-mode=\"dock-out-morph\"]");
-    expect(css).toMatch(/\.chrome\[data-shell-mode="dock-out-morph"\]\s*\{[\s\S]*animation: dockOutChromeToTarget var\(--workbench-assistant-compose-duration\)/);
+    expect(css).toContain("--workbench-assistant-bottom-left: 50%");
+    expect(css).toMatch(/\.chrome\[data-shell-mode="dock-out-morph"\]\[data-dock-out-target="capsule"\]\s*\{[\s\S]*left: var\(--workbench-assistant-bottom-left\)/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="dock-out-morph"\]\[data-dock-out-target="capsule"\]\s*\{[\s\S]*width: var\(--workbench-assistant-dock-out-target-width\)/);
     expect(css).toContain(".surface[data-dock-transition=\"dock-out\"] .morphPanel");
     expect(css).toContain("animation: morphPanelConcealToCapsule var(--workbench-assistant-compose-duration)");
     expect(css).toMatch(/@keyframes morphPanelConcealToCapsule\s*\{[\s\S]*clip-path: inset\(50% 0 50% 0 round 18px\)/);
-    expect(css).toMatch(/@keyframes dockOutChromeToTarget\s*\{[\s\S]*0%\s*\{[\s\S]*left: calc\(100% - var\(--workbench-assistant-dock-inline-size\)\)/);
-    expect(css).toMatch(/@keyframes dockOutChromeToTarget\s*\{[\s\S]*100%\s*\{[\s\S]*bottom: 16px/);
-    expect(css).toMatch(/@keyframes dockOutChromeToTarget\s*\{[\s\S]*100%\s*\{[\s\S]*left: 50%/);
-    expect(css).toMatch(/@keyframes dockOutChromeToTarget\s*\{[\s\S]*100%\s*\{[\s\S]*transform: translateX\(-50%\)/);
+    expect(css).toMatch(/\.chrome\s*\{[\s\S]*transition:\s*[\s\S]*left var\(--workbench-assistant-compose-duration\)/);
+    expect(css).toMatch(/\.chrome\s*\{[\s\S]*height var\(--workbench-assistant-compose-duration\)/);
+    expect(css).toMatch(/\.chrome\s*\{[\s\S]*translate var\(--workbench-assistant-compose-duration\)/);
+    expect(css).not.toContain("dockOutChromeToTarget");
     expect(css).not.toContain("52% {");
     expect(css).not.toContain("78% {");
+    expect(css).not.toMatch(/\.capsule\[data-compose-open="false"\]\s*\{[\s\S]*width: fit-content/);
     expect(css).toContain("animation: dockOutComposerFrameToCapsule var(--workbench-assistant-compose-duration)");
     expect(css).toContain("animation: dockOutInputSurfaceToCapsule var(--workbench-assistant-compose-duration)");
     expect(css).toMatch(/\.shell\[data-transition-phase="dock-out"\] \.chrome\s*\{[\s\S]*transform-origin: bottom center/);
@@ -99,16 +104,22 @@ describe("workbench assistant geometry", () => {
     expect(css).not.toContain("morphPanelDockOut");
   });
 
-  it("does not put long shell-style transitions on the base chrome because dock-in must move and grow together", () => {
+  it("keeps the base chrome as the single morphing shell for bottom and drawer states", () => {
     const css = readFileSync(
       resolve(process.cwd(), "src/renderer/pages/workbench/WorkbenchAssistantSurface.module.css"),
       "utf8",
     );
 
     const baseChromeRule = css.match(/\.chrome\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
-    expect(baseChromeRule).not.toContain("transition:");
-    expect(baseChromeRule).not.toContain("border-radius var(--workbench-assistant-compose-duration)");
-    expect(baseChromeRule).not.toContain("background var(--workbench-assistant-compose-duration)");
+    expect(baseChromeRule).toContain("position: absolute");
+    expect(baseChromeRule).toContain("transition:");
+    expect(baseChromeRule).toContain("left var(--workbench-assistant-compose-duration)");
+    expect(baseChromeRule).toContain("height var(--workbench-assistant-compose-duration)");
+    expect(baseChromeRule).toContain("translate: -50% 0");
+    expect(baseChromeRule).toContain("translate var(--workbench-assistant-compose-duration)");
+    expect(baseChromeRule).toContain("transform: none");
+    expect(baseChromeRule).not.toContain("transform var(--workbench-assistant-compose-duration)");
+    expect(css).not.toMatch(/\.chrome(?:\[[^\]]+\])?\s*\{[^}]*transform: translateX\(-50%\)/);
   });
 
   it("keeps the fixed drawer conversation panel visually stable without a second reveal", () => {
@@ -133,11 +144,10 @@ describe("workbench assistant geometry", () => {
     );
 
     expect(css).toContain("--workbench-assistant-drawer-radius: 18px");
-    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\]\s*\{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--color-border-subtle\) 78%, transparent\)/);
-    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\]\s*\{[\s\S]*border-right: 0/);
-    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\]\s*\{[\s\S]*box-shadow: -16px 0 42px rgb\(15 23 42 \/ 8%\)/);
-    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\]\s*\{[\s\S]*border-radius: var\(--workbench-assistant-drawer-radius\) 0 0 var\(--workbench-assistant-drawer-radius\)/);
-    expect(css).toMatch(/\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*border-radius: var\(--workbench-assistant-drawer-radius\) 0 0 var\(--workbench-assistant-drawer-radius\)/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\],\s*\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--color-border-subtle\) 78%, transparent\)/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\],\s*\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*border-right: 0/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\],\s*\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*box-shadow: -16px 0 42px rgb\(15 23 42 \/ 8%\)/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\],\s*\.chrome\[data-shell-mode="dock-morph"\]\s*\{[\s\S]*border-radius: var\(--workbench-assistant-drawer-radius\) 0 0 var\(--workbench-assistant-drawer-radius\)/);
     expect(css).toMatch(/\.morphPanel\s*\{[\s\S]*border-radius: inherit/);
     expect(css).toMatch(/\.drawer\s*\{[\s\S]*border-radius: inherit/);
     expect(css).toMatch(/\.drawer > \.drawerHeader\s*\{[\s\S]*background: transparent/);
@@ -145,7 +155,8 @@ describe("workbench assistant geometry", () => {
     expect(css).toMatch(/\.drawerPanel\s*\{[\s\S]*background: transparent/);
     expect(css).toMatch(/\.drawerPanel\s*\{[\s\S]*box-shadow: none/);
     expect(css).not.toContain(".drawerComposer");
-    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\] \.capsule,\s*\.chrome\[data-shell-mode="dock-morph"\] \.capsule,\s*\.chrome\[data-shell-mode="dock-out-morph"\] \.capsule\s*\{[\s\S]*padding: 8px 10px 16px/);
+    expect(css).toMatch(/\.chrome\[data-shell-mode="drawer"\] \.capsule,\s*\.chrome\[data-shell-mode="dock-morph"\] \.capsule\s*\{[\s\S]*padding: 8px 10px 16px/);
+    expect(css).not.toMatch(/\.chrome\[data-shell-mode="drawer"\] \.capsule,\s*\.chrome\[data-shell-mode="dock-morph"\] \.capsule,\s*\.chrome\[data-shell-mode="dock-out-morph"\] \.capsule/);
   });
 
   it("keeps the inline assistant host transparent so rounded drawer corners do not show a rectangular backing", () => {
@@ -157,6 +168,7 @@ describe("workbench assistant geometry", () => {
     expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*background: transparent/);
     expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*border-left: 0/);
     expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*overflow: visible/);
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*padding: 6px 0 8px/);
+    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*position: absolute/);
+    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*padding: 0/);
   });
 });

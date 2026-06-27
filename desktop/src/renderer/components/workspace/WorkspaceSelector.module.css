@@ -192,6 +192,7 @@
 
 .option:hover,
 .option:focus-visible,
+.option[data-active="true"],
 .option[aria-selected="true"] {
   outline: none;
   background: var(--surface-hover);

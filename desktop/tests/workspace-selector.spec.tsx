@@ -36,6 +36,88 @@ describe("WorkspaceSelector", () => {
     expect(screen.queryByRole("dialog", { name: "工作区选择" })).toBeNull();
   });
 
+  it("selects a recent workspace with arrow keys from the search field", async () => {
+    const onSelectWorkspace = vi.fn();
+    const selected = workspace("ws-1", "keydex");
+    const target = workspace("ws-2", "kt-agent-framework");
+
+    render(
+      <WorkspaceSelector
+        value={{ type: "workspace", workspace: selected }}
+        workspaces={[selected, target]}
+        onSelectWorkspace={onSelectWorkspace}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+    const search = screen.getByLabelText("筛选工作区");
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /keydex/ }).getAttribute("data-active")).toBe("true");
+    });
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /kt-agent-framework/ }).getAttribute("data-active")).toBe("true");
+
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onSelectWorkspace).toHaveBeenCalledWith(target);
+    expect(screen.queryByRole("dialog", { name: "工作区选择" })).toBeNull();
+  });
+
+  it("selects project-free chat with arrow keys", async () => {
+    const onSelectChat = vi.fn();
+    const selected = workspace("ws-1", "keydex");
+
+    render(
+      <WorkspaceSelector
+        value={{ type: "workspace", workspace: selected }}
+        workspaces={[selected]}
+        onSelectChat={onSelectChat}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+    const search = screen.getByLabelText("筛选工作区");
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /keydex/ }).getAttribute("data-active")).toBe("true");
+    });
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /无项目聊天/ }).getAttribute("data-active")).toBe("true");
+
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onSelectChat).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "工作区选择" })).toBeNull();
+  });
+
+  it("keeps keyboard selection on matching projects while filtering from chat mode", async () => {
+    const onSelectWorkspace = vi.fn();
+    const target = workspace("ws-2", "kt-agent-framework");
+
+    render(
+      <WorkspaceSelector
+        value={{ type: "chat" }}
+        workspaces={[workspace("ws-1", "keydex"), target]}
+        onSelectWorkspace={onSelectWorkspace}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作区" }));
+    const search = screen.getByLabelText("筛选工作区");
+    fireEvent.change(search, { target: { value: "kt-agent" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /kt-agent-framework/ }).getAttribute("data-active")).toBe("true");
+    });
+
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onSelectWorkspace).toHaveBeenCalledWith(target);
+  });
+
   it("selects project-free chat mode", () => {
     const onSelectChat = vi.fn();
 

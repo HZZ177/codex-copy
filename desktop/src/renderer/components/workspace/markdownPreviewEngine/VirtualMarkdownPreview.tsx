@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { ChevronRight } from "lucide-react";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 
 import {
@@ -20,7 +21,8 @@ import {
 } from "./renderer";
 import type { MarkdownAnnotationIndexItem } from "./annotationIndex";
 import type { MarkdownFindIndex } from "./findIndex";
-import type { MarkdownDocumentModel } from "./types";
+import type { MarkdownBlock, MarkdownDocumentModel } from "./types";
+import styles from "../FilePreview.module.css";
 
 export interface VirtualMarkdownPreviewHandle {
   scrollToAnnotation: (annotationId: string, align?: "start" | "center" | "end") => boolean;
@@ -44,12 +46,21 @@ export interface VirtualMarkdownPreviewProps {
   rootClassName?: string;
   rootRef?: Ref<HTMLDivElement>;
   rootStyle?: CSSProperties;
+  showSourceGutter?: boolean;
 }
 
 interface VirtualMarkdownPreviewItem {
   block: MarkdownDocumentModel["blocks"][number];
+  collapsed: boolean;
+  exiting: boolean;
+  foldKind: MarkdownPreviewFoldKind | null;
+  foldMotion: boolean;
   renderStateKey: string;
+  sectionEndLine: number | null;
 }
+
+type MarkdownPreviewFoldKind = "block" | "section";
+const MARKDOWN_PREVIEW_FOLD_MOTION_MS = 180;
 
 const markdownVirtuosoComponents = {
   Item: MarkdownVirtuosoItem,
@@ -79,14 +90,22 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
       rootClassName,
       rootRef,
       rootStyle,
+      showSourceGutter = false,
     },
     ref,
   ) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const foldMotionTimerRef = useRef<number | null>(null);
+    const [collapsedBlockIds, setCollapsedBlockIds] = useState<ReadonlySet<string>>(() => new Set());
+    const [foldMotionBlockIds, setFoldMotionBlockIds] = useState<ReadonlySet<string>>(() => new Set());
     const [pendingRevealBlockId, setPendingRevealBlockId] = useState<string | null>(null);
     const [mountedRange, setMountedRange] = useState<ListRange | null>(null);
     const blockIndexById = useMemo(
       () => new Map(model.blocks.map((block) => [block.id, block.index])),
+      [model.blocks],
+    );
+    const headingSectionEndIndexByBlockId = useMemo(
+      () => buildHeadingSectionEndIndexByBlockId(model.blocks),
       [model.blocks],
     );
     const firstAnnotationBlockId = useMemo(
@@ -102,31 +121,43 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
       () => new Map((findIndex?.matches ?? []).map((match) => [match.id, match.blockId])),
       [findIndex],
     );
-    const initialMountedBlockCount = Math.min(model.blocks.length, 32);
-    const mountedBlockIds = useMemo(() => {
-      if (model.blocks.length <= 0) {
-        return [];
+    useEffect(() => {
+      setCollapsedBlockIds(new Set());
+      setFoldMotionBlockIds(new Set());
+    }, [model]);
+
+    const activeTargetBlockId = useMemo(() => {
+      if (activeBlockId) {
+        return activeBlockId;
       }
-      if (!mountedRange) {
-        return model.blocks.slice(0, initialMountedBlockCount).map((block) => block.id);
+      if (activeFindMatchId) {
+        return findMatchBlockId.get(activeFindMatchId) ?? null;
       }
-      return model.blocks
-        .slice(mountedRange.startIndex, mountedRange.endIndex + 1)
-        .map((block) => block.id);
-    }, [initialMountedBlockCount, model.blocks, mountedRange]);
-    const mountedHeavyBlockCount = useMemo(() => {
-      if (model.blocks.length <= 0) {
-        return 0;
+      if (activeAnnotationId) {
+        return firstAnnotationBlockId.get(activeAnnotationId) ?? null;
       }
-      if (!mountedRange) {
-        return model.blocks
-          .slice(0, initialMountedBlockCount)
-          .filter((block) => block.type === "fence" || block.type === "table").length;
+      if (flashAnnotationId) {
+        return firstAnnotationBlockId.get(flashAnnotationId) ?? null;
       }
-      return model.blocks
-        .slice(mountedRange.startIndex, mountedRange.endIndex + 1)
-        .filter((block) => block.type === "fence" || block.type === "table").length;
-    }, [initialMountedBlockCount, model.blocks, mountedRange]);
+      return null;
+    }, [
+      activeAnnotationId,
+      activeBlockId,
+      activeFindMatchId,
+      findMatchBlockId,
+      firstAnnotationBlockId,
+      flashAnnotationId,
+    ]);
+
+    useEffect(() => {
+      if (!activeTargetBlockId) {
+        return;
+      }
+      setCollapsedBlockIds((current) =>
+        expandCollapsedBlockIdsForBlock(model.blocks, headingSectionEndIndexByBlockId, current, activeTargetBlockId),
+      );
+    }, [activeTargetBlockId, headingSectionEndIndexByBlockId, model.blocks]);
+
     const findRenderStateByBlockId = useMemo(() => {
       const state = new Map<string, string>();
       (findIndex?.matches ?? []).forEach((match) => {
@@ -152,17 +183,78 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
       return state;
     }, [activeAnnotationId, annotationIndex, flashAnnotationId]);
     const renderedBlocks = useMemo<VirtualMarkdownPreviewItem[]>(
-      () =>
-        model.blocks.map((block) => ({
-          block,
-          renderStateKey: [
-            model.version,
-            findRenderStateByBlockId.get(block.id) ?? "",
-            annotationRenderStateByBlockId.get(block.id) ?? "",
-          ].join(":"),
-        })),
-      [annotationRenderStateByBlockId, findRenderStateByBlockId, model.blocks, model.version],
+      () => {
+        let hiddenUntilIndex = -1;
+        return model.blocks.flatMap((block) => {
+          const exiting = block.index < hiddenUntilIndex;
+          if (exiting && !foldMotionBlockIds.has(block.id)) {
+            return [];
+          }
+          const foldKind = showSourceGutter && !exiting
+            ? markdownPreviewFoldKind(block, model.blocks, headingSectionEndIndexByBlockId)
+            : null;
+          const collapsed = Boolean(foldKind && collapsedBlockIds.has(block.id));
+          const sectionEndIndex = foldKind === "section"
+            ? headingSectionEndIndexByBlockId.get(block.id) ?? model.blocks.length
+            : null;
+          if (collapsed && sectionEndIndex !== null) {
+            hiddenUntilIndex = Math.max(hiddenUntilIndex, sectionEndIndex);
+          }
+          const sectionEndBlock = sectionEndIndex === null ? null : model.blocks[sectionEndIndex - 1] ?? null;
+          return [{
+            block,
+            collapsed,
+            exiting,
+            foldKind,
+            foldMotion: foldMotionBlockIds.has(block.id),
+            renderStateKey: [
+              model.version,
+              findRenderStateByBlockId.get(block.id) ?? "",
+              annotationRenderStateByBlockId.get(block.id) ?? "",
+              collapsed ? "collapsed" : "expanded",
+              exiting ? "exiting" : "visible",
+            ].join(":"),
+            sectionEndLine: sectionEndBlock?.lineEnd ?? null,
+          }];
+        });
+      },
+      [
+        annotationRenderStateByBlockId,
+        collapsedBlockIds,
+        foldMotionBlockIds,
+        findRenderStateByBlockId,
+        headingSectionEndIndexByBlockId,
+        model.blocks,
+        model.version,
+        showSourceGutter,
+      ],
     );
+    const mountedBlockIds = useMemo(() => {
+      if (renderedBlocks.length <= 0) {
+        return [];
+      }
+      const initialMountedBlockCount = Math.min(renderedBlocks.length, 32);
+      if (!mountedRange) {
+        return renderedBlocks.slice(0, initialMountedBlockCount).map((item) => item.block.id);
+      }
+      return renderedBlocks
+        .slice(mountedRange.startIndex, mountedRange.endIndex + 1)
+        .map((item) => item.block.id);
+    }, [mountedRange, renderedBlocks]);
+    const mountedHeavyBlockCount = useMemo(() => {
+      if (renderedBlocks.length <= 0) {
+        return 0;
+      }
+      const initialMountedBlockCount = Math.min(renderedBlocks.length, 32);
+      if (!mountedRange) {
+        return renderedBlocks
+          .slice(0, initialMountedBlockCount)
+          .filter((item) => item.block.type === "fence" || item.block.type === "table").length;
+      }
+      return renderedBlocks
+        .slice(mountedRange.startIndex, mountedRange.endIndex + 1)
+        .filter((item) => item.block.type === "fence" || item.block.type === "table").length;
+    }, [mountedRange, renderedBlocks]);
     const usesExternalScrollParent = Boolean(customScrollParent);
     const rootClassNames = rootClassName ? `keydex-markdown ${rootClassName}` : "keydex-markdown";
     const rootStyles = usesExternalScrollParent ? rootStyle : { height: "100%", ...rootStyle };
@@ -177,18 +269,67 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
       }
     }, [mountedBlockIds, pendingRevealBlockId]);
 
+    useEffect(() => () => {
+      if (foldMotionTimerRef.current !== null) {
+        window.clearTimeout(foldMotionTimerRef.current);
+      }
+    }, []);
+
+    const toggleCollapsedBlock = useCallback((blockId: string) => {
+      if (foldMotionTimerRef.current !== null) {
+        window.clearTimeout(foldMotionTimerRef.current);
+      }
+      setFoldMotionBlockIds(markdownPreviewMotionBlockIdsForToggle(
+        model.blocks,
+        headingSectionEndIndexByBlockId,
+        blockId,
+      ));
+      foldMotionTimerRef.current = window.setTimeout(() => {
+        foldMotionTimerRef.current = null;
+        setFoldMotionBlockIds(new Set());
+      }, MARKDOWN_PREVIEW_FOLD_MOTION_MS);
+      setCollapsedBlockIds((current) => {
+        const next = new Set(current);
+        if (next.has(blockId)) {
+          next.delete(blockId);
+        } else {
+          next.add(blockId);
+        }
+        return next;
+      });
+    }, [headingSectionEndIndexByBlockId, model.blocks]);
+
     const scrollToIndex = useCallback((index: number, align: "start" | "center" | "end" = "start") => {
       if (!Number.isInteger(index) || index < 0 || index >= model.blocks.length) {
         return false;
       }
       const block = model.blocks[index];
+      const nextCollapsedBlockIds = expandCollapsedBlockIdsForBlock(
+        model.blocks,
+        headingSectionEndIndexByBlockId,
+        collapsedBlockIds,
+        block.id,
+      );
+      if (nextCollapsedBlockIds !== collapsedBlockIds) {
+        setCollapsedBlockIds(nextCollapsedBlockIds);
+      }
+      const visibleIndex = visibleMarkdownPreviewIndexForBlock(
+        model.blocks,
+        headingSectionEndIndexByBlockId,
+        nextCollapsedBlockIds,
+        block.id,
+        showSourceGutter,
+      );
+      if (visibleIndex < 0) {
+        return false;
+      }
       setPendingRevealBlockId(block.id);
-      const scroll = () => virtuosoRef.current?.scrollToIndex({ align, index });
+      const scroll = () => virtuosoRef.current?.scrollToIndex({ align, index: visibleIndex });
       scroll();
       window.requestAnimationFrame(scroll);
       window.setTimeout(scroll, 60);
       return true;
-    }, [model.blocks]);
+    }, [collapsedBlockIds, headingSectionEndIndexByBlockId, model.blocks, showSourceGutter]);
 
     const scrollToBlock = useCallback((blockId: string, align: "start" | "center" | "end" = "start") => {
       const index = blockIndexById.get(blockId);
@@ -232,19 +373,47 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
           customScrollParent={customScrollParent ?? undefined}
           data={renderedBlocks}
           increaseViewportBy={{ bottom: 640, top: 320 }}
-          initialItemCount={Math.min(model.blocks.length, 32)}
+          initialItemCount={Math.min(renderedBlocks.length, 32)}
           itemContent={(_index, item) => (
-            <MarkdownBlockView
-              active={item.block.id === activeBlockId || item.block.id === pendingRevealBlockId}
-              activeAnnotationId={activeAnnotationId}
-              activeFindMatchId={activeFindMatchId}
-              annotationIndex={annotationIndex}
-              block={item.block}
-              findIndex={findIndex}
-              flashAnnotationId={flashAnnotationId}
-              registry={registry}
-              renderImage={renderImage}
-            />
+            showSourceGutter ? (
+              <MarkdownPreviewBlockFrame
+                block={item.block}
+                collapsed={item.collapsed}
+                exiting={item.exiting}
+                foldKind={item.foldKind}
+                foldMotion={item.foldMotion}
+                onToggleFold={toggleCollapsedBlock}
+                sectionEndLine={item.sectionEndLine}
+              >
+                {item.collapsed && item.foldKind === "block" ? (
+                  <MarkdownPreviewCollapsedBlock block={item.block} />
+                ) : (
+                  <MarkdownBlockView
+                    active={item.block.id === activeBlockId || item.block.id === pendingRevealBlockId}
+                    activeAnnotationId={activeAnnotationId}
+                    activeFindMatchId={activeFindMatchId}
+                    annotationIndex={annotationIndex}
+                    block={item.block}
+                    findIndex={findIndex}
+                    flashAnnotationId={flashAnnotationId}
+                    registry={registry}
+                    renderImage={renderImage}
+                  />
+                )}
+              </MarkdownPreviewBlockFrame>
+            ) : (
+              <MarkdownBlockView
+                active={item.block.id === activeBlockId || item.block.id === pendingRevealBlockId}
+                activeAnnotationId={activeAnnotationId}
+                activeFindMatchId={activeFindMatchId}
+                annotationIndex={annotationIndex}
+                block={item.block}
+                findIndex={findIndex}
+                flashAnnotationId={flashAnnotationId}
+                registry={registry}
+                renderImage={renderImage}
+              />
+            )
           )}
           overscan={480}
           rangeChanged={setMountedRange}
@@ -255,3 +424,226 @@ export const VirtualMarkdownPreview = forwardRef<VirtualMarkdownPreviewHandle, V
     );
   },
 );
+
+function MarkdownPreviewBlockFrame({
+  block,
+  children,
+  collapsed,
+  exiting,
+  foldKind,
+  foldMotion,
+  onToggleFold,
+  sectionEndLine,
+}: {
+  block: MarkdownBlock;
+  children: ReactNode;
+  collapsed: boolean;
+  exiting: boolean;
+  foldKind: MarkdownPreviewFoldKind | null;
+  foldMotion: boolean;
+  onToggleFold: (blockId: string) => void;
+  sectionEndLine: number | null;
+}) {
+  const foldTarget = foldKind === "section" ? "章节" : "内容";
+  const foldLabel = `${collapsed ? "展开" : "折叠"}第 ${block.lineStart} 行${foldTarget}`;
+  const foldTitle = sectionEndLine && foldKind === "section"
+    ? `${foldLabel}（${block.lineStart}-${sectionEndLine} 行）`
+    : foldLabel;
+  const sectionCollapsedLineCount = sectionEndLine && foldKind === "section"
+    ? Math.max(1, sectionEndLine - block.lineEnd)
+    : 0;
+
+  return (
+    <div
+      className={styles.markdownPreviewBlock}
+      data-collapsed={collapsed ? "true" : "false"}
+      data-fold-exiting={exiting ? "true" : undefined}
+      data-fold-kind={foldKind ?? undefined}
+      data-fold-motion={foldMotion ? "true" : undefined}
+      data-markdown-preview-block-frame="true"
+      data-markdown-preview-line-start={block.lineStart}
+    >
+      <div className={styles.markdownPreviewGutter}>
+        {foldKind ? (
+          <button
+            aria-expanded={!collapsed}
+            aria-label={foldLabel}
+            className={styles.markdownPreviewFoldButton}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFold(block.id);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            title={foldTitle}
+            type="button"
+          >
+            <ChevronRight size={13} />
+          </button>
+        ) : (
+          <span className={styles.markdownPreviewFoldPlaceholder} />
+        )}
+        <span className={styles.markdownPreviewLineNumber} data-markdown-preview-line-number="true">
+          {block.lineStart}
+        </span>
+      </div>
+      <div className={styles.markdownPreviewBlockContent}>
+        {children}
+        {collapsed && foldKind === "section" ? (
+          <MarkdownPreviewCollapsedSummary lineCount={sectionCollapsedLineCount} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MarkdownPreviewCollapsedBlock({ block }: { block: MarkdownBlock }) {
+  const lineCount = markdownPreviewBlockLineSpan(block);
+  return (
+    <div
+      className={styles.markdownPreviewCollapsedBlock}
+      data-markdown-preview-collapsed-block="true"
+      data-markdown-source-end={block.sourceEnd}
+      data-markdown-source-start={block.sourceStart}
+    >
+      已折叠 {lineCount} 行
+    </div>
+  );
+}
+
+function MarkdownPreviewCollapsedSummary({ lineCount }: { lineCount: number }) {
+  return (
+    <div
+      className={styles.markdownPreviewCollapsedBlock}
+      data-markdown-preview-collapsed-section="true"
+    >
+      已折叠 {lineCount} 行
+    </div>
+  );
+}
+
+function buildHeadingSectionEndIndexByBlockId(blocks: MarkdownBlock[]): Map<string, number> {
+  const endIndexByBlockId = new Map<string, number>();
+  blocks.forEach((block) => {
+    if (block.type !== "heading" || !block.metadata.headingLevel) {
+      return;
+    }
+    const level = block.metadata.headingLevel;
+    let endIndex = blocks.length;
+    for (let index = block.index + 1; index < blocks.length; index += 1) {
+      const candidate = blocks[index];
+      if (
+        candidate.type === "heading" &&
+        candidate.metadata.headingLevel &&
+        candidate.metadata.headingLevel <= level
+      ) {
+        endIndex = index;
+        break;
+      }
+    }
+    endIndexByBlockId.set(block.id, endIndex);
+  });
+  return endIndexByBlockId;
+}
+
+function markdownPreviewFoldKind(
+  block: MarkdownBlock,
+  blocks: MarkdownBlock[],
+  headingSectionEndIndexByBlockId: Map<string, number>,
+): MarkdownPreviewFoldKind | null {
+  if (block.type === "heading") {
+    const sectionEndIndex = headingSectionEndIndexByBlockId.get(block.id);
+    return typeof sectionEndIndex === "number" && sectionEndIndex > block.index + 1 ? "section" : null;
+  }
+  return markdownPreviewBlockLineSpan(block) > 1 && blocks.length > 1 ? "block" : null;
+}
+
+function markdownPreviewMotionBlockIdsForToggle(
+  blocks: MarkdownBlock[],
+  headingSectionEndIndexByBlockId: Map<string, number>,
+  blockId: string,
+): ReadonlySet<string> {
+  const block = blocks.find((item) => item.id === blockId);
+  const motionBlockIds = new Set<string>([blockId]);
+  if (!block || block.type !== "heading") {
+    return motionBlockIds;
+  }
+  const sectionEndIndex = headingSectionEndIndexByBlockId.get(block.id);
+  if (typeof sectionEndIndex !== "number" || sectionEndIndex <= block.index + 1) {
+    return motionBlockIds;
+  }
+  for (let index = block.index + 1; index < sectionEndIndex; index += 1) {
+    const child = blocks[index];
+    if (child) {
+      motionBlockIds.add(child.id);
+    }
+  }
+  return motionBlockIds;
+}
+
+function markdownPreviewBlockLineSpan(block: MarkdownBlock): number {
+  return Math.max(1, block.lineEnd - block.lineStart + 1);
+}
+
+function expandCollapsedBlockIdsForBlock(
+  blocks: MarkdownBlock[],
+  headingSectionEndIndexByBlockId: Map<string, number>,
+  collapsedBlockIds: ReadonlySet<string>,
+  blockId: string,
+): ReadonlySet<string> {
+  const targetBlock = blocks.find((block) => block.id === blockId);
+  if (!targetBlock || collapsedBlockIds.size <= 0) {
+    return collapsedBlockIds;
+  }
+
+  let next: Set<string> | null = null;
+  const ensureNext = () => {
+    if (!next) {
+      next = new Set(collapsedBlockIds);
+    }
+    return next;
+  };
+
+  if (collapsedBlockIds.has(targetBlock.id)) {
+    ensureNext().delete(targetBlock.id);
+  }
+
+  blocks.forEach((block) => {
+    if (!collapsedBlockIds.has(block.id) || block.type !== "heading") {
+      return;
+    }
+    const sectionEndIndex = headingSectionEndIndexByBlockId.get(block.id);
+    if (typeof sectionEndIndex !== "number") {
+      return;
+    }
+    if (targetBlock.index > block.index && targetBlock.index < sectionEndIndex) {
+      ensureNext().delete(block.id);
+    }
+  });
+
+  return next ?? collapsedBlockIds;
+}
+
+function visibleMarkdownPreviewIndexForBlock(
+  blocks: MarkdownBlock[],
+  headingSectionEndIndexByBlockId: Map<string, number>,
+  collapsedBlockIds: ReadonlySet<string>,
+  blockId: string,
+  showSourceGutter: boolean,
+): number {
+  let visibleIndex = 0;
+  let hiddenUntilIndex = -1;
+  for (const block of blocks) {
+    if (block.index < hiddenUntilIndex) {
+      continue;
+    }
+    if (block.id === blockId) {
+      return visibleIndex;
+    }
+    const foldKind = showSourceGutter ? markdownPreviewFoldKind(block, blocks, headingSectionEndIndexByBlockId) : null;
+    if (foldKind === "section" && collapsedBlockIds.has(block.id)) {
+      hiddenUntilIndex = Math.max(hiddenUntilIndex, headingSectionEndIndexByBlockId.get(block.id) ?? blocks.length);
+    }
+    visibleIndex += 1;
+  }
+  return -1;
+}

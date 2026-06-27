@@ -25,6 +25,10 @@ export interface WorkspaceSelectorProps {
   onPickWorkspacePath?: () => Promise<string | null>;
 }
 
+type WorkspaceMenuOption = { type: "workspace"; key: string; workspace: Workspace } | { type: "chat"; key: string };
+
+const chatOptionKey = "chat";
+
 export function WorkspaceSelector({
   value,
   workspaces,
@@ -41,12 +45,14 @@ export function WorkspaceSelector({
 }: WorkspaceSelectorProps) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const addMenuCloseTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [manualPathOpen, setManualPathOpen] = useState(false);
   const [manualPath, setManualPath] = useState("");
   const [query, setQuery] = useState("");
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -77,6 +83,17 @@ export function WorkspaceSelector({
       `${workspace.name}\n${workspace.root_path}`.toLowerCase().includes(keyword),
     );
   }, [query, workspaces]);
+  const selectableOptions = useMemo<WorkspaceMenuOption[]>(() => {
+    const workspaceOptions = filteredWorkspaces.map((workspace) => ({
+      type: "workspace" as const,
+      key: workspaceOptionKey(workspace),
+      workspace,
+    }));
+    if (!allowProjectFreeChat) {
+      return workspaceOptions;
+    }
+    return [...workspaceOptions, { type: "chat", key: chatOptionKey }];
+  }, [allowProjectFreeChat, filteredWorkspaces]);
 
   const clearAddMenuCloseTimer = () => {
     if (addMenuCloseTimerRef.current !== null) {
@@ -139,8 +156,41 @@ export function WorkspaceSelector({
   useEffect(() => {
     if (!canOpen) {
       setOpen(false);
+      setActiveOptionIndex(-1);
     }
   }, [canOpen]);
+
+  useEffect(() => {
+    if (!open) {
+      setActiveOptionIndex(-1);
+      return;
+    }
+    setActiveOptionIndex((current) => {
+      if (!selectableOptions.length) {
+        return -1;
+      }
+      if (current >= 0 && current < selectableOptions.length) {
+        return current;
+      }
+      const selectedIndex = query.trim()
+        ? -1
+        : selectableOptions.findIndex((option) =>
+            isWorkspaceMenuOptionSelected(option, selectedWorkspaceId, value.type),
+          );
+      return selectedIndex >= 0 ? selectedIndex : 0;
+    });
+  }, [open, query, selectableOptions, selectedWorkspaceId, value.type]);
+
+  useEffect(() => {
+    if (!open || activeOptionIndex < 0) {
+      return;
+    }
+    const activeOption = selectableOptions[activeOptionIndex];
+    if (!activeOption) {
+      return;
+    }
+    optionRefs.current.get(activeOption.key)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeOptionIndex, open, selectableOptions]);
 
   useEffect(() => () => clearAddMenuCloseTimer(), []);
 
@@ -171,6 +221,28 @@ export function WorkspaceSelector({
     onSelectWorkspace?.(workspace);
     closeAddMenu();
     setOpen(false);
+  };
+
+  const chooseActiveOption = () => {
+    const activeOption = activeOptionIndex >= 0 ? selectableOptions[activeOptionIndex] : null;
+    if (!activeOption) {
+      return;
+    }
+    if (activeOption.type === "workspace") {
+      chooseWorkspace(activeOption.workspace);
+      return;
+    }
+    chooseChat();
+  };
+
+  const moveActiveOption = (direction: 1 | -1) => {
+    if (!selectableOptions.length) {
+      return;
+    }
+    setActiveOptionIndex((current) => {
+      const base = current >= 0 ? current : direction > 0 ? -1 : 0;
+      return (base + direction + selectableOptions.length) % selectableOptions.length;
+    });
   };
 
   const addPickedWorkspace = async () => {
@@ -236,6 +308,36 @@ export function WorkspaceSelector({
     }
   };
 
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActiveOption(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActiveOption(-1);
+      return;
+    }
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      if (activeOptionIndex >= 0) {
+        event.preventDefault();
+        chooseActiveOption();
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const activeOptionId =
+    open && activeOptionIndex >= 0 && selectableOptions[activeOptionIndex]
+      ? `${menuId}-option-${activeOptionIndex}`
+      : undefined;
+  const chatSelectableIndex = selectableOptions.findIndex((option) => option.key === chatOptionKey);
+
   return (
     <div className={styles.root} ref={rootRef} data-readonly={readOnly ? "true" : "false"} data-variant={variant}>
       <button
@@ -265,10 +367,13 @@ export function WorkspaceSelector({
             <Search size={13} strokeWidth={1.9} aria-hidden="true" />
             <input
               aria-label="筛选工作区"
+              aria-activedescendant={activeOptionId}
+              aria-controls={menuId}
               autoFocus
               placeholder="搜索项目"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
             />
           </label>
 
@@ -290,13 +395,25 @@ export function WorkspaceSelector({
             {!loading && filteredWorkspaces.length
               ? filteredWorkspaces.map((workspace) => {
                   const selected = workspace.id === selectedWorkspaceId;
+                  const optionKey = workspaceOptionKey(workspace);
+                  const optionIndex = selectableOptions.findIndex((option) => option.key === optionKey);
+                  const active = optionIndex === activeOptionIndex;
                   return (
                     <button
                       className={styles.option}
                       type="button"
                       role="option"
+                      id={optionIndex >= 0 ? `${menuId}-option-${optionIndex}` : undefined}
                       aria-selected={selected ? "true" : "false"}
+                      data-active={active ? "true" : undefined}
                       key={workspace.id}
+                      ref={(element) => {
+                        if (element) {
+                          optionRefs.current.set(optionKey, element);
+                        } else {
+                          optionRefs.current.delete(optionKey);
+                        }
+                      }}
                       onClick={() => chooseWorkspace(workspace)}
                     >
                       <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -389,7 +506,16 @@ export function WorkspaceSelector({
               <button
                 className={styles.option}
                 type="button"
+                id={chatSelectableIndex >= 0 ? `${menuId}-option-${chatSelectableIndex}` : undefined}
                 aria-selected={value.type === "chat" ? "true" : "false"}
+                data-active={chatSelectableIndex === activeOptionIndex ? "true" : undefined}
+                ref={(element) => {
+                  if (element) {
+                    optionRefs.current.set(chatOptionKey, element);
+                  } else {
+                    optionRefs.current.delete(chatOptionKey);
+                  }
+                }}
                 onClick={chooseChat}
               >
                 <MessageCircle size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -405,6 +531,21 @@ export function WorkspaceSelector({
       ) : null}
     </div>
   );
+}
+
+function workspaceOptionKey(workspace: Workspace): string {
+  return `workspace:${workspace.id}`;
+}
+
+function isWorkspaceMenuOptionSelected(
+  option: WorkspaceMenuOption,
+  selectedWorkspaceId: string | null,
+  selectionType: WorkspaceSelection["type"],
+): boolean {
+  if (option.type === "workspace") {
+    return option.workspace.id === selectedWorkspaceId;
+  }
+  return selectionType === "chat";
 }
 
 function errorMessage(reason: unknown): string {

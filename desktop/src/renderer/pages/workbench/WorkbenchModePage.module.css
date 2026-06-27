@@ -63,6 +63,7 @@
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  margin-right: var(--workbench-dock-reserved-width);
   overflow: hidden;
   transition:
     flex-basis var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease),
