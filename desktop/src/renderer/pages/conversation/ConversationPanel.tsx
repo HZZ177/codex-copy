@@ -1,7 +1,12 @@
 import type { RuntimeBridge } from "@/runtime";
 import { ConversationComposerAccessory } from "@/renderer/pages/conversation/ComposerAccessory";
 
-import { MessageList, type MessageListTurnNavigationRequest, type MessageListTurnNavigatorMode } from "./messages";
+import {
+  MessageList,
+  type MessageListPerformanceProfile,
+  type MessageListTurnNavigationRequest,
+  type MessageListTurnNavigatorMode,
+} from "./messages";
 import type { ConversationPanelModel } from "./useConversationPanelModel";
 
 import styles from "./ConversationPanel.module.css";
@@ -12,6 +17,7 @@ export interface ConversationPanelProps {
   model: ConversationPanelModel;
   workspaceRuntime: RuntimeBridge;
   variant?: ConversationPanelVariant;
+  performanceProfile?: MessageListPerformanceProfile;
   emptyText?: string;
   emptyTestId?: string;
   scrollButtonMode?: "inline" | "external";
@@ -24,6 +30,7 @@ export function ConversationPanel({
   model,
   workspaceRuntime,
   variant = "full",
+  performanceProfile = "default",
   emptyText = "暂无消息",
   emptyTestId = "message-empty",
   scrollButtonMode = "inline",
@@ -40,6 +47,7 @@ export function ConversationPanel({
       <MessageList
         messages={model.messages}
         variant={variant}
+        performanceProfile={performanceProfile}
         loading={model.loading}
         isProcessing={model.runtimeState === "running"}
         runtimeState={model.runtimeState}

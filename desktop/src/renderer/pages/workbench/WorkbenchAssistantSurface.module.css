@@ -1302,12 +1302,26 @@
   align-items: flex-end;
   padding: 0 0 160px;
   pointer-events: auto;
-  background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
-  backdrop-filter: blur(18px) saturate(1.18);
-  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+  isolation: isolate;
+  background: rgb(255 255 255 / 2.5%);
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.expandedLayer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 1.5%);
+  opacity: 1;
+  pointer-events: none;
 }
 
 .expandedPanelFrame {
+  position: relative;
+  z-index: 1;
   width: min(760px, 100%);
   height: 100%;
   max-height: 100%;
@@ -1322,6 +1336,7 @@
 .expandedPanelFrame > .overlayPanel {
   width: 100%;
   height: 100%;
+  animation: assistantPanelContentReveal 140ms var(--motion-ease-out) both;
 }
 
 .overlayPanel {
@@ -1330,6 +1345,18 @@
   max-height: 100%;
   min-height: 0;
   pointer-events: auto;
+}
+
+.panelLoading {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  --loading-skeleton-padding: 0;
+  --loading-skeleton-stack-width: min(300px, 42%);
+  --loading-skeleton-compact-stack-width: min(280px, 42%);
+  --loading-skeleton-line-base: color-mix(in srgb, var(--surface-muted) 88%, var(--color-text-4));
+  --loading-skeleton-line-highlight: color-mix(in srgb, var(--surface-hover) 76%, var(--color-text-4));
+  animation: assistantPanelContentReveal 140ms var(--motion-ease-out) both;
 }
 
 .morphPanel {
@@ -1369,6 +1396,11 @@
   box-shadow: none;
   transform-origin: center;
   backdrop-filter: blur(16px);
+}
+
+.morphMiddle[data-content-state="deferred"] {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .morphPanel[data-panel-mode="morph"] .morphMiddle {
@@ -1515,6 +1547,7 @@
   background: transparent;
   box-shadow: none;
   backdrop-filter: blur(16px);
+  animation: assistantPanelContentReveal 140ms var(--motion-ease-out) both;
 }
 
 .approvalPrompt {
@@ -1602,7 +1635,8 @@
       var(--workbench-assistant-accessory-height)
       0
       var(--workbench-assistant-input-open-height);
-    gap: 8px;
+    column-gap: 6px;
+    row-gap: 4px;
   }
 
   100% {
@@ -1611,7 +1645,8 @@
       var(--workbench-assistant-accessory-height)
       0
       var(--workbench-assistant-input-closed-height);
-    gap: 6px;
+    column-gap: 6px;
+    row-gap: 3px;
   }
 }
 
@@ -1714,6 +1749,18 @@
     opacity: 0;
     clip-path: inset(50% 0 50% 0 round 18px);
     transform: scaleY(0.02);
+  }
+}
+
+@keyframes assistantPanelContentReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

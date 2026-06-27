@@ -17,7 +17,14 @@ export interface UseVirtuosoAutoScrollResult {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
 }
 
-export function useVirtuosoAutoScroll(itemCount: number): UseVirtuosoAutoScrollResult {
+export interface UseVirtuosoAutoScrollOptions {
+  autoFollow?: boolean;
+}
+
+export function useVirtuosoAutoScroll(
+  itemCount: number,
+  { autoFollow = true }: UseVirtuosoAutoScrollOptions = {},
+): UseVirtuosoAutoScrollResult {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
@@ -113,6 +120,10 @@ export function useVirtuosoAutoScroll(itemCount: number): UseVirtuosoAutoScrollR
   }, []);
 
   const handleTotalListHeightChanged = useCallback(() => {
+    if (!autoFollow) {
+      updateBottomState();
+      return;
+    }
     if (scrollerRef.current && isExpansionScrollLocked(scrollerRef.current)) {
       updateBottomState();
       return;
@@ -126,7 +137,7 @@ export function useVirtuosoAutoScroll(itemCount: number): UseVirtuosoAutoScrollR
       return;
     }
     updateBottomState();
-  }, [scrollToBottom, updateBottomState]);
+  }, [autoFollow, scrollToBottom, updateBottomState]);
 
   const followOutput = useCallback(() => {
     // Keep the bottom spacer visible by letting handleTotalListHeightChanged
@@ -167,10 +178,12 @@ export function useVirtuosoAutoScroll(itemCount: number): UseVirtuosoAutoScrollR
       return;
     }
 
-    if (!userPinnedRef.current && atBottomRef.current) {
+    if (autoFollow && !userPinnedRef.current && atBottomRef.current) {
       scrollToBottom("auto");
+      return;
     }
-  }, [cancelScrollAnimation, itemCount, scrollToBottom]);
+    updateBottomState();
+  }, [autoFollow, cancelScrollAnimation, itemCount, scrollToBottom, updateBottomState]);
 
   useEffect(() => {
     return () => cancelScrollAnimation();

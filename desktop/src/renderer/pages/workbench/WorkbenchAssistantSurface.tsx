@@ -20,6 +20,7 @@ import {
   type WorkspaceSkillSummary,
 } from "@/runtime";
 import { type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
+import { LoadingSkeleton } from "@/renderer/components/loading";
 import { useRuntimeModelSelection } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
@@ -99,6 +100,7 @@ const WORKBENCH_EXPANDED_PANEL_TRANSITION = {
   duration: 0.26,
   ease: [0.2, 0.82, 0.22, 1],
 } as const;
+const WORKBENCH_EXPANDED_CONTENT_REVEAL_DELAY_MS = 260;
 
 export interface WorkbenchAssistantSurfaceProps {
   runtime: RuntimeBridge;
@@ -125,7 +127,9 @@ export function WorkbenchAssistantSurface({
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockTransitionRunIdRef = useRef(0);
   const composeCollapseTimerRef = useRef<number | null>(null);
+  const expandedContentTimerRef = useRef<number | null>(null);
   const messageTriggerPrimingTimerRef = useRef<number | null>(null);
+  const panelMessageCountRef = useRef(0);
   const previousSurfaceModeRef = useRef<AssistantSurfaceMode>("capsule");
   const previousRuntimeStateRef = useRef<ConversationRuntimeState | null>(null);
   const handledFileChipRequestIdRef = useRef(controller.fileChipRequest?.requestId ?? 0);
@@ -138,6 +142,7 @@ export function WorkbenchAssistantSurface({
   const [dockTransitionPhase, setDockTransitionPhase] = useState<DockTransitionPhase | null>(null);
   const [dockReturnMode, setDockReturnMode] = useState<"capsule" | "composer" | null>(null);
   const [keepComposerContentDuringCollapse, setKeepComposerContentDuringCollapse] = useState(false);
+  const [expandedContentReady, setExpandedContentReady] = useState(false);
   const [messageTriggerPriming, setMessageTriggerPriming] = useState(false);
   const [unreadAssistantMessageKey, setUnreadAssistantMessageKey] = useState<string | null>(null);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
@@ -175,6 +180,7 @@ export function WorkbenchAssistantSurface({
     sessionId: panelSessionId,
     controller,
   });
+  panelMessageCountRef.current = panelModel.messages.length;
   const runtimeState = controller.runtimeState;
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
@@ -295,8 +301,8 @@ export function WorkbenchAssistantSurface({
   );
   const showMiniTurnNavigator =
     surfaceMode !== "expanded" &&
-    dockTransitionPhase === null &&
     !renderDrawerContent &&
+    (dockTransitionPhase === null || dockTransitionPhase === "dock-out") &&
     turnNavigationItems.length >= 2;
 
   const finishDockTransition = useCallback((reservedWidth = 0) => {
@@ -316,6 +322,13 @@ export function WorkbenchAssistantSurface({
     }
     composeCollapseTimerRef.current = null;
     setKeepComposerContentDuringCollapse(false);
+  }, []);
+
+  const clearExpandedContentTimer = useCallback(() => {
+    if (expandedContentTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(expandedContentTimerRef.current);
+    }
+    expandedContentTimerRef.current = null;
   }, []);
 
   const finishMessageTriggerPriming = useCallback(() => {
@@ -443,7 +456,26 @@ export function WorkbenchAssistantSurface({
 
   useEffect(() => () => finishComposeCollapse(), [finishComposeCollapse]);
 
+  useEffect(() => () => clearExpandedContentTimer(), [clearExpandedContentTimer]);
+
   useEffect(() => () => finishMessageTriggerPriming(), [finishMessageTriggerPriming]);
+
+  useEffect(() => {
+    clearExpandedContentTimer();
+    if (surfaceMode !== "expanded" || dockTransitionPhase !== null) {
+      setExpandedContentReady(false);
+      return;
+    }
+    if (panelMessageCountRef.current <= 0 || reducedMotion || typeof window === "undefined") {
+      setExpandedContentReady(true);
+      return;
+    }
+    setExpandedContentReady(false);
+    expandedContentTimerRef.current = window.setTimeout(() => {
+      expandedContentTimerRef.current = null;
+      setExpandedContentReady(true);
+    }, WORKBENCH_EXPANDED_CONTENT_REVEAL_DELAY_MS);
+  }, [clearExpandedContentTimer, dockTransitionPhase, reducedMotion, surfaceMode]);
 
   useEffect(() => {
     const previousMode = previousSurfaceModeRef.current;
@@ -711,9 +743,16 @@ export function WorkbenchAssistantSurface({
     () => panelModel.messages.some((message) => valueContainsMarkdownCodeFence(message)),
     [panelModel.messages],
   );
+  useEffect(() => {
+    if (!hasCodeBlockMessages) {
+      return;
+    }
+    void preloadMarkdownCodeBlockRuntime().catch(() => undefined);
+  }, [hasCodeBlockMessages]);
+
   const stablePanelMode = renderDrawerContent ? "drawer" : renderMorphContent ? "morph" : "prewarm";
-  const shouldMountStablePanel =
-    surfaceMode !== "expanded" && (hasCodeBlockMessages || renderMorphContent || renderDrawerContent);
+  const shouldMountStablePanel = surfaceMode !== "expanded" && (renderMorphContent || renderDrawerContent);
+  const stablePanelContentReady = stablePanelMode === "drawer";
   const stablePanelTestId =
     stablePanelMode === "drawer"
       ? "workbench-assistant-drawer"
@@ -726,11 +765,12 @@ export function WorkbenchAssistantSurface({
       : stablePanelMode === "morph"
         ? "workbench-assistant-morph-header"
         : undefined;
-  const stableConversationPanel = shouldMountStablePanel ? (
+  const stableConversationPanel = shouldMountStablePanel && stablePanelContentReady ? (
     <ConversationPanel
       model={panelModel}
       workspaceRuntime={runtime}
       variant="compact"
+      performanceProfile="interactivePanel"
       emptyText="当前工作空间还没有助手消息。"
       emptyTestId={`workbench-${stablePanelMode === "drawer" ? "drawer" : "morph"}-message-empty`}
       scrollButtonMode="external"
@@ -739,17 +779,28 @@ export function WorkbenchAssistantSurface({
     />
   ) : null;
   const overlayConversationPanel =
-    surfaceMode === "expanded" && dockTransitionPhase === null ? (
+    surfaceMode === "expanded" && dockTransitionPhase === null && expandedContentReady ? (
       <ConversationPanel
         model={panelModel}
         workspaceRuntime={runtime}
         variant="overlay"
+        performanceProfile="interactivePanel"
         emptyText="当前工作空间还没有助手消息。"
         emptyTestId="workbench-expanded-message-empty"
         scrollButtonMode="external"
         turnNavigatorMode="auto"
         turnNavigationRequest={overlayTurnNavigationRequest}
         className={styles.overlayPanel}
+      />
+    ) : null;
+  const overlayLoadingPanel =
+    surfaceMode === "expanded" && dockTransitionPhase === null && !expandedContentReady ? (
+      <LoadingSkeleton
+        aria-label="正在准备消息历史"
+        className={styles.panelLoading}
+        lineCount={4}
+        testId="workbench-expanded-panel-loading"
+        width="compact"
       />
     ) : null;
   const stableAssistantPanel = shouldMountStablePanel ? (
@@ -782,6 +833,7 @@ export function WorkbenchAssistantSurface({
       </header>
       <div
         className={styles.morphMiddle}
+        data-content-state={stablePanelContentReady ? "ready" : "deferred"}
         data-testid={stablePanelMode === "morph" ? "workbench-assistant-morph-middle" : undefined}
       >
         {stableConversationPanel}
@@ -843,7 +895,7 @@ export function WorkbenchAssistantSurface({
               transition={reducedMotion ? { duration: 0 } : WORKBENCH_EXPANDED_PANEL_TRANSITION}
               onClick={(event) => event.stopPropagation()}
             >
-              {overlayConversationPanel}
+              {overlayConversationPanel ?? overlayLoadingPanel}
               {pendingApproval ? (
                 <WorkbenchApprovalPrompt
                   approval={pendingApproval}

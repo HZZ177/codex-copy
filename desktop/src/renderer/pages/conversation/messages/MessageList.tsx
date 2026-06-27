@@ -14,7 +14,6 @@ import {
   Virtuoso,
   type Components,
   type ItemProps,
-  type ListRange,
   type ListProps,
   type ScrollerProps,
 } from "react-virtuoso";
@@ -41,17 +40,20 @@ import { useAutoScroll } from "./useAutoScroll";
 import { useVirtuosoAutoScroll } from "./useVirtuosoAutoScroll";
 
 const STATIC_MESSAGE_LIST_ITEM_LIMIT = 160;
+const INTERACTIVE_PANEL_STATIC_MESSAGE_LIST_ITEM_LIMIT = 48;
 const VIRTUAL_MESSAGE_VIEWPORT_BUFFER = { bottom: 2600, top: 1800 } as const;
 const LOAD_OLDER_TRIGGER_PX = 44;
 const LOAD_OLDER_ARM_PX = 120;
 const ACTIVE_TURN_ANCHOR_RATIO = 0.35;
 const SCROLL_BOUNDARY_EPSILON_PX = 2;
+const TURN_NAVIGATION_RETRY_FRAMES = 8;
 
 export interface MessageListProps {
   messages: ConversationMessage[];
   loading?: boolean;
   isProcessing?: boolean;
   variant?: MessageListVariant;
+  performanceProfile?: MessageListPerformanceProfile;
   turnNavigatorMode?: MessageListTurnNavigatorMode;
   turnNavigationRequest?: MessageListTurnNavigationRequest | null;
   emptyText?: string;
@@ -78,6 +80,7 @@ export interface MessageListScrollControls {
 }
 
 export type MessageListVariant = "full" | "compact" | "overlay";
+export type MessageListPerformanceProfile = "default" | "interactivePanel";
 export type MessageListTurnNavigatorMode = "auto" | "hidden";
 export interface MessageListTurnNavigationRequest {
   requestId: number;
@@ -89,6 +92,7 @@ export function MessageList({
   loading = false,
   isProcessing = false,
   variant = "full",
+  performanceProfile = "default",
   turnNavigatorMode,
   turnNavigationRequest,
   emptyText = "暂无消息",
@@ -109,6 +113,7 @@ export function MessageList({
   const olderLoadAnchorRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const olderLoadRequestedRef = useRef(false);
   const olderLoadArmedRef = useRef(false);
+  const virtualActiveTurnFrameRef = useRef<number | null>(null);
   const virtualScrollerRef = useRef<HTMLElement | null>(null);
   const staticTurnRefsRef = useRef<Array<HTMLDivElement | null>>([]);
   const previousTurnSummaryRef = useRef<{ count: number; lastId: string | null } | null>(null);
@@ -147,11 +152,20 @@ export function MessageList({
     () => collectTurnEndStreamingCursor(visibleMessages, displayItems, isProcessing),
     [displayItems, isProcessing, visibleMessages],
   );
-  const useStaticList = shouldUseStaticMessageList(displayItems.length);
+  const useStaticList = shouldUseStaticMessageList(displayItems.length, performanceProfile);
   const [activeTurnIndex, setActiveTurnIndex] = useState(0);
   const listMode = useStaticList ? "static" : "virtual";
-  const staticAutoScroll = useAutoScroll({ deps: [displayTurns, isProcessing], itemCount: displayTurns.length });
-  const autoScroll = useVirtuosoAutoScroll(displayTurns.length);
+  const externalTurnNavigationIndex =
+    turnNavigationRequest && turnNavigationRequest.targetIndex >= 0 && turnNavigationRequest.targetIndex < displayTurns.length
+      ? turnNavigationRequest.targetIndex
+      : null;
+  const shouldAutoFollowMessages = externalTurnNavigationIndex === null;
+  const staticAutoScroll = useAutoScroll({
+    deps: [displayTurns, isProcessing],
+    itemCount: displayTurns.length,
+    autoFollow: shouldAutoFollowMessages,
+  });
+  const autoScroll = useVirtuosoAutoScroll(displayTurns.length, { autoFollow: shouldAutoFollowMessages });
   const scrollControls = useStaticList ? staticAutoScroll : autoScroll;
   const canLoadOlder = Boolean(hasMoreOlder && onLoadOlder);
   const olderLoader = renderOlderLoader({ canLoadOlder, loadingOlder, showTrigger: showOlderTrigger });
@@ -234,6 +248,14 @@ export function MessageList({
     setActiveTurnIndex((current) => (current === nextActiveIndex ? current : nextActiveIndex));
   }, []);
 
+  const updateActiveVirtualTurn = useCallback((scroller: HTMLElement | null) => {
+    const nextActiveIndex = activeVirtualTurnIndexFromMountedTurns(scroller, displayTurns.length);
+    if (nextActiveIndex === null) {
+      return;
+    }
+    setActiveTurnIndex((current) => (current === nextActiveIndex ? current : nextActiveIndex));
+  }, [displayTurns.length]);
+
   const handleStaticScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       staticAutoScroll.handleScroll(event);
@@ -246,13 +268,24 @@ export function MessageList({
   const handleVirtualScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       updateOlderLoadTrigger(event.currentTarget);
+      updateActiveVirtualTurn(event.currentTarget);
     },
-    [updateOlderLoadTrigger],
+    [updateActiveVirtualTurn, updateOlderLoadTrigger],
   );
 
-  const handleVirtualRangeChanged = useCallback((range: ListRange) => {
-    setActiveTurnIndex((current) => (current === range.startIndex ? current : range.startIndex));
-  }, []);
+  const handleVirtualRangeChanged = useCallback(() => {
+    if (typeof window === "undefined") {
+      updateActiveVirtualTurn(virtualScrollerRef.current);
+      return;
+    }
+    if (virtualActiveTurnFrameRef.current !== null) {
+      window.cancelAnimationFrame(virtualActiveTurnFrameRef.current);
+    }
+    virtualActiveTurnFrameRef.current = window.requestAnimationFrame(() => {
+      virtualActiveTurnFrameRef.current = null;
+      updateActiveVirtualTurn(virtualScrollerRef.current);
+    });
+  }, [updateActiveVirtualTurn]);
 
   const setVirtualScrollerRef = useCallback(
     (ref: HTMLElement | Window | null) => {
@@ -289,6 +322,14 @@ export function MessageList({
     },
     [updateOlderLoadTrigger],
   );
+
+  useEffect(() => {
+    return () => {
+      if (virtualActiveTurnFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(virtualActiveTurnFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (loading || !canLoadOlder) {
@@ -396,15 +437,20 @@ export function MessageList({
   const navigateToTurn = useCallback(
     (index: number) => {
       if (index < 0 || index >= displayTurns.length) {
-        return;
+        return true;
       }
       if (!useStaticList) {
-        autoScroll.virtuosoRef.current?.scrollToIndex({
+        const virtuoso = autoScroll.virtuosoRef.current;
+        if (!virtuoso) {
+          return false;
+        }
+        virtuoso.scrollToIndex({
           align: "center",
           behavior: prefersReducedMotion() ? "auto" : "smooth",
           index,
         });
-        return;
+        setActiveTurnIndex((current) => (current === index ? current : index));
+        return true;
       }
 
       const target = staticTurnRefsRef.current[index];
@@ -413,24 +459,45 @@ export function MessageList({
           block: "center",
           behavior: prefersReducedMotion() ? "auto" : "smooth",
         });
+        setActiveTurnIndex((current) => (current === index ? current : index));
+        return true;
       }
+      return false;
     },
     [autoScroll.virtuosoRef, displayTurns.length, useStaticList],
   );
 
   useEffect(() => {
-    if (!turnNavigationRequest) {
+    if (!turnNavigationRequest || loading) {
       return;
     }
     if (typeof window === "undefined") {
       navigateToTurn(turnNavigationRequest.targetIndex);
       return;
     }
-    const frameId = window.requestAnimationFrame(() => {
-      navigateToTurn(turnNavigationRequest.targetIndex);
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, [navigateToTurn, turnNavigationRequest]);
+    let cancelled = false;
+    let frameId: number | null = null;
+    let remainingAttempts = TURN_NAVIGATION_RETRY_FRAMES;
+    const attemptNavigation = () => {
+      frameId = null;
+      if (cancelled) {
+        return;
+      }
+      const navigated = navigateToTurn(turnNavigationRequest.targetIndex);
+      remainingAttempts -= 1;
+      if (navigated || remainingAttempts <= 0) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(attemptNavigation);
+    };
+    frameId = window.requestAnimationFrame(attemptNavigation);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [loading, navigateToTurn, turnNavigationRequest]);
 
   const messageListContent = useStaticList ? (
     <div
@@ -479,7 +546,6 @@ export function MessageList({
       computeItemKey={(_, turn) => turn.id}
       defaultItemHeight={120}
       increaseViewportBy={VIRTUAL_MESSAGE_VIEWPORT_BUFFER}
-      initialTopMostItemIndex={{ align: "end", index: Math.max(0, displayTurns.length - 1) }}
       followOutput={autoScroll.followOutput}
       atBottomThreshold={8}
       atTopThreshold={LOAD_OLDER_TRIGGER_PX}
@@ -489,6 +555,11 @@ export function MessageList({
       scrollerRef={setVirtualScrollerRef}
       startReached={handleVirtualStartReached}
       rangeChanged={handleVirtualRangeChanged}
+      initialTopMostItemIndex={
+        externalTurnNavigationIndex === null
+          ? { align: "end", index: Math.max(0, displayTurns.length - 1) }
+          : { align: "center", index: externalTurnNavigationIndex }
+      }
       itemContent={(_, turn) =>
         renderMessageTurn({
           turn,
@@ -511,6 +582,7 @@ export function MessageList({
       className={styles.root}
       data-list-mode={listMode}
       data-message-list-variant={variant}
+      data-performance-profile={performanceProfile}
       data-turn-navigator={showTurnNavigator ? "true" : "false"}
       data-testid="message-list"
     >
@@ -820,7 +892,7 @@ function itemKind(item: ProcessedMessageItem): ConversationMessage["kind"] | str
   return item.type === "message" ? item.message.kind : item.groupKind;
 }
 
-function shouldUseStaticMessageList(itemCount: number): boolean {
+function shouldUseStaticMessageList(itemCount: number, performanceProfile: MessageListPerformanceProfile): boolean {
   const userAgent =
     typeof navigator === "undefined" || typeof navigator.userAgent !== "string"
       ? ""
@@ -828,7 +900,11 @@ function shouldUseStaticMessageList(itemCount: number): boolean {
   if (typeof ResizeObserver === "undefined" || userAgent.includes("jsdom")) {
     return true;
   }
-  return itemCount <= STATIC_MESSAGE_LIST_ITEM_LIMIT;
+  const staticItemLimit =
+    performanceProfile === "interactivePanel"
+      ? INTERACTIVE_PANEL_STATIC_MESSAGE_LIST_ITEM_LIMIT
+      : STATIC_MESSAGE_LIST_ITEM_LIMIT;
+  return itemCount <= staticItemLimit;
 }
 
 function clampTurnIndex(index: number, count: number): number {
@@ -844,6 +920,42 @@ function isAtScrollTop(scroller: HTMLElement): boolean {
 
 function isAtScrollBottom(scroller: HTMLElement): boolean {
   return scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - SCROLL_BOUNDARY_EPSILON_PX;
+}
+
+export function activeVirtualTurnIndexFromMountedTurns(scroller: HTMLElement | null, turnCount: number): number | null {
+  if (!scroller || turnCount <= 0) {
+    return null;
+  }
+  const scrollerRect = scroller.getBoundingClientRect();
+  if (scrollerRect.height <= 0) {
+    return null;
+  }
+  if (isAtScrollTop(scroller)) {
+    return 0;
+  }
+  if (isAtScrollBottom(scroller)) {
+    return Math.max(0, turnCount - 1);
+  }
+
+  const anchorY = scrollerRect.top + scrollerRect.height * ACTIVE_TURN_ANCHOR_RATIO;
+  const mountedTurns = Array.from(scroller.querySelectorAll<HTMLElement>('[data-testid="message-turn"]'));
+  let nextActiveIndex: number | null = null;
+
+  for (const turn of mountedTurns) {
+    const turnIndex = Number(turn.dataset.index);
+    if (!Number.isInteger(turnIndex)) {
+      continue;
+    }
+    if (nextActiveIndex === null) {
+      nextActiveIndex = turnIndex;
+    }
+    if (turn.getBoundingClientRect().top > anchorY) {
+      break;
+    }
+    nextActiveIndex = turnIndex;
+  }
+
+  return nextActiveIndex === null ? null : clampTurnIndex(nextActiveIndex, turnCount);
 }
 
 export function buildTurnNavigationItemsFromMessages(messages: ConversationMessage[]): ConversationTurnNavigationItem[] {

@@ -49,6 +49,18 @@ describe("ConversationPanel", () => {
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
   });
 
+  it("passes the requested message list performance profile through the panel boundary", () => {
+    render(
+      <ConversationPanel
+        model={panelModel()}
+        workspaceRuntime={fakeRuntime()}
+        performanceProfile="interactivePanel"
+      />,
+    );
+
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
+  });
+
   it.each<ConversationPanelVariant>(["full", "compact", "overlay"])(
     "renders primary message kinds through the %s variant",
     (variant) => {

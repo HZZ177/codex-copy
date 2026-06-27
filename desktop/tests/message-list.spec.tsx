@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
 import { MessageList } from "@/renderer/pages/conversation/messages";
+import { activeVirtualTurnIndexFromMountedTurns } from "@/renderer/pages/conversation/messages/MessageList";
 import { MessageGroupBlock } from "@/renderer/pages/conversation/messages/MessageGroupBlock";
 import { useVirtuosoAutoScroll } from "@/renderer/pages/conversation/messages/useVirtuosoAutoScroll";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
@@ -31,6 +32,12 @@ describe("MessageList", () => {
 
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
     expect(screen.getByTestId("message-list-scroll").getAttribute("data-message-list-variant")).toBe("compact");
+  });
+
+  it("exposes the requested performance profile on the list root", () => {
+    render(<MessageList messages={[]} performanceProfile="interactivePanel" />);
+
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
   });
 
   it("renders a turn navigator with hover summary and static turn jumping", () => {
@@ -75,6 +82,47 @@ describe("MessageList", () => {
       expect(scrollIntoView).toHaveBeenCalledWith({
         block: "center",
         behavior: "smooth",
+      });
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+          configurable: true,
+          value: originalScrollIntoView,
+        });
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
+      }
+    }
+  });
+
+  it("keeps an external turn navigation request until delayed content is mounted", async () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      const messages = [
+        message("m1", "user", "第一轮问题"),
+        message("m2", "assistant", "第一轮回答"),
+        message("m3", "user", "第二轮问题"),
+        message("m4", "assistant", "第二轮回答"),
+      ];
+      const request = { requestId: 1, targetIndex: 1 };
+      const { rerender } = render(<MessageList messages={messages} loading turnNavigationRequest={request} />);
+
+      expect(screen.getByTestId("message-skeleton")).not.toBeNull();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      rerender(<MessageList messages={messages} turnNavigationRequest={request} />);
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "center",
+          behavior: "smooth",
+        });
       });
     } finally {
       if (originalScrollIntoView) {
@@ -221,6 +269,22 @@ describe("MessageList", () => {
         delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
       }
     }
+  });
+
+  it("anchors the virtual turn navigator to the visible viewport instead of the rendered range start", () => {
+    const scroller = document.createElement("div");
+    mockElementRect(scroller, { top: 0, height: 220 });
+    mockScrollMetrics(scroller, { scrollHeight: 3200, clientHeight: 220, scrollTop: 960 });
+    [-360, -120, 40, 220].forEach((top, index) => {
+      const turn = document.createElement("div");
+      turn.dataset.testid = "message-turn";
+      turn.setAttribute("data-testid", "message-turn");
+      turn.dataset.index = String(20 + index);
+      mockElementTop(turn, top);
+      scroller.appendChild(turn);
+    });
+
+    expect(activeVirtualTurnIndexFromMountedTurns(scroller, 72)).toBe(22);
   });
 
   it("requests older history when the static list is scrolled into the top buffer", async () => {
@@ -896,6 +960,27 @@ describe("MessageList", () => {
 
     expect(scroller.scrollTop).toBe(800);
     expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollToIndex).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-follow virtualized content after an external turn navigation target is active", () => {
+    const scrollToIndex = vi.fn();
+    const { result } = renderHook(() => useVirtuosoAutoScroll(3, { autoFollow: false }));
+    const scroller = document.createElement("div");
+    mockScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 200, scrollTop: 120 });
+
+    act(() => {
+      result.current.setScrollerRef(scroller);
+      (result.current.virtuosoRef as unknown as { current: { scrollToIndex: typeof scrollToIndex } | null }).current = {
+        scrollToIndex,
+      };
+    });
+
+    act(() => {
+      result.current.handleTotalListHeightChanged();
+    });
+
+    expect(scroller.scrollTop).toBe(120);
     expect(scrollToIndex).not.toHaveBeenCalled();
   });
 

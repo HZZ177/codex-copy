@@ -97,6 +97,8 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-composer-frame").getAttribute("data-message-trigger-visible")).toBe("false");
     expect(screen.queryByTestId("workbench-message-trigger")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
 
     await waitForSurfaceMode("drawer");
     expect(screen.getByTestId("workbench-assistant-shell")).toBe(shell);
@@ -104,6 +106,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(shell.getAttribute("data-shell-mode")).toBe("drawer");
     expect(chrome.getAttribute("data-shell-mode")).toBe("drawer");
     expect(screen.getByTestId("workbench-assistant-drawer-composer-frame").getAttribute("data-message-trigger-visible")).toBe("false");
+    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
   });
 
   it("keeps the same chrome while undocking from the drawer", async () => {
@@ -131,7 +134,8 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-morph-header")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-middle")).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
-    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
     expect(screen.getByLabelText("工作台助手输入").textContent).toContain("继续修改 README");
     await waitForSurfaceMode("drawer");
@@ -153,7 +157,8 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-message-trigger").getAttribute("data-state")).toBe("idle");
     expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
-    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
     expect(screen.getByLabelText("工作台助手输入").textContent).toContain("继续修改 README");
 
     await waitForDockTransitionIdle();
@@ -170,7 +175,14 @@ describe("WorkbenchAssistantSurface", () => {
           runtime={fakeRuntime()}
           workspaceId="ws-1"
           workspace={workspace()}
-          controller={fakeController()}
+          controller={fakeController({
+            agentMessages: [
+              agentMessage({ id: "user-1", role: "user", content: "第一轮问题" }),
+              agentMessage({ id: "assistant-1", role: "assistant", content: "第一轮回答" }),
+              agentMessage({ id: "user-2", role: "user", content: "第二轮问题" }),
+              agentMessage({ id: "assistant-2", role: "assistant", content: "第二轮回答" }),
+            ],
+          })}
         />
       </WorkbenchSurfaceTestProviders>,
     );
@@ -180,6 +192,7 @@ describe("WorkbenchAssistantSurface", () => {
     await waitForSurfaceMode("drawer");
     expect(screen.queryByRole("button", { name: "展开工作台消息层" })).toBeNull();
     expect(screen.getByRole("button", { name: "收回工作台助手为胶囊" })).not.toBeNull();
+    expect(screen.queryByTestId("workbench-mini-turn-navigator")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "收回工作台助手为胶囊" }));
 
@@ -191,10 +204,15 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-capsule").getAttribute("data-compose-collapsing")).toBe("true");
     expect(screen.getByLabelText("工作台助手输入")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "展开工作台输入框" })).toBeNull();
+    expect(screen.getByTestId("workbench-assistant-composer-frame").getAttribute("data-mini-navigator-visible")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("workbench-mini-turn-navigator").getAttribute("data-turn-count")).toBe("2");
 
     await waitForDockTransitionIdle();
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
     expect(screen.getByTestId("workbench-assistant-capsule").getAttribute("data-compose-open")).toBe("false");
+    expect(screen.getByTestId("workbench-mini-turn-navigator").getAttribute("data-turn-count")).toBe("2");
   });
 
   it("uses a lightweight drawer header instead of the full Agent chat layout header", async () => {
@@ -290,6 +308,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByText("我会先读取 README。")).not.toBeNull();
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
     expect(screen.getByTestId("tool-call-block")).not.toBeNull();
     expect(screen.getByTestId("file-change-block")).not.toBeNull();
   });
@@ -747,8 +766,13 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-expanded-panel-frame")).not.toBeNull();
     expect(screen.getByRole("button", { name: "收起工作台消息层" }).closest("form")).toBeNull();
     expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
+    expect(screen.getByTestId("workbench-expanded-panel-loading")).not.toBeNull();
+    expect(screen.queryByText("覆盖层消息")).toBeNull();
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
+    await screen.findByTestId("conversation-panel");
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("overlay");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
     expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("true");
     expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
     expect(screen.queryByTestId("workbench-mini-turn-navigator")).toBeNull();

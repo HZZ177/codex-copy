@@ -18,6 +18,7 @@ const FOLLOW_BOTTOM_THRESHOLD_PX = 4;
 export interface UseAutoScrollOptions {
   deps: readonly unknown[];
   itemCount?: number;
+  autoFollow?: boolean;
 }
 
 export interface UseAutoScrollResult {
@@ -31,7 +32,7 @@ export interface UseAutoScrollResult {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
 }
 
-export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): UseAutoScrollResult {
+export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAutoScrollOptions): UseAutoScrollResult {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -125,6 +126,9 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
   );
 
   const scheduleAutoFollow = useCallback(() => {
+    if (!autoFollow) {
+      return;
+    }
     const scrollElement = getScrollElement();
     if (!scrollElement || userPinnedRef.current || isExpansionScrollLocked(scrollElement)) {
       return;
@@ -153,7 +157,7 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
         updateBottomState(nextScrollElement);
       }
     });
-  }, [getScrollElement, scrollToBottom, updateBottomState]);
+  }, [autoFollow, getScrollElement, scrollToBottom, updateBottomState]);
 
   const handleTargetScroll = useCallback(
     (scrollElement: HTMLElement) => {
@@ -213,6 +217,10 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
     }
 
     initialScrollDoneRef.current = true;
+    if (!autoFollow) {
+      updateBottomState(scrollElement);
+      return;
+    }
     window.requestAnimationFrame(() => {
       if (userPinnedRef.current) {
         return;
@@ -220,7 +228,7 @@ export function useAutoScroll({ deps, itemCount = 0 }: UseAutoScrollOptions): Us
       scrollToBottom("auto");
       lastScrollTopRef.current = scrollElement.scrollTop;
     });
-  }, [getScrollElement, itemCount, scrollToBottom]);
+  }, [autoFollow, getScrollElement, itemCount, scrollToBottom, updateBottomState]);
 
   useLayoutEffect(() => {
     const scrollElement = getScrollElement();
