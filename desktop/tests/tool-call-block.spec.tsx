@@ -25,6 +25,7 @@ describe("ToolCallBlock", () => {
     expect(screen.queryByText("工具正在执行")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+    expect(screen.getByText("read_file")).not.toBeNull();
     expect(screen.getByLabelText("工具入参").textContent).toContain('"path": "README.md"');
     expect(screen.getByText("工具正在执行")).not.toBeNull();
   });
@@ -57,6 +58,19 @@ describe("ToolCallBlock", () => {
           { status: "success", model_content: "" },
           "grep_files",
           { query: "needle", regex: false },
+        )}
+      />,
+    );
+
+    expect(screen.getByText("已搜索文件 needle")).not.toBeNull();
+
+    rerender(
+      <ToolCallBlock
+        message={toolMessage(
+          "completed",
+          { status: "success", model_content: "" },
+          "search_files",
+          { query: "needle" },
         )}
       />,
     );

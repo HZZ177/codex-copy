@@ -236,10 +236,14 @@ describe("AppRouter", () => {
     expect(shell.dataset.rightSidebar).toBe("closed");
     expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
     const surface = await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
+    const assistantShell = screen.getByTestId("workbench-assistant-shell");
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("capsule");
+    expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("idle");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("false");
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
     expect(canvasContent.getAttribute("data-render-paused")).toBeNull();
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-capsule")).not.toBeNull();
@@ -250,21 +254,36 @@ describe("AppRouter", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
     expect(await screen.findByLabelText("工作台助手输入")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("composer");
     expect(surface.getAttribute("data-surface-mode")).toBe("composer");
 
     fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
     expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("expanded");
     expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
 
     fireEvent.click(screen.getByRole("button", { name: "收起工作台消息层" }));
     expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
 
+    await waitFor(
+      () => {
+        expect(screen.getByRole("button", { name: "展开工作台输入框" })).not.toBeNull();
+      },
+      { timeout: 2000 },
+    );
     fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
     const emptyInput = await screen.findByLabelText("工作台助手输入");
     fireEvent.pointerDown(screen.getByTestId("workspace-file-browser"));
     expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
-    expect(emptyInput.isConnected).toBe(false);
+    await waitFor(
+      () => {
+        expect(emptyInput.isConnected).toBe(false);
+      },
+      { timeout: 2000 },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
     const stickyInput = await screen.findByLabelText("工作台助手输入");
@@ -274,51 +293,76 @@ describe("AppRouter", () => {
     expect(surface.getAttribute("data-surface-mode")).toBe("composer");
 
     fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
-    expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
-    expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
-    expect(surface.getAttribute("data-dock-layout")).toBe("inline");
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("dock-morph");
+    expect(assistantShell.getAttribute("data-transition-phase")).toBe("dock-in");
+    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    expect(surface.getAttribute("data-visual-mode")).toBe("dock-morph");
+    expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("dock-in");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("true");
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("dock-in");
     expect(canvasContent.isConnected).toBe(true);
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
-    const dockInMorph = screen.getByTestId("workbench-assistant-dock-morph");
-    expect(dockInMorph.getAttribute("data-active")).toBe("false");
-    await waitFor(() => {
-      expect(dockInMorph.getAttribute("data-active")).toBe("true");
-    });
+    expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-header")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-morph-middle")).not.toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
+    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.getByLabelText("工作台助手输入").textContent).toContain("保留草稿");
+    expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
     expect(shell.dataset.rightSidebar).toBe("closed");
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
     expect(screen.queryByTestId("workbench-expanded-layer")).toBeNull();
-    await waitFor(() => {
-      expect(surface.getAttribute("data-dock-transition")).toBe("idle");
-    });
+    await waitFor(
+      () => {
+        expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+      },
+      { timeout: 2000 },
+    );
+    expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
+    expect(surface.getAttribute("data-dock-layout")).toBe("inline");
+    expect(surface.getAttribute("data-dock-transition")).toBe("idle");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("false");
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
     expect(canvasContent.getAttribute("data-render-paused")).toBeNull();
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
-    expect(screen.queryByTestId("workbench-assistant-dock-morph")).toBeNull();
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
 
     fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
-    expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-shell-mode")).toBe("dock-out-morph");
+    expect(assistantShell.getAttribute("data-transition-phase")).toBe("dock-out");
+    expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+    expect(surface.getAttribute("data-visual-mode")).toBe("dock-out-morph");
+    expect(surface.getAttribute("data-geometry-mode")).toBe("composer");
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("dock-out");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("true");
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("dock-out");
     expect(canvasContent.isConnected).toBe(true);
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
-    const dockOutMorph = screen.getByTestId("workbench-assistant-dock-morph");
-    expect(dockOutMorph.getAttribute("data-active")).toBe("false");
-    await waitFor(() => {
-      expect(dockOutMorph.getAttribute("data-active")).toBe("true");
-    });
-    await waitFor(() => {
-      expect(surface.getAttribute("data-dock-transition")).toBe("idle");
-    });
+    expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-morph-loading")).toBeNull();
+    expect(screen.getByTestId("conversation-panel")).not.toBeNull();
+    expect(screen.getByLabelText("工作台助手输入").textContent).toContain("保留草稿");
+    await waitFor(
+      () => {
+        expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+      },
+      { timeout: 2000 },
+    );
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
+    expect(surface.getAttribute("data-dock-transition")).toBe("idle");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("false");
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
     expect(canvasContent.getAttribute("data-render-paused")).toBeNull();
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
-    expect(screen.queryByTestId("workbench-assistant-dock-morph")).toBeNull();
-  });
+    expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
+    expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
+  }, 10000);
 
   it("surfaces pending approval in the workbench assistant drawer", async () => {
     const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);
@@ -337,14 +381,28 @@ describe("AppRouter", () => {
       });
     });
 
+    await waitFor(
+      () => {
+        expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+        expect(surface.getAttribute("data-visual-mode")).toBe("dock-morph");
+        expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
+        expect(surface.getAttribute("data-dock-transition")).toBe("dock-in");
+      },
+      { timeout: 2000 },
+    );
+    expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-approval-prompt")).not.toBeNull();
     expect(await screen.findByTestId("workbench-approval-prompt", undefined, { timeout: 10000 })).not.toBeNull();
+    await waitFor(
+      () => {
+        expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
+      },
+      { timeout: 2000 },
+    );
     expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
     expect(surface.getAttribute("data-dock-layout")).toBe("inline");
-    expect(surface.getAttribute("data-dock-transition")).toBe("dock-in");
+    expect(surface.getAttribute("data-dock-transition")).toBe("idle");
     expect(screen.getByText("是否允许执行命令？")).not.toBeNull();
-    await waitFor(() => {
-      expect(surface.getAttribute("data-dock-transition")).toBe("idle");
-    });
 
     fireEvent.click(screen.getByRole("button", { name: "批准" }));
 

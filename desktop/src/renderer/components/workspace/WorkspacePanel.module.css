@@ -263,9 +263,9 @@
   transform: translateY(-4px);
   transform-origin: top;
   transition:
-    height 340ms var(--motion-ease-standard),
+    height 180ms var(--motion-ease-standard),
     opacity 220ms var(--motion-ease-standard),
-    transform 340ms var(--motion-ease-standard);
+    transform 180ms var(--motion-ease-standard);
 }
 
 .nodeGroup[data-open="true"] {
@@ -293,6 +293,65 @@
   font-size: 12px;
   line-height: 1.35;
   text-align: left;
+}
+
+.directoryRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.directoryRow:hover,
+.directoryRow:focus-within {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.directoryRow:hover .nodeButton,
+.directoryRow:focus-within .nodeButton {
+  color: var(--color-text-primary);
+}
+
+.directoryRow .nodeButton:hover {
+  background: transparent;
+}
+
+.subtreeToggleButton {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  opacity: 0.72;
+  padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-standard),
+    color var(--motion-fast) var(--motion-ease-standard),
+    opacity var(--motion-fast) var(--motion-ease-standard);
+}
+
+.subtreeToggleButton:hover:not(:disabled),
+.subtreeToggleButton:focus-visible {
+  background: color-mix(in srgb, var(--color-border-subtle) 58%, transparent);
+  color: var(--color-text-primary);
+  opacity: 1;
+}
+
+.subtreeToggleButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.subtreeToggleButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-border-strong) 58%, transparent);
+  outline-offset: 1px;
 }
 
 .panel[data-chrome="panel"] .nodeButton {

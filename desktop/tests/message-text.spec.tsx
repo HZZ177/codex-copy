@@ -839,14 +839,14 @@ describe("MessageText", () => {
     fireEvent.click(screen.getByRole("button", { name: "全屏显示 Mermaid" }));
 
     const dialog = screen.getByRole("dialog", { name: "Mermaid 预览" });
-    const controls = within(dialog).getByLabelText("Mermaid 视图控制");
+    const controls = await within(dialog).findByLabelText("Mermaid 视图控制");
     expect(controls).not.toBeNull();
     expect(within(controls).getByText("100%")).not.toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "放大 Mermaid" }));
-    expect(within(controls).getByText("110%")).not.toBeNull();
+    await waitFor(() => expect(within(controls).getByText("110%")).not.toBeNull());
     expect(within(dialog).getByRole("button", { name: "缩小 Mermaid" })).not.toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "重置 Mermaid 视图" }));
-    expect(within(controls).getByText("100%")).not.toBeNull();
+    await waitFor(() => expect(within(controls).getByText("100%")).not.toBeNull());
 
     for (let index = 0; index < 90; index += 1) {
       fireEvent.click(within(dialog).getByRole("button", { name: "放大 Mermaid" }));
@@ -900,8 +900,10 @@ describe("MessageText", () => {
       .find((button) => button.querySelector(".lucide-zoom-in"));
     expect(zoomInButton).toBeDefined();
     fireEvent.click(zoomInButton as HTMLButtonElement);
-    expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("2640px");
-    expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("1320px");
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-render-width")).toBe("2640px");
+      expect(chart.style.getPropertyValue("--mermaid-render-height")).toBe("1320px");
+    });
     expect(chart.style.transform).not.toContain("scale");
   });
 
@@ -978,6 +980,13 @@ describe("MessageText", () => {
 
     await waitFor(() => {
       expect(addEventListener).toHaveBeenCalledWith("wheel", expect.any(Function), { passive: false });
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Mermaid 预览" });
+    const chart = await within(dialog).findByLabelText("Mermaid 图表") as HTMLDivElement;
+    fireEvent.wheel(chart, { clientX: 120, clientY: 140, deltaY: -30 });
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("1.1");
     });
     addEventListener.mockRestore();
   });

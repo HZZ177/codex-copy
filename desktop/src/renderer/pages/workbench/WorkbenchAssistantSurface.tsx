@@ -1,5 +1,6 @@
-import { ChevronUp, PanelRightOpen, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ChevronUp, SquareArrowOutUpRight, X } from "lucide-react";
+import { motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   type RuntimeBridge,
@@ -7,43 +8,44 @@ import {
   type WorkspaceSearchResult,
   type WorkspaceSkillSummary,
 } from "@/runtime";
-import { SendBox, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
-import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
+import { type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
+import { useRuntimeModelSelection } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
-import { ConversationComposerAccessory } from "@/renderer/pages/conversation/ComposerAccessory";
-import type { FileChangePreview } from "@/renderer/pages/conversation/messages";
-import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import { ConversationComposer } from "@/renderer/pages/conversation/ConversationComposer";
+import { ConversationPanel, ConversationPanelComposerAccessory } from "@/renderer/pages/conversation/ConversationPanel";
+import { preloadMarkdownCodeBlockRuntime } from "@/renderer/pages/conversation/messages/MarkdownCodeBlock";
+import { useConversationPanelModel } from "@/renderer/pages/conversation/useConversationPanelModel";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import { prefersReducedMotion } from "@/renderer/utils/motionPreference";
 import type {
-  AgentChatMessage,
   CommandApprovalRequest,
   Workspace,
 } from "@/types/protocol";
 
 import styles from "./WorkbenchAssistantSurface.module.css";
+import { workbenchAssistantGeometryCssVars } from "./workbenchAssistantGeometry";
+import {
+  createWorkbenchAssistantState,
+  workbenchAssistantReducer,
+  type AssistantSurfaceMode,
+} from "./workbenchAssistantState";
 
-type AssistantSurfaceMode = "capsule" | "composer" | "expanded" | "drawer";
 type DockTransitionPhase = "dock-in" | "dock-out";
+type AssistantVisualMode = AssistantSurfaceMode | "dock-morph" | "dock-out-morph";
 
-const DOCK_MORPH_DURATION_MS = 320;
-
-interface DockMorphRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  radius: number;
+export interface WorkbenchAssistantDockTransitionState {
+  phase: DockTransitionPhase | "idle";
+  reservedWidth: number;
 }
 
-interface DockMorphState {
-  phase: DockTransitionPhase;
-  from: DockMorphRect;
-  to: DockMorphRect | null;
-  targetMode: AssistantSurfaceMode;
-  active: boolean;
-}
+const DOCK_TRANSITION_DURATION_MS = 1200;
+const WORKBENCH_ASSISTANT_MOTION_TRANSITION = {
+  type: "tween",
+  duration: 1.2,
+  ease: [0.2, 0.82, 0.22, 1],
+} as const;
 
 export interface WorkbenchAssistantSurfaceProps {
   runtime: RuntimeBridge;
@@ -52,24 +54,33 @@ export interface WorkbenchAssistantSurfaceProps {
   controller: AgentSessionController;
   creatingSession?: boolean;
   onDockTransitionChange?: (transitioning: boolean) => void;
+  onDockTransitionLayoutChange?: (state: WorkbenchAssistantDockTransitionState) => void;
 }
 
 export function WorkbenchAssistantSurface({
   runtime,
   workspaceId,
-  workspace,
   controller,
   creatingSession = false,
   onDockTransitionChange,
+  onDockTransitionLayoutChange,
 }: WorkbenchAssistantSurfaceProps) {
   const layout = useLayoutState();
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const dockTransitionTimerRef = useRef<number | null>(null);
+  const dockTransitionRunIdRef = useRef(0);
+  const composeCollapseTimerRef = useRef<number | null>(null);
+  const previousSurfaceModeRef = useRef<AssistantSurfaceMode>("capsule");
   const handledFileChipRequestIdRef = useRef(controller.fileChipRequest?.requestId ?? 0);
   const handledQuoteChipRequestIdRef = useRef(controller.quoteChipRequest?.requestId ?? 0);
-  const [surfaceMode, setSurfaceMode] = useState<AssistantSurfaceMode>("capsule");
-  const [composerFocusSeq, setComposerFocusSeq] = useState(0);
-  const [dockTransition, setDockTransition] = useState<DockMorphState | null>(null);
+  const [assistantState, dispatchAssistantState] = useReducer(
+    workbenchAssistantReducer,
+    undefined,
+    createWorkbenchAssistantState,
+  );
+  const [dockTransitionPhase, setDockTransitionPhase] = useState<DockTransitionPhase | null>(null);
+  const [dockReturnMode, setDockReturnMode] = useState<"capsule" | "composer" | null>(null);
+  const [keepComposerContentDuringCollapse, setKeepComposerContentDuringCollapse] = useState(false);
   const modelSelection = useRuntimeModelSelection(runtime, "");
   const workspaceSkillScope = useMemo(() => ({ workspaceId }), [workspaceId]);
   const { state: workspaceSkillsState } = useWorkspaceSkills({
@@ -79,61 +90,164 @@ export function WorkbenchAssistantSurface({
   });
   const workspaceSkills = workspaceSkillsState.skills;
   const pendingApproval = controller.pendingApproval;
-  const projectedMessages = useMemo(() => controller.agentMessages.map(projectAgentMessage), [controller.agentMessages]);
-  const accessoryMessages = useMemo(
-    () => projectWorkbenchAccessoryMessages(controller.agentMessages),
-    [controller.agentMessages],
-  );
+  const panelSessionId = controller.session?.id ?? "";
+  const panelModel = useConversationPanelModel({
+    runtime,
+    sessionId: panelSessionId,
+    controller,
+  });
   const runtimeState = controller.runtimeState;
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
   const canStop = controller.canStop;
   const selectedModel = modelSelection.selectedModel.trim();
-  const workspaceLabel = workspace?.root_path ?? workspace?.name ?? workspaceId;
   const drawerWidth = layout.state.workbenchAssistantDrawerWidth;
-  const dockLayout = surfaceMode === "drawer" ? "inline" : "overlay";
+  const dockInlineWidth = resolveDockInlineWidth(drawerWidth);
+  const surfaceMode = assistantState.mode;
+  const dockOutTargetMode = dockReturnMode ?? (controller.draft.trim() ? "composer" : "capsule");
+  const visualSurfaceMode: AssistantVisualMode =
+    dockTransitionPhase === "dock-in"
+      ? "dock-morph"
+      : dockTransitionPhase === "dock-out"
+        ? "dock-out-morph"
+        : surfaceMode;
+  const bottomSurfaceMode: AssistantSurfaceMode =
+    dockTransitionPhase === "dock-in" ? "composer" : dockTransitionPhase === "dock-out" ? dockOutTargetMode : surfaceMode;
+  const composerFocusSeq = assistantState.focusSeq;
+  const composeOpen = bottomSurfaceMode !== "capsule";
+  const dockOutCollapsingToCapsule = dockTransitionPhase === "dock-out" && dockOutTargetMode === "capsule";
+  const showFullComposerContent = composeOpen || keepComposerContentDuringCollapse || dockOutCollapsingToCapsule;
+  const collapsingComposer = (!composeOpen && keepComposerContentDuringCollapse) || dockOutCollapsingToCapsule;
+  const dockLayout = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out" ? "inline" : "overlay";
+  const renderDrawerContent = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out";
+  const renderMorphContent = dockTransitionPhase !== null;
+  const renderBottomContent = true;
+  const reducedMotion = prefersReducedMotion();
+  const visualComposeOpen = composeOpen || dockOutCollapsingToCapsule;
+  const enableDockChildLayout = !reducedMotion && dockTransitionPhase !== "dock-out";
+  const geometryMode: AssistantSurfaceMode =
+    dockTransitionPhase === "dock-in" ? "drawer" : dockTransitionPhase === "dock-out" ? dockOutTargetMode : surfaceMode;
+  const geometryVars = workbenchAssistantGeometryCssVars(geometryMode, {
+    drawerWidth,
+    viewportWidth: typeof window === "undefined" ? 1440 : window.innerWidth,
+  });
 
   const finishDockTransition = useCallback(() => {
+    dockTransitionRunIdRef.current += 1;
     if (dockTransitionTimerRef.current !== null && typeof window !== "undefined") {
       window.clearTimeout(dockTransitionTimerRef.current);
     }
     dockTransitionTimerRef.current = null;
-    setDockTransition(null);
+    setDockTransitionPhase(null);
     onDockTransitionChange?.(false);
-  }, [onDockTransitionChange]);
+    onDockTransitionLayoutChange?.({ phase: "idle", reservedWidth: 0 });
+  }, [onDockTransitionChange, onDockTransitionLayoutChange]);
+
+  const finishComposeCollapse = useCallback(() => {
+    if (composeCollapseTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(composeCollapseTimerRef.current);
+    }
+    composeCollapseTimerRef.current = null;
+    setKeepComposerContentDuringCollapse(false);
+  }, []);
+
+  const beginComposeCollapse = useCallback(() => {
+    if (reducedMotion) {
+      finishComposeCollapse();
+      return;
+    }
+    setKeepComposerContentDuringCollapse(true);
+    if (composeCollapseTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(composeCollapseTimerRef.current);
+    }
+    if (typeof window === "undefined") {
+      finishComposeCollapse();
+      return;
+    }
+    composeCollapseTimerRef.current = window.setTimeout(finishComposeCollapse, DOCK_TRANSITION_DURATION_MS);
+  }, [finishComposeCollapse, reducedMotion]);
 
   const beginDockTransition = useCallback(
-    (phase: DockTransitionPhase, from: DockMorphRect, targetMode: AssistantSurfaceMode) => {
+    (phase: DockTransitionPhase, onComplete: () => void) => {
+      const transitionRunId = dockTransitionRunIdRef.current + 1;
+      dockTransitionRunIdRef.current = transitionRunId;
       if (dockTransitionTimerRef.current !== null && typeof window !== "undefined") {
         window.clearTimeout(dockTransitionTimerRef.current);
       }
       dockTransitionTimerRef.current = null;
+      if (phase === "dock-in") {
+        void preloadMarkdownCodeBlockRuntime().catch(() => undefined);
+      }
+      const completeTransition = () => {
+        if (dockTransitionRunIdRef.current !== transitionRunId) {
+          return;
+        }
+        onComplete();
+        finishDockTransition();
+      };
+      if (reducedMotion) {
+        completeTransition();
+        return;
+      }
       onDockTransitionChange?.(true);
-      setDockTransition({
-        phase,
-        from,
-        targetMode,
-        active: false,
-        to: null,
-      });
+      onDockTransitionLayoutChange?.({ phase, reservedWidth: dockInlineWidth });
+      setDockTransitionPhase(phase);
+      if (typeof window === "undefined") {
+        completeTransition();
+        return;
+      }
+      dockTransitionTimerRef.current = window.setTimeout(() => {
+        dockTransitionTimerRef.current = null;
+        completeTransition();
+      }, DOCK_TRANSITION_DURATION_MS);
     },
-    [onDockTransitionChange],
+    [dockInlineWidth, finishDockTransition, onDockTransitionChange, onDockTransitionLayoutChange, reducedMotion],
   );
 
   useEffect(() => {
     finishDockTransition();
-    setSurfaceMode("capsule");
+    setDockReturnMode(null);
+    dispatchAssistantState({ type: "workspace-reset" });
     handledFileChipRequestIdRef.current = controller.fileChipRequest?.requestId ?? 0;
     handledQuoteChipRequestIdRef.current = controller.quoteChipRequest?.requestId ?? 0;
-  }, [finishDockTransition, workspaceId]);
+  }, [finishDockTransition, panelSessionId, workspaceId]);
 
   useEffect(() => () => finishDockTransition(), [finishDockTransition]);
 
+  useEffect(() => () => finishComposeCollapse(), [finishComposeCollapse]);
+
   useEffect(() => {
-    if (surfaceMode === "capsule" && controller.draft.trim()) {
-      setSurfaceMode("composer");
+    const previousMode = previousSurfaceModeRef.current;
+    previousSurfaceModeRef.current = surfaceMode;
+
+    if (surfaceMode !== "capsule") {
+      finishComposeCollapse();
+      return;
     }
-  }, [controller.draft, surfaceMode]);
+
+    if (keepComposerContentDuringCollapse) {
+      return;
+    }
+
+    const shouldKeepContent =
+      !reducedMotion && (previousMode === "composer" || previousMode === "expanded");
+    if (!shouldKeepContent) {
+      finishComposeCollapse();
+      return;
+    }
+
+    beginComposeCollapse();
+  }, [
+    beginComposeCollapse,
+    finishComposeCollapse,
+    keepComposerContentDuringCollapse,
+    reducedMotion,
+    surfaceMode,
+  ]);
+
+  useEffect(() => {
+    dispatchAssistantState({ type: "draft-changed", hasDraft: Boolean(controller.draft.trim()) });
+  }, [controller.draft]);
 
   useEffect(() => {
     const fileRequestId = controller.fileChipRequest?.requestId ?? 0;
@@ -146,18 +260,16 @@ export function WorkbenchAssistantSurface({
     if (!hasNewContextRequest || surfaceMode === "drawer") {
       return;
     }
-    if (surfaceMode === "capsule") {
-      setSurfaceMode("composer");
-    }
-    setComposerFocusSeq((seq) => seq + 1);
+    dispatchAssistantState({ type: "context-injected" });
   }, [controller.fileChipRequest?.requestId, controller.quoteChipRequest?.requestId, surfaceMode]);
 
   useEffect(() => {
     if (pendingApproval) {
       if (surfaceMode !== "drawer") {
-        const from = measureCapsuleTargetRect(surfaceRef.current, surfaceMode, fallbackDockSourceRect());
-        beginDockTransition("dock-in", from, "drawer");
-        setSurfaceMode("drawer");
+        setDockReturnMode(null);
+        beginDockTransition("dock-in", () => {
+          dispatchAssistantState({ type: "approval-pending" });
+        });
       }
     }
   }, [beginDockTransition, pendingApproval, surfaceMode]);
@@ -171,65 +283,12 @@ export function WorkbenchAssistantSurface({
       if (target && surfaceRef.current?.contains(target)) {
         return;
       }
-      setSurfaceMode("capsule");
+      beginComposeCollapse();
+      dispatchAssistantState({ type: "workspace-reset" });
     };
     document.addEventListener("pointerdown", collapseOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", collapseOnOutsidePointer);
-  }, [controller.draft, surfaceMode]);
-
-  useEffect(() => {
-    if (!dockTransition || dockTransition.to || dockTransition.active) {
-      return;
-    }
-    let cancelled = false;
-    let firstFrame: number | null = null;
-    let secondFrame: number | null = null;
-
-    const activateMorph = () => {
-      if (cancelled) {
-        return;
-      }
-      const to =
-        dockTransition.phase === "dock-in"
-          ? measureDockTargetRect(surfaceRef.current, drawerWidth, dockTransition.from)
-          : measureDockOutTargetRect(surfaceRef.current, dockTransition.targetMode, dockTransition.from);
-      setDockTransition((current) =>
-        current && current.phase === dockTransition.phase
-          ? {
-              ...current,
-              to,
-              active: true,
-            }
-          : current,
-      );
-      if (typeof window === "undefined") {
-        finishDockTransition();
-        return;
-      }
-      dockTransitionTimerRef.current = window.setTimeout(finishDockTransition, DOCK_MORPH_DURATION_MS);
-    };
-
-    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-      activateMorph();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(activateMorph);
-    });
-
-    return () => {
-      cancelled = true;
-      if (firstFrame !== null) {
-        window.cancelAnimationFrame(firstFrame);
-      }
-      if (secondFrame !== null) {
-        window.cancelAnimationFrame(secondFrame);
-      }
-    };
-  }, [dockTransition, drawerWidth, finishDockTransition]);
+  }, [beginComposeCollapse, controller.draft, surfaceMode]);
 
   useEffect(() => {
     if (
@@ -261,35 +320,31 @@ export function WorkbenchAssistantSurface({
   );
 
   const openComposer = useCallback(() => {
-    setSurfaceMode("composer");
-    setComposerFocusSeq((seq) => seq + 1);
+    dispatchAssistantState({ type: "open-composer" });
   }, []);
 
   const closeDrawer = useCallback(() => {
-    const targetMode: AssistantSurfaceMode = controller.draft.trim() ? "composer" : "capsule";
-    const from = measureDockTargetRect(surfaceRef.current, drawerWidth, fallbackDockSourceRect());
-    beginDockTransition("dock-out", from, targetMode);
-    setSurfaceMode(targetMode);
-  }, [beginDockTransition, controller.draft, drawerWidth]);
+    const hasDraft = Boolean(controller.draft.trim());
+    setDockReturnMode(hasDraft ? "composer" : "capsule");
+    beginDockTransition("dock-out", () => {
+      dispatchAssistantState({ type: "close-drawer", hasDraft });
+      setDockReturnMode(null);
+    });
+  }, [beginDockTransition, controller.draft]);
 
   const dockToDrawer = useCallback(() => {
-    const from = measureCapsuleTargetRect(surfaceRef.current, surfaceMode, fallbackDockSourceRect());
-    beginDockTransition("dock-in", from, "drawer");
-    setSurfaceMode("drawer");
-    setComposerFocusSeq((seq) => seq + 1);
-  }, [beginDockTransition, surfaceMode]);
+    setDockReturnMode(null);
+    beginDockTransition("dock-in", () => {
+      dispatchAssistantState({ type: "dock-to-drawer" });
+    });
+  }, [beginDockTransition]);
 
   const toggleExpandedLayer = useCallback(() => {
-    setSurfaceMode((mode) => {
-      if (mode === "expanded") {
-        return controller.draft.trim() ? "composer" : "capsule";
-      }
-      return "expanded";
-    });
-    setComposerFocusSeq((seq) => seq + 1);
-  }, [controller.draft]);
-
-  const ignoreFilePreview = useCallback((_file: FileChangePreview) => undefined, []);
+    if (surfaceMode === "expanded" && !controller.draft.trim()) {
+      beginComposeCollapse();
+    }
+    dispatchAssistantState({ type: "toggle-expanded", hasDraft: Boolean(controller.draft.trim()) });
+  }, [beginComposeCollapse, controller.draft, surfaceMode]);
 
   const submitApproval = useCallback(
     (approved: boolean) =>
@@ -324,15 +379,96 @@ export function WorkbenchAssistantSurface({
     />
   );
 
-  const accessory = (
-    <ConversationComposerAccessory
-      messages={accessoryMessages}
-      showScrollToBottom={false}
-      showScrollButton={false}
-      onFilePreview={ignoreFilePreview}
-      onScrollToBottom={() => undefined}
-    />
+  const accessory = <ConversationPanelComposerAccessory model={panelModel} showScrollButton={false} />;
+
+  const hasCodeBlockMessages = useMemo(
+    () => panelModel.messages.some((message) => valueContainsMarkdownCodeFence(message)),
+    [panelModel.messages],
   );
+  const stablePanelMode = renderDrawerContent ? "drawer" : renderMorphContent ? "morph" : "prewarm";
+  const shouldMountStablePanel =
+    surfaceMode !== "expanded" && (hasCodeBlockMessages || renderMorphContent || renderDrawerContent);
+  const stablePanelTestId =
+    stablePanelMode === "drawer"
+      ? "workbench-assistant-drawer"
+      : stablePanelMode === "morph"
+        ? "workbench-assistant-morph-panel"
+        : "workbench-assistant-panel-prewarm";
+  const stablePanelHeaderTestId =
+    stablePanelMode === "drawer"
+      ? "workbench-assistant-drawer-header"
+      : stablePanelMode === "morph"
+        ? "workbench-assistant-morph-header"
+        : undefined;
+  const stableConversationPanel = shouldMountStablePanel ? (
+    <ConversationPanel
+      model={panelModel}
+      workspaceRuntime={runtime}
+      variant="compact"
+      emptyText="当前工作空间还没有助手消息。"
+      emptyTestId={`workbench-${stablePanelMode === "drawer" ? "drawer" : "morph"}-message-empty`}
+      scrollButtonMode="external"
+      turnNavigatorMode="hidden"
+      className={styles.drawerPanel}
+    />
+  ) : null;
+  const overlayConversationPanel =
+    surfaceMode === "expanded" && dockTransitionPhase === null ? (
+      <ConversationPanel
+        model={panelModel}
+        workspaceRuntime={runtime}
+        variant="overlay"
+        emptyText="当前工作空间还没有助手消息。"
+        emptyTestId="workbench-expanded-message-empty"
+        scrollButtonMode="external"
+        turnNavigatorMode="hidden"
+        className={styles.overlayPanel}
+      />
+    ) : null;
+  const stableAssistantPanel = shouldMountStablePanel ? (
+    <section
+      className={[
+        styles.morphPanel,
+        stablePanelMode === "drawer" ? styles.drawer : "",
+        stablePanelMode === "prewarm" ? styles.prewarmPanel : "",
+      ].filter(Boolean).join(" ")}
+      data-panel-mode={stablePanelMode}
+      data-testid={stablePanelTestId}
+      aria-hidden={stablePanelMode === "prewarm" ? "true" : undefined}
+      aria-label={stablePanelMode === "drawer" ? "工作台助手" : "工作台助手过渡面板"}
+    >
+      <header className={styles.drawerHeader} data-testid={stablePanelHeaderTestId}>
+        <div className={styles.drawerTitle}>
+          <span>助手</span>
+          <small>{drawerStatusText(runtimeState, pendingApproval)}</small>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭工作台助手侧栏"
+          aria-hidden={stablePanelMode === "drawer" ? undefined : "true"}
+          data-visible={stablePanelMode === "drawer" ? "true" : "false"}
+          tabIndex={stablePanelMode === "drawer" ? 0 : -1}
+          onClick={closeDrawer}
+        >
+          <X size={15} />
+        </button>
+      </header>
+      <div
+        className={styles.morphMiddle}
+        data-testid={stablePanelMode === "morph" ? "workbench-assistant-morph-middle" : undefined}
+      >
+        {stableConversationPanel}
+        {stablePanelMode !== "prewarm" && pendingApproval ? (
+          <WorkbenchApprovalPrompt
+            approval={pendingApproval}
+            error={controller.approvalError}
+            submitting={controller.approvalSubmitting}
+            onSubmit={submitApproval}
+          />
+        ) : null}
+      </div>
+    </section>
+  ) : null;
 
   return (
     <div
@@ -340,234 +476,151 @@ export function WorkbenchAssistantSurface({
       className={styles.surface}
       data-testid="workbench-assistant-surface"
       data-surface-mode={surfaceMode}
+      data-visual-mode={visualSurfaceMode}
+      data-geometry-mode={geometryMode}
+      data-dock-out-target={dockOutTargetMode}
       data-dock-layout={dockLayout}
-      data-dock-transition={dockTransition?.phase ?? "idle"}
+      data-dock-transition={dockTransitionPhase ?? "idle"}
       data-running={runtimeState === "running" ? "true" : "false"}
       data-pending-approval={pendingApproval ? "true" : "false"}
-      style={{ "--workbench-assistant-dock-width": `${drawerWidth}px` } as CSSProperties}
+      style={
+        {
+          ...geometryVars,
+          "--workbench-assistant-dock-width": `${drawerWidth}px`,
+          "--workbench-assistant-dock-inline-size": `${dockInlineWidth}px`,
+        } as CSSProperties
+      }
     >
-      {surfaceMode === "expanded" ? (
-        <div className={styles.expandedLayer} data-testid="workbench-expanded-layer">
-          <WorkbenchMessageProjection
-            messages={projectedMessages}
-            runtimeDetail={controller.runtimeDetail}
-            workspaceLabel={workspaceLabel}
-          />
-          {pendingApproval ? (
-            <WorkbenchApprovalPrompt
-              approval={pendingApproval}
-              error={controller.approvalError}
-              submitting={controller.approvalSubmitting}
-              onSubmit={submitApproval}
-            />
-          ) : null}
-        </div>
-      ) : null}
-      {surfaceMode === "drawer" ? (
-        <aside
-          className={styles.drawer}
-          data-testid="workbench-assistant-drawer"
-          aria-label="工作台助手"
-        >
-          <header className={styles.drawerHeader}>
-            <span>助手</span>
-            <button type="button" aria-label="关闭工作台助手侧栏" onClick={closeDrawer}>
-              <X size={15} />
-            </button>
-          </header>
-          <WorkbenchMessageProjection
-            messages={projectedMessages}
-            runtimeDetail={controller.runtimeDetail}
-            workspaceLabel={workspaceLabel}
-          />
-          {pendingApproval ? (
-            <WorkbenchApprovalPrompt
-              approval={pendingApproval}
-              error={controller.approvalError}
-              submitting={controller.approvalSubmitting}
-              onSubmit={submitApproval}
-            />
-          ) : null}
-          <div className={styles.drawerComposer}>
-            <div className={styles.drawerAccessory}>{accessory}</div>
-            {composer}
+      <WorkbenchAssistantShell
+        mode={visualSurfaceMode}
+        geometryMode={geometryMode}
+        dockOutTargetMode={dockOutTargetMode}
+        dockLayout={dockLayout}
+        transitionPhase={dockTransitionPhase ?? "idle"}
+        reducedMotion={reducedMotion}
+      >
+        {surfaceMode === "expanded" && dockTransitionPhase === null ? (
+          <div className={styles.expandedLayer} data-testid="workbench-expanded-layer">
+            {overlayConversationPanel}
+            {pendingApproval ? (
+              <WorkbenchApprovalPrompt
+                approval={pendingApproval}
+                error={controller.approvalError}
+                submitting={controller.approvalSubmitting}
+                onSubmit={submitApproval}
+              />
+            ) : null}
           </div>
-        </aside>
-      ) : null}
-      {surfaceMode !== "drawer" ? (
-        <div
-          className={styles.capsule}
-          data-compose-open={surfaceMode === "capsule" ? "false" : "true"}
-          data-testid="workbench-assistant-capsule"
-        >
-          {surfaceMode === "capsule" ? (
-            <div className={styles.capsuleCluster}>
-              <div className={styles.capsuleAccessory}>{accessory}</div>
-              <button
-                className={styles.miniComposer}
-                type="button"
-                aria-label="展开工作台输入框"
-                onClick={openComposer}
-              >
-                <span>要求后续变更</span>
-              </button>
-              <button
-                className={styles.dockHandle}
-                type="button"
-                aria-label="将工作台助手展开到右侧"
-                title="展开到右侧"
-                onClick={dockToDrawer}
-              >
-                <PanelRightOpen size={15} />
-              </button>
-            </div>
-          ) : (
-            <div className={styles.composerStack}>
-              <div className={styles.composerAccessory}>{accessory}</div>
-              <div className={styles.composerShell}>
-                {composer}
-                <button
-                  className={styles.composerDockHandle}
+        ) : null}
+        {stableAssistantPanel}
+        {renderBottomContent ? (
+          <motion.div
+            className={styles.capsule}
+            layout={enableDockChildLayout ? "position" : false}
+            transition={reducedMotion ? { duration: 0 } : WORKBENCH_ASSISTANT_MOTION_TRANSITION}
+            data-compose-open={visualComposeOpen ? "true" : "false"}
+            data-compose-collapsing={collapsingComposer ? "true" : "false"}
+            data-testid="workbench-assistant-capsule"
+          >
+            <motion.div
+              className={styles.composerFrame}
+              layout={enableDockChildLayout}
+              transition={reducedMotion ? { duration: 0 } : WORKBENCH_ASSISTANT_MOTION_TRANSITION}
+              data-compose-open={visualComposeOpen ? "true" : "false"}
+              data-compose-collapsing={collapsingComposer ? "true" : "false"}
+              data-testid={renderDrawerContent ? "workbench-assistant-drawer-composer-frame" : "workbench-assistant-composer-frame"}
+            >
+              <div className={styles.composerFrameHeader}>
+                <motion.div
+                  className={styles.composerFrameAccessory}
+                >
+                  {accessory}
+                </motion.div>
+                <motion.button
+                  className={styles.dockHandle}
                   type="button"
                   aria-label="将工作台助手展开到右侧"
                   title="展开到右侧"
                   onClick={dockToDrawer}
                 >
-                  <PanelRightOpen size={15} />
-                </button>
+                  <SquareArrowOutUpRight size={15} />
+                </motion.button>
               </div>
-            </div>
-          )}
-        </div>
-      ) : null}
-      {dockTransition ? <DockMorph transition={dockTransition} /> : null}
+              <motion.div
+                className={styles.inputSurface}
+                layout={enableDockChildLayout}
+                transition={reducedMotion ? { duration: 0 } : WORKBENCH_ASSISTANT_MOTION_TRANSITION}
+                data-compose-open={visualComposeOpen ? "true" : "false"}
+                data-compose-collapsing={collapsingComposer ? "true" : "false"}
+                data-testid={renderDrawerContent ? "workbench-assistant-drawer-input-surface" : "workbench-assistant-input-surface"}
+                onClick={composeOpen ? undefined : openComposer}
+              >
+                {showFullComposerContent ? (
+                  <div className={styles.composerShell} data-collapsing={collapsingComposer ? "true" : "false"}>
+                    {composer}
+                  </div>
+                ) : (
+                  <button
+                    className={styles.miniComposer}
+                    type="button"
+                    aria-label="展开工作台输入框"
+                    onClick={openComposer}
+                  >
+                    <span>要求后续变更</span>
+                  </button>
+                )}
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </WorkbenchAssistantShell>
     </div>
   );
 }
 
-function DockMorph({ transition }: { transition: DockMorphState }) {
-  const rect = transition.active && transition.to ? transition.to : transition.from;
-  const radius = transition.active && transition.to ? transition.to.radius : transition.from.radius;
-  const style = {
-    left: `${rect.left}px`,
-    top: `${rect.top}px`,
-    width: `${rect.width}px`,
-    height: `${rect.height}px`,
-    borderRadius: `${radius}px`,
-  } as CSSProperties;
+function WorkbenchAssistantShell({
+  children,
+  dockLayout,
+  dockOutTargetMode,
+  geometryMode,
+  mode,
+  reducedMotion,
+  transitionPhase,
+}: {
+  children: ReactNode;
+  dockLayout: "inline" | "overlay";
+  dockOutTargetMode: AssistantSurfaceMode;
+  geometryMode: AssistantSurfaceMode;
+  mode: AssistantVisualMode;
+  reducedMotion: boolean;
+  transitionPhase: DockTransitionPhase | "idle";
+}) {
+  const chromeLayout =
+    reducedMotion || mode === "dock-out-morph" ? false : dockLayout === "inline" || transitionPhase !== "idle" ? true : "position";
+
   return (
     <div
-      className={styles.dockMorph}
-      data-testid="workbench-assistant-dock-morph"
-      data-phase={transition.phase}
-      data-active={transition.active ? "true" : "false"}
-      aria-hidden="true"
-      style={style}
+      className={styles.shell}
+      data-testid="workbench-assistant-shell"
+      data-dock-layout={dockLayout}
+      data-dock-out-target={dockOutTargetMode}
+      data-geometry-mode={geometryMode}
+      data-shell-mode={mode}
+      data-transition-phase={transitionPhase}
     >
-      <div className={styles.dockMorphHeader} />
-      <div className={styles.dockMorphLines}>
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className={styles.dockMorphComposer} />
+      <motion.div
+        className={styles.chrome}
+        data-testid="workbench-assistant-chrome"
+        data-dock-out-target={dockOutTargetMode}
+        data-geometry-mode={geometryMode}
+        data-shell-mode={mode}
+        layout={chromeLayout}
+        transition={reducedMotion ? { duration: 0 } : WORKBENCH_ASSISTANT_MOTION_TRANSITION}
+      >
+        {children}
+      </motion.div>
     </div>
   );
-}
-
-function measureCapsuleTargetRect(
-  surface: HTMLDivElement | null,
-  mode: AssistantSurfaceMode,
-  fallback: DockMorphRect,
-): DockMorphRect {
-  const capsule = surface?.querySelector<HTMLElement>('[data-testid="workbench-assistant-capsule"]') ?? null;
-  const radius = mode === "capsule" ? 22 : 20;
-  return rectFromElement(capsule, radius) ?? fallbackBottomRect(surface, mode, fallback);
-}
-
-function measureDockOutTargetRect(
-  surface: HTMLDivElement | null,
-  mode: AssistantSurfaceMode,
-  fallback: DockMorphRect,
-): DockMorphRect {
-  return measureCapsuleTargetRect(surface, mode, fallback);
-}
-
-function measureDockTargetRect(
-  surface: HTMLDivElement | null,
-  drawerWidth: number,
-  fallback: DockMorphRect,
-): DockMorphRect {
-  const surfaceRect = rectFromElement(surface, 0);
-  const workspaceRect = rectFromElement(surface?.parentElement ?? null, 0);
-  if (!workspaceRect) {
-    return surfaceRect ?? fallback;
-  }
-  const width = Math.min(resolveDockInlineWidth(drawerWidth), workspaceRect.width);
-  return {
-    left: workspaceRect.left + workspaceRect.width - width,
-    top: workspaceRect.top,
-    width,
-    height: workspaceRect.height,
-    radius: 0,
-  };
-}
-
-function rectFromElement(element: Element | null, radius: number): DockMorphRect | null {
-  if (!element) {
-    return null;
-  }
-  const rect = element.getBoundingClientRect();
-  if (rect.width < 1 || rect.height < 1) {
-    return null;
-  }
-  return {
-    left: Math.round(rect.left),
-    top: Math.round(rect.top),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
-    radius,
-  };
-}
-
-function fallbackBottomRect(
-  surface: HTMLDivElement | null,
-  mode: AssistantSurfaceMode,
-  fallback: DockMorphRect,
-): DockMorphRect {
-  const workspaceRect = rectFromElement(surface?.parentElement ?? null, 0);
-  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
-  const baseLeft = workspaceRect?.left ?? 0;
-  const baseTop = workspaceRect?.top ?? 0;
-  const baseWidth = workspaceRect?.width ?? viewportWidth;
-  const baseHeight = workspaceRect?.height ?? viewportHeight;
-  const width = Math.min(mode === "capsule" ? 560 : 640, Math.max(280, baseWidth - 56));
-  const height = mode === "capsule" ? 44 : 98;
-  if (baseWidth <= 0 || baseHeight <= 0) {
-    return fallback;
-  }
-  return {
-    left: Math.round(baseLeft + (baseWidth - width) / 2),
-    top: Math.round(baseTop + baseHeight - 16 - height),
-    width: Math.round(width),
-    height,
-    radius: mode === "capsule" ? 22 : 20,
-  };
-}
-
-function fallbackDockSourceRect(): DockMorphRect {
-  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
-  const width = Math.min(640, Math.max(280, viewportWidth - 56));
-  const height = 92;
-  return {
-    left: Math.round((viewportWidth - width) / 2),
-    top: Math.round(viewportHeight - 16 - height),
-    width: Math.round(width),
-    height,
-    radius: 20,
-  };
 }
 
 function resolveDockInlineWidth(drawerWidth: number): number {
@@ -576,6 +629,24 @@ function resolveDockInlineWidth(drawerWidth: number): number {
     return Math.min(380, Math.max(300, viewportWidth * 0.48));
   }
   return Math.min(Math.max(320, drawerWidth), 520, viewportWidth * 0.46);
+}
+
+function valueContainsMarkdownCodeFence(value: unknown, depth = 0): boolean {
+  if (depth > 5 || value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.includes("```") || value.includes("~~~");
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => valueContainsMarkdownCodeFence(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) =>
+      valueContainsMarkdownCodeFence(item, depth + 1),
+    );
+  }
+  return false;
 }
 
 function WorkbenchApprovalPrompt({
@@ -648,16 +719,15 @@ function WorkbenchComposer({
   onListWorkspaceDirectory: (path: string) => Promise<WorkspaceSearchResult[]>;
 }) {
   return (
-    <SendBox
+    <ConversationComposer
       value={value}
       runtimeState={runtimeState}
       canSend={canSend}
       canStop={canStop}
-      ariaLabel="工作台助手表单"
-      inputLabel="工作台助手输入"
-      placeholder="要求后续变更"
-      statusText={composerStatusText(runtimeState, connectionReady)}
-      variant="keydex"
+      connectionReady={connectionReady}
+      modelSelection={modelSelection}
+      workspaceSkills={workspaceSkills}
+      selectedSkill={selectedSkill}
       autoFocusKey={autoFocusKey}
       className={styles.composer}
       controls={
@@ -671,22 +741,12 @@ function WorkbenchComposer({
           <ChevronUp size={15} />
         </button>
       }
-      rightControls={
-        <RuntimeModelSelector
-          model={modelSelection.selectedModel}
-          modelOptions={modelSelection.modelOptions}
-          modelLoadState={modelSelection.modelLoadState}
-          modelError={modelSelection.modelError}
-          disabled={isBusy(runtimeState)}
-          placement="top"
-          onModelChange={modelSelection.setSelectedModel}
-        />
-      }
-      allowFileSelection
+      placeholder="要求后续变更"
+      ariaLabel="工作台助手表单"
+      inputLabel="工作台助手输入"
+      modelSelectorPlacement="top"
       externalFileRequest={fileChipRequest}
       externalQuoteRequest={quoteChipRequest}
-      workspaceSkills={workspaceSkills}
-      selectedSkill={selectedSkill}
       onChange={onChange}
       onSkillChange={onSkillChange}
       onSend={onSend}
@@ -697,171 +757,6 @@ function WorkbenchComposer({
   );
 }
 
-function WorkbenchMessageProjection({
-  messages,
-  runtimeDetail,
-  workspaceLabel,
-}: {
-  messages: ProjectedMessage[];
-  runtimeDetail: string | null;
-  workspaceLabel: string;
-}) {
-  const visibleMessages = messages.slice(-8);
-  return (
-    <div className={styles.messages} data-testid="workbench-message-projection" aria-label="工作台助手消息">
-      {visibleMessages.length ? (
-        visibleMessages.map((message) => (
-          <article className={styles.messageBubble} data-role={message.role} key={message.id}>
-            <span>{message.label}</span>
-            <p>{message.content}</p>
-          </article>
-        ))
-      ) : (
-        <article className={styles.messageBubble} data-role="status">
-          <span>{workspaceLabel}</span>
-          <p>当前工作空间还没有助手消息。</p>
-        </article>
-      )}
-      {runtimeDetail ? (
-        <article className={styles.messageBubble} data-role="error" role="alert">
-          <span>运行状态</span>
-          <p>{runtimeDetail}</p>
-        </article>
-      ) : null}
-    </div>
-  );
-}
-
-interface ProjectedMessage {
-  id: string;
-  role: "user" | "assistant" | "tool" | "status" | "error";
-  label: string;
-  content: string;
-}
-
-function projectWorkbenchAccessoryMessages(messages: AgentChatMessage[]): ConversationMessage[] {
-  return messages
-    .map<ConversationMessage | null>((message, index) => {
-      const createdAt = new Date(message.timestamp || Date.now()).toISOString();
-      const base = {
-        id: `workbench:${message.id}`,
-        threadId: message.sessionId,
-        turnId: message.turnIndex === undefined || message.turnIndex === null ? null : `turn:${message.turnIndex}`,
-        itemId: message.runId ?? message.toolCallId ?? message.id,
-        content: message.content,
-        createdAt,
-        updatedAt: createdAt,
-      };
-      if (message.role === "user") {
-        return {
-          ...base,
-          kind: "user" as const,
-          payload: { text: message.content, _sortSeq: index },
-        };
-      }
-      if (message.toolName === "update_plan") {
-        const parsedResult = parseMaybeJson(message.toolResult);
-        return {
-          ...base,
-          kind: "plan" as const,
-          status: workbenchMessageStatus(message),
-          payload: {
-            call: { name: message.toolName, arguments: message.toolParams },
-            result: parsedResult ?? message.toolResult,
-            ui_payload: message.uiPayload,
-            uiPayload: message.uiPayload,
-            output_data: parsedResult,
-            _sortSeq: index,
-          },
-        };
-      }
-      const fileChanges = message.fileChanges ?? fileChangesFromUiPayload(message.uiPayload);
-      if (message.role === "tool" && fileChanges.length) {
-        return {
-          ...base,
-          kind: "file_change" as const,
-          status: workbenchMessageStatus(message),
-          payload: {
-            tool_name: message.toolName,
-            toolName: message.toolName,
-            params: message.toolParams,
-            files: fileChanges,
-            ui_payload: message.uiPayload,
-            uiPayload: message.uiPayload,
-            result: {
-              status: message.status,
-              files: fileChanges,
-              ui_payload: message.uiPayload,
-            },
-            _sortSeq: index,
-          },
-        };
-      }
-      return null;
-    })
-    .filter((message): message is ConversationMessage => message !== null);
-}
-
-function workbenchMessageStatus(message: AgentChatMessage): ConversationMessage["status"] {
-  if (message.status === "running" || message.status === "pending") {
-    return "running";
-  }
-  if (message.status === "error" || message.status === "failed") {
-    return "failed";
-  }
-  if (message.status === "cancelled") {
-    return "cancelled";
-  }
-  return "completed";
-}
-
-function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): NonNullable<AgentChatMessage["fileChanges"]> {
-  if (!uiPayload) {
-    return [];
-  }
-  const raw = Array.isArray(uiPayload.files)
-    ? uiPayload.files
-    : Array.isArray(uiPayload.changes)
-      ? uiPayload.changes
-      : [];
-  return raw.filter((item): item is NonNullable<AgentChatMessage["fileChanges"]>[number] =>
-    Boolean(item && typeof item === "object" && !Array.isArray(item) && typeof (item as { path?: unknown }).path === "string"),
-  );
-}
-
-function parseMaybeJson(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function projectAgentMessage(message: AgentChatMessage): ProjectedMessage {
-  if (message.role === "user") {
-    return { id: message.id, role: "user", label: "你", content: message.content || "已发送上下文" };
-  }
-  if (message.role === "assistant") {
-    return { id: message.id, role: "assistant", label: "Agent", content: message.content || "正在整理回复" };
-  }
-  if (message.role === "tool") {
-    return {
-      id: message.id,
-      role: "tool",
-      label: message.toolName || "工具调用",
-      content: message.toolError || message.toolResult || message.content || "工具正在运行",
-    };
-  }
-  if (message.role === "error") {
-    return { id: message.id, role: "error", label: "错误", content: message.content || "执行失败" };
-  }
-  return { id: message.id, role: "status", label: message.role, content: message.content || "状态更新" };
-}
-
 function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSearchResult[] {
   return entries.map((entry) => ({
     path: entry.path,
@@ -870,25 +765,18 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
   }));
 }
 
-function isBusy(state: ConversationRuntimeState): boolean {
-  return state === "starting" || state === "running" || state === "waiting_approval" || state === "cancelling";
-}
-
-function composerStatusText(state: ConversationRuntimeState, connectionReady: boolean): string {
-  if (!connectionReady) {
-    return "正在连接后端";
+function drawerStatusText(state: ConversationRuntimeState, pendingApproval: CommandApprovalRequest | null): string {
+  if (pendingApproval) {
+    return "等待审批";
   }
-  if (state === "idle" || state === "running") {
-    return "";
+  if (state === "running") {
+    return "运行中";
   }
   if (state === "starting") {
-    return "正在发起对话";
-  }
-  if (state === "waiting_approval") {
-    return "等待审批确认";
+    return "启动中";
   }
   if (state === "cancelling") {
-    return "正在停止";
+    return "停止中";
   }
-  return "可以修改后重新发送";
+  return "就绪";
 }

@@ -72,6 +72,7 @@ function isDeferredToolMessage(message: ConversationMessage): boolean {
 function toolDetailKey(message: ConversationMessage): string {
   const ref = asRecord(message.payload.toolDetailRef);
   return [
+    message.threadId,
     message.id,
     stringValue(ref?.startEventId),
     stringValue(ref?.endEventId),

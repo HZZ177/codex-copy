@@ -1033,7 +1033,7 @@ function SiderSection({
       {hideTitle ? null : canToggleSection ? (
         <div className={styles.sectionTitleRow} data-kind={kind}>
           <button
-            className={styles.sectionTitle}
+            className={`${styles.sectionTitle} ${styles.projectSectionTitle}`}
             type="button"
             aria-controls={sectionItemsId}
             aria-expanded={sectionExpanded}

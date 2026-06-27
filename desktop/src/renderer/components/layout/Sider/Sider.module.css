@@ -298,6 +298,17 @@ button.sectionTitle {
   line-height: 1.25;
 }
 
+.projectSectionTitle {
+  min-height: 32px;
+  padding-block: 2px;
+  line-height: 1.35;
+}
+
+.projectSectionTitle span {
+  line-height: 1.35;
+  padding-bottom: 1px;
+}
+
 button.sectionTitle[data-kind="workspace"]:hover,
 button.sectionTitle[data-kind="workspace"]:focus-visible,
 .sectionNewButton:hover,
@@ -888,8 +899,9 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding-top: 7px;
-  overflow-x: visible;
+  padding: 7px 0 0;
+  overflow-x: hidden;
+  scrollbar-gutter: auto;
 }
 
 .collapsedSection {

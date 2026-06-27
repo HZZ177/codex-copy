@@ -40,6 +40,17 @@ describe("ConversationPage", () => {
     expect(runtime.conversation.openChatChannel).toHaveBeenCalled();
   });
 
+  it("keeps the Agent route free of Workbench assistant shell chrome", async () => {
+    const { runtime } = fakeRuntime({ history: [] });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    expect(await screen.findByTestId("chat-layout")).not.toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-surface")).toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-shell")).toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-capsule")).toBeNull();
+  });
+
   it("shows history load failures as a top notification instead of an error message card", async () => {
     const { runtime } = fakeRuntime({ historyError: new Error("会话不存在：ses-1") });
 

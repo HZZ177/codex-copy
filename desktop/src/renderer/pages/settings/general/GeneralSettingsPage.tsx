@@ -20,10 +20,16 @@ const fontOptions: Array<{
     label: "Maple Mono",
     icon: Type,
   },
+  {
+    id: "jetbrains-mono",
+    label: "JetBrains Mono",
+    icon: Type,
+  },
 ];
 
 const fontStatusLabels: Partial<Record<AppFontFamily, string>> = {
   "maple-mono": "Maple Mono CN 已启用",
+  "jetbrains-mono": "JetBrains Mono 已启用",
 };
 
 export function GeneralSettingsPage() {

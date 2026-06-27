@@ -31,6 +31,12 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
   const failed = details.message.status === "failed" || command.status === "timed_out" || command.status === "disabled";
   const negative = rejected || failed;
   const statusKind = negative ? "failed" : running ? "running" : "done";
+  const footerState = details.error ? "failed" : details.loading ? "running" : statusKind;
+  const footerLabel = details.loading
+    ? "加载中"
+    : details.error
+      ? "加载失败"
+      : commandFooterLabel(command, running, negative);
   const combinedOutput = [command.stdout, command.stderr].filter(Boolean).join(command.stdout && command.stderr ? "\n" : "");
   const outputMotion = useDeferredUnmount<HTMLElement>(detailsOpen);
   const captureExpansionAnchor = useExpansionScrollAnchor();
@@ -105,6 +111,10 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
         >
           <div className={styles.outputInner}>
             <section className={styles.detailSection} aria-label="命令入参">
+              <div className={styles.toolNameRow}>
+                <span className={styles.toolNameLabel}>工具</span>
+                <code className={styles.toolNameValue}>{command.name}</code>
+              </div>
               <div className={styles.sectionHeader} data-kind="input">
                 <div className={styles.outputHeader}>入参</div>
                 <button
@@ -154,6 +164,9 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
                   <p className={styles.emptyOutput}>{running ? "等待命令输出" : "无输出"}</p>
                 </div>
               )}
+              <div className={styles.panelFooter} data-state={footerState}>
+                {footerLabel}
+              </div>
             </section>
           </div>
         </section>
@@ -180,6 +193,7 @@ function copyAriaLabel(label: "入参" | "输出", status: CopyStatus): string {
 }
 
 interface ParsedCommandPayload {
+  name: string;
   command: string;
   inputText: string;
   title: string;
@@ -200,8 +214,14 @@ function parseCommandPayload(message: ConversationMessage): ParsedCommandPayload
   const result = asRecord(message.payload.result);
   const resultUiPayload = asRecord(result?.ui_payload);
   const merged = { ...message.payload, ...(resultUiPayload ?? {}) };
+  const call = asRecord(merged.call);
   const input = commandInput(merged);
   const command = stringValue(merged.command) || stringValue(input.command);
+  const name =
+    stringValue(call?.name) ||
+    stringValue(merged.tool) ||
+    stringValue(merged.tool_name) ||
+    "run_command";
   const exitCode = numberValue(merged.exit_code ?? merged.exitCode);
   const status = stringValue(merged.status) || String(message.status ?? "");
   const approval = asRecord(merged.approval);
@@ -209,6 +229,7 @@ function parseCommandPayload(message: ConversationMessage): ParsedCommandPayload
   const stderr = stringValue(merged.stderr) || fallbackErrorText(message, result, merged);
   const errorPreview = commandErrorPreview(message, status, exitCode, stderr);
   return {
+    name,
     command,
     inputText: stringifyInput(input),
     title: commandTitleFromInput(inputTitle(input, command), message.status, status),
@@ -349,6 +370,26 @@ function commandStatusLabel(status: string): string {
     default:
       return "";
   }
+}
+
+function commandFooterLabel(
+  command: ParsedCommandPayload,
+  running: boolean,
+  negative: boolean,
+): string {
+  if (running) {
+    return "运行中";
+  }
+  if (command.statusLabel) {
+    return command.statusLabel;
+  }
+  if (negative) {
+    return "失败";
+  }
+  if (typeof command.exitCode === "number" && command.exitCode !== 0) {
+    return `退出码 ${command.exitCode}`;
+  }
+  return "成功";
 }
 
 function truncateInlineError(value: string): string {

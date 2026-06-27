@@ -26,6 +26,13 @@ describe("MessageList", () => {
     expect(screen.getAllByRole("button", { name: "复制消息" }).length).toBe(2);
   });
 
+  it("exposes the requested density variant on the list root and scroll surface", () => {
+    render(<MessageList messages={[]} variant="compact" />);
+
+    expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-message-list-variant")).toBe("compact");
+  });
+
   it("renders a turn navigator with hover summary and static turn jumping", () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
@@ -47,8 +54,18 @@ describe("MessageList", () => {
       );
 
       expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
+      expect(screen.getByTestId("conversation-turn-navigator-viewport")).not.toBeNull();
+      const currentIndicator = screen.getByTestId("conversation-turn-navigator-current-indicator");
+      expect(currentIndicator).not.toBeNull();
       const markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
       expect(markers).toHaveLength(2);
+      expect(markers[0].getAttribute("data-current")).toBe("true");
+
+      fireEvent.focus(markers[0]);
+      expect(currentIndicator.style.getPropertyValue("--turn-current-marker-width")).toBe("35px");
+
+      fireEvent.blur(markers[0]);
+      expect(currentIndicator.style.getPropertyValue("--turn-current-marker-width")).toBe("12px");
 
       fireEvent.focus(markers[1]);
       expect(screen.getByTestId("conversation-turn-navigator-card").textContent).toContain("第二轮问题");
@@ -69,6 +86,103 @@ describe("MessageList", () => {
         delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
       }
     }
+  });
+
+  it("keeps the first and last turn highlighted at static scroll boundaries", async () => {
+    render(
+      <MessageList
+        messages={[
+          message("m1", "user", "第一轮问题"),
+          message("m2", "assistant", "第一轮回答"),
+          message("m3", "user", "第二轮问题"),
+          message("m4", "assistant", "第二轮回答"),
+          message("m5", "user", "第三轮问题"),
+          message("m6", "assistant", "第三轮回答"),
+          message("m7", "user", "第四轮问题"),
+          message("m8", "assistant", "第四轮回答"),
+        ]}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-list-scroll") as HTMLDivElement;
+    const turns = screen.getAllByTestId("message-turn") as HTMLElement[];
+    mockElementRect(scroller, { height: 200, top: 0 });
+    turns.forEach((turn, index) => mockElementTop(turn, index * 32));
+
+    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 200, scrollTop: 0 });
+    await act(async () => {
+      fireEvent.scroll(scroller);
+    });
+
+    let markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
+    expect(markers[0].getAttribute("data-current")).toBe("true");
+
+    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 200, scrollTop: 400 });
+    turns.forEach((turn, index) => mockElementTop(turn, index === turns.length - 1 ? 180 : -160 + index * 36));
+    await act(async () => {
+      fireEvent.scroll(scroller);
+    });
+
+    markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
+    expect(markers[3].getAttribute("data-current")).toBe("true");
+  });
+
+  it("adds and highlights a new user turn before the assistant reply completes", async () => {
+    const initialMessages = [
+      message("m1", "user", "第一轮问题"),
+      message("m2", "assistant", "第一轮回答"),
+      message("m3", "user", "第二轮问题"),
+      message("m4", "assistant", "第二轮回答"),
+    ];
+    const { rerender } = render(<MessageList messages={initialMessages} />);
+
+    rerender(<MessageList messages={[...initialMessages, message("m5", "user", "第三轮问题")]} isProcessing />);
+
+    await waitFor(() => {
+      const markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
+      expect(markers).toHaveLength(3);
+      expect(markers[2].getAttribute("data-current")).toBe("true");
+      expect(markers[2].getAttribute("data-entering")).toBe("true");
+      expect(screen.getByTestId("conversation-turn-navigator-current-indicator").getAttribute("data-entering")).toBe(
+        "true",
+      );
+    });
+  });
+
+  it("hides the turn navigator by default in compact and overlay variants", () => {
+    const messages = [
+      message("m1", "user", "第一轮问题"),
+      message("m2", "assistant", "第一轮回答"),
+      message("m3", "user", "第二轮问题"),
+      message("m4", "assistant", "第二轮回答"),
+    ];
+    const { rerender } = render(<MessageList messages={messages} variant="compact" />);
+
+    expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("false");
+    expect(screen.queryByTestId("conversation-turn-navigator")).toBeNull();
+
+    rerender(<MessageList messages={messages} variant="overlay" />);
+    expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("false");
+    expect(screen.queryByTestId("conversation-turn-navigator")).toBeNull();
+
+    rerender(<MessageList messages={messages} variant="compact" turnNavigatorMode="auto" />);
+    expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("true");
+    expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
+  });
+
+  it("keeps compact and overlay density attributes through empty and loading states", () => {
+    const { rerender } = render(<MessageList messages={[]} variant="compact" loading />);
+
+    expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-message-list-variant")).toBe("compact");
+    expect(screen.getByTestId("message-skeleton")).not.toBeNull();
+
+    rerender(<MessageList messages={[]} variant="overlay" emptyText="覆盖层暂无消息" />);
+
+    expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-message-list-variant")).toBe("overlay");
+    expect(screen.getByTestId("message-empty").textContent).toBe("覆盖层暂无消息");
+    expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("false");
   });
 
   it("keeps compact lists on the static renderer while processing", () => {
@@ -386,7 +500,7 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(screen.getByText("读取了 2 个文件，查看了 1 个目录，搜索了 1 次，已运行 1 条命令")).not.toBeNull();
+    expect(screen.getByText("读取了 2 个文件，查看了 1 个目录，已搜索文件 1 次，已运行 1 条命令")).not.toBeNull();
     expect(screen.queryByText(/工具步骤/)).toBeNull();
     expect(screen.queryByText("5 步")).toBeNull();
     expect(screen.queryByText("read_file")).toBeNull();
@@ -544,7 +658,7 @@ describe("MessageList", () => {
 
     expect(
       screen.getByText(
-        "读取失败 1 个文件，读取了 1 个文件，查看失败 1 个目录，查看了 2 个目录，搜索失败 1 次，搜索了 1 次，运行失败 1 条命令，已运行 1 条命令，创建失败 1 个文件，创建了 1 个文件，调用失败 1 个工具，调用了 1 个工具",
+        "读取失败 1 个文件，读取了 1 个文件，查看失败 1 个目录，查看了 2 个目录，搜索文件失败 1 次，已搜索文件 1 次，运行失败 1 条命令，已运行 1 条命令，创建失败 1 个文件，创建了 1 个文件，调用失败 1 个工具，调用了 1 个工具",
       ),
     ).not.toBeNull();
     expect(screen.queryByText(/查看失败 3 个目录/)).toBeNull();
@@ -942,6 +1056,24 @@ function mockScrollMetrics(
 
 function mockElementTop(element: HTMLElement, top: number) {
   mockElementTopSequence(element, [top]);
+}
+
+function mockElementRect(element: HTMLElement, rect: { top: number; height: number; width?: number }) {
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () =>
+      ({
+        top: rect.top,
+        bottom: rect.top + rect.height,
+        left: 0,
+        right: rect.width ?? 320,
+        width: rect.width ?? 320,
+        height: rect.height,
+        x: 0,
+        y: rect.top,
+        toJSON: () => ({}),
+      }) as DOMRect,
+  });
 }
 
 function mockElementTopSequence(element: HTMLElement, tops: number[]) {

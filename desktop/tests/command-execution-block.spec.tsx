@@ -23,6 +23,7 @@ describe("CommandExecutionBlock", () => {
     expect(screen.queryByText("line 1")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
+    expect(screen.getByText("run_command")).not.toBeNull();
     expect(screen.getByText("line 1")).not.toBeNull();
   });
 

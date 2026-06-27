@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type CSSProperties } from "react";
 
 import type { RuntimeBridge } from "@/runtime";
 import { WorkspaceFileBrowser, WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace";
@@ -6,7 +6,10 @@ import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import type { AgentSession, Workspace } from "@/types/protocol";
 
-import { WorkbenchAssistantSurface } from "./WorkbenchAssistantSurface";
+import {
+  WorkbenchAssistantSurface,
+  type WorkbenchAssistantDockTransitionState,
+} from "./WorkbenchAssistantSurface";
 import styles from "./WorkbenchModePage.module.css";
 
 export interface WorkbenchModePageProps {
@@ -40,6 +43,10 @@ export function WorkbenchModePage({
 }: WorkbenchModePageProps) {
   const [creatingSession, setCreatingSession] = useState(false);
   const [dockTransitioning, setDockTransitioning] = useState(false);
+  const [dockTransitionLayout, setDockTransitionLayout] = useState<WorkbenchAssistantDockTransitionState>({
+    phase: "idle",
+    reservedWidth: 0,
+  });
   const selectorValue: WorkspaceSelection = selectedWorkspace
     ? { type: "workspace", workspace: selectedWorkspace }
     : { type: "chat" };
@@ -123,6 +130,12 @@ export function WorkbenchModePage({
           className={styles.workspace}
           data-testid="workbench-workspace-shell"
           data-dock-transitioning={dockTransitioning ? "true" : "false"}
+          data-dock-transition-phase={dockTransitionLayout.phase}
+          style={
+            {
+              "--workbench-dock-reserved-width": `${dockTransitionLayout.reservedWidth}px`,
+            } as CSSProperties
+          }
           aria-label="工作台"
         >
           <div className={styles.canvas}>
@@ -146,6 +159,7 @@ export function WorkbenchModePage({
             controller={assistantController}
             creatingSession={creatingSession}
             onDockTransitionChange={setDockTransitioning}
+            onDockTransitionLayoutChange={setDockTransitionLayout}
           />
         </main>
       )}

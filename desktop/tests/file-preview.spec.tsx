@@ -28,6 +28,12 @@ vi.mock("mermaid", () => ({
 
 let restoreElementMetrics: (() => void) | null = null;
 
+class FakeResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 afterEach(() => {
   restoreElementMetrics?.();
   restoreElementMetrics = null;
@@ -35,6 +41,9 @@ afterEach(() => {
 
 describe("FilePreview", () => {
   beforeEach(() => {
+    if (typeof ResizeObserver === "undefined") {
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    }
     vi.stubGlobal("navigator", {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -74,6 +83,124 @@ describe("FilePreview", () => {
     expect(screen.queryByRole("status", { name: "正在准备预览" })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Project" })).not.toBeNull();
     expect(screen.queryByRole("status", { name: "正在准备预览" })).toBeNull();
+  });
+
+  it("keeps panel file previews loading through the open animation", async () => {
+    let resolveRead:
+      | ((value: { content: string; encoding: string; path: string }) => void)
+      | null = null;
+    const runtime = fakeRuntime({
+      readFile: vi.fn(
+        () =>
+          new Promise<{ content: string; encoding: string; path: string }>((resolve) => {
+            resolveRead = resolve;
+          }),
+      ),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} chrome="panel" />);
+
+    await act(async () => {
+      resolveRead?.({
+        path: "README.md",
+        content: "# Small Project\n\nShort but potentially complex.",
+        encoding: "utf-8",
+      });
+    });
+
+    expect(screen.queryByRole("heading", { name: "Small Project" })).toBeNull();
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Small Project" })).not.toBeNull();
+  });
+
+  it("keeps large markdown parsing out of the file-read completion frame", async () => {
+    const largeMarkdown = `# Deferred Project\n\n${"Large section text.\n".repeat(3000)}`;
+    let resolveRead:
+      | ((value: { content: string; encoding: string; path: string }) => void)
+      | null = null;
+    const runtime = fakeRuntime({
+      readFile: vi.fn(
+        () =>
+          new Promise<{ content: string; encoding: string; path: string }>((resolve) => {
+            resolveRead = resolve;
+          }),
+      ),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "README.md" }} sessionId="ses-1" runtime={runtime} chrome="panel" />);
+
+    await act(async () => {
+      resolveRead?.({
+        path: "README.md",
+        content: largeMarkdown,
+        encoding: "utf-8",
+      });
+    });
+
+    expect(screen.queryByRole("heading", { name: "Deferred Project" })).toBeNull();
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Deferred Project" })).not.toBeNull();
+  });
+
+  it("selects only rendered preview content with Ctrl+A", async () => {
+    window.getSelection()?.removeAllRanges();
+    render(
+      <FilePreview
+        request={{
+          type: "content",
+          title: "Markdown snippet",
+          content: "# Preview Select\n\nAlpha content",
+          contentType: "markdown",
+        }}
+      />,
+    );
+
+    const body = await screen.findByLabelText("预览内容");
+    fireEvent.mouseEnter(body);
+
+    expect(fireEvent.keyDown(window, { key: "a", code: "KeyA", ctrlKey: true })).toBe(false);
+    const selectedText = window.getSelection()?.toString() ?? "";
+    expect(selectedText).toContain("Preview Select");
+    expect(selectedText).toContain("Alpha content");
+    expect(selectedText).not.toContain("复制预览内容");
+  });
+
+  it("keeps the markdown preview scrollbar dragging after the pointer leaves the rail horizontally", async () => {
+    mockSourceScrollMetrics({ clientWidth: 640, clientHeight: 200, scrollHeight: 1000 });
+    render(
+      <FilePreview
+        request={{
+          type: "content",
+          title: "Markdown preview",
+          content: `# Preview\n\n${"Long preview paragraph.\n\n".repeat(120)}`,
+          contentType: "markdown",
+        }}
+      />,
+    );
+
+    const pane = await waitFor(() => {
+      const element = screen.getByText("Preview").closest<HTMLElement>("[data-custom-scrollbar='true']");
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+    const rail = await screen.findByTestId("preview-scroll-rail");
+    await waitFor(() => expect(rail.getAttribute("data-visible")).toBe("true"));
+    expect(rail.getAttribute("data-surface")).toBe("preview");
+    const scrollDownButton = screen.getByTestId("preview-scroll-rail-down");
+    expect(screen.getByTestId("preview-scroll-rail-up")).not.toBeNull();
+    expect(scrollDownButton).not.toBeNull();
+
+    pane.scrollTop = 0;
+    dispatchPointer(scrollDownButton, "pointerdown", { clientX: 636, clientY: 196, pointerId: 9 });
+    dispatchPointer(scrollDownButton, "pointerup", { clientX: 636, clientY: 196, pointerId: 9 });
+    expect(pane.scrollTop).toBeGreaterThan(0);
+
+    pane.scrollTop = 0;
+    dispatchPointer(rail, "pointerdown", { clientX: 636, clientY: 20, pointerId: 8 });
+    dispatchPointer(rail, "pointermove", { clientX: 420, clientY: 80, pointerId: 8 });
+    dispatchPointer(rail, "pointerup", { clientX: 420, clientY: 80, pointerId: 8 });
+
+    expect(pane.scrollTop).toBeGreaterThan(0);
   });
 
   it("opens an in-preview search bar for Ctrl+F and navigates matches", async () => {
@@ -702,6 +829,38 @@ describe("FilePreview", () => {
     });
   });
 
+  it("keeps the CodeMirror source scrollbar dragging after the pointer leaves the rail horizontally", async () => {
+    mockSourceScrollMetrics({ clientWidth: 640, clientHeight: 200, scrollHeight: 1000 });
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "src/App.tsx",
+        content: Array.from({ length: 120 }, (_, index) => `const value${index} = ${index};`).join("\n"),
+        encoding: "utf-8",
+      }),
+    });
+
+    render(<FilePreview request={{ type: "file", path: "src/App.tsx" }} sessionId="ses-1" runtime={runtime} />);
+
+    const sourceViewer = await screen.findByTestId("file-source-viewer");
+    const scroller = await waitFor(() => {
+      const element = sourceViewer.querySelector<HTMLElement>(".cm-scroller");
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+    const rail = await screen.findByTestId("source-scroll-rail");
+    await waitFor(() => expect(rail.getAttribute("data-visible")).toBe("true"));
+    expect(rail.getAttribute("data-surface")).toBe("source");
+    expect(screen.getByTestId("source-scroll-rail-up")).not.toBeNull();
+    expect(screen.getByTestId("source-scroll-rail-down")).not.toBeNull();
+
+    scroller.scrollTop = 0;
+    dispatchPointer(rail, "pointerdown", { clientX: 636, clientY: 20, pointerId: 7 });
+    dispatchPointer(rail, "pointermove", { clientX: 420, clientY: 80, pointerId: 7 });
+    dispatchPointer(rail, "pointerup", { clientX: 420, clientY: 80, pointerId: 7 });
+
+    expect(scroller.scrollTop).toBeGreaterThan(0);
+  });
+
   it("renders enlarged centered fold controls in CodeMirror source viewer", async () => {
     const runtime = fakeRuntime({
       readFile: vi.fn().mockResolvedValue({
@@ -1075,8 +1234,10 @@ describe("FilePreview", () => {
     expect(within(controls).getByText("47%")).not.toBeNull();
 
     fireEvent.click(resetButton);
-    expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
-    expect(within(controls).getByText("47%")).not.toBeNull();
+    await waitFor(() => {
+      expect(chart.style.getPropertyValue("--mermaid-scale")).toBe("0.47");
+      expect(within(controls).getByText("47%")).not.toBeNull();
+    });
 
     for (let index = 0; index < 80; index += 1) {
       fireEvent.click(zoomInButton);
@@ -1221,6 +1382,7 @@ describe("FilePreview", () => {
   });
 
   it("keeps mermaid diagrams bounded when rendered inside markdown previews", async () => {
+    const clipboard = navigator.clipboard.writeText as unknown as ReturnType<typeof vi.fn>;
     mockElementMetrics({ clientWidth: 640, clientHeight: 320 });
 
     render(
@@ -1237,17 +1399,45 @@ describe("FilePreview", () => {
 
     const pane = await screen.findByTestId("preview-mermaid-pane");
     expect(pane.getAttribute("data-layout")).toBe("document");
+    expect(pane.getAttribute("data-markdown-code-frame")).toBe("true");
+    expect(within(pane).getByText("mermaid")).not.toBeNull();
     await waitFor(() => {
       expect(pane.querySelector("svg")).not.toBeNull();
     });
 
-    const chart = pane.querySelector('[data-interactive="true"]') as HTMLDivElement | null;
+    const chart = within(pane).getByLabelText("Mermaid 图表") as HTMLDivElement;
     expect(chart).not.toBeNull();
+    expect(chart.getAttribute("data-interactive")).toBe("false");
     await waitFor(() => {
       expect(chart?.style.getPropertyValue("--mermaid-scale")).toBe("0.24");
     });
     expect(chart?.style.getPropertyValue("--mermaid-render-width")).toBe("576px");
     expect(chart?.style.getPropertyValue("--mermaid-render-height")).toBe("288px");
+
+    const scrollPane = pane.closest<HTMLElement>("[data-custom-scrollbar='true']");
+    expect(scrollPane).not.toBeNull();
+    scrollPane!.scrollTop = 0;
+    fireEvent.wheel(chart!, { clientX: 80, clientY: 90, deltaY: 120 });
+    expect(scrollPane!.scrollTop).toBe(120);
+    expect(chart?.style.getPropertyValue("--mermaid-scale")).toBe("0.24");
+    expect(within(pane).queryByRole("button", { name: "放大 Mermaid" })).toBeNull();
+    const copyButton = within(pane).getByRole("button", { name: "复制 Mermaid 源码" });
+    fireEvent.click(copyButton);
+    await waitFor(() => {
+      expect(clipboard).toHaveBeenCalledWith("graph TD\nA[Start] --> B[Finish]");
+      expect(copyButton.getAttribute("title")).toBe("已复制 Mermaid 源码");
+    });
+
+    fireEvent.click(within(pane).getByRole("button", { name: "打开 Mermaid 预览" }));
+    const dialog = await screen.findByRole("dialog", { name: "Mermaid 预览" });
+    const dialogChart = (await within(dialog).findByLabelText("Mermaid 图表")) as HTMLDivElement;
+    fireEvent.wheel(dialogChart, { clientX: 80, clientY: 90, deltaY: -30 });
+    await waitFor(() => {
+      expect(dialogChart.style.getPropertyValue("--mermaid-scale")).toBe("0.34");
+    });
+    expect(within(dialog).getByRole("button", { name: "放大 Mermaid" })).not.toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭 Mermaid 预览" }));
+    expect(screen.queryByRole("dialog", { name: "Mermaid 预览" })).toBeNull();
   });
 
   it("quotes selected preview text through the floating selection toolbar", async () => {
@@ -2949,6 +3139,47 @@ function mockElementMetrics(metrics: { clientWidth: number; clientHeight: number
       Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
     } else {
       delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  };
+}
+
+function mockSourceScrollMetrics(metrics: { clientWidth: number; clientHeight: number; scrollHeight: number }) {
+  restoreElementMetrics?.();
+
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => metrics.clientWidth,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => metrics.clientHeight,
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => metrics.scrollHeight,
+  });
+
+  restoreElementMetrics = () => {
+    if (clientWidth) {
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth);
+    } else {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+    }
+
+    if (clientHeight) {
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
+    } else {
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+
+    if (scrollHeight) {
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeight);
+    } else {
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
     }
   };
 }

@@ -187,6 +187,8 @@ describe("style foundation", () => {
     expect(sider).toMatch(/\.section\[data-kind="workspace"\]\s+\.historyItem\s*{[^}]*padding-left:\s*31px/s);
     expect(sider).toMatch(/--sidebar-footer-feather-height:\s*38px/);
     expect(sider).not.toMatch(/\.history\s*{[^}]*mask-image/s);
+    expect(sider).toMatch(/\.sider\[data-collapsed="true"\]\s+\.history\s*{[^}]*overflow-x:\s*hidden/s);
+    expect(sider).toMatch(/\.sider\[data-collapsed="true"\]\s+\.history\s*{[^}]*scrollbar-gutter:\s*auto/s);
     expect(sider).toMatch(/\.footer\s*{[^}]*margin-top:\s*-6px/s);
     expect(sider).toMatch(/\.footer::before\s*{[^}]*right:\s*12px/s);
     expect(sider).toMatch(/\.footer::before\s*{[^}]*bottom:\s*100%/s);

@@ -1,0 +1,336 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import type { RuntimeBridge } from "../src/runtime";
+import {
+  ConversationPanel,
+  ConversationPanelComposerAccessory,
+  type ConversationPanelVariant,
+} from "../src/renderer/pages/conversation/ConversationPanel";
+import type { ConversationPanelModel } from "../src/renderer/pages/conversation/useConversationPanelModel";
+import type { ConversationMessage } from "../src/renderer/stores/conversationStore";
+
+describe("ConversationPanel", () => {
+  it("renders shared MessageList content through the full variant by default", () => {
+    render(
+      <ConversationPanel
+        model={panelModel({
+          messages: [
+            {
+              id: "assistant-1",
+              threadId: "ses-1",
+              turnId: "turn-1",
+              itemId: "item-1",
+              kind: "assistant",
+              status: "completed",
+              content: "共享消息面板",
+              payload: {},
+              createdAt: "2026-06-27T00:00:00.000Z",
+              updatedAt: "2026-06-27T00:00:00.000Z",
+            },
+          ],
+        })}
+        workspaceRuntime={fakeRuntime()}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("full");
+    expect(screen.getByText("共享消息面板")).not.toBeNull();
+  });
+
+  it("keeps compact and overlay variants on the shared panel boundary", () => {
+    const { rerender } = render(
+      <ConversationPanel model={panelModel()} workspaceRuntime={fakeRuntime()} variant="compact" />,
+    );
+    expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");
+
+    rerender(<ConversationPanel model={panelModel()} workspaceRuntime={fakeRuntime()} variant="overlay" />);
+    expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("overlay");
+    expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
+  });
+
+  it.each<ConversationPanelVariant>(["full", "compact", "overlay"])(
+    "renders primary message kinds through the %s variant",
+    (variant) => {
+      render(
+        <ConversationPanel
+          model={panelModel({
+            messages: [
+              message("user-1", "user", "用户问题"),
+              message("assistant-1", "assistant", "助手回答"),
+              message("tool-1", "tool", "工具结果", {
+                call: { id: "call-1", name: "workspace_search", arguments: { query: "README" } },
+                result: { status: "success", model_content: "README.md" },
+              }),
+              message("file-1", "file_change", "编辑 README", {
+                files: [{ path: "README.md", operation: "modify" }],
+                result: { status: "success", files: [{ path: "README.md", operation: "modify" }] },
+              }),
+              message("error-1", "error", "执行失败", {
+                error: { code: "runtime_error", message: "执行失败", details: {} },
+              }),
+            ],
+          })}
+          workspaceRuntime={fakeRuntime()}
+          variant={variant}
+        />,
+      );
+
+      expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe(variant);
+      expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe(variant);
+      expect(screen.getByText("用户问题")).not.toBeNull();
+      expect(screen.getByText("助手回答")).not.toBeNull();
+      expect(screen.getByTestId("tool-call-block")).not.toBeNull();
+      expect(screen.getByTestId("file-change-block")).not.toBeNull();
+      expect(screen.getByTestId("error-item")).not.toBeNull();
+    },
+  );
+
+  it("wires composer accessory file preview and scroll controls to the same model", () => {
+    const openFileChangePreview = vi.fn();
+    const scrollToBottom = vi.fn();
+    render(
+      <ConversationPanelComposerAccessory
+        model={panelModel({
+          showScrollToBottom: true,
+          scrollToBottom,
+          openFileChangePreview,
+          messages: [
+            {
+              id: "tool-1",
+              threadId: "ses-1",
+              turnId: "turn-1",
+              itemId: "item-1",
+              kind: "file_change",
+              status: "completed",
+              content: "edited",
+              payload: {
+                files: [{ path: "README.md", operation: "modify" }],
+                result: { status: "success", files: [{ path: "README.md", operation: "modify" }] },
+              },
+              createdAt: "2026-06-27T00:00:00.000Z",
+              updatedAt: "2026-06-27T00:00:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "滚动到底" }));
+    expect(scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads deferred tool details through the shared panel and keeps the loaded patch cached", async () => {
+    const loadToolDetails = vi.fn().mockResolvedValue({
+      payload: {
+        call: {
+          id: "call-1",
+          name: "read_file",
+          arguments: { path: "README.md", content: "large input" },
+        },
+        result: { status: "success", model_content: "完整文件内容" },
+      },
+    });
+    const tool = deferredToolMessage();
+    render(
+      <ConversationPanel
+        model={panelModel({
+          messages: [tool],
+          loadToolDetails,
+        })}
+        workspaceRuntime={fakeRuntime()}
+        variant="compact"
+      />,
+    );
+
+    expect(screen.getByText("已读取文件 README.md")).not.toBeNull();
+    expect(screen.queryByText("完整文件内容")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    await waitFor(() => {
+      expect(loadToolDetails).toHaveBeenCalledWith(tool);
+      expect(screen.getByText("完整文件内容")).not.toBeNull();
+    });
+    expect(screen.getByLabelText("工具入参").textContent).toContain('"content": "large input"');
+
+    fireEvent.click(screen.getByRole("button", { name: "收起工具详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+    expect(loadToolDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows deferred tool detail failures without breaking the list and retries on the next expansion", async () => {
+    const loadToolDetails = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValueOnce({
+        payload: {
+          result: { status: "success", model_content: "retry ok" },
+        },
+      });
+    render(
+      <ConversationPanel
+        model={panelModel({
+          messages: [deferredToolMessage()],
+          loadToolDetails,
+        })}
+        workspaceRuntime={fakeRuntime()}
+        variant="overlay"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("工具详情加载失败")).not.toBeNull();
+    });
+    expect(screen.getByText("已读取文件 README.md")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起工具详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    await waitFor(() => {
+      expect(loadToolDetails).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("retry ok")).not.toBeNull();
+    });
+  });
+
+  it("clears deferred tool detail patches when the panel switches sessions", async () => {
+    const loadToolDetails = vi
+      .fn()
+      .mockResolvedValueOnce({
+        payload: {
+          result: { status: "success", model_content: "session one detail" },
+        },
+      })
+      .mockResolvedValueOnce({
+        payload: {
+          result: { status: "success", model_content: "session two detail" },
+        },
+      });
+    const firstSessionMessage = deferredToolMessage({ threadId: "ses-1" });
+    const secondSessionMessage = deferredToolMessage({ threadId: "ses-2" });
+    const { rerender } = render(
+      <ConversationPanel
+        model={panelModel({
+          messages: [firstSessionMessage],
+          loadToolDetails,
+        })}
+        workspaceRuntime={fakeRuntime()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+    await waitFor(() => {
+      expect(screen.getByText("session one detail")).not.toBeNull();
+    });
+
+    rerender(
+      <ConversationPanel
+        model={panelModel({
+          messages: [secondSessionMessage],
+          loadToolDetails,
+        })}
+        workspaceRuntime={fakeRuntime()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "收起工具详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    await waitFor(() => {
+      expect(loadToolDetails).toHaveBeenCalledTimes(2);
+      expect(loadToolDetails).toHaveBeenLastCalledWith(secondSessionMessage);
+      expect(screen.getByText("session two detail")).not.toBeNull();
+    });
+    expect(screen.queryByText("session one detail")).toBeNull();
+  });
+});
+
+function panelModel(overrides: Partial<ConversationPanelModel> = {}): ConversationPanelModel {
+  return {
+    messages: [],
+    session: null,
+    sessionViewState: null,
+    pendingApproval: null,
+    runtimeState: "idle",
+    runtimeDetail: null,
+    loading: false,
+    loadingOlderHistory: false,
+    loadOlderHistory: vi.fn(),
+    messageWorkspaceScope: { sessionId: "ses-1" },
+    workspaceAvailable: false,
+    workspaceUnavailable: false,
+    workspaceLabel: undefined,
+    workspaceSkills: [],
+    searchWorkspace: undefined,
+    listWorkspaceDirectory: undefined,
+    showScrollToBottom: false,
+    updateScrollControls: vi.fn(),
+    scrollToBottom: vi.fn(),
+    scrollToBottomAfterSend: vi.fn(),
+    handleRuntimeError: vi.fn(),
+    handleRuntimeEventSideEffects: vi.fn(),
+    quoteSelection: vi.fn(),
+    startChatFromAnnotation: vi.fn(),
+    previewRenderContext: {},
+    openPreview: vi.fn(),
+    openFileReference: vi.fn(),
+    openFileChangePreview: vi.fn(),
+    loadToolDetails: vi.fn(),
+    ...overrides,
+  } as unknown as ConversationPanelModel;
+}
+
+function message(
+  id: string,
+  kind: ConversationMessage["kind"],
+  content: string,
+  payload: ConversationMessage["payload"] = {},
+): ConversationMessage {
+  return {
+    id,
+    threadId: "ses-1",
+    turnId: "turn-1",
+    itemId: id,
+    kind,
+    status: kind === "error" ? "failed" : "completed",
+    content,
+    payload,
+    createdAt: "2026-06-27T00:00:00.000Z",
+    updatedAt: "2026-06-27T00:00:00.000Z",
+  };
+}
+
+function deferredToolMessage(overrides: Partial<ConversationMessage> = {}): ConversationMessage {
+  return {
+    id: "tool-1",
+    threadId: "ses-1",
+    turnId: "turn-1",
+    itemId: "item-tool-1",
+    kind: "tool",
+    itemType: "tool_call",
+    status: "completed",
+    content: "read_file",
+    payload: {
+      call: {
+        id: "call-1",
+        name: "read_file",
+        arguments: { path: "README.md" },
+      },
+      toolDetailsDeferred: true,
+      toolDetailRef: {
+        startEventId: "evt-start",
+        endEventId: "evt-end",
+        runId: "run-1",
+        toolCallId: "call-1",
+      },
+    },
+    createdAt: "2026-06-27T00:00:00.000Z",
+    updatedAt: "2026-06-27T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function fakeRuntime(): RuntimeBridge {
+  return {} as RuntimeBridge;
+}

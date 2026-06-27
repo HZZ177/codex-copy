@@ -8,6 +8,7 @@ import type { AppFontFamily } from "@/types/protocol";
 import { installIndexedDbMock } from "./helpers/indexedDbMock";
 
 const MAPLE_FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
+const JETBRAINS_FONT_CSS = "@font-face{font-family:'JetBrains Mono';font-style:normal;font-display:swap;font-weight:400;src:url(./files/jetbrains-mono-latin-400-normal.woff2) format('woff2');unicode-range:U+0000-00FF;}";
 
 function FontHarness() {
   const font = useFontPreference();
@@ -17,12 +18,16 @@ function FontHarness() {
       <span data-testid="downloading-family">{font.downloadingFamily}</span>
       <span data-testid="status">{font.status}</span>
       <span data-testid="cached-maple">{String(font.cachedFamilies["maple-mono"])}</span>
+      <span data-testid="cached-jetbrains">{String(font.cachedFamilies["jetbrains-mono"])}</span>
       <span data-testid="error">{font.error}</span>
       <span data-testid="progress">
         {font.progress.downloadedBytes}/{font.progress.totalBytes}/{font.progress.percent}
       </span>
       <button type="button" onClick={() => void font.setFamily("maple-mono")}>
         Maple Mono
+      </button>
+      <button type="button" onClick={() => void font.setFamily("jetbrains-mono")}>
+        JetBrains Mono
       </button>
       <button type="button" onClick={() => void font.setFamily("system")}>
         系统默认
@@ -47,6 +52,14 @@ function mockSuccessfulFontDownload() {
         headers: new Headers({ "content-type": "text/css" }),
         text: () => Promise.resolve(MAPLE_FONT_CSS),
         arrayBuffer: () => Promise.resolve(new TextEncoder().encode(MAPLE_FONT_CSS).buffer),
+      } as Response);
+    }
+    if (url.includes("@fontsource/jetbrains-mono") && url.endsWith(".css")) {
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ "content-type": "text/css" }),
+        text: () => Promise.resolve(JETBRAINS_FONT_CSS),
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(JETBRAINS_FONT_CSS).buffer),
       } as Response);
     }
 
@@ -103,6 +116,7 @@ describe("FontProvider", () => {
     expect(screen.getByTestId("family").textContent).toBe("system");
     expect(screen.getByTestId("status").textContent).toBe("idle");
     expect(screen.getByTestId("cached-maple").textContent).toBe("undefined");
+    expect(screen.getByTestId("cached-jetbrains").textContent).toBe("undefined");
     expect(fetch).not.toHaveBeenCalled();
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("");
   });
@@ -134,6 +148,24 @@ describe("FontProvider", () => {
     expect(document.documentElement.style.getPropertyValue("--font-mono")).toContain("Maple Mono CN");
     expect(document.getElementById("keydex-custom-font-face")?.textContent).toContain('url("blob:font")');
     expect(settingsRuntime.saveAppearanceSettings).toHaveBeenCalledWith({ font_family: "maple-mono" });
+  });
+
+  it("downloads JetBrains Mono only after the user selects it", async () => {
+    mockSuccessfulFontDownload();
+    const settingsRuntime = fakeSettingsRuntime();
+
+    renderProvider({ children: <FontHarness />, settingsRuntime });
+    fireEvent.click(screen.getByRole("button", { name: "JetBrains Mono" }));
+
+    await waitFor(() => expect(screen.getByTestId("family").textContent).toBe("jetbrains-mono"));
+    expect(fetch).toHaveBeenCalledTimes(10);
+    expect(screen.getByTestId("cached-jetbrains").textContent).toBe("true");
+    expect(screen.getByTestId("progress").textContent).toBe("111702/111702/100");
+    expect(localStorage.getItem("keydex.font.family.v1")).toBe("jetbrains-mono");
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toContain("JetBrains Mono");
+    expect(document.documentElement.style.getPropertyValue("--font-reading")).toContain("JetBrains Mono");
+    expect(document.documentElement.style.getPropertyValue("--font-mono")).toContain("JetBrains Mono");
+    expect(settingsRuntime.saveAppearanceSettings).toHaveBeenCalledWith({ font_family: "jetbrains-mono" });
   });
 
   it("returns to the original font tokens when system font is selected", async () => {

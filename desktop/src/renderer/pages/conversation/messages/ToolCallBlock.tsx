@@ -37,6 +37,16 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
   const tool = useMemo(() => parseToolPayload(details.message), [details.message]);
   const running = details.message.status === "pending" || details.message.status === "running";
   const failed = details.message.status === "failed" || tool.resultStatus === "error";
+  const footerLabel = details.loading
+    ? "加载中"
+    : details.error
+      ? "加载失败"
+      : running
+        ? "运行中"
+        : failed
+          ? "失败"
+          : "成功";
+  const footerState = details.error || failed ? "failed" : details.loading || running ? "running" : "done";
   const detailsMotion = useDeferredUnmount<HTMLDivElement>(detailsOpen);
   const captureExpansionAnchor = useExpansionScrollAnchor();
 
@@ -108,6 +118,10 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
         >
           <div className={styles.detailsInner}>
             <section className={styles.detailSection} aria-label="工具入参">
+              <div className={styles.toolNameRow}>
+                <span className={styles.toolNameLabel}>工具</span>
+                <code className={styles.toolNameValue}>{tool.name}</code>
+              </div>
               <div className={styles.sectionHeader} data-kind="input">
                 <div className={styles.outputHeader}>入参</div>
                 <button
@@ -157,6 +171,9 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
                   <p className={styles.emptyResult}>{running ? "工具正在执行" : "暂无输出"}</p>
                 </div>
               )}
+              <div className={styles.panelFooter} data-state={footerState}>
+                {footerLabel}
+              </div>
             </section>
           </div>
         </div>
@@ -285,7 +302,7 @@ function toolAction(name: string): ToolAction | null {
       cancelled: "已取消查看目录",
     };
   }
-  if (name === "grep_files") {
+  if (["grep_files", "search_files"].includes(name)) {
     return {
       done: "已搜索文件",
       running: "正在搜索文件",
@@ -303,7 +320,7 @@ function toolAction(name: string): ToolAction | null {
       cancelled: "已取消搜索内容",
     };
   }
-  if (["search_files", "search", "grep"].includes(name)) {
+  if (["search", "grep"].includes(name)) {
     return {
       done: "已搜索",
       running: "正在搜索",

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeBridge, WorkspaceEntry, WorkspaceTreeResponse } from "@/runtime";
+import type { RuntimeBridge, WorkspaceEntry, WorkspaceSubtreeResponse, WorkspaceTreeResponse } from "@/runtime";
 import { WorkspaceFileBrowser, WorkspacePanel } from "@/renderer/components/workspace";
 
 describe("WorkspacePanel", () => {
@@ -19,11 +19,11 @@ describe("WorkspacePanel", () => {
 
     expect(await screen.findByText("D:/repo")).not.toBeNull();
     expect(screen.getByText("README.md")).not.toBeNull();
-    expect(entryIconId(screen.getByRole("button", { name: "展开 src" }))).toBe("folder");
+    expect(entryIconIdForLabel("src")).toBe("folder");
 
     fireEvent.click(screen.getByRole("button", { name: "展开 src" }));
     expect(await screen.findByText("main.py")).not.toBeNull();
-    expect(entryIconId(screen.getByRole("button", { name: "折叠 src" }))).toBe("folder");
+    expect(entryIconIdForLabel("src")).toBe("folder");
 
     fireEvent.click(await screen.findByRole("button", { name: "选择文件 src/main.py" }));
     expect(screen.getByText("src/main.py")).not.toBeNull();
@@ -88,6 +88,45 @@ describe("WorkspacePanel", () => {
         vi.mocked(runtime.workspace.listDirectory).mock.calls.filter(([, path]) => path === "src"),
       ).toHaveLength(1);
     });
+  });
+
+  it("toggles all descendant directories from the right edge control", async () => {
+    const runtime = fakeRuntime({
+      "": [entry("src", "src", "directory")],
+      src: [
+        entry("components", "src/components", "directory"),
+        entry("index.ts", "src/index.ts", "file", 12),
+      ],
+      "src/components": [entry("ui", "src/components/ui", "directory")],
+      "src/components/ui": [entry("Button.tsx", "src/components/ui/Button.tsx", "file", 24)],
+    });
+
+    render(<WorkspacePanel sessionId="ses-1" label="D:/repo" runtime={runtime} />);
+
+    expect(await screen.findByRole("button", { name: "展开 src" })).not.toBeNull();
+    const expandSubtreeButton = screen.getByRole("button", { name: "展开 src 的目录树" });
+    expect(expandSubtreeButton.querySelector(".lucide-chevrons-up-down")).not.toBeNull();
+    fireEvent.click(expandSubtreeButton);
+
+    expect(await screen.findByRole("button", { name: "选择文件 src/components/ui/Button.tsx" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "折叠 src" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "折叠 components" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "折叠 ui" })).not.toBeNull();
+    const collapseSubtreeButton = screen.getByRole("button", { name: "收起 src 的目录树" });
+    expect(collapseSubtreeButton.querySelector(".lucide-chevrons-down-up")).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectorySubtree).toHaveBeenCalledWith(
+        { sessionId: "ses-1" },
+        "src",
+        expect.objectContaining({ maxDepth: 6, maxDirs: 300, maxEntries: 1500, timeoutMs: 700 }),
+      );
+    });
+
+    fireEvent.click(collapseSubtreeButton);
+
+    expect(screen.getByRole("button", { name: "展开 src" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "展开 src 的目录树" }).querySelector(".lucide-chevrons-up-down")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "选择文件 src/components/ui/Button.tsx" })).toBeNull();
   });
 
   it("shows backend workspace errors", async () => {
@@ -626,6 +665,36 @@ function fakeRuntime(
     }
     return Promise.resolve({ root: "D:/repo", entries });
   });
+  const listDirectorySubtree = vi.fn((_scope: unknown, path = ""): Promise<WorkspaceSubtreeResponse> => {
+    const entriesByDirectory: Record<string, WorkspaceEntry[]> = {};
+    const expandedPaths: string[] = [];
+    const visit = (directoryPath: string) => {
+      const entries = entriesByPath[directoryPath];
+      if (!entries) {
+        throw new Error(`目录不存在：${directoryPath}`);
+      }
+      entriesByDirectory[directoryPath] = entries;
+      expandedPaths.push(directoryPath);
+      entries
+        .filter((item) => item.type === "directory")
+        .forEach((item) => visit(item.path));
+    };
+    try {
+      visit(path);
+    } catch (reason) {
+      return Promise.reject(reason);
+    }
+    return Promise.resolve({
+      root: "D:/repo",
+      path,
+      entries_by_path: entriesByDirectory,
+      expanded_paths: expandedPaths,
+      truncated: false,
+      truncated_reason: null,
+      visited_dirs: expandedPaths.length,
+      entry_count: Object.values(entriesByDirectory).reduce((count, entries) => count + entries.length, 0),
+    });
+  });
   const readFile = vi.fn((_scope: unknown, path: string) => {
     if (failingFiles.has(path)) {
       return Promise.reject(new Error("文件过大，暂不预览"));
@@ -653,6 +722,7 @@ function fakeRuntime(
   return {
     workspace: {
       listDirectory,
+      listDirectorySubtree,
       readFile,
       search,
     },
@@ -694,4 +764,9 @@ function deferred<T>() {
 
 function entryIconId(button: HTMLElement): string | null {
   return button.querySelector("[data-icon-id]")?.getAttribute("data-icon-id") ?? null;
+}
+
+function entryIconIdForLabel(label: string): string | null {
+  const treeItem = screen.getByText(label).closest('[role="treeitem"]');
+  return treeItem?.querySelector("[data-icon-id]")?.getAttribute("data-icon-id") ?? null;
 }

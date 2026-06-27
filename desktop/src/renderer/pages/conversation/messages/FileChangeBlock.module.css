@@ -196,7 +196,7 @@
 
 .details {
   display: grid;
-  max-width: min(760px, 100%);
+  max-width: var(--message-tool-detail-width, min(760px, 100%));
   box-sizing: border-box;
   margin-left: 25px;
   overflow: hidden;

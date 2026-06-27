@@ -14,6 +14,7 @@ import {
   Virtuoso,
   type Components,
   type ItemProps,
+  type ListRange,
   type ListProps,
   type ScrollerProps,
 } from "react-virtuoso";
@@ -43,11 +44,15 @@ const STATIC_MESSAGE_LIST_ITEM_LIMIT = 160;
 const VIRTUAL_MESSAGE_VIEWPORT_BUFFER = { bottom: 2600, top: 1800 } as const;
 const LOAD_OLDER_TRIGGER_PX = 44;
 const LOAD_OLDER_ARM_PX = 120;
+const ACTIVE_TURN_ANCHOR_RATIO = 0.35;
+const SCROLL_BOUNDARY_EPSILON_PX = 2;
 
 export interface MessageListProps {
   messages: ConversationMessage[];
   loading?: boolean;
   isProcessing?: boolean;
+  variant?: MessageListVariant;
+  turnNavigatorMode?: MessageListTurnNavigatorMode;
   emptyText?: string;
   emptyTestId?: string;
   runtimeState?: ConversationRuntimeState;
@@ -71,10 +76,15 @@ export interface MessageListScrollControls {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
 }
 
+export type MessageListVariant = "full" | "compact" | "overlay";
+export type MessageListTurnNavigatorMode = "auto" | "hidden";
+
 export function MessageList({
   messages,
   loading = false,
   isProcessing = false,
+  variant = "full",
+  turnNavigatorMode,
   emptyText = "暂无消息",
   emptyTestId = "message-empty",
   renderMessage,
@@ -95,6 +105,7 @@ export function MessageList({
   const olderLoadArmedRef = useRef(false);
   const virtualScrollerRef = useRef<HTMLElement | null>(null);
   const staticTurnRefsRef = useRef<Array<HTMLDivElement | null>>([]);
+  const previousTurnSummaryRef = useRef<{ count: number; lastId: string | null } | null>(null);
   const [showOlderTrigger, setShowOlderTrigger] = useState(false);
   const visibleMessages = useMemo(() => messages.filter((message) => message.kind !== "plan"), [messages]);
   const processedMessages = useMemo(() => processMessages(visibleMessages), [visibleMessages]);
@@ -120,6 +131,8 @@ export function MessageList({
   }, [pendingAssistantMessage, processedMessages]);
   const displayTurns = useMemo(() => groupDisplayItemsByTurn(displayItems), [displayItems]);
   const turnNavigationItems = useMemo(() => buildTurnNavigationItems(displayTurns), [displayTurns]);
+  const effectiveTurnNavigatorMode = turnNavigatorMode ?? (variant === "full" ? "auto" : "hidden");
+  const showTurnNavigator = effectiveTurnNavigatorMode === "auto" && turnNavigationItems.length >= 2;
   const assistantTurnFooters = useMemo(
     () => collectAssistantTurnFooters(visibleMessages, displayItems, isProcessing),
     [displayItems, isProcessing, visibleMessages],
@@ -129,12 +142,17 @@ export function MessageList({
     [displayItems, isProcessing, visibleMessages],
   );
   const useStaticList = shouldUseStaticMessageList(displayItems.length);
+  const [activeTurnIndex, setActiveTurnIndex] = useState(0);
   const listMode = useStaticList ? "static" : "virtual";
   const staticAutoScroll = useAutoScroll({ deps: [displayTurns, isProcessing], itemCount: displayTurns.length });
   const autoScroll = useVirtuosoAutoScroll(displayTurns.length);
   const scrollControls = useStaticList ? staticAutoScroll : autoScroll;
   const canLoadOlder = Boolean(hasMoreOlder && onLoadOlder);
   const olderLoader = renderOlderLoader({ canLoadOlder, loadingOlder, showTrigger: showOlderTrigger });
+  const activeTurnNavigationIndex = useMemo(
+    () => findActiveTurnNavigationIndex(turnNavigationItems, activeTurnIndex),
+    [activeTurnIndex, turnNavigationItems],
+  );
 
   const requestLoadOlder = useCallback(
     (scroller: HTMLElement | null) => {
@@ -176,12 +194,47 @@ export function MessageList({
     [canLoadOlder, loadingOlder, requestLoadOlder],
   );
 
+  const updateActiveStaticTurn = useCallback((scroller: HTMLElement | null) => {
+    if (!scroller) {
+      return;
+    }
+    const scrollerRect = scroller.getBoundingClientRect();
+    if (scrollerRect.height <= 0) {
+      return;
+    }
+    if (isAtScrollTop(scroller)) {
+      setActiveTurnIndex((current) => (current === 0 ? current : 0));
+      return;
+    }
+    if (isAtScrollBottom(scroller)) {
+      const lastIndex = Math.max(0, staticTurnRefsRef.current.length - 1);
+      setActiveTurnIndex((current) => (current === lastIndex ? current : lastIndex));
+      return;
+    }
+    const anchorY = scrollerRect.top + scrollerRect.height * ACTIVE_TURN_ANCHOR_RATIO;
+    let nextActiveIndex = 0;
+
+    for (let index = 0; index < staticTurnRefsRef.current.length; index += 1) {
+      const turn = staticTurnRefsRef.current[index];
+      if (!turn) {
+        continue;
+      }
+      if (turn.getBoundingClientRect().top > anchorY) {
+        break;
+      }
+      nextActiveIndex = index;
+    }
+
+    setActiveTurnIndex((current) => (current === nextActiveIndex ? current : nextActiveIndex));
+  }, []);
+
   const handleStaticScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       staticAutoScroll.handleScroll(event);
       updateOlderLoadTrigger(event.currentTarget);
+      updateActiveStaticTurn(event.currentTarget);
     },
-    [staticAutoScroll, updateOlderLoadTrigger],
+    [staticAutoScroll, updateActiveStaticTurn, updateOlderLoadTrigger],
   );
 
   const handleVirtualScroll = useCallback(
@@ -190,6 +243,10 @@ export function MessageList({
     },
     [updateOlderLoadTrigger],
   );
+
+  const handleVirtualRangeChanged = useCallback((range: ListRange) => {
+    setActiveTurnIndex((current) => (current === range.startIndex ? current : range.startIndex));
+  }, []);
 
   const setVirtualScrollerRef = useCallback(
     (ref: HTMLElement | Window | null) => {
@@ -204,9 +261,23 @@ export function MessageList({
     updateOlderLoadTrigger(virtualScrollerRef.current);
   }, [updateOlderLoadTrigger]);
 
+  const handleVirtualAtBottomStateChange = useCallback(
+    (atBottom: boolean) => {
+      autoScroll.handleAtBottomStateChange(atBottom);
+      if (atBottom) {
+        setActiveTurnIndex((current) => {
+          const lastIndex = Math.max(0, displayTurns.length - 1);
+          return current === lastIndex ? current : lastIndex;
+        });
+      }
+    },
+    [autoScroll.handleAtBottomStateChange, displayTurns.length],
+  );
+
   const handleVirtualAtTopStateChange = useCallback(
     (atTop: boolean) => {
       if (atTop) {
+        setActiveTurnIndex((current) => (current === 0 ? current : 0));
         updateOlderLoadTrigger(virtualScrollerRef.current);
       }
     },
@@ -221,6 +292,10 @@ export function MessageList({
       setShowOlderTrigger(false);
     }
   }, [canLoadOlder, isProcessing, listMode, loading, visibleMessages[0]?.id]);
+
+  useEffect(() => {
+    setActiveTurnIndex((current) => clampTurnIndex(current, displayTurns.length));
+  }, [displayTurns.length]);
 
   useLayoutEffect(() => {
     if (loadingOlder) {
@@ -243,6 +318,33 @@ export function MessageList({
     olderLoadRequestedRef.current = false;
   }, [displayTurns.length, loadingOlder, staticAutoScroll.containerRef, useStaticList]);
 
+  useLayoutEffect(() => {
+    if (!useStaticList) {
+      return;
+    }
+    updateActiveStaticTurn(staticAutoScroll.containerRef.current);
+  }, [displayTurns.length, staticAutoScroll.containerRef, updateActiveStaticTurn, useStaticList]);
+
+  useLayoutEffect(() => {
+    const previousTurnSummary = previousTurnSummaryRef.current;
+    const currentLastTurnId = displayTurns.at(-1)?.id ?? null;
+    previousTurnSummaryRef.current = { count: displayTurns.length, lastId: currentLastTurnId };
+    if (!previousTurnSummary || displayTurns.length <= previousTurnSummary.count || !currentLastTurnId) {
+      return;
+    }
+    if (currentLastTurnId === previousTurnSummary.lastId) {
+      return;
+    }
+    const lastTurn = displayTurns.at(-1);
+    const hasNewUserTurn = Boolean(
+      lastTurn?.items.some((item) => messagesFromProcessedItem(item).some((message) => message.kind === "user")),
+    );
+    if (!hasNewUserTurn && !isProcessing) {
+      return;
+    }
+    setActiveTurnIndex(displayTurns.length - 1);
+  }, [displayTurns, isProcessing]);
+
   const virtualComponents = useMemo<Components<MessageTurn>>(
     () => ({
       ...messageVirtuosoComponents,
@@ -259,6 +361,7 @@ export function MessageList({
             ref={ref}
             className={styles.scroller}
             data-message-list-scroll="true"
+            data-message-list-variant={variant}
             data-testid="message-list-scroll"
             style={style}
             onScroll={(event) => {
@@ -274,7 +377,7 @@ export function MessageList({
         return olderLoader;
       },
     }),
-    [handleVirtualScroll, olderLoader],
+    [handleVirtualScroll, olderLoader, variant],
   );
 
   useEffect(() => {
@@ -314,6 +417,7 @@ export function MessageList({
       ref={staticAutoScroll.containerRef}
       className={styles.scroller}
       data-message-list-scroll="true"
+      data-message-list-variant={variant}
       data-testid="message-list-scroll"
       onPointerDown={staticAutoScroll.handlePointerDown}
       onScroll={handleStaticScroll}
@@ -359,11 +463,12 @@ export function MessageList({
       followOutput={autoScroll.followOutput}
       atBottomThreshold={8}
       atTopThreshold={LOAD_OLDER_TRIGGER_PX}
-      atBottomStateChange={autoScroll.handleAtBottomStateChange}
+      atBottomStateChange={handleVirtualAtBottomStateChange}
       atTopStateChange={handleVirtualAtTopStateChange}
       totalListHeightChanged={autoScroll.handleTotalListHeightChanged}
       scrollerRef={setVirtualScrollerRef}
       startReached={handleVirtualStartReached}
+      rangeChanged={handleVirtualRangeChanged}
       itemContent={(_, turn) =>
         renderMessageTurn({
           turn,
@@ -385,17 +490,18 @@ export function MessageList({
     <section
       className={styles.root}
       data-list-mode={listMode}
-      data-turn-navigator={turnNavigationItems.length >= 2 ? "true" : "false"}
+      data-message-list-variant={variant}
+      data-turn-navigator={showTurnNavigator ? "true" : "false"}
       data-testid="message-list"
     >
       {loading ? (
-        <div className={styles.scroller} data-testid="message-list-scroll">
+        <div className={styles.scroller} data-message-list-variant={variant} data-testid="message-list-scroll">
           <MessageSkeleton />
         </div>
       ) : visibleMessages.length ? (
         messageListContent
       ) : (
-        <div className={styles.scroller} data-testid="message-list-scroll">
+        <div className={styles.scroller} data-message-list-variant={variant} data-testid="message-list-scroll">
           <div className={styles.empty} data-testid={emptyTestId}>
             {emptyText}
           </div>
@@ -414,8 +520,12 @@ export function MessageList({
         </button>
       ) : null}
 
-      {visibleMessages.length ? (
-        <ConversationTurnNavigator turns={turnNavigationItems} onNavigate={navigateToTurn} />
+      {visibleMessages.length && showTurnNavigator ? (
+        <ConversationTurnNavigator
+          turns={turnNavigationItems}
+          activeIndex={activeTurnNavigationIndex}
+          onNavigate={navigateToTurn}
+        />
       ) : null}
     </section>
   );
@@ -699,6 +809,35 @@ function shouldUseStaticMessageList(itemCount: number): boolean {
     return true;
   }
   return itemCount <= STATIC_MESSAGE_LIST_ITEM_LIMIT;
+}
+
+function clampTurnIndex(index: number, count: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(index, 0), count - 1);
+}
+
+function isAtScrollTop(scroller: HTMLElement): boolean {
+  return scroller.scrollTop <= SCROLL_BOUNDARY_EPSILON_PX;
+}
+
+function isAtScrollBottom(scroller: HTMLElement): boolean {
+  return scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - SCROLL_BOUNDARY_EPSILON_PX;
+}
+
+function findActiveTurnNavigationIndex(items: ConversationTurnNavigationItem[], activeTurnIndex: number): number | null {
+  if (!items.length) {
+    return null;
+  }
+  let activeNavigationIndex = 0;
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index].targetIndex > activeTurnIndex) {
+      break;
+    }
+    activeNavigationIndex = index;
+  }
+  return activeNavigationIndex;
 }
 
 interface MessageTurn {

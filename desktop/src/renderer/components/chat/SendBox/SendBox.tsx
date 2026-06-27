@@ -567,7 +567,7 @@ export function SendBox({
       }}
     >
       {selectedSkill || quoteSelection.quotes.length || fileSelection.files.length ? (
-        <div className={styles.fileChips} aria-label="已添加上下文">
+        <div className={styles.fileChips} aria-label="已添加上下文" data-sendbox-context-chips="true">
           {selectedSkill ? (
             <SkillContextChip
               skill={selectedSkill}
@@ -640,9 +640,13 @@ export function SendBox({
         </Suspense>
       ) : null}
 
-      {fileSelection.error ? <div className={styles.fileError}>{fileSelection.error}</div> : null}
+      {fileSelection.error ? (
+        <div className={styles.fileError} data-sendbox-file-error="true">
+          {fileSelection.error}
+        </div>
+      ) : null}
 
-      <div className={styles.toolbar}>
+      <div className={styles.toolbar} data-sendbox-toolbar="true">
         <div className={styles.leftActions}>
           {controls}
           {leftHint}
@@ -669,7 +673,11 @@ export function SendBox({
         </div>
       </div>
 
-      {contextBar ? <div className={styles.contextBar}>{contextBar}</div> : null}
+      {contextBar ? (
+        <div className={styles.contextBar} data-sendbox-context-bar="true">
+          {contextBar}
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1157,6 +1165,7 @@ function ContentEditableInput({
       aria-placeholder={placeholder}
       contentEditable={!disabled}
       data-empty={value ? "false" : "true"}
+      data-sendbox-input="true"
       data-placeholder={placeholder}
       suppressContentEditableWarning
       tabIndex={disabled ? -1 : 0}

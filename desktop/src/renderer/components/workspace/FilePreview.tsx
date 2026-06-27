@@ -7,6 +7,7 @@ import {
   Columns2,
   Copy,
   Eye,
+  Maximize2,
   Search,
   MessageSquarePlus,
   MessageSquareText,
@@ -59,10 +60,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type HTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
+  type ReactNode,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -109,6 +112,7 @@ import {
   markdownDocumentModelCache,
   VirtualMarkdownPreview,
   type MarkdownBlockRendererRegistry,
+  type MarkdownDocumentModel,
   type VirtualMarkdownPreviewHandle,
 } from "./markdownPreviewEngine";
 import styles from "./FilePreview.module.css";
@@ -173,16 +177,21 @@ export function FilePreview({
   const markdownPreviewRef = useRef<VirtualMarkdownPreviewHandle | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const panelChrome = chrome === "panel";
+  const usesFileOpenDelay = panelChrome && request.type === "file";
   const kind = useMemo(() => detectPreviewKind(request), [request]);
   const immediateContent = useMemo(() => immediatePreviewContent(request), [request]);
   const [content, setContent] = useState(() => immediatePreviewContent(request) ?? "");
   const [media, setMedia] = useState<WorkspaceMediaResponse | null>(null);
   const [loading, setLoading] = useState(request.type === "file");
+  const [fileOpenSettling, setFileOpenSettling] = useState(usesFileOpenDelay);
   const previewContent = immediateContent ?? content;
   const previewLoading = immediateContent === null ? loading : false;
   const [error, setError] = useState<string | null>(null);
   const renderedPreviewContent = previewContent;
-  const previewBusy = previewLoading;
+  const [markdownModel, setMarkdownModel] = useState<MarkdownDocumentModel | null>(null);
+  const [markdownModelPreparing, setMarkdownModelPreparing] = useState(false);
+  const markdownPreparing = kind === "markdown" && !previewLoading && !error && markdownModelPreparing;
+  const previewBusy = previewLoading || fileOpenSettling || markdownPreparing;
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
   const [splitMode, setSplitMode] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -446,6 +455,18 @@ export function FilePreview({
   }, [kind, scope, runtime, request]);
 
   useEffect(() => {
+    if (!usesFileOpenDelay) {
+      setFileOpenSettling(false);
+      return;
+    }
+    setFileOpenSettling(true);
+    const timer = window.setTimeout(() => {
+      setFileOpenSettling(false);
+    }, FILE_PREVIEW_OPEN_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [request, usesFileOpenDelay]);
+
+  useEffect(() => {
     sourceSelectionRef.current = null;
     setSelectionDraft(null);
     setEditingAnnotationId(null);
@@ -508,17 +529,34 @@ export function FilePreview({
   const canSplit = kind === "markdown" || kind === "html";
   const sourceLabel = previewSourceLabel(request);
   const formattedSource = useMemo(() => formatSource(renderedPreviewContent, kind), [kind, renderedPreviewContent]);
-  const markdownModel = useMemo(
-    () =>
-      kind === "markdown"
-        ? markdownDocumentModelCache.getOrCreate({
-          cacheKey: sourceLabel,
-          idPrefix: "file-preview",
-          source: renderedPreviewContent,
-        })
-        : null,
-    [kind, renderedPreviewContent, sourceLabel],
-  );
+  useEffect(() => {
+    if (kind !== "markdown" || previewLoading || fileOpenSettling || error) {
+      setMarkdownModel(null);
+      setMarkdownModelPreparing(false);
+      return;
+    }
+
+    let active = true;
+    setMarkdownModel(null);
+    setMarkdownModelPreparing(true);
+    const cancelBuild = scheduleMarkdownModelBuild(renderedPreviewContent, { deferLarge: !usesFileOpenDelay }, () => {
+      const model = markdownDocumentModelCache.getOrCreate({
+        cacheKey: sourceLabel,
+        idPrefix: "file-preview",
+        source: renderedPreviewContent,
+      });
+      if (!active) {
+        return;
+      }
+      setMarkdownModel(model);
+      setMarkdownModelPreparing(false);
+    });
+
+    return () => {
+      active = false;
+      cancelBuild();
+    };
+  }, [error, fileOpenSettling, kind, previewLoading, renderedPreviewContent, sourceLabel, usesFileOpenDelay]);
   const markdownOutline = useMemo(
     () =>
       markdownModel
@@ -1129,6 +1167,23 @@ export function FilePreview({
     }
   }, [activateFindRoot, clearTransientReveal]);
 
+  useEffect(() => {
+    const handleSelectAllShortcut = (event: KeyboardEvent) => {
+      const root = previewRootRef.current;
+      if (!root || activeFilePreviewRoot !== root || !isSelectAllShortcut(event)) {
+        return;
+      }
+      if (!selectPreviewContentForShortcut(event.target, root, bodyRef.current)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", handleSelectAllShortcut, true);
+    return () => window.removeEventListener("keydown", handleSelectAllShortcut, true);
+  }, []);
+
   const handlePreviewKeyDownCapture = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
       if (!isFindShortcutEvent(event.nativeEvent)) {
@@ -1314,40 +1369,47 @@ export function FilePreview({
 
   const renderPreviewPane = () => {
     if (kind === "mermaid") {
-      return <NativeMermaidPreview code={renderedPreviewContent || ""} />;
+      return <NativeMermaidPreview code={renderedPreviewContent || ""} selectable />;
     }
 
     if (kind === "markdown") {
       if (!markdownModel || markdownModel.blocks.length === 0) {
         return (
-          <div className={styles.markdownPane}>
+          <PreviewScrollPane className={styles.markdownPane} data-file-preview-selectable-content="preview">
             <div className="keydex-markdown">
               <p>{markdownContent}</p>
             </div>
-          </div>
+          </PreviewScrollPane>
         );
       }
       return (
-        <div className={styles.markdownPane} onClick={handleMarkdownPreviewClick}>
-          <VirtualMarkdownPreview
-            ref={markdownPreviewRef}
-            activeAnnotationId={activeAnnotationId}
-            activeFindMatchId={activeMarkdownFindMatchId}
-            annotationIndex={markdownAnnotationIndex}
-            findIndex={markdownFindIndex}
-            flashAnnotationId={flashAnnotationId}
-            model={markdownModel}
-            registry={markdownRendererRegistry}
-            renderImage={renderMarkdownImage}
-          />
-        </div>
+        <PreviewScrollPane
+          className={styles.markdownPane}
+          data-file-preview-selectable-content="preview"
+          onClick={handleMarkdownPreviewClick}
+        >
+          {(scrollElement) => (
+            <VirtualMarkdownPreview
+              ref={markdownPreviewRef}
+              activeAnnotationId={activeAnnotationId}
+              activeFindMatchId={activeMarkdownFindMatchId}
+              annotationIndex={markdownAnnotationIndex}
+              customScrollParent={scrollElement}
+              findIndex={markdownFindIndex}
+              flashAnnotationId={flashAnnotationId}
+              model={markdownModel}
+              registry={markdownRendererRegistry}
+              renderImage={renderMarkdownImage}
+            />
+          )}
+        </PreviewScrollPane>
       );
     }
 
     if (kind === "html") {
       const htmlDocument = renderedPreviewContent || "<p>文件为空</p>";
       return (
-        <div className={styles.htmlPane}>
+        <PreviewScrollPane className={styles.htmlPane} data-file-preview-selectable-content="preview">
           <iframe
             key={hashText(htmlDocument)}
             className={styles.htmlFrame}
@@ -1355,7 +1417,7 @@ export function FilePreview({
             sandbox=""
             srcDoc={htmlDocument}
           />
-        </div>
+        </PreviewScrollPane>
       );
     }
 
@@ -1859,6 +1921,9 @@ interface FilePreviewFindScrollLine {
 
 const HIGHLIGHT_MAX_CHARS = 120_000;
 const HIGHLIGHT_MAX_LINES = 2_000;
+const FILE_PREVIEW_OPEN_SETTLE_MS = 260;
+const MARKDOWN_MODEL_DEFER_CHARS = 48_000;
+const MARKDOWN_MODEL_DEFER_MS = 260;
 const ANNOTATION_PANEL_EXIT_MS = 160;
 const ANNOTATION_FLASH_ITERATIONS = 1;
 const ANNOTATION_FLASH_INTERVAL_MS = 700;
@@ -1893,6 +1958,105 @@ const FILE_PREVIEW_TRANSIENT_REVEAL_SCROLL_OPTIONS: ScrollIntoViewOptions = {
 const TRANSIENT_REVEAL_ANNOTATION_ID_PREFIX = "__file-preview-reveal:";
 
 let activeFilePreviewRoot: HTMLElement | null = null;
+
+function isSelectAllShortcut(event: KeyboardEvent): boolean {
+  return (
+    event.key.toLowerCase() === "a" &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey
+  );
+}
+
+function selectPreviewContentForShortcut(
+  target: EventTarget | null,
+  root: HTMLElement,
+  body: HTMLElement | null,
+): boolean {
+  if (!body) {
+    return false;
+  }
+  const targetElement = target instanceof Element ? target : null;
+  if (targetElement && shouldKeepNativeSelectAll(targetElement)) {
+    return false;
+  }
+  if (
+    targetElement &&
+    targetElement !== document.body &&
+    targetElement !== document.documentElement &&
+    !root.contains(targetElement)
+  ) {
+    return false;
+  }
+  const content = previewSelectableContent(targetElement, body);
+  const selection = window.getSelection?.();
+  if (!content || !selection) {
+    return false;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(content);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function shouldKeepNativeSelectAll(target: Element): boolean {
+  return Boolean(
+    target.closest(
+      [
+        FILE_PREVIEW_FIND_SELECTION_EXCLUDE_SELECTOR,
+        "[data-renderer='codemirror']",
+        ".cm-editor",
+        "[contenteditable='true']",
+        "[contenteditable='']",
+      ].join(","),
+    ),
+  );
+}
+
+function previewSelectableContent(target: Element | null, body: HTMLElement): HTMLElement | null {
+  const selector = "[data-file-preview-selectable-content='preview']";
+  const closest = target?.closest<HTMLElement>(selector);
+  if (closest && body.contains(closest)) {
+    return closest;
+  }
+  return body.querySelector<HTMLElement>(selector);
+}
+
+function scheduleMarkdownModelBuild(
+  source: string,
+  options: { deferLarge: boolean },
+  build: () => void,
+): () => void {
+  let timer: number | null = null;
+  let frame: number | null = null;
+
+  if (!options.deferLarge || source.length <= MARKDOWN_MODEL_DEFER_CHARS) {
+    build();
+    return () => {};
+  }
+
+  const runAfterPaint = () => {
+    frame = window.requestAnimationFrame(() => {
+      frame = null;
+      build();
+    });
+  };
+
+  timer = window.setTimeout(() => {
+    timer = null;
+    runAfterPaint();
+  }, MARKDOWN_MODEL_DEFER_MS);
+
+  return () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+    }
+  };
+}
 
 interface SelectionAnnotationDraft {
   anchor: WorkspaceFileAnnotationAnchorV2;
@@ -3651,6 +3815,7 @@ function CodeMirrorSourceView({
   const languageCompartmentRef = useRef<Compartment | null>(null);
   const annotationCompartmentRef = useRef<Compartment | null>(null);
   const findCompartmentRef = useRef<Compartment | null>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   if (themeCompartmentRef.current === null) {
     themeCompartmentRef.current = new Compartment();
   }
@@ -3728,12 +3893,14 @@ function CodeMirrorSourceView({
       }),
     });
     viewRef.current = view;
+    setScrollElement(view.scrollDOM);
     onEditorViewChange?.(view);
 
     return () => {
       if (viewRef.current === view) {
         viewRef.current = null;
       }
+      setScrollElement(null);
       onEditorViewChange?.(null);
       onSelectionChangeRef.current?.(null);
       view.destroy();
@@ -3789,7 +3956,368 @@ function CodeMirrorSourceView({
     smoothScrollCodeMirrorPositionIntoView(view, position, revealLineRequest.block ?? "start");
   }, [revealLineRequest]);
 
-  return <div ref={hostRef} className={styles.codeMirrorHost} />;
+  return (
+    <div className={styles.codeMirrorShell}>
+      <div ref={hostRef} className={styles.codeMirrorHost} />
+      <FilePreviewScrollRail
+        scrollElement={scrollElement}
+        observeSelector=".cm-content"
+        railTestId="source-scroll-rail"
+        surface="source"
+        thumbTestId="source-scroll-thumb"
+      />
+    </div>
+  );
+}
+
+function PreviewScrollPane({
+  children,
+  className,
+  ...props
+}: PreviewScrollPaneProps) {
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const setScrollRef = useCallback((element: HTMLDivElement | null) => {
+    setScrollElement(element);
+  }, []);
+  const resolvedChildren = typeof children === "function" ? (scrollElement ? children(scrollElement) : null) : children;
+
+  return (
+    <div className={styles.previewScrollShell}>
+      <div ref={setScrollRef} className={className} data-custom-scrollbar="true" {...props}>
+        {resolvedChildren}
+      </div>
+      <FilePreviewScrollRail
+        scrollElement={scrollElement}
+        railTestId="preview-scroll-rail"
+        surface="preview"
+        thumbTestId="preview-scroll-thumb"
+      />
+    </div>
+  );
+}
+
+interface PreviewScrollPaneProps extends Omit<HTMLAttributes<HTMLDivElement>, "children"> {
+  className: string;
+  children: ReactNode | ((scrollElement: HTMLElement | null) => ReactNode);
+}
+
+const FILE_PREVIEW_SCROLL_MIN_THUMB_SIZE = 36;
+
+const EMPTY_FILE_PREVIEW_SCROLL_METRICS: FilePreviewScrollMetrics = {
+  maxScrollTop: 0,
+  maxThumbTop: 0,
+  trackHeight: 0,
+  visible: false,
+  thumbTop: 0,
+  thumbHeight: 0,
+};
+
+interface FilePreviewScrollMetrics {
+  maxScrollTop: number;
+  maxThumbTop: number;
+  trackHeight: number;
+  visible: boolean;
+  thumbTop: number;
+  thumbHeight: number;
+}
+
+interface FilePreviewScrollDrag {
+  pointerId: number;
+  pointerOffsetY: number;
+}
+
+interface FilePreviewScrollRepeat {
+  interval: number | null;
+  pointerId: number;
+  timeout: number | null;
+}
+
+function FilePreviewScrollRail({
+  scrollElement,
+  observeSelector,
+  railTestId,
+  surface,
+  thumbTestId,
+}: {
+  scrollElement: HTMLElement | null;
+  observeSelector?: string;
+  railTestId?: string;
+  surface: "preview" | "source";
+  thumbTestId?: string;
+}) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
+  const dragRef = useRef<FilePreviewScrollDrag | null>(null);
+  const repeatRef = useRef<FilePreviewScrollRepeat | null>(null);
+  const [metrics, setMetrics] = useState<FilePreviewScrollMetrics>(EMPTY_FILE_PREVIEW_SCROLL_METRICS);
+
+  const readMetrics = useCallback((): FilePreviewScrollMetrics => {
+    const track = trackRef.current;
+    if (!track || !scrollElement) {
+      return EMPTY_FILE_PREVIEW_SCROLL_METRICS;
+    }
+    const trackHeight = track.clientHeight;
+    const viewportHeight = scrollElement.clientHeight;
+    const scrollHeight = scrollElement.scrollHeight;
+    const maxScrollTop = Math.max(0, scrollHeight - viewportHeight);
+    if (trackHeight <= 0 || viewportHeight <= 0 || maxScrollTop <= 0) {
+      return EMPTY_FILE_PREVIEW_SCROLL_METRICS;
+    }
+    const thumbHeight = Math.min(
+      trackHeight,
+      Math.max(FILE_PREVIEW_SCROLL_MIN_THUMB_SIZE, Math.round((viewportHeight / scrollHeight) * trackHeight)),
+    );
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+    const thumbTop = maxThumbTop <= 0 ? 0 : (scrollElement.scrollTop / maxScrollTop) * maxThumbTop;
+    return {
+      maxScrollTop,
+      maxThumbTop,
+      trackHeight,
+      visible: true,
+      thumbTop: Math.max(0, Math.min(thumbTop, maxThumbTop)),
+      thumbHeight,
+    };
+  }, [scrollElement]);
+
+  const updateMetrics = useCallback(() => {
+    const next = readMetrics();
+    setMetrics((current) => (
+      current.visible === next.visible &&
+      Math.abs(current.thumbTop - next.thumbTop) < 0.5 &&
+      Math.abs(current.thumbHeight - next.thumbHeight) < 0.5
+        ? current
+        : next
+    ));
+  }, [readMetrics]);
+
+  const scheduleMetrics = useCallback(() => {
+    if (frameRef.current !== null) {
+      return;
+    }
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      updateMetrics();
+    });
+  }, [updateMetrics]);
+
+  const scrollToThumbTop = useCallback((thumbTop: number, sourceMetrics: FilePreviewScrollMetrics) => {
+    if (!scrollElement || !sourceMetrics.visible || sourceMetrics.maxThumbTop <= 0) {
+      return;
+    }
+    const nextThumbTop = clampNumber(thumbTop, 0, sourceMetrics.maxThumbTop);
+    scrollElement.scrollTop = (nextThumbTop / sourceMetrics.maxThumbTop) * sourceMetrics.maxScrollTop;
+  }, [scrollElement]);
+
+  const scrollByDirection = useCallback((direction: -1 | 1) => {
+    if (!scrollElement) {
+      return;
+    }
+    const step = Math.max(32, Math.min(96, Math.round(scrollElement.clientHeight * 0.16)));
+    const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    scrollElement.scrollTop = clampNumber(scrollElement.scrollTop + direction * step, 0, maxScrollTop);
+    scheduleMetrics();
+  }, [scheduleMetrics, scrollElement]);
+
+  useLayoutEffect(() => {
+    updateMetrics();
+    if (!scrollElement) {
+      return;
+    }
+    const delayedMeasure = window.setTimeout(scheduleMetrics, 80);
+    scrollElement.addEventListener("scroll", scheduleMetrics, { passive: true });
+    window.addEventListener("resize", scheduleMetrics);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleMetrics);
+    resizeObserver?.observe(scrollElement);
+    const contentElement = observeSelector
+      ? scrollElement.querySelector<HTMLElement>(observeSelector)
+      : scrollElement.firstElementChild instanceof HTMLElement
+        ? scrollElement.firstElementChild
+        : null;
+    if (contentElement) {
+      resizeObserver?.observe(contentElement);
+    }
+    if (railRef.current) {
+      resizeObserver?.observe(railRef.current);
+    }
+    if (trackRef.current) {
+      resizeObserver?.observe(trackRef.current);
+    }
+    return () => {
+      window.clearTimeout(delayedMeasure);
+      scrollElement.removeEventListener("scroll", scheduleMetrics);
+      window.removeEventListener("resize", scheduleMetrics);
+      resizeObserver?.disconnect();
+    };
+  }, [observeSelector, scheduleMetrics, scrollElement, updateMetrics]);
+
+  useEffect(() => () => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    if (repeatRef.current?.timeout !== null && repeatRef.current?.timeout !== undefined) {
+      window.clearTimeout(repeatRef.current.timeout);
+    }
+    if (repeatRef.current?.interval !== null && repeatRef.current?.interval !== undefined) {
+      window.clearInterval(repeatRef.current.interval);
+    }
+    repeatRef.current = null;
+  }, []);
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const rail = railRef.current;
+    const track = trackRef.current;
+    if (!rail || !track || !scrollElement || !metrics.visible) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(`.${styles.previewScrollButton}`)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const currentMetrics = readMetrics();
+    if (!currentMetrics.visible || currentMetrics.maxThumbTop <= 0 || currentMetrics.maxScrollTop <= 0) {
+      return;
+    }
+    const trackRect = track.getBoundingClientRect();
+    const thumb = target?.closest<HTMLElement>(`.${styles.previewScrollThumb}`) ?? null;
+    let pointerOffsetY = thumb
+      ? event.clientY - thumb.getBoundingClientRect().top
+      : currentMetrics.thumbHeight / 2;
+    pointerOffsetY = clampNumber(pointerOffsetY, 0, currentMetrics.thumbHeight);
+    const startedOnThumb = Boolean(thumb);
+    if (!startedOnThumb) {
+      scrollToThumbTop(event.clientY - trackRect.top - pointerOffsetY, currentMetrics);
+      updateMetrics();
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      pointerOffsetY,
+    };
+    rail.dataset.dragging = "true";
+    rail.setPointerCapture?.(event.pointerId);
+  }, [metrics.visible, readMetrics, scrollElement, scrollToThumbTop, updateMetrics]);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const track = trackRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !track || !scrollElement) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const currentMetrics = readMetrics();
+    if (!currentMetrics.visible || currentMetrics.maxThumbTop <= 0) {
+      return;
+    }
+    const trackRect = track.getBoundingClientRect();
+    scrollToThumbTop(event.clientY - trackRect.top - drag.pointerOffsetY, currentMetrics);
+    scheduleMetrics();
+  }, [readMetrics, scheduleMetrics, scrollElement, scrollToThumbTop]);
+
+  const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    delete event.currentTarget.dataset.dragging;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    updateMetrics();
+  }, [updateMetrics]);
+
+  const finishButtonScroll = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const repeat = repeatRef.current;
+    if (!repeat || repeat.pointerId !== event.pointerId) {
+      return;
+    }
+    if (repeat.timeout !== null) {
+      window.clearTimeout(repeat.timeout);
+    }
+    if (repeat.interval !== null) {
+      window.clearInterval(repeat.interval);
+    }
+    repeatRef.current = null;
+    delete event.currentTarget.dataset.pressing;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }, []);
+
+  const startButtonScroll = useCallback((event: ReactPointerEvent<HTMLButtonElement>, direction: -1 | 1) => {
+    if (!scrollElement || !metrics.visible) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (repeatRef.current?.timeout !== null && repeatRef.current?.timeout !== undefined) {
+      window.clearTimeout(repeatRef.current.timeout);
+    }
+    if (repeatRef.current?.interval !== null && repeatRef.current?.interval !== undefined) {
+      window.clearInterval(repeatRef.current.interval);
+    }
+    scrollByDirection(direction);
+    event.currentTarget.dataset.pressing = "true";
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const repeat: FilePreviewScrollRepeat = {
+      interval: null,
+      pointerId: event.pointerId,
+      timeout: window.setTimeout(() => {
+        repeat.timeout = null;
+        repeat.interval = window.setInterval(() => scrollByDirection(direction), 54);
+      }, 280),
+    };
+    repeatRef.current = repeat;
+  }, [metrics.visible, scrollByDirection, scrollElement]);
+
+  return (
+    <div
+      ref={railRef}
+      className={styles.previewScrollRail}
+      data-surface={surface}
+      data-visible={metrics.visible ? "true" : "false"}
+      data-testid={railTestId}
+      aria-hidden="true"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+    >
+      <button
+        type="button"
+        className={styles.previewScrollButton}
+        data-direction="up"
+        data-testid={railTestId ? `${railTestId}-up` : undefined}
+        tabIndex={-1}
+        aria-label="Scroll up"
+        onPointerCancel={finishButtonScroll}
+        onPointerDown={(event) => startButtonScroll(event, -1)}
+        onPointerUp={finishButtonScroll}
+      />
+      <div ref={trackRef} className={styles.previewScrollTrack}>
+        <div
+          className={styles.previewScrollThumb}
+          data-testid={thumbTestId}
+          style={{ height: `${metrics.thumbHeight}px`, transform: `translateY(${metrics.thumbTop}px)` }}
+        />
+      </div>
+      <button
+        type="button"
+        className={styles.previewScrollButton}
+        data-direction="down"
+        data-testid={railTestId ? `${railTestId}-down` : undefined}
+        tabIndex={-1}
+        aria-label="Scroll down"
+        onPointerCancel={finishButtonScroll}
+        onPointerDown={(event) => startButtonScroll(event, 1)}
+        onPointerUp={finishButtonScroll}
+      />
+    </div>
+  );
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
 }
 
 function smoothScrollCodeMirrorPositionIntoView(
@@ -4050,13 +4578,24 @@ function codeMirrorTheme(theme: "light" | "dark"): Extension {
       ".cm-scroller": {
         fontFamily: "var(--font-mono)",
         lineHeight: "1.55",
+        scrollbarColor: "transparent transparent",
+        scrollbarGutter: "auto",
+        scrollbarWidth: "none",
+      },
+      ".cm-scroller::-webkit-scrollbar": {
+        width: "0",
+        height: "0",
+      },
+      ".cm-scroller::-webkit-scrollbar-track, .cm-scroller::-webkit-scrollbar-thumb, .cm-scroller::-webkit-scrollbar-corner": {
+        border: "0",
+        background: "transparent",
       },
       ".cm-content": {
         minHeight: "100%",
         padding: "10px 0 14px",
       },
       ".cm-line": {
-        padding: "0 14px",
+        padding: "0 24px 0 14px",
       },
       ".cm-gutters": {
         backgroundColor: "var(--color-bg-elevated)",
@@ -4301,22 +4840,45 @@ interface MermaidDragState {
   scrollTop: number;
 }
 
-function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout?: "panel" | "document" }) {
+function NativeMermaidPreview({
+  code,
+  layout = "panel",
+  selectable = false,
+}: {
+  code: string;
+  layout?: "panel" | "document" | "fullscreen";
+  selectable?: boolean;
+}) {
   const [theme, setTheme] = useState<"light" | "dark">(() => getTheme());
   const [state, setState] = useState<MermaidPreviewState>({ status: "loading" });
   const [scale, setScale] = useState(1);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<MermaidDragState | null>(null);
+  const mermaidCopyTimerRef = useRef<number | null>(null);
   const autoFitRef = useRef(true);
   const centerFrameRef = useRef<number | null>(null);
   const autoFitFrameRef = useRef<number | null>(null);
   const autoFitAttemptRef = useRef(0);
   const instanceId = useRef(`preview-mermaid-${Math.random().toString(36).slice(2)}`);
+  const documentLayout = layout === "document";
 
   useEffect(() => {
     const themeObserver = new MutationObserver(() => setTheme(getTheme()));
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => themeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setMermaidCopyState("idle");
+  }, [code]);
+
+  useEffect(() => () => {
+    if (mermaidCopyTimerRef.current !== null) {
+      window.clearTimeout(mermaidCopyTimerRef.current);
+      mermaidCopyTimerRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -4468,6 +5030,23 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
     scheduleAutoFitLoop();
   };
 
+  const copyMermaidSource = useCallback(async () => {
+    if (mermaidCopyTimerRef.current !== null) {
+      window.clearTimeout(mermaidCopyTimerRef.current);
+      mermaidCopyTimerRef.current = null;
+    }
+    try {
+      await copyText(code);
+      setMermaidCopyState("copied");
+    } catch {
+      setMermaidCopyState("failed");
+    }
+    mermaidCopyTimerRef.current = window.setTimeout(() => {
+      setMermaidCopyState("idle");
+      mermaidCopyTimerRef.current = null;
+    }, 1400);
+  }, [code]);
+
   useLayoutEffect(() => {
     if (!autoFitRef.current) {
       return;
@@ -4511,6 +5090,13 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
     }
 
     const handleNativeWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) === 0 && Math.abs(event.deltaX) === 0) {
+        return;
+      }
+      if (documentLayout) {
+        scrollMarkdownPreviewFromEmbeddedMermaid(viewport, event);
+        return;
+      }
       if (Math.abs(event.deltaY) === 0) {
         return;
       }
@@ -4523,10 +5109,10 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
 
     viewport.addEventListener("wheel", handleNativeWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleNativeWheel);
-  }, [state.status, zoomBy]);
+  }, [documentLayout, state.status, zoomBy]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (state.status !== "ready" || event.button > 0) {
+    if (documentLayout || state.status !== "ready" || event.button > 0) {
       return;
     }
     autoFitRef.current = false;
@@ -4545,7 +5131,7 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== pointerIdValue(event)) {
+    if (documentLayout || !drag || drag.pointerId !== pointerIdValue(event)) {
       return;
     }
     event.currentTarget.scrollLeft = drag.scrollLeft - (pointerCoordinate(event.clientX) - drag.startX);
@@ -4561,7 +5147,44 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
-  const scaleLabel = formatMermaidScale(scale);
+  const zoomFromViewportCenter = (delta: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      zoomBy(delta);
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    zoomBy(delta, {
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+  };
+
+  const documentControls =
+    state.status === "ready" ? (
+      <div
+        className={styles.mermaidDocumentHeader}
+        data-file-preview-selection-excluded="true"
+      >
+        <span>mermaid</span>
+        <button
+          type="button"
+          aria-label="打开 Mermaid 预览"
+          title="打开 Mermaid 预览"
+          onClick={() => setFullscreenOpen(true)}
+        >
+          <Maximize2 size={13} />
+        </button>
+        <button
+          type="button"
+          aria-label="复制 Mermaid 源码"
+          title={mermaidCopyState === "copied" ? "已复制 Mermaid 源码" : "复制 Mermaid 源码"}
+          onClick={() => void copyMermaidSource()}
+        >
+          {mermaidCopyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      </div>
+    ) : null;
   const renderDimensions =
     state.status === "ready" && state.dimensions
       ? {
@@ -4569,61 +5192,148 @@ function NativeMermaidPreview({ code, layout = "panel" }: { code: string; layout
           "--mermaid-render-height": formatMermaidCssPixels(state.dimensions.height * scale),
         }
       : null;
+  const scaleLabel = formatMermaidScale(scale);
+  const interactiveControls =
+    state.status === "ready" && !documentLayout ? (
+      <div
+        className={styles.mermaidControls}
+        aria-label="Mermaid 视图控制"
+        data-file-preview-selection-excluded="true"
+      >
+        <button
+          type="button"
+          aria-label="缩小 Mermaid"
+          title="缩小 Mermaid"
+          onClick={() => zoomFromViewportCenter(-MERMAID_SCALE_STEP)}
+        >
+          <ZoomOut size={15} />
+        </button>
+        <span className={styles.mermaidScaleValue} aria-label={`当前缩放 ${scaleLabel}`}>
+          {scaleLabel}
+        </span>
+        <button
+          type="button"
+          aria-label="放大 Mermaid"
+          title="放大 Mermaid"
+          onClick={() => zoomFromViewportCenter(MERMAID_SCALE_STEP)}
+        >
+          <ZoomIn size={15} />
+        </button>
+        <button type="button" aria-label="重置 Mermaid 视图" title="重置 Mermaid 视图" onClick={resetZoom}>
+          <RotateCcw size={15} />
+        </button>
+      </div>
+    ) : null;
 
   return (
-    <div className={styles.mermaidPane} data-layout={layout} data-testid="preview-mermaid-pane">
-      {state.status === "ready" ? (
-        <div className={styles.mermaidControls} aria-label="Mermaid 视图控制">
-          <button type="button" aria-label="缩小 Mermaid" title="缩小 Mermaid" onClick={() => zoomBy(-MERMAID_SCALE_STEP)}>
-            <ZoomOut size={15} />
-          </button>
-          <span className={styles.mermaidScaleValue} aria-label={`当前缩放 ${scaleLabel}`}>
-            {scaleLabel}
-          </span>
-          <button type="button" aria-label="放大 Mermaid" title="放大 Mermaid" onClick={() => zoomBy(MERMAID_SCALE_STEP)}>
-            <ZoomIn size={15} />
-          </button>
-          <button type="button" aria-label="重置 Mermaid 视图" title="重置 Mermaid 视图" onClick={resetZoom}>
-            <RotateCcw size={15} />
-          </button>
-        </div>
-      ) : null}
-      {state.status === "ready" ? (
-        <div
-          ref={viewportRef}
-          className={styles.mermaidSvg}
-          aria-label="Mermaid 图表"
-          data-interactive="true"
-          style={
-            {
-              "--mermaid-scale": scale,
-              ...renderDimensions,
-            } as CSSProperties
-          }
-          onPointerCancel={clearDrag}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={clearDrag}
-        >
+    <>
+      <div
+        className={styles.mermaidPane}
+        data-markdown-code-frame={documentLayout ? "true" : undefined}
+        data-markdown-code-language={documentLayout ? "mermaid" : undefined}
+        data-file-preview-selectable-content={selectable ? "preview" : undefined}
+        data-layout={layout}
+        data-testid="preview-mermaid-pane"
+      >
+        {documentLayout ? documentControls : null}
+        {interactiveControls}
+        {state.status === "ready" ? (
           <div
-            className={styles.mermaidSvgContent}
-            data-sized={state.dimensions ? "true" : "false"}
-            dangerouslySetInnerHTML={{ __html: state.svg }}
-          />
-        </div>
-      ) : state.status === "error" ? (
-        <div className={styles.mermaidStatus} role="alert">
-          {state.message}
-        </div>
-      ) : (
-        <div className={styles.mermaidStatus} aria-hidden="true" />
-      )}
-    </div>
+            ref={viewportRef}
+            className={
+              documentLayout
+                ? `${styles.mermaidSvg} ${styles.mermaidDocumentViewport}`
+                : styles.mermaidSvg
+            }
+            aria-label="Mermaid 图表"
+            data-interactive={documentLayout ? "false" : "true"}
+            style={
+              {
+                "--mermaid-scale": scale,
+                ...renderDimensions,
+              } as CSSProperties
+            }
+            onPointerCancel={clearDrag}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={clearDrag}
+          >
+            <div
+              className={styles.mermaidSvgContent}
+              data-sized={state.dimensions ? "true" : "false"}
+              dangerouslySetInnerHTML={{ __html: state.svg }}
+            />
+          </div>
+        ) : state.status === "error" ? (
+          <div className={styles.mermaidStatus} role="alert">
+            {state.message}
+          </div>
+        ) : (
+          <div className={styles.mermaidStatus} aria-hidden="true" />
+        )}
+      </div>
+      {fullscreenOpen ? (
+        <FilePreviewFullscreenDialog title="Mermaid 预览" onClose={() => setFullscreenOpen(false)}>
+          <NativeMermaidPreview code={code} layout="fullscreen" />
+        </FilePreviewFullscreenDialog>
+      ) : null}
+    </>
   );
 }
 
 function clampMermaidScale(value: number): number {
   return Math.min(MERMAID_MAX_SCALE, Math.max(MERMAID_MIN_SCALE, Math.round(value * 100) / 100));
+}
+
+function scrollMarkdownPreviewFromEmbeddedMermaid(viewport: HTMLElement, event: WheelEvent): void {
+  const scrollParent = viewport.closest<HTMLElement>("[data-custom-scrollbar='true']");
+  if (!scrollParent) {
+    return;
+  }
+  event.preventDefault();
+  scrollParent.scrollTop += event.deltaY;
+  scrollParent.scrollLeft += event.deltaX;
+}
+
+function FilePreviewFullscreenDialog({
+  children,
+  onClose,
+  title,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  title: string;
+}) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return createPortal(
+    <div className={styles.previewFullscreenOverlay} role="presentation" onMouseDown={onClose}>
+      <section
+        className={styles.previewFullscreenDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className={styles.previewFullscreenHeader}>
+          <h2>{title}</h2>
+          <button className={styles.previewFullscreenClose} type="button" aria-label="关闭 Mermaid 预览" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+        <div className={styles.previewFullscreenBody}>{children}</div>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 function calculateMermaidFitScale(viewport: HTMLElement, dimensions: SvgDimensions): number | null {
@@ -4708,7 +5418,7 @@ function annotationWorkspaceRuntime(runtime: RuntimeBridge | undefined): Annotat
 function DiffPreview({ diff }: { diff: string }) {
   const lines = parseUnifiedDiffDisplayLines(diff);
   return (
-    <div className={styles.diffPane} aria-label="Diff 渲染内容">
+    <PreviewScrollPane className={styles.diffPane} aria-label="Diff 渲染内容">
       {lines.map((line) => (
         <div key={line.key} className={styles.diffLine} data-kind={line.kind}>
           <span className={styles.diffLineNo}>{line.lineNumber ?? ""}</span>
@@ -4718,7 +5428,7 @@ function DiffPreview({ diff }: { diff: string }) {
           </code>
         </div>
       ))}
-    </div>
+    </PreviewScrollPane>
   );
 }
 

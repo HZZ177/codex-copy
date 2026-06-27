@@ -23,7 +23,7 @@ APPEARANCE_SETTINGS_KEY = "appearance_settings"
 
 
 class AppearanceSettings(BaseModel):
-    font_family: Literal["system", "maple-mono"] = "system"
+    font_family: Literal["system", "maple-mono", "jetbrains-mono"] = "system"
 
 
 class SettingsResponse(BaseModel):

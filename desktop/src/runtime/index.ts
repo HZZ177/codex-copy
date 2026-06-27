@@ -72,6 +72,8 @@ export type {
   WorkspaceSkillListOptions,
   WorkspaceSkillsResponse,
   WorkspaceSkillSummary,
+  WorkspaceSubtreeOptions,
+  WorkspaceSubtreeResponse,
   WorkspaceTreeResponse,
 } from "./workspace";
 export type {

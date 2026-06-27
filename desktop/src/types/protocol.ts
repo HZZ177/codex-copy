@@ -147,7 +147,7 @@ export interface PublicModelSettings {
   api_key_preview: string | null;
 }
 
-export type AppFontFamily = "system" | "maple-mono";
+export type AppFontFamily = "system" | "maple-mono" | "jetbrains-mono";
 
 export interface AppearanceSettings {
   font_family: AppFontFamily;

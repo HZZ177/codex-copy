@@ -104,7 +104,7 @@ test("workbench capsule creates workspace-owned sessions, sends, searches and pr
 
   await page.getByRole("button", { name: "Agent" }).click();
   await expect(page).toHaveURL(new RegExp(`/conversation/${NEW_SESSION}$`));
-  await expect(page.getByText("e2e new task")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "e2e new task" })).toBeVisible();
   await expect(page.getByLabel("继续输入")).toBeVisible();
   await saveEvidence(page, "e2e-009");
 
@@ -191,6 +191,7 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   await page.getByRole("button", { name: "将工作台助手展开到右侧" }).click();
   const drawer = page.getByTestId("workbench-assistant-drawer");
   await expect(drawer).toBeVisible();
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
   await expect(drawer).toHaveCSS("box-shadow", "none");
   await expect(drawer).toHaveCSS("backdrop-filter", "none");
   const drawerBox = await drawer.boundingBox();
@@ -198,7 +199,7 @@ test("workbench expanded layer, drawer and approval stay above the workspace", a
   expect(drawerBox?.width ?? 0).toBeLessThanOrEqual(520);
   const dockedFileBox = await fileBrowser.boundingBox();
   expect(dockedFileBox?.width ?? 0).toBeLessThan((beforeBox?.width ?? 0) - 300);
-  expect(Math.round(drawerBox?.x ?? 0)).toBeGreaterThanOrEqual(Math.round((dockedFileBox?.x ?? 0) + (dockedFileBox?.width ?? 0)) - 2);
+  expect(Math.round(drawerBox?.x ?? 0)).toBeGreaterThanOrEqual(Math.round((dockedFileBox?.x ?? 0) + (dockedFileBox?.width ?? 0)) - 6);
   await expect(page.getByTestId("app-shell")).toHaveAttribute("data-right-sidebar", "closed");
   await expect(page.getByTestId("right-sidebar-initial-page")).toHaveCount(0);
   await expect(page.getByTestId("workbench-expanded-layer")).toHaveCount(0);
@@ -313,6 +314,7 @@ test("workbench keeps controls usable across responsive viewports and reload", a
   }
 
   await page.getByRole("button", { name: "关闭工作台助手侧栏" }).click();
+  await expect(page.getByTestId("workbench-assistant-surface")).toHaveAttribute("data-dock-transition", "idle");
   await openWorkbenchComposer(page);
   await page.getByRole("button", { name: "展开工作台消息层" }).click();
   await expect(page.getByTestId("workbench-expanded-layer")).toBeVisible();

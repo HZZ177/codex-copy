@@ -7,7 +7,7 @@ export type { ErrorItemProps } from "./ErrorItem";
 export { FileChangeBlock } from "./FileChangeBlock";
 export type { FileChangeBlockProps, FileChangePreview } from "./FileChangeBlock";
 export { MessageList } from "./MessageList";
-export type { MessageListProps, MessageListScrollControls } from "./MessageList";
+export type { MessageListProps, MessageListScrollControls, MessageListTurnNavigatorMode } from "./MessageList";
 export { MessageAgentStatus } from "./MessageAgentStatus";
 export type { MessageAgentStatusProps } from "./MessageAgentStatus";
 export { MessageThinking } from "./MessageThinking";

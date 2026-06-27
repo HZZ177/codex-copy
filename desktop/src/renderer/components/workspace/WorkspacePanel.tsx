@@ -1,4 +1,4 @@
-import { ChevronRight, Crosshair, RefreshCw, Search } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Crosshair, RefreshCw, Search } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -39,8 +39,14 @@ export interface WorkspacePanelProps {
 
 type EntryMap = Record<string, WorkspaceEntry[]>;
 type ErrorMap = Record<string, string>;
-const TREE_GROUP_TRANSITION_MS = 340;
+const TREE_GROUP_TRANSITION_MS = 180;
 const ENTRY_NAME_TOOLTIP_DELAY_MS = 500;
+const SUBTREE_EXPAND_OPTIONS = {
+  maxDepth: 6,
+  maxDirs: 300,
+  maxEntries: 1500,
+  timeoutMs: 700,
+};
 
 export function WorkspacePanel({
   workspaceId,
@@ -56,6 +62,8 @@ export function WorkspacePanel({
   const handledRevealSelectedPathRequestIdRef = useRef(0);
   const [entriesByPath, setEntriesByPath] = useState<EntryMap>({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([""]));
+  const [bulkExpandedSubtreePaths, setBulkExpandedSubtreePaths] = useState<Set<string>>(() => new Set());
+  const [subtreeBusyPaths, setSubtreeBusyPaths] = useState<Set<string>>(() => new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
   const [errorsByPath, setErrorsByPath] = useState<ErrorMap>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -79,6 +87,8 @@ export function WorkspacePanel({
     setEntriesByPath({});
     setErrorsByPath({});
     setExpandedPaths(new Set([""]));
+    setBulkExpandedSubtreePaths(new Set());
+    setSubtreeBusyPaths(new Set());
     setSelectedPath(null);
     setFilterQuery("");
     setLoadingPaths(new Set([""]));
@@ -138,26 +148,33 @@ export function WorkspacePanel({
       : searchActive && !searchLoading && !searchState.error && !searchState.results.length
         ? "没有匹配的文件"
         : null;
+  const fullyExpandedSubtreePaths = useMemo(
+    () => collectFullyExpandedDirectoryPaths(entriesByPath, expandedPaths),
+    [entriesByPath, expandedPaths],
+  );
 
   useEffect(() => {
     onSelectFileRef.current = onSelectFile;
   }, [onSelectFile]);
 
-  const loadDirectory = useCallback(async (path: string, force = false) => {
+  const loadDirectory = useCallback(async (path: string, force = false): Promise<WorkspaceEntry[] | null> => {
     if (!force && entriesByPath[path]) {
-      return;
+      return entriesByPath[path];
     }
     setLoadingPaths((paths) => addToSet(paths, path));
     setErrorsByPath((errors) => removeKey(errors, path));
     try {
       if (!scope) {
         setErrorsByPath((errors) => ({ ...errors, [path]: "工作区未绑定" }));
-        return;
+        return null;
       }
       const response = await runtime.workspace.listDirectory(scope, path);
-      setEntriesByPath((entries) => ({ ...entries, [path]: sortEntries(response.entries) }));
+      const sortedEntries = sortEntries(response.entries);
+      setEntriesByPath((entries) => ({ ...entries, [path]: sortedEntries }));
+      return sortedEntries;
     } catch (reason) {
       setErrorsByPath((errors) => ({ ...errors, [path]: errorMessage(reason) }));
+      return null;
     } finally {
       setLoadingPaths((paths) => removeFromSet(paths, path));
     }
@@ -166,6 +183,7 @@ export function WorkspacePanel({
   const toggleDirectory = useCallback(async (path: string) => {
     if (expandedPaths.has(path)) {
       setExpandedPaths((paths) => removeFromSet(paths, path));
+      setBulkExpandedSubtreePaths((paths) => removeFromSet(paths, path));
       return;
     }
     if (entriesByPath[path]) {
@@ -175,6 +193,47 @@ export function WorkspacePanel({
     await loadDirectory(path);
     setExpandedPaths((paths) => addToSet(paths, path));
   }, [entriesByPath, expandedPaths, loadDirectory]);
+
+  const loadDirectorySubtree = useCallback(async (path: string) => {
+    setSubtreeBusyPaths((paths) => addToSet(paths, path));
+    setErrorsByPath((errors) => removeKey(errors, path));
+    try {
+      if (!scope) {
+        setErrorsByPath((errors) => ({ ...errors, [path]: "工作区未绑定" }));
+        return;
+      }
+      const response = await runtime.workspace.listDirectorySubtree(scope, path, SUBTREE_EXPAND_OPTIONS);
+      setEntriesByPath((entries) => ({
+        ...entries,
+        ...sortEntryMap(response.entries_by_path),
+      }));
+      setExpandedPaths((paths) => {
+        const next = new Set(paths);
+        response.expanded_paths.forEach((entryPath) => next.add(entryPath));
+        return next;
+      });
+      setBulkExpandedSubtreePaths((paths) => addToSet(paths, path));
+    } catch (reason) {
+      setErrorsByPath((errors) => ({ ...errors, [path]: errorMessage(reason) }));
+    } finally {
+      setSubtreeBusyPaths((paths) => removeFromSet(paths, path));
+    }
+  }, [runtime, scope]);
+
+  const toggleDirectorySubtree = useCallback(async (path: string, collapse: boolean) => {
+    if (collapse) {
+      const pathsToCollapse = loadedDirectorySubtreePaths(path, entriesByPath);
+      setExpandedPaths((paths) => {
+        const next = new Set(paths);
+        pathsToCollapse.forEach((entryPath) => next.delete(entryPath));
+        return next;
+      });
+      setBulkExpandedSubtreePaths((paths) => removeManyFromSet(paths, pathsToCollapse));
+      return;
+    }
+
+    await loadDirectorySubtree(path);
+  }, [entriesByPath, loadDirectorySubtree]);
 
   const selectFile = useCallback((path: string) => {
     setSelectedPath(path);
@@ -325,15 +384,19 @@ export function WorkspacePanel({
               : visibleRootEntries.map((entry) => (
                   <TreeNode
                     entriesByPath={entriesByPath}
+                    bulkExpandedSubtreePaths={bulkExpandedSubtreePaths}
                     entry={entry}
                     errorsByPath={errorsByPath}
                     expandedPaths={expandedPaths}
                     filterQuery={normalizedFilter}
+                    fullyExpandedSubtreePaths={fullyExpandedSubtreePaths}
                     key={entry.path}
                     loadingPaths={loadingPaths}
                     onSelectFile={selectFile}
+                    onToggleSubtree={(path, collapse) => void toggleDirectorySubtree(path, collapse)}
                     onToggleDirectory={(path) => void toggleDirectory(path)}
                     selectedPath={effectiveSelectedPath}
+                    subtreeBusyPaths={subtreeBusyPaths}
                   />
                 ))}
           </div>
@@ -384,54 +447,76 @@ function workspaceScope({
 
 interface TreeNodeProps {
   entriesByPath: EntryMap;
+  bulkExpandedSubtreePaths: Set<string>;
   entry: WorkspaceEntry;
   errorsByPath: ErrorMap;
   expandedPaths: Set<string>;
   filterQuery: string;
+  fullyExpandedSubtreePaths: Set<string>;
   loadingPaths: Set<string>;
   onSelectFile: (path: string) => void;
+  onToggleSubtree: (path: string, collapse: boolean) => void;
   onToggleDirectory: (path: string) => void;
   selectedPath: string | null;
+  subtreeBusyPaths: Set<string>;
   depth?: number;
 }
 
 const TreeNode = memo(function TreeNode({
   entriesByPath,
+  bulkExpandedSubtreePaths,
   entry,
   errorsByPath,
   expandedPaths,
   filterQuery,
+  fullyExpandedSubtreePaths,
   loadingPaths,
   onSelectFile,
+  onToggleSubtree,
   onToggleDirectory,
   selectedPath,
+  subtreeBusyPaths,
   depth = 0,
 }: TreeNodeProps) {
   const isDirectory = entry.type === "directory";
   const loading = loadingPaths.has(entry.path);
+  const subtreeBusy = subtreeBusyPaths.has(entry.path);
   const children = useMemo(
     () => filterEntries(entriesByPath[entry.path] ?? [], entriesByPath, filterQuery),
     [entriesByPath, entry.path, filterQuery],
   );
   const expanded = expandedPaths.has(entry.path) || (Boolean(filterQuery) && children.length > 0);
+  const subtreeExpanded = bulkExpandedSubtreePaths.has(entry.path) || fullyExpandedSubtreePaths.has(entry.path);
   const error = errorsByPath[entry.path];
   const paddingLeft = 8 + depth * 14;
 
   return (
     <div className={styles.node} role="treeitem" aria-expanded={isDirectory ? expanded : undefined}>
       {isDirectory ? (
-        <button
-          aria-label={`${expanded ? "折叠" : "展开"} ${entry.name}`}
-          className={styles.nodeButton}
-          onClick={() => onToggleDirectory(entry.path)}
-          style={{ paddingLeft }}
-          type="button"
-        >
-          <ChevronRight className={styles.chevron} data-expanded={expanded ? "true" : "false"} size={14} />
-          <MaterialEntryIcon path={entry.path || entry.name} type="directory" />
-          <EllipsizedEntryName name={entry.name} />
-          {loading ? <em>读取中</em> : null}
-        </button>
+        <div className={styles.directoryRow}>
+          <button
+            aria-label={`${expanded ? "折叠" : "展开"} ${entry.name}`}
+            className={styles.nodeButton}
+            onClick={() => onToggleDirectory(entry.path)}
+            style={{ paddingLeft }}
+            type="button"
+          >
+            <ChevronRight className={styles.chevron} data-expanded={expanded ? "true" : "false"} size={14} />
+            <MaterialEntryIcon path={entry.path || entry.name} type="directory" />
+            <EllipsizedEntryName name={entry.name} />
+            {loading ? <em>读取中</em> : null}
+          </button>
+          <button
+            aria-label={`${subtreeBusy ? "正在展开" : subtreeExpanded ? "收起" : "展开"} ${entry.name} 的目录树`}
+            className={styles.subtreeToggleButton}
+            disabled={subtreeBusy}
+            onClick={() => onToggleSubtree(entry.path, subtreeExpanded)}
+            title={subtreeExpanded ? "收起目录树" : "展开目录树"}
+            type="button"
+          >
+            {subtreeExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
+          </button>
+        </div>
       ) : (
         <button
           aria-label={`选择文件 ${entry.path}`}
@@ -454,15 +539,19 @@ const TreeNode = memo(function TreeNode({
           {children.map((child) => (
             <TreeNode
               entriesByPath={entriesByPath}
+              bulkExpandedSubtreePaths={bulkExpandedSubtreePaths}
               entry={child}
               errorsByPath={errorsByPath}
               expandedPaths={expandedPaths}
               filterQuery={filterQuery}
+              fullyExpandedSubtreePaths={fullyExpandedSubtreePaths}
               key={child.path}
               loadingPaths={loadingPaths}
               onSelectFile={onSelectFile}
+              onToggleSubtree={onToggleSubtree}
               onToggleDirectory={onToggleDirectory}
               selectedPath={selectedPath}
+              subtreeBusyPaths={subtreeBusyPaths}
               depth={depth + 1}
             />
           ))}
@@ -479,12 +568,16 @@ function areTreeNodePropsEqual(previous: TreeNodeProps, next: TreeNodeProps): bo
   if (
     previous.entry !== next.entry ||
     previous.entriesByPath !== next.entriesByPath ||
+    previous.bulkExpandedSubtreePaths !== next.bulkExpandedSubtreePaths ||
     previous.errorsByPath !== next.errorsByPath ||
     previous.expandedPaths !== next.expandedPaths ||
     previous.filterQuery !== next.filterQuery ||
+    previous.fullyExpandedSubtreePaths !== next.fullyExpandedSubtreePaths ||
     previous.loadingPaths !== next.loadingPaths ||
     previous.onSelectFile !== next.onSelectFile ||
+    previous.onToggleSubtree !== next.onToggleSubtree ||
     previous.onToggleDirectory !== next.onToggleDirectory ||
+    previous.subtreeBusyPaths !== next.subtreeBusyPaths ||
     previous.depth !== next.depth
   ) {
     return false;
@@ -504,6 +597,51 @@ function treeEntryContainsPath(entry: WorkspaceEntry, path: string | null): bool
     return true;
   }
   return entry.type === "directory" && path.startsWith(`${entry.path}/`);
+}
+
+function loadedDirectorySubtreePaths(path: string, entriesByPath: EntryMap): string[] {
+  const paths = [path];
+  const visit = (directoryPath: string) => {
+    for (const child of entriesByPath[directoryPath] ?? []) {
+      if (child.type !== "directory") {
+        continue;
+      }
+      paths.push(child.path);
+      visit(child.path);
+    }
+  };
+  visit(path);
+  return paths;
+}
+
+function collectFullyExpandedDirectoryPaths(entriesByPath: EntryMap, expandedPaths: Set<string>): Set<string> {
+  const result = new Set<string>();
+  const visiting = new Set<string>();
+  const directoryPaths = new Set(Object.keys(entriesByPath));
+
+  const visit = (path: string): boolean => {
+    if (result.has(path)) {
+      return true;
+    }
+    if (!directoryPaths.has(path) || !expandedPaths.has(path) || visiting.has(path)) {
+      return false;
+    }
+    visiting.add(path);
+    const childDirectories = (entriesByPath[path] ?? [])
+      .filter((entry) => entry.type === "directory")
+      .map((entry) => entry.path);
+    const expanded = childDirectories.every((childPath) => directoryPaths.has(childPath) && visit(childPath));
+    visiting.delete(path);
+    if (expanded) {
+      result.add(path);
+    }
+    return expanded;
+  };
+
+  directoryPaths.forEach((path) => {
+    void visit(path);
+  });
+  return result;
 }
 
 const SearchResultNode = memo(function SearchResultNode({
@@ -775,6 +913,12 @@ function sortEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   });
 }
 
+function sortEntryMap(entriesByPath: EntryMap): EntryMap {
+  return Object.fromEntries(
+    Object.entries(entriesByPath).map(([path, entries]) => [path, sortEntries(entries)]),
+  );
+}
+
 function addToSet(values: Set<string>, value: string): Set<string> {
   const next = new Set(values);
   next.add(value);
@@ -784,6 +928,14 @@ function addToSet(values: Set<string>, value: string): Set<string> {
 function removeFromSet(values: Set<string>, value: string): Set<string> {
   const next = new Set(values);
   next.delete(value);
+  return next;
+}
+
+function removeManyFromSet(values: Set<string>, items: Iterable<string>): Set<string> {
+  const next = new Set(values);
+  for (const item of items) {
+    next.delete(item);
+  }
   return next;
 }
 

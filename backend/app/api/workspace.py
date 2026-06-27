@@ -5,6 +5,8 @@ import base64
 import mimetypes
 import subprocess
 import threading
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Literal
 
@@ -30,6 +32,14 @@ MAX_READ_BYTES = 512 * 1024
 MAX_MEDIA_BYTES = 2 * 1024 * 1024
 DEFAULT_SEARCH_LIMIT = 100
 MAX_SEARCH_SECONDS = 2.0
+DEFAULT_SUBTREE_MAX_DEPTH = 6
+MAX_SUBTREE_DEPTH = 10
+DEFAULT_SUBTREE_MAX_DIRS = 300
+MAX_SUBTREE_DIRS = 1000
+DEFAULT_SUBTREE_MAX_ENTRIES = 1500
+MAX_SUBTREE_ENTRIES = 5000
+DEFAULT_SUBTREE_TIMEOUT_MS = 700
+MAX_SUBTREE_TIMEOUT_MS = 2500
 IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -92,6 +102,17 @@ class WorkspaceEntry(BaseModel):
 class WorkspaceTreeResponse(BaseModel):
     root: str
     entries: list[WorkspaceEntry]
+
+
+class WorkspaceSubtreeResponse(BaseModel):
+    root: str
+    path: str
+    entries_by_path: dict[str, list[WorkspaceEntry]]
+    expanded_paths: list[str]
+    truncated: bool
+    truncated_reason: Literal["max_depth", "max_dirs", "max_entries", "timeout"] | None = None
+    visited_dirs: int
+    entry_count: int
 
 
 class WorkspaceFileResponse(BaseModel):
@@ -180,6 +201,30 @@ async def list_workspace_tree(
 ) -> WorkspaceTreeResponse:
     scope = _workspace_scope(repositories, workspace_id)
     return _list_tree(scope, path)
+
+
+@router.get("/api/workspaces/{workspace_id}/tree/subtree", response_model=WorkspaceSubtreeResponse)
+async def list_workspace_subtree(
+    workspace_id: str,
+    path: str = "",
+    max_depth: int = Query(DEFAULT_SUBTREE_MAX_DEPTH, ge=1, le=MAX_SUBTREE_DEPTH),
+    max_dirs: int = Query(DEFAULT_SUBTREE_MAX_DIRS, ge=1, le=MAX_SUBTREE_DIRS),
+    max_entries: int = Query(DEFAULT_SUBTREE_MAX_ENTRIES, ge=1, le=MAX_SUBTREE_ENTRIES),
+    timeout_ms: int = Query(DEFAULT_SUBTREE_TIMEOUT_MS, ge=100, le=MAX_SUBTREE_TIMEOUT_MS),
+    include_files: bool = True,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceSubtreeResponse:
+    scope = _workspace_scope(repositories, workspace_id)
+    return await asyncio.to_thread(
+        _list_subtree,
+        scope,
+        path,
+        max_depth=max_depth,
+        max_dirs=max_dirs,
+        max_entries=max_entries,
+        timeout_ms=timeout_ms,
+        include_files=include_files,
+    )
 
 
 @router.get("/api/workspaces/{workspace_id}/read", response_model=WorkspaceFileResponse)
@@ -311,6 +356,30 @@ async def list_session_workspace_tree(
 ) -> WorkspaceTreeResponse:
     scope = _session_workspace_scope(repositories, session_id)
     return _list_tree(scope, path)
+
+
+@router.get("/api/sessions/{session_id}/workspace/tree/subtree", response_model=WorkspaceSubtreeResponse)
+async def list_session_workspace_subtree(
+    session_id: str,
+    path: str = "",
+    max_depth: int = Query(DEFAULT_SUBTREE_MAX_DEPTH, ge=1, le=MAX_SUBTREE_DEPTH),
+    max_dirs: int = Query(DEFAULT_SUBTREE_MAX_DIRS, ge=1, le=MAX_SUBTREE_DIRS),
+    max_entries: int = Query(DEFAULT_SUBTREE_MAX_ENTRIES, ge=1, le=MAX_SUBTREE_ENTRIES),
+    timeout_ms: int = Query(DEFAULT_SUBTREE_TIMEOUT_MS, ge=100, le=MAX_SUBTREE_TIMEOUT_MS),
+    include_files: bool = True,
+    repositories: StorageRepositories = RepositoriesDep,
+) -> WorkspaceSubtreeResponse:
+    scope = _session_workspace_scope(repositories, session_id)
+    return await asyncio.to_thread(
+        _list_subtree,
+        scope,
+        path,
+        max_depth=max_depth,
+        max_dirs=max_dirs,
+        max_entries=max_entries,
+        timeout_ms=timeout_ms,
+        include_files=include_files,
+    )
 
 
 @router.get("/api/sessions/{session_id}/workspace/read", response_model=WorkspaceFileResponse)
@@ -723,6 +792,107 @@ def _list_tree(scope: WorkspaceRuntimeContext, path: str) -> WorkspaceTreeRespon
     return WorkspaceTreeResponse(root=str(scope.cwd), entries=entries)
 
 
+def _list_subtree(
+    scope: WorkspaceRuntimeContext,
+    path: str,
+    *,
+    max_depth: int,
+    max_dirs: int,
+    max_entries: int,
+    timeout_ms: int,
+    include_files: bool,
+) -> WorkspaceSubtreeResponse:
+    target = _resolve(scope, path or ".")
+    if not target.exists():
+        raise _workspace_error(status.HTTP_404_NOT_FOUND, "workspace_path_not_found", "目录不存在")
+    if not target.is_dir():
+        raise _workspace_error(
+            status.HTTP_400_BAD_REQUEST,
+            "workspace_not_directory",
+            "路径不是目录",
+        )
+
+    root_path = _tree_map_key(scope, target)
+    queue: deque[tuple[Path, int]] = deque([(target, 0)])
+    seen_dirs = {_resolved_path_key(target)}
+    entries_by_path: dict[str, list[WorkspaceEntry]] = {}
+    expanded_paths: list[str] = []
+    truncated_reason: Literal["max_depth", "max_dirs", "max_entries", "timeout"] | None = None
+    visited_dirs = 0
+    entry_count = 0
+    deadline = time.monotonic() + timeout_ms / 1000
+
+    while queue:
+        if time.monotonic() >= deadline:
+            truncated_reason = truncated_reason or "timeout"
+            break
+        if visited_dirs >= max_dirs:
+            truncated_reason = truncated_reason or "max_dirs"
+            break
+
+        directory, depth = queue.popleft()
+        directory_key = _tree_map_key(scope, directory)
+        visited_dirs += 1
+
+        try:
+            children = sorted(directory.iterdir(), key=_entry_sort_key)
+        except OSError as exc:
+            logger.warning(
+                "[WorkspaceAPI] 子树目录读取失败 | "
+                f"workspace_id={scope.workspace_id} | path={directory_key or '.'} | error={exc}"
+            )
+            entries_by_path[directory_key] = []
+            expanded_paths.append(directory_key)
+            continue
+
+        if not include_files:
+            children = [child for child in children if _is_directory_entry(child)]
+
+        remaining_entries = max_entries - entry_count
+        if remaining_entries <= 0:
+            truncated_reason = truncated_reason or "max_entries"
+            break
+        if len(children) > remaining_entries:
+            children = children[:remaining_entries]
+            truncated_reason = truncated_reason or "max_entries"
+
+        entries_by_path[directory_key] = [_entry_for_path(scope, child) for child in children]
+        expanded_paths.append(directory_key)
+        entry_count += len(children)
+
+        if truncated_reason == "max_entries":
+            break
+        if depth >= max_depth:
+            if any(_can_descend_for_subtree(child) for child in children):
+                truncated_reason = truncated_reason or "max_depth"
+            continue
+
+        for child in children:
+            if not _can_descend_for_subtree(child):
+                continue
+            child_key = _resolved_path_key(child)
+            if child_key in seen_dirs:
+                continue
+            seen_dirs.add(child_key)
+            queue.append((child, depth + 1))
+
+    logger.debug(
+        "[WorkspaceAPI] 列出目录子树 | "
+        f"workspace_id={scope.workspace_id} | path={root_path or '.'} | "
+        f"visited_dirs={visited_dirs} | entries={entry_count} | truncated={bool(truncated_reason)}"
+    )
+    return WorkspaceSubtreeResponse(
+        root=str(scope.cwd),
+        path=root_path,
+        entries_by_path=entries_by_path,
+        expanded_paths=expanded_paths,
+        truncated=truncated_reason is not None,
+        truncated_reason=truncated_reason,
+        visited_dirs=visited_dirs,
+        entry_count=entry_count,
+    )
+
+
 def _read_file(scope: WorkspaceRuntimeContext, path: str) -> WorkspaceFileResponse:
     target = _resolve(scope, path)
     if not target.exists():
@@ -1008,6 +1178,34 @@ def _entry_for_path(scope: WorkspaceRuntimeContext, path: Path) -> WorkspaceEntr
         size=None if path.is_dir() else stat.st_size,
         modified_at=None,
     )
+
+
+def _tree_map_key(scope: WorkspaceRuntimeContext, path: Path) -> str:
+    relative = _relative_path(scope, path)
+    return "" if relative == "." else relative
+
+
+def _resolved_path_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path.absolute())
+
+
+def _is_directory_entry(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _can_descend_for_subtree(path: Path) -> bool:
+    if _should_skip_search_dir(path.name):
+        return False
+    try:
+        return path.is_dir() and not path.is_symlink()
+    except OSError:
+        return False
 
 
 def _relative_path(scope: WorkspaceRuntimeContext, path: Path) -> str:

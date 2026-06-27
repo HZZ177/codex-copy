@@ -1,0 +1,113 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  agentMessageToConversationMessage,
+  conversationKindFromAgent,
+  payloadFromAgentMessage,
+} from "@/renderer/pages/conversation/conversationMessageAdapter";
+import type { AgentChatMessage } from "@/types/protocol";
+
+describe("conversation message adapter", () => {
+  it("maps user and assistant messages without changing ids or content", () => {
+    const user = agentMessage({ id: "u1", role: "user", content: "hello" });
+    const assistant = agentMessage({ id: "a1", role: "assistant", content: "world", streaming: true });
+
+    expect(agentMessageToConversationMessage(user, 0)).toMatchObject({
+      id: "agent:u1",
+      threadId: "ses-1",
+      itemId: "u1",
+      kind: "user",
+      content: "hello",
+      payload: { _sortSeq: 1 },
+    });
+    expect(agentMessageToConversationMessage(assistant, 1)).toMatchObject({
+      id: "agent:a1",
+      kind: "assistant",
+      status: "running",
+      content: "world",
+      payload: { _sortSeq: 2 },
+    });
+  });
+
+  it("keeps special tool kinds aligned with the Agent transcript renderer", () => {
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "update_plan" }))).toBe("plan");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "load_skill" }))).toBe("skill");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "run_command" }))).toBe("command");
+    expect(
+      conversationKindFromAgent(
+        agentMessage({
+          role: "tool",
+          toolName: "apply_patch",
+          uiPayload: { files: [{ path: "src/app.ts", operation: "modify" }] },
+        }),
+      ),
+    ).toBe("file_change");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "search_text" }))).toBe("tool");
+  });
+
+  it("preserves tool payload data for shared drawer and overlay rendering", () => {
+    const payload = payloadFromAgentMessage(
+      agentMessage({
+        role: "tool",
+        runId: "run-1",
+        toolCallId: "call-1",
+        toolName: "search_text",
+        toolParams: { query: "Shell" },
+        toolResult: "found",
+        toolDurationMs: 42,
+        uiPayload: { files: [{ path: "README.md" }] },
+      }),
+    );
+
+    expect(payload).toMatchObject({
+      call: { id: "call-1", name: "search_text", arguments: { query: "Shell" } },
+      result: {
+        status: "success",
+        model_content: "found",
+        duration_ms: 42,
+        ui_payload: { files: [{ path: "README.md" }] },
+        files: [{ path: "README.md" }],
+      },
+      files: [{ path: "README.md" }],
+      runId: "run-1",
+      toolCallId: "call-1",
+    });
+  });
+
+  it("maps approval, error and subagent payloads for shared message components", () => {
+    expect(agentMessageToConversationMessage(agentMessage({ role: "approval", status: "pending" }), 0)).toMatchObject({
+      kind: "approval",
+      status: "pending",
+    });
+    expect(payloadFromAgentMessage(agentMessage({ role: "error", status: "failed", content: "boom" }))).toMatchObject({
+      error: { code: "failed", message: "boom", details: {} },
+    });
+    expect(
+      payloadFromAgentMessage(
+        agentMessage({
+          role: "subagent",
+          subagentName: "reviewer",
+          subagentTask: "check",
+          subagentItems: [{ id: "item-1", type: "text", content: "ok", timestamp: 1 }],
+        }),
+      ),
+    ).toMatchObject({
+      reasoningKind: "subagent",
+      reasoning_kind: "subagent",
+      subagentName: "reviewer",
+      subagentTask: "check",
+      subagentItems: [{ id: "item-1", type: "text", content: "ok", timestamp: 1 }],
+    });
+  });
+});
+
+function agentMessage(patch: Partial<AgentChatMessage>): AgentChatMessage {
+  return {
+    id: "msg-1",
+    sessionId: "ses-1",
+    role: "assistant",
+    content: "",
+    timestamp: 1_700_000_000_000,
+    ...patch,
+  } as AgentChatMessage;
+}

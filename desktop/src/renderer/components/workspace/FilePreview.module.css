@@ -1094,6 +1094,28 @@
   }
 }
 
+@keyframes previewFullscreenOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes previewFullscreenDialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .content,
 .diff {
   min-height: 180px;
@@ -1138,6 +1160,9 @@
   display: block;
   overflow: hidden;
   padding-left: 0;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
 }
 
 .body[data-chrome="panel"] .sourceViewer {
@@ -1153,6 +1178,23 @@
 
 .body[data-chrome="panel"] .sourceViewer[data-renderer="codemirror"] {
   background: var(--color-bg-elevated);
+}
+
+.codeMirrorShell,
+.previewScrollShell {
+  --file-preview-scroll-rail-block-inset: 4px;
+  --file-preview-scroll-rail-inline-inset: 6px;
+  --file-preview-scroll-rail-width: 16px;
+  --file-preview-scroll-button-size: 16px;
+  --file-preview-scroll-thumb-inset: 2px;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.codeMirrorShell {
+  height: 100%;
+  min-height: inherit;
 }
 
 .codeMirrorHost {
@@ -1202,13 +1244,249 @@
   min-height: 180px;
   max-height: calc(100vh - 230px);
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-4) 34%, transparent) transparent;
+}
+
+.content,
+.diff,
+.sourceViewer,
+.markdownPane,
+.htmlPane,
+.diffPane,
+.mermaidPane,
+.imagePane,
+.mermaidSvg {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-4) 34%, transparent) transparent;
+}
+
+.content::-webkit-scrollbar,
+.diff::-webkit-scrollbar,
+.sourceViewer::-webkit-scrollbar,
+.markdownPane::-webkit-scrollbar,
+.htmlPane::-webkit-scrollbar,
+.diffPane::-webkit-scrollbar,
+.mermaidPane::-webkit-scrollbar,
+.imagePane::-webkit-scrollbar,
+.mermaidSvg::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.content::-webkit-scrollbar-track,
+.diff::-webkit-scrollbar-track,
+.sourceViewer::-webkit-scrollbar-track,
+.markdownPane::-webkit-scrollbar-track,
+.htmlPane::-webkit-scrollbar-track,
+.diffPane::-webkit-scrollbar-track,
+.mermaidPane::-webkit-scrollbar-track,
+.imagePane::-webkit-scrollbar-track,
+.mermaidSvg::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb,
+.diff::-webkit-scrollbar-thumb,
+.sourceViewer::-webkit-scrollbar-thumb,
+.markdownPane::-webkit-scrollbar-thumb,
+.htmlPane::-webkit-scrollbar-thumb,
+.diffPane::-webkit-scrollbar-thumb,
+.mermaidPane::-webkit-scrollbar-thumb,
+.imagePane::-webkit-scrollbar-thumb,
+.mermaidSvg::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-text-4) 32%, transparent);
+  background-clip: padding-box;
+}
+
+.sourceViewer {
+  scrollbar-width: auto;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--color-text-4) 36%, transparent) transparent;
+}
+
+.sourceViewer[data-renderer="codemirror"] :global(.cm-scroller) {
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+  scrollbar-color: transparent transparent;
+}
+
+.sourceViewer::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.sourceViewer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sourceViewer::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-text-4) 36%, transparent);
+  background-clip: padding-box;
+}
+
+.sourceViewer::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.sourceViewer[data-renderer="codemirror"] :global(.cm-scroller::-webkit-scrollbar) {
+  width: 0;
+  height: 0;
+}
+
+.sourceViewer[data-renderer="codemirror"]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.sourceViewer[data-renderer="codemirror"] :global(.cm-scroller::-webkit-scrollbar-track),
+.sourceViewer[data-renderer="codemirror"] :global(.cm-scroller::-webkit-scrollbar-thumb),
+.sourceViewer[data-renderer="codemirror"] :global(.cm-scroller::-webkit-scrollbar-corner),
+.sourceViewer[data-renderer="codemirror"]::-webkit-scrollbar-track,
+.sourceViewer[data-renderer="codemirror"]::-webkit-scrollbar-thumb,
+.sourceViewer[data-renderer="codemirror"]::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.previewScrollShell > [data-custom-scrollbar="true"] {
+  scrollbar-width: none;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+}
+
+.previewScrollShell > [data-custom-scrollbar="true"]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.previewScrollShell > .markdownPane[data-custom-scrollbar="true"] {
+  padding-right: 24px;
+}
+
+.previewScrollShell > .htmlPane[data-custom-scrollbar="true"],
+.previewScrollShell > .diffPane[data-custom-scrollbar="true"] {
+  box-sizing: border-box;
+  padding-right: 16px;
+}
+
+.previewScrollRail {
+  position: absolute;
+  top: var(--file-preview-scroll-rail-block-inset);
+  right: var(--file-preview-scroll-rail-inline-inset);
+  bottom: var(--file-preview-scroll-rail-block-inset);
+  z-index: 5;
+  display: flex;
+  box-sizing: border-box;
+  width: var(--file-preview-scroll-rail-width);
+  flex-direction: column;
+  gap: 2px;
+  background: transparent;
+  cursor: default;
+  opacity: 0.78;
+  touch-action: none;
+  transition: opacity var(--motion-fast) var(--motion-ease-standard);
+}
+
+.previewScrollRail[data-visible="false"] {
+  pointer-events: none;
+  opacity: 0;
+}
+
+.previewScrollRail:hover,
+.previewScrollRail[data-dragging="true"] {
+  opacity: 1;
+}
+
+.previewScrollButton {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  display: grid;
+  box-sizing: border-box;
+  width: var(--file-preview-scroll-button-size);
+  height: var(--file-preview-scroll-button-size);
+  flex: 0 0 var(--file-preview-scroll-button-size);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--surface-muted) 66%, transparent);
+  color: color-mix(in srgb, var(--color-text-4) 58%, transparent);
+  cursor: default;
+  padding: 0;
+}
+
+.previewScrollButton::before {
+  width: 0;
+  height: 0;
+  border-right: 3.5px solid transparent;
+  border-left: 3.5px solid transparent;
+  content: "";
+}
+
+.previewScrollButton[data-direction="up"]::before {
+  border-bottom: 4.5px solid currentColor;
+}
+
+.previewScrollButton[data-direction="down"]::before {
+  border-top: 4.5px solid currentColor;
+}
+
+.previewScrollButton:hover,
+.previewScrollButton[data-pressing="true"] {
+  background: color-mix(in srgb, var(--surface-hover) 86%, transparent);
+  color: color-mix(in srgb, var(--color-text-secondary) 78%, transparent);
+}
+
+.previewScrollButton:focus-visible {
+  outline: none;
+}
+
+.previewScrollTrack {
+  position: relative;
+  width: var(--file-preview-scroll-rail-width);
+  min-height: 0;
+  flex: 1 1 auto;
+  border-radius: var(--radius-pill);
+}
+
+.previewScrollThumb {
+  position: absolute;
+  right: var(--file-preview-scroll-thumb-inset);
+  left: var(--file-preview-scroll-thumb-inset);
+  min-height: 36px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-text-4) 36%, transparent);
+  transition: background-color var(--motion-fast) var(--motion-ease-standard);
+  will-change: transform;
+}
+
+.previewScrollRail:hover .previewScrollThumb,
+.previewScrollRail[data-dragging="true"] .previewScrollThumb {
+  background: color-mix(in srgb, var(--color-text-4) 48%, transparent);
+}
+
+.body[data-chrome="panel"] > .previewScrollShell,
+.splitPanelBody > .previewScrollShell {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
 }
 
 .body[data-chrome="panel"] > .markdownPane,
 .body[data-chrome="panel"] > .htmlPane,
 .body[data-chrome="panel"] > .diffPane,
 .body[data-chrome="panel"] > .mermaidPane,
-.body[data-chrome="panel"] > .imagePane {
+.body[data-chrome="panel"] > .imagePane,
+.body[data-chrome="panel"] > .previewScrollShell > .markdownPane,
+.body[data-chrome="panel"] > .previewScrollShell > .htmlPane,
+.body[data-chrome="panel"] > .previewScrollShell > .diffPane,
+.body[data-chrome="panel"] > .previewScrollShell > .mermaidPane,
+.body[data-chrome="panel"] > .previewScrollShell > .imagePane {
   height: 100%;
   min-height: 0;
   max-height: none;
@@ -1317,6 +1595,38 @@
   line-height: var(--ui-line-height-tight);
 }
 
+.markdownPane [data-markdown-code-frame="true"] > .mermaidDocumentHeader {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.markdownPane [data-markdown-code-frame="true"] > .mermaidDocumentHeader > span {
+  margin-right: auto;
+}
+
+.markdownPane [data-markdown-code-frame="true"] > .mermaidDocumentHeader > button {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+}
+
+.markdownPane [data-markdown-code-frame="true"] > .mermaidDocumentHeader > button[title^="已复制"] {
+  color: var(--color-accent);
+}
+
+.markdownPane [data-markdown-code-frame="true"] .mermaidDocumentViewport {
+  overflow: hidden;
+  min-height: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 44%);
+}
+
+:global(html[data-theme="dark"]) .markdownPane [data-markdown-code-frame="true"] .mermaidDocumentViewport {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+}
+
 .markdownPane [data-code-token-kind="keyword"] {
   color: #7c3aed;
   font-weight: 600;
@@ -1410,7 +1720,12 @@
 .splitPanelBody > .htmlPane,
 .splitPanelBody > .diffPane,
 .splitPanelBody > .mermaidPane,
-.splitPanelBody > .imagePane {
+.splitPanelBody > .imagePane,
+.splitPanelBody > .previewScrollShell > .markdownPane,
+.splitPanelBody > .previewScrollShell > .htmlPane,
+.splitPanelBody > .previewScrollShell > .diffPane,
+.splitPanelBody > .previewScrollShell > .mermaidPane,
+.splitPanelBody > .previewScrollShell > .imagePane {
   height: 100%;
   min-height: 0;
   max-height: none;
@@ -1455,11 +1770,15 @@
   height: clamp(220px, 48vh, 520px);
   min-height: 220px;
   max-height: 520px;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  margin: 12px 0;
-  padding: 12px;
+  padding: 0;
+}
+
+.mermaidPane[data-layout="fullscreen"] {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
 }
 
 .mermaidSvg {
@@ -1475,6 +1794,10 @@
   justify-items: safe center;
   overflow: auto;
   scroll-padding: var(--mermaid-canvas-padding-y) var(--mermaid-canvas-padding-x);
+}
+
+.mermaidPane[data-layout="fullscreen"] .mermaidSvg {
+  min-height: 0;
 }
 
 .mermaidSvg[data-interactive="true"] {
@@ -1571,6 +1894,88 @@
   font-size: 12px;
   line-height: 1.5;
   text-align: center;
+}
+
+.previewFullscreenOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  background: rgb(255 255 255 / 58%);
+  padding: 24px;
+  animation: previewFullscreenOverlayIn 150ms ease both;
+  backdrop-filter: blur(10px);
+}
+
+:global(html[data-theme="dark"]) .previewFullscreenOverlay {
+  background: rgb(0 0 0 / 56%);
+}
+
+.previewFullscreenDialog {
+  display: grid;
+  width: min(1320px, calc(100vw - 48px));
+  height: min(860px, calc(100vh - 48px));
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 42px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 86%, transparent);
+  border-radius: 12px;
+  background: var(--color-bg-elevated);
+  box-shadow:
+    0 24px 70px rgb(15 23 42 / 22%),
+    0 6px 20px rgb(15 23 42 / 12%);
+  animation: previewFullscreenDialogIn 180ms var(--motion-ease-out) both;
+}
+
+.previewFullscreenHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--surface-muted));
+  padding: 0 10px 0 14px;
+}
+
+.previewFullscreenHeader h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--color-text-1);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: var(--ui-line-height-compact);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewFullscreenClose {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+}
+
+.previewFullscreenClose:hover {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.previewFullscreenClose:focus-visible {
+  outline: none;
+}
+
+.previewFullscreenBody {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-bg);
 }
 
 .mermaidPane[data-layout="document"] .mermaidSvg {

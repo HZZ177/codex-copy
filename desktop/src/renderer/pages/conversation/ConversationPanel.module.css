@@ -1,0 +1,11 @@
+.panel {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.panel[data-conversation-panel-variant="overlay"] {
+  background: transparent;
+}

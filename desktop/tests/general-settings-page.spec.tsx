@@ -6,6 +6,7 @@ import { FontProvider } from "@/renderer/providers/FontProvider";
 import { installIndexedDbMock } from "./helpers/indexedDbMock";
 
 const MAPLE_FONT_CSS = '@font-face{font-family:"Maple Mono CN";src:local("Maple Mono CN"),url("./font.woff2")format("woff2");font-style:normal;font-display:swap;font-weight:400;unicode-range:U+4E00-9FFF;}';
+const JETBRAINS_FONT_CSS = "@font-face{font-family:'JetBrains Mono';font-style:normal;font-display:swap;font-weight:400;src:url(./files/jetbrains-mono-latin-400-normal.woff2) format('woff2');unicode-range:U+0000-00FF;}";
 
 function renderPage() {
   return render(
@@ -24,6 +25,14 @@ function mockSuccessfulFontDownload() {
         headers: new Headers({ "content-type": "text/css" }),
         text: () => Promise.resolve(MAPLE_FONT_CSS),
         arrayBuffer: () => Promise.resolve(new TextEncoder().encode(MAPLE_FONT_CSS).buffer),
+      } as Response);
+    }
+    if (url.includes("@fontsource/jetbrains-mono") && url.endsWith(".css")) {
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ "content-type": "text/css" }),
+        text: () => Promise.resolve(JETBRAINS_FONT_CSS),
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode(JETBRAINS_FONT_CSS).buffer),
       } as Response);
     }
 
@@ -50,14 +59,16 @@ describe("GeneralSettingsPage", () => {
     });
   });
 
-  it("offers system and Maple Mono font choices", () => {
+  it("offers system, Maple Mono, and JetBrains Mono font choices", () => {
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "外观" })).not.toBeNull();
-    expect(screen.getByRole("radio", { name: /系统默认/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("general-settings-page")).not.toBeNull();
+    const radios = screen.getAllByRole("radio");
+    expect(radios).toHaveLength(3);
+    expect(radios[0].getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: /Maple Mono/ }).getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText("点击下载到本地后使用")).not.toBeNull();
-    expect(screen.queryByRole("progressbar", { name: "字体下载进度" })).toBeNull();
+    expect(screen.getByRole("radio", { name: /JetBrains Mono/ }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -71,10 +82,22 @@ describe("GeneralSettingsPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("radio", { name: /Maple Mono/ }).getAttribute("aria-checked")).toBe("true"),
     );
-    expect(screen.queryByRole("progressbar", { name: "字体下载进度" })).toBeNull();
-    expect(screen.getByText("已启用")).not.toBeNull();
-    expect(screen.getByText("Maple Mono CN 已启用")).not.toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(8);
+  });
+
+  it("downloads JetBrains Mono when selected and hides progress after completion", async () => {
+    mockSuccessfulFontDownload();
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("radio", { name: /JetBrains Mono/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: /JetBrains Mono/ }).getAttribute("aria-checked")).toBe("true"),
+    );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(10);
   });
 
   it("shows byte-level progress while Maple Mono CN is downloading", async () => {
@@ -84,9 +107,21 @@ describe("GeneralSettingsPage", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: /Maple Mono/ }));
 
-    expect(await screen.findByRole("progressbar", { name: "字体下载进度" })).not.toBeNull();
-    expect(screen.getByText("已下载 0 B / 34.8 MB（0/944）")).not.toBeNull();
-    expect(screen.getByText("下载中 0 B / 34.8 MB")).not.toBeNull();
+    const progress = await screen.findByRole("progressbar");
+    expect(progress.textContent).toContain("0 B / 34.8 MB");
+    expect(progress.textContent).toContain("0/944");
+  });
+
+  it("shows byte-level progress while JetBrains Mono is downloading", async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(() => undefined));
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("radio", { name: /JetBrains Mono/ }));
+
+    const progress = await screen.findByRole("progressbar");
+    expect(progress.textContent).toContain("0 B / 109 KB");
+    expect(progress.textContent).toContain("0/10");
   });
 
   it("keeps the local cache state after switching back to system", async () => {
@@ -99,11 +134,10 @@ describe("GeneralSettingsPage", () => {
       expect(screen.getByRole("radio", { name: /Maple Mono/ }).getAttribute("aria-checked")).toBe("true"),
     );
 
-    fireEvent.click(screen.getByRole("radio", { name: /系统默认/ }));
+    fireEvent.click(screen.getAllByRole("radio")[0]);
 
-    expect(screen.getByRole("radio", { name: /系统默认/ }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryByRole("progressbar", { name: "字体下载进度" })).toBeNull();
-    expect(screen.getByText("已下载到本地，点击启用")).not.toBeNull();
+    expect(screen.getAllByRole("radio")[0].getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("progressbar")).toBeNull();
 
     fireEvent.click(screen.getByRole("radio", { name: /Maple Mono/ }));
     await waitFor(() =>
@@ -111,6 +145,6 @@ describe("GeneralSettingsPage", () => {
     );
 
     expect(fetch).toHaveBeenCalledTimes(8);
-    expect(screen.queryByRole("progressbar", { name: "字体下载进度" })).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 });

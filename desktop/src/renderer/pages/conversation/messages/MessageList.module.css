@@ -1,5 +1,12 @@
 .root {
   --message-list-bottom-buffer: 80px;
+  --message-list-inline-padding: var(--conversation-edge-padding, 18px);
+  --message-list-max-width: var(--composer-width);
+  --message-user-bubble-max-width: min(568px, calc(100% - 36px));
+  --message-context-chip-max-width: min(340px, 100%);
+  --message-notice-max-width: min(720px, 100%);
+  --message-inline-tool-detail-width: min(760px, 100%);
+  --message-tool-detail-width: min(760px, calc(100% - 25px));
   --turn-navigator-fluid-room: max(0px, calc(100cqw - var(--conversation-document-min-width, 420px)));
   --turn-navigator-content-right: max(var(--conversation-edge-padding, 18px), calc((100cqw - var(--composer-width)) / 2));
   --turn-navigator-edge: clamp(8px, calc(8px + var(--turn-navigator-fluid-room) / 8), 20px);
@@ -24,6 +31,29 @@
   min-height: 0;
   container-type: inline-size;
   overflow-anchor: none;
+}
+
+.root[data-message-list-variant="compact"] {
+  --message-list-bottom-buffer: 64px;
+  --message-list-inline-padding: 12px;
+  --message-list-max-width: 100%;
+  --message-user-bubble-max-width: min(92%, calc(100% - 18px));
+  --message-context-chip-max-width: min(260px, 100%);
+  --message-notice-max-width: 100%;
+  --message-inline-tool-detail-width: 100%;
+  --message-tool-detail-width: calc(100% - 22px);
+}
+
+.root[data-message-list-variant="overlay"] {
+  --message-list-bottom-buffer: 96px;
+  --message-list-inline-padding: 22px;
+  --message-list-max-width: min(760px, 100%);
+  --message-user-bubble-max-width: min(620px, calc(100% - 36px));
+  --message-context-chip-max-width: min(320px, 100%);
+  --message-notice-max-width: min(720px, 100%);
+  --message-inline-tool-detail-width: min(720px, 100%);
+  --message-tool-detail-width: min(720px, calc(100% - 28px));
+  background: transparent;
 }
 
 .virtualScroller {
@@ -69,7 +99,7 @@
 
 .list {
   display: block;
-  width: min(var(--composer-width), calc(100% - (var(--conversation-edge-padding, 18px) * 2)));
+  width: min(var(--message-list-max-width), calc(100% - (var(--message-list-inline-padding) * 2)));
   min-width: 0;
   box-sizing: border-box;
   margin: 0 auto;
@@ -161,7 +191,7 @@
 }
 
 .item[data-kind="user"] .content {
-  max-width: min(568px, calc(100% - 36px));
+  max-width: var(--message-user-bubble-max-width);
   border-radius: var(--radius-lg);
   background: var(--surface-muted);
   padding: 10px 14px;
@@ -182,7 +212,7 @@
 }
 
 .empty {
-  width: min(540px, calc(100% - (var(--conversation-edge-padding, 18px) * 2)));
+  width: min(540px, calc(100% - (var(--message-list-inline-padding) * 2)));
   max-width: 540px;
   margin: 0 auto;
   color: var(--color-text-tertiary);
@@ -193,7 +223,7 @@
 }
 
 .skeletonWrap {
-  width: min(var(--composer-width), calc(100% - (var(--conversation-edge-padding, 18px) * 2)));
+  width: min(var(--message-list-max-width), calc(100% - (var(--message-list-inline-padding) * 2)));
   min-width: 0;
   min-height: 100%;
   box-sizing: border-box;
@@ -206,7 +236,7 @@
   .list,
   .empty,
   .skeletonWrap {
-    width: min(var(--composer-width), calc(100% - (var(--conversation-edge-padding, 14px) * 2)));
+    width: min(var(--message-list-max-width), calc(100% - (var(--message-list-inline-padding) * 2)));
   }
 }
 
@@ -239,10 +269,32 @@
   z-index: 12;
   width: var(--turn-navigator-width);
   height: var(--turn-navigator-height);
+  max-height: 70%;
   transform: translateY(-50%);
+  overflow: visible;
+}
+
+.turnNavigatorViewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.turnNavigatorViewport::-webkit-scrollbar {
+  display: none;
+}
+
+.turnNavigatorViewport[data-scrollable="true"] {
+  mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
 }
 
 .turnNavigatorRail {
+  --turn-marker-line-height: 2px;
+  --turn-marker-line-radius: var(--radius-pill);
   position: relative;
   width: 100%;
   height: var(--turn-navigator-height);
@@ -266,23 +318,61 @@
 .turnNavigatorMarker span {
   display: block;
   width: var(--turn-marker-width);
-  height: 2px;
-  border-radius: var(--radius-pill);
+  height: var(--turn-marker-line-height);
+  transform-origin: right center;
+  border-radius: var(--turn-marker-line-radius);
   background: color-mix(in srgb, var(--color-text-tertiary) 36%, transparent);
   transition:
     background 120ms ease,
     opacity 120ms ease;
 }
 
-.turnNavigatorMarker:hover span,
-.turnNavigatorMarker:focus-visible span,
-.turnNavigatorMarker[data-active="true"] span {
+.turnNavigatorMarker[data-entering="true"] span {
+  animation: turnNavigatorMarkerGrow 180ms var(--motion-ease-out) both;
+}
+
+.turnNavigatorMarker[data-current="true"] span {
+  background: transparent;
+}
+
+.turnNavigatorMarker:not([data-current="true"]):hover span,
+.turnNavigatorMarker:not([data-current="true"]):focus-visible span,
+.turnNavigatorMarker:not([data-current="true"])[data-active="true"] span {
   background: color-mix(in srgb, var(--color-text-primary) 82%, transparent);
 }
 
 .turnNavigatorMarker:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-text-tertiary) 58%, transparent);
   outline-offset: 1px;
+}
+
+.turnNavigatorCurrentIndicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  width: 44px;
+  height: 14px;
+  align-items: center;
+  justify-content: flex-end;
+  transform: translateY(calc(var(--turn-current-marker-top) - 50%));
+  pointer-events: none;
+  padding: 0 8px 0 0;
+  transition: transform 180ms var(--motion-ease-standard);
+}
+
+.turnNavigatorCurrentIndicator span {
+  display: block;
+  width: var(--turn-current-marker-width);
+  height: 2.5px;
+  transform-origin: right center;
+  border-radius: var(--turn-marker-line-radius);
+  background: color-mix(in srgb, #f59e0b 88%, var(--color-text-primary) 12%);
+}
+
+.turnNavigatorCurrentIndicator[data-entering="true"] span {
+  animation: turnNavigatorMarkerGrow 180ms var(--motion-ease-out) both;
 }
 
 .turnNavigatorCard {
@@ -337,12 +427,25 @@
   }
 }
 
+@keyframes turnNavigatorMarkerGrow {
+  from {
+    opacity: 0;
+    transform: scaleX(0.18);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
 .root[data-turn-navigator="true"] {
   --turn-navigator-list-padding-right: var(--turn-navigator-reserved);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .turnNavigatorMarker span,
+  .turnNavigatorCurrentIndicator,
+  .turnNavigatorCurrentIndicator span,
   .turnNavigatorCard {
     animation: none;
     transition: none;

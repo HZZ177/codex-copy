@@ -79,6 +79,82 @@ def test_workspace_bound_tree_read_and_search(tmp_path) -> None:
     ]
 
 
+def test_workspace_subtree_returns_entries_map(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    ui = root / "src" / "components" / "ui"
+    ui.mkdir(parents=True)
+    (root / "src" / "index.ts").write_text("export {}\n", encoding="utf-8")
+    (ui / "Button.tsx").write_text("export const Button = () => null;\n", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/tree/subtree",
+            params={"path": "src", "max_depth": 5, "max_dirs": 20, "max_entries": 50},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == "src"
+    assert payload["truncated"] is False
+    assert payload["expanded_paths"] == [
+        "src",
+        "src/components",
+        "src/components/ui",
+    ]
+    assert [entry["path"] for entry in payload["entries_by_path"]["src"]] == [
+        "src/components",
+        "src/index.ts",
+    ]
+    assert [entry["path"] for entry in payload["entries_by_path"]["src/components/ui"]] == [
+        "src/components/ui/Button.tsx",
+    ]
+
+
+def test_workspace_subtree_respects_budget(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    for name in ["alpha", "beta"]:
+        directory = root / "src" / name
+        directory.mkdir(parents=True)
+        (directory / "note.txt").write_text("ok\n", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/tree/subtree",
+            params={"path": "src", "max_depth": 5, "max_dirs": 1, "max_entries": 50},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["truncated"] is True
+    assert payload["truncated_reason"] == "max_dirs"
+    assert payload["visited_dirs"] == 1
+    assert payload["expanded_paths"] == ["src"]
+    assert set(payload["entries_by_path"]) == {"src"}
+
+
+def test_workspace_subtree_keeps_ignored_dirs_without_descending(tmp_path) -> None:
+    root = tmp_path / "workspace"
+    package = root / "src" / "node_modules" / "pkg"
+    package.mkdir(parents=True)
+    (package / "index.js").write_text("module.exports = {}\n", encoding="utf-8")
+    (root / "src" / "app.ts").write_text("export {}\n", encoding="utf-8")
+
+    with _client(tmp_path) as client:
+        workspace = _create_workspace(client, root)
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/tree/subtree",
+            params={"path": "src", "max_depth": 5, "max_dirs": 20, "max_entries": 50},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "src/node_modules" in [entry["path"] for entry in payload["entries_by_path"]["src"]]
+    assert "src/node_modules" not in payload["entries_by_path"]
+    assert payload["truncated"] is False
+
+
 def test_workspace_search_skips_generated_paths_but_includes_env_files(tmp_path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()

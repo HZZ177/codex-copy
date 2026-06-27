@@ -13,6 +13,26 @@ export interface WorkspaceTreeResponse {
   entries: WorkspaceEntry[];
 }
 
+export interface WorkspaceSubtreeResponse {
+  root: string;
+  path: string;
+  entries_by_path: Record<string, WorkspaceEntry[]>;
+  expanded_paths: string[];
+  truncated: boolean;
+  truncated_reason?: "max_depth" | "max_dirs" | "max_entries" | "timeout" | null;
+  visited_dirs: number;
+  entry_count: number;
+}
+
+export interface WorkspaceSubtreeOptions {
+  maxDepth?: number;
+  maxDirs?: number;
+  maxEntries?: number;
+  timeoutMs?: number;
+  includeFiles?: boolean;
+  signal?: AbortSignal;
+}
+
 export interface WorkspaceFileResponse {
   path: string;
   content: string;
@@ -138,6 +158,11 @@ export type WorkspaceSessionScope = { sessionId: string; workspaceId?: never };
 
 export interface WorkspaceRuntime {
   listDirectory(scope: WorkspaceScope, path?: string): Promise<WorkspaceTreeResponse>;
+  listDirectorySubtree(
+    scope: WorkspaceScope,
+    path?: string,
+    options?: WorkspaceSubtreeOptions,
+  ): Promise<WorkspaceSubtreeResponse>;
   readFile(scope: WorkspaceScope, path: string): Promise<WorkspaceFileResponse>;
   readMedia(scope: WorkspaceScope, path: string): Promise<WorkspaceMediaResponse>;
   search(scope: WorkspaceScope, query: string, options?: WorkspaceSearchOptions): Promise<WorkspaceSearchResult[]>;
@@ -164,6 +189,12 @@ export function createWorkspaceRuntime(http: HttpClient): WorkspaceRuntime {
     listDirectory(scope, path = "") {
       return http.request<WorkspaceTreeResponse>(
         `${workspaceBasePath(scope)}/tree?path=${encodeURIComponent(path)}`,
+      );
+    },
+    listDirectorySubtree(scope, path = "", options = {}) {
+      return http.request<WorkspaceSubtreeResponse>(
+        `${workspaceBasePath(scope)}/tree/subtree${workspaceSubtreeQuery(path, options)}`,
+        { signal: options.signal },
       );
     },
     readFile(scope, path) {
@@ -233,4 +264,25 @@ function workspaceBasePath(scope: WorkspaceScope): string {
 
 function workspaceSkillsQuery(options: WorkspaceSkillListOptions): string {
   return options.forceReload ? "?force_reload=true" : "";
+}
+
+function workspaceSubtreeQuery(path: string, options: WorkspaceSubtreeOptions): string {
+  const params = new URLSearchParams();
+  params.set("path", path);
+  if (typeof options.maxDepth === "number") {
+    params.set("max_depth", String(options.maxDepth));
+  }
+  if (typeof options.maxDirs === "number") {
+    params.set("max_dirs", String(options.maxDirs));
+  }
+  if (typeof options.maxEntries === "number") {
+    params.set("max_entries", String(options.maxEntries));
+  }
+  if (typeof options.timeoutMs === "number") {
+    params.set("timeout_ms", String(options.timeoutMs));
+  }
+  if (typeof options.includeFiles === "boolean") {
+    params.set("include_files", String(options.includeFiles));
+  }
+  return `?${params.toString()}`;
 }

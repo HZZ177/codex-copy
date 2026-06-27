@@ -93,7 +93,7 @@
   display: grid;
   max-width: 100%;
   box-sizing: border-box;
-  margin-left: 25px;
+  margin-left: 10px;
   overflow: hidden;
   grid-template-rows: 1fr;
   opacity: 1;
@@ -120,7 +120,7 @@
   display: grid;
   min-height: 0;
   gap: 7px;
-  padding: 2px 0 2px 13px;
+  padding: 2px 0 2px 4px;
   overflow: hidden;
 }
 

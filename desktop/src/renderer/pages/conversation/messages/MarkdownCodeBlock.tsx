@@ -72,6 +72,9 @@ const CODE_TAG_PROPS = {
     fontFamily: "var(--font-mono)",
   },
 };
+const CODE_HIGHLIGHTER_STATE_STYLE: CSSProperties = {
+  display: "contents",
+};
 const MERMAID_MIN_SCALE = 0.1;
 const MERMAID_MAX_SCALE = 10;
 const MERMAID_SCALE_STEP = 0.1;
@@ -95,23 +98,46 @@ type HighlightStyleModule = {
   vs: unknown;
   vs2015: unknown;
 };
+type SyntaxHighlighterViewProps = SyntaxHighlighterRuntimeProps & { theme: "light" | "dark" };
+type SyntaxHighlighterViewModule = {
+  default: ComponentType<SyntaxHighlighterViewProps>;
+};
 
-const LazySyntaxHighlighter = lazy(async () => {
-  const [highlighterModule, styleModule] = await Promise.all([
-    import("react-syntax-highlighter") as Promise<SyntaxHighlighterModule>,
-    import("react-syntax-highlighter/dist/esm/styles/hljs") as Promise<HighlightStyleModule>,
-  ]);
-  const SyntaxHighlighter = highlighterModule.default;
+let syntaxHighlighterViewPromise: Promise<SyntaxHighlighterViewModule> | null = null;
+let loadedSyntaxHighlighterView: ComponentType<SyntaxHighlighterViewProps> | null = null;
 
-  return {
-    default: function SyntaxHighlighterView({
-      theme,
-      ...props
-    }: SyntaxHighlighterRuntimeProps & { theme: "light" | "dark" }) {
-      return <SyntaxHighlighter {...props} style={theme === "dark" ? styleModule.vs2015 : styleModule.vs} />;
-    },
-  };
-});
+function loadSyntaxHighlighterView(): Promise<SyntaxHighlighterViewModule> {
+  if (!syntaxHighlighterViewPromise) {
+    syntaxHighlighterViewPromise = Promise.all([
+      import("react-syntax-highlighter") as Promise<SyntaxHighlighterModule>,
+      import("react-syntax-highlighter/dist/esm/styles/hljs") as Promise<HighlightStyleModule>,
+    ])
+      .then(([highlighterModule, styleModule]) => {
+        const SyntaxHighlighter = highlighterModule.default;
+
+        const SyntaxHighlighterView = function SyntaxHighlighterView({ theme, ...props }: SyntaxHighlighterViewProps) {
+          return <SyntaxHighlighter {...props} style={theme === "dark" ? styleModule.vs2015 : styleModule.vs} />;
+        };
+        loadedSyntaxHighlighterView = SyntaxHighlighterView;
+
+        return {
+          default: SyntaxHighlighterView,
+        };
+      })
+      .catch((error: unknown) => {
+        syntaxHighlighterViewPromise = null;
+        throw error;
+      });
+  }
+
+  return syntaxHighlighterViewPromise;
+}
+
+export function preloadMarkdownCodeBlockRuntime(): Promise<void> {
+  return loadSyntaxHighlighterView().then(() => undefined);
+}
+
+const LazySyntaxHighlighter = lazy(loadSyntaxHighlighterView);
 
 const LazyJsonTreeViewer = lazy(() =>
   import("@/renderer/components/json/JsonTreeViewer").then((module) => ({
@@ -452,20 +478,37 @@ const SourceCodeHighlighter = memo(function SourceCodeHighlighter({
         : undefined,
     [isDiff, lines, theme],
   );
+  const highlighterProps = {
+    language,
+    theme,
+    PreTag: "div",
+    wrapLines: isDiff,
+    lineProps,
+    customStyle: CODE_HIGHLIGHTER_STYLE,
+    codeTagProps: CODE_TAG_PROPS,
+    children: displayText,
+  } satisfies SyntaxHighlighterViewProps;
+  const SyntaxHighlighterView = loadedSyntaxHighlighterView;
+
+  if (SyntaxHighlighterView) {
+    return (
+      <div data-markdown-code-highlighter-state="ready" style={CODE_HIGHLIGHTER_STATE_STYLE}>
+        <SyntaxHighlighterView {...highlighterProps} />
+      </div>
+    );
+  }
 
   return (
-    <Suspense fallback={<PlainCodeBlock displayText={displayText} />}>
-      <LazySyntaxHighlighter
-        language={language}
-        theme={theme}
-        PreTag="div"
-        wrapLines={isDiff}
-        lineProps={lineProps}
-        customStyle={CODE_HIGHLIGHTER_STYLE}
-        codeTagProps={CODE_TAG_PROPS}
-      >
-        {displayText}
-      </LazySyntaxHighlighter>
+    <Suspense
+      fallback={
+        <div data-markdown-code-highlighter-state="fallback" style={CODE_HIGHLIGHTER_STATE_STYLE}>
+          <PlainCodeBlock displayText={displayText} />
+        </div>
+      }
+    >
+      <div data-markdown-code-highlighter-state="ready" style={CODE_HIGHLIGHTER_STATE_STYLE}>
+        <LazySyntaxHighlighter {...highlighterProps} />
+      </div>
     </Suspense>
   );
 });

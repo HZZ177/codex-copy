@@ -47,6 +47,9 @@
 }
 
 .workspace {
+  --workbench-dock-layout-duration: 1200ms;
+  --workbench-dock-layout-ease: cubic-bezier(0.2, 0.82, 0.22, 1);
+  --workbench-dock-reserved-width: 0px;
   position: relative;
   height: 100%;
   min-height: 0;
@@ -61,6 +64,23 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  transition:
+    flex-basis var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease),
+    margin-right var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease),
+    width var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease);
+  will-change: flex-basis, margin-right, width;
+}
+
+.workspace[data-dock-transition-phase="dock-in"] .canvas {
+  animation: workbenchCanvasDockIn var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease) both;
+}
+
+.workspace[data-dock-transition-phase="dock-out"] .canvas {
+  animation: workbenchCanvasDockOut var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease) both;
+}
+
+.workspace[data-dock-transition-phase="idle"] .canvas {
+  will-change: auto;
 }
 
 .canvasContent {
@@ -98,5 +118,32 @@
 @media (max-width: 900px) {
   .picker {
     padding-inline: 20px;
+  }
+}
+
+@keyframes workbenchCanvasDockIn {
+  from {
+    margin-right: 0;
+  }
+
+  to {
+    margin-right: var(--workbench-dock-reserved-width);
+  }
+}
+
+@keyframes workbenchCanvasDockOut {
+  from {
+    margin-right: var(--workbench-dock-reserved-width);
+  }
+
+  to {
+    margin-right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas {
+    animation: none;
+    transition: none;
   }
 }

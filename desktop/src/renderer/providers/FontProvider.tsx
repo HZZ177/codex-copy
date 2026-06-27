@@ -71,6 +71,8 @@ const FONT_DB_NAME = "keydex-font-cache";
 const FONT_STORE_NAME = "assets";
 const MAPLE_MONO_CDN_BASE = "https://cdn.jsdelivr.net/npm/@chinese-fonts/maple-mono-cn@2.0.0/dist";
 const MAPLE_MONO_FAMILY = "Maple Mono CN";
+const JETBRAINS_MONO_CDN_BASE = "https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8";
+const JETBRAINS_MONO_FAMILY = "JetBrains Mono";
 const FONT_STYLE_ID = "keydex-custom-font-face";
 const FONT_DOWNLOAD_CONCURRENCY = 8;
 
@@ -91,6 +93,23 @@ const FONT_DEFINITIONS: Record<FontAssetFamily, FontDefinition> = {
     readingStack: `"${MAPLE_MONO_FAMILY}", var(--font-reading-system)`,
     monoStack: `"${MAPLE_MONO_FAMILY}", var(--font-mono-system)`,
     removeLocalSource: `src:local("${MAPLE_MONO_FAMILY}"),url`,
+  },
+  "jetbrains-mono": {
+    id: "jetbrains-mono",
+    displayName: "JetBrains Mono",
+    cacheVersion: "fontsource-jetbrains-mono-5.2.8-latin-400-500-700-italic",
+    faces: [
+      fontFace("regular", JETBRAINS_MONO_CDN_BASE, "latin-400.css"),
+      fontFace("medium", JETBRAINS_MONO_CDN_BASE, "latin-500.css"),
+      fontFace("bold", JETBRAINS_MONO_CDN_BASE, "latin-700.css"),
+      fontFace("italic", JETBRAINS_MONO_CDN_BASE, "latin-400-italic.css"),
+      fontFace("bold-italic", JETBRAINS_MONO_CDN_BASE, "latin-700-italic.css"),
+    ],
+    totalAssets: 10,
+    totalBytes: 111_702,
+    sansStack: `"${JETBRAINS_MONO_FAMILY}", var(--font-sans-system)`,
+    readingStack: `"${JETBRAINS_MONO_FAMILY}", var(--font-reading-system)`,
+    monoStack: `"${JETBRAINS_MONO_FAMILY}", var(--font-mono-system)`,
   },
 };
 const FONT_ASSET_FAMILIES = Object.keys(FONT_DEFINITIONS) as FontAssetFamily[];

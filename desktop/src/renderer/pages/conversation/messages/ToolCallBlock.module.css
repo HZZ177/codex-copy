@@ -104,7 +104,7 @@
 }
 
 .errorMessage {
-  max-width: min(760px, 100%);
+  max-width: var(--message-tool-detail-width, min(760px, 100%));
   margin: -1px 0 0 25px;
   color: color-mix(in srgb, var(--color-danger) 72%, var(--color-text-secondary));
   font-size: 12px;
@@ -114,9 +114,9 @@
 
 .details {
   display: grid;
-  width: min(760px, calc(100% - 25px));
+  width: var(--message-inline-tool-detail-width, min(760px, 100%));
   box-sizing: border-box;
-  margin-left: 25px;
+  margin-left: 0;
   overflow: hidden;
   grid-template-rows: 1fr;
   opacity: 1;
@@ -144,20 +144,17 @@
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 84%, transparent);
-  border-radius: 8px;
-  background: var(--color-bg-elevated);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 70%),
-    0 8px 22px rgb(15 23 42 / 5%),
-    0 1px 2px rgb(15 23 42 / 5%);
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 54%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-muted) 72%, var(--color-bg-elevated));
+  box-shadow: none;
   overflow: hidden;
 }
 
 :global(html[data-theme="dark"]) .detailsInner {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 4%),
-    0 10px 26px rgb(0 0 0 / 18%);
+  background: color-mix(in srgb, var(--surface-muted) 66%, var(--color-bg-elevated));
+  border-color: color-mix(in srgb, var(--color-border-default) 48%, transparent);
+  box-shadow: none;
 }
 
 .detailSection {
@@ -167,55 +164,83 @@
   padding: 0;
 }
 
-.detailSection + .detailSection {
-  border-top: 1px solid color-mix(in srgb, var(--color-border-2) 66%, transparent);
+.detailSection:first-child {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 40%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 82%, transparent);
+  padding: 9px 12px 8px;
+}
+
+.detailSection:last-child {
+  background: color-mix(in srgb, var(--surface-muted) 54%, var(--color-bg-elevated));
+  padding: 7px 12px 10px;
 }
 
 .sectionHeader {
   display: flex;
   min-width: 0;
-  min-height: 30px;
+  min-height: 22px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 52%, transparent);
-  background: var(--surface-muted);
-  padding: 4px 6px 4px 10px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.toolNameRow {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+  padding-bottom: 6px;
+}
+
+.toolNameLabel {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.toolNameValue {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-text-primary) 84%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :global(html[data-theme="dark"]) .sectionHeader {
-  background: var(--surface-muted);
+  background: transparent;
 }
 
 .outputHeader {
-  color: var(--color-text-tertiary);
-  font-size: 11px;
-  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text-secondary) 82%, transparent);
+  font-size: 12px;
+  font-weight: 560;
   line-height: 1.35;
 }
 
 .codeViewport {
-  min-height: 74px;
-  max-height: 196px;
+  min-height: 0;
+  max-height: 144px;
   overflow-x: auto;
   overflow-y: auto;
-  background: var(--color-bg-elevated);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 44%),
-    inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 34%, transparent);
-  padding: 8px 10px;
-  scrollbar-gutter: stable;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 0 0;
 }
 
 :global(html[data-theme="dark"]) .codeViewport {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 4%),
-    inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 42%, transparent);
+  box-shadow: none;
 }
 
 .sectionHeader[data-kind="output"] + .codeViewport {
-  min-height: 122px;
   max-height: 260px;
+  padding-top: 2px;
 }
 
 .args,
@@ -225,10 +250,10 @@
   overflow: visible;
   border-radius: 0;
   background: transparent;
-  color: var(--color-text-primary);
+  color: color-mix(in srgb, var(--color-text-primary) 88%, transparent);
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.58;
+  font-size: 12px;
+  line-height: 1.55;
   padding: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -240,8 +265,8 @@
 
 .copyButton {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -254,7 +279,7 @@
 }
 
 .copyButton:hover {
-  background: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 58%, transparent);
   color: var(--color-text-primary);
 }
 
@@ -277,6 +302,25 @@
   color: var(--color-text-tertiary);
   font-size: 11px;
   line-height: 1.55;
+}
+
+.panelFooter {
+  display: flex;
+  min-height: 22px;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding-top: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.panelFooter[data-state="failed"] {
+  color: color-mix(in srgb, var(--color-danger) 72%, var(--color-text-secondary));
+}
+
+.panelFooter[data-state="running"] {
+  color: var(--color-text-secondary);
 }
 
 @keyframes ghostPulse {

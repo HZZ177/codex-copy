@@ -314,7 +314,7 @@ function toolActivityLabel(
       stats.listedDirectories[countState].add(target);
       return;
     }
-    if (toolName === "grep_files") {
+    if (toolName === "grep_files" || toolName === "search_files") {
       stats.fileSearches[countState] += 1;
       return;
     }
