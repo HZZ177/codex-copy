@@ -7,13 +7,15 @@
     [switch]$Fast,
     [switch]$Full,
     [switch]$NoSign = $true,
+    [ValidateRange(1, 16)]
+    [int]$RustJobs = 1,
     [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-Fast|-Full] [-SkipInstall] [-SkipTests] [-SkipRustChecks] [-RebuildSidecar] [-CleanSidecar] [-NoSign]"
+    Write-Host "用法：powershell.exe -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 [-Fast|-Full] [-SkipInstall] [-SkipTests] [-SkipRustChecks] [-RebuildSidecar] [-CleanSidecar] [-NoSign] [-RustJobs 1]"
     Write-Host ""
     Write-Host "说明："
     Write-Host "- 仅在需要 Windows exe 时执行。日常开发不要默认打包。"
@@ -25,6 +27,7 @@ if ($Help) {
     Write-Host "- -SkipInstall 跳过依赖安装；-SkipTests 跳过测试。"
     Write-Host "- -SkipRustChecks 跳过 cargo fmt/check 预检查；Tauri release build 仍会编译 Rust。"
     Write-Host "- -RebuildSidecar 强制重建 sidecar；-CleanSidecar 清理 PyInstaller 缓存后重建。"
+    Write-Host "- -RustJobs 设置 Cargo 编译并发；默认 1，避免 Windows 页面文件不足导致 Rust 产物损坏。"
     return
 }
 
@@ -66,6 +69,52 @@ function Assert-Path {
     )
     if (-not (Test-Path $Path)) {
         throw $Message
+    }
+}
+
+function Set-RustBuildJobs {
+    param(
+        [int]$Jobs
+    )
+    $env:CARGO_BUILD_JOBS = [string]$Jobs
+    Write-Host ""
+    Write-Host "Rust 构建并发：CARGO_BUILD_JOBS=$env:CARGO_BUILD_JOBS"
+}
+
+function Clear-RustCrateArtifacts {
+    param(
+        [string]$TargetProfileDir,
+        [string[]]$CrateNames
+    )
+    if (-not (Test-Path $TargetProfileDir)) {
+        return
+    }
+
+    $targetRoot = [System.IO.Path]::GetFullPath($TargetProfileDir)
+    $targetRootWithSeparator = $targetRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+
+    foreach ($crateName in $CrateNames) {
+        $crateFileStem = $crateName.Replace("-", "_")
+        $patterns = @(
+            (Join-Path $TargetProfileDir "deps\*$crateFileStem-*"),
+            (Join-Path $TargetProfileDir "deps\lib$crateFileStem-*"),
+            (Join-Path $TargetProfileDir ".fingerprint\$crateName-*"),
+            (Join-Path $TargetProfileDir ".fingerprint\$crateFileStem-*")
+        )
+
+        foreach ($pattern in $patterns) {
+            Get-ChildItem -Path $pattern -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    $artifactPath = [System.IO.Path]::GetFullPath($_.FullName)
+                    if (-not $artifactPath.StartsWith($targetRootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        throw "拒绝清理 target 目录之外的 Rust 产物：$artifactPath"
+                    }
+                    Remove-Item -LiteralPath $artifactPath -Recurse -Force
+                }
+        }
     }
 }
 
@@ -172,6 +221,7 @@ function Copy-DirectoryArtifact {
 
 $PackageMode = Resolve-PackageMode
 Apply-PackageMode -Mode $PackageMode
+Set-RustBuildJobs -Jobs $RustJobs
 
 Assert-Path $BackendPython "未找到 Python 虚拟环境：$BackendPython。打包前请先创建 .venv。"
 
@@ -253,6 +303,12 @@ if (-not $SkipRustChecks) {
             Pop-Location
         }
     }
+}
+
+Invoke-Step "清理可能损坏的 Tauri Rust 缓存" {
+    Clear-RustCrateArtifacts `
+        -TargetProfileDir (Join-Path $TauriDir "target\release") `
+        -CrateNames @("tauri-utils", "tauri-plugin-fs")
 }
 
 Invoke-Step "构建 Tauri NSIS 安装包" {

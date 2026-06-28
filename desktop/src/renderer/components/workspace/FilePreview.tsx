@@ -5022,7 +5022,8 @@ function NativeMermaidPreview({
 
   const scheduleAutoFitLoop = useCallback(() => {
     cancelAutoFitLoop();
-    autoFitAttemptRef.current = 0;
+    fitMermaidToViewport();
+    autoFitAttemptRef.current = 1;
 
     const tick = () => {
       autoFitFrameRef.current = null;
