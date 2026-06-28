@@ -170,7 +170,11 @@ class CheckpointService:
             raise CheckpointServiceError(
                 "trace_session_mismatch",
                 "trace 不属于当前 session",
-                {"session_id": session.id, "trace_id": trace_id, "trace_session_id": trace.session_id},
+                {
+                    "session_id": session.id,
+                    "trace_id": trace_id,
+                    "trace_session_id": trace.session_id,
+                },
             )
         return self._source_from_trace(
             session=session,
@@ -249,7 +253,9 @@ class CheckpointService:
                 {"trace_id": trace.trace_id, "session_id": session.id},
             )
         checkpoint_ns = trace.output_checkpoint_ns or ""
-        if not self._checkpoint_exists(active_session_id, checkpoint_ns, trace.output_checkpoint_id):
+        if not self._checkpoint_exists(
+            active_session_id, checkpoint_ns, trace.output_checkpoint_id
+        ):
             raise CheckpointServiceError(
                 "checkpoint_not_found",
                 "checkpoint 不存在",

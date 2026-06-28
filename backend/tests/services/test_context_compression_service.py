@@ -10,7 +10,12 @@ from backend.app.agent.runtime_settings import ContextCompressionRuntimeSettings
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
 from backend.app.services.context_compression_service import ContextCompressionService
-from backend.app.storage import MODEL_DEFAULT_FAST, ModelProviderRecord, StorageRepositories, init_database
+from backend.app.storage import (
+    MODEL_DEFAULT_FAST,
+    ModelProviderRecord,
+    StorageRepositories,
+    init_database,
+)
 
 
 def _repositories(tmp_path) -> StorageRepositories:
@@ -114,7 +119,9 @@ def _prepare_source(tmp_path):
 @pytest.mark.asyncio
 async def test_context_compression_skips_below_threshold(tmp_path) -> None:
     repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(repositories, checkpointer=saver, factory=FakeFactory("摘要"))
+    service = ContextCompressionService(
+        repositories, checkpointer=saver, factory=FakeFactory("摘要")
+    )
 
     outcome = await service.maybe_compress_after_turn(
         session_id="ses_source",
@@ -139,7 +146,9 @@ async def test_context_compression_skips_below_threshold(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_context_compression_skips_when_no_compressible_history(tmp_path) -> None:
     repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(repositories, checkpointer=saver, factory=FakeFactory("摘要"))
+    service = ContextCompressionService(
+        repositories, checkpointer=saver, factory=FakeFactory("摘要")
+    )
 
     outcome = await service.maybe_compress_after_turn(
         session_id="ses_source",
@@ -159,7 +168,9 @@ async def test_context_compression_skips_when_no_compressible_history(tmp_path) 
     assert outcome.status == "skipped"
     assert outcome.reason == "no_compressible_history"
     assert repositories.sessions.get("ses_source").active_session_id == "ses_source"
-    assert [event.action for event in repositories.message_events.list_by_session("ses_source")] == [
+    assert [
+        event.action for event in repositories.message_events.list_by_session("ses_source")
+    ] == [
         "user_message",
         "ai_message",
         "user_message",
@@ -170,7 +181,9 @@ async def test_context_compression_skips_when_no_compressible_history(tmp_path) 
 @pytest.mark.asyncio
 async def test_context_compression_creates_active_branch_and_rewrites_checkpoint(tmp_path) -> None:
     repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(repositories, checkpointer=saver, factory=FakeFactory("压缩摘要"))
+    service = ContextCompressionService(
+        repositories, checkpointer=saver, factory=FakeFactory("压缩摘要")
+    )
 
     outcome = await service.maybe_compress_after_turn(
         session_id="ses_source",
@@ -210,7 +223,11 @@ async def test_context_compression_creates_active_branch_and_rewrites_checkpoint
     assert [message.content for message in messages[1:]] == ["最近问题", "最近回答"]
 
     target_history = repositories.message_events.list_by_session(outcome.target_session_id)
-    assert [event.action for event in target_history] == ["system_message", "user_message", "ai_message"]
+    assert [event.action for event in target_history] == [
+        "system_message",
+        "user_message",
+        "ai_message",
+    ]
     assert "压缩摘要" in target_history[0].data["content"]
     assert target_history[1].data["session_id"] == outcome.target_session_id
     source_history = repositories.message_events.list_by_session("ses_source")

@@ -31,8 +31,7 @@ class ToolCallChunkState:
 class ToolProgressCollector(Protocol):
     tool_names: frozenset[str]
 
-    def collect(self, state: ToolCallChunkState) -> dict[str, Any] | None:
-        ...
+    def collect(self, state: ToolCallChunkState) -> dict[str, Any] | None: ...
 
 
 class ToolCallChunkPipeline:
@@ -184,9 +183,8 @@ def extract_tool_call_chunks(chunk: Any, *, model_run_id: str) -> list[ToolCallC
     raw_chunks = getattr(chunk, "tool_call_chunks", None)
     if raw_chunks is None:
         additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
-        raw_chunks = (
-            additional_kwargs.get("tool_call_chunks")
-            or additional_kwargs.get("tool_calls")
+        raw_chunks = additional_kwargs.get("tool_call_chunks") or additional_kwargs.get(
+            "tool_calls"
         )
     if not isinstance(raw_chunks, list):
         return []

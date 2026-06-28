@@ -12,11 +12,9 @@ ProjectionFlusher = Callable[[], Awaitable[None]]
 
 
 class Projection(Protocol):
-    async def handle(self, event: DomainEvent) -> None:
-        ...
+    async def handle(self, event: DomainEvent) -> None: ...
 
-    async def flush(self) -> None:
-        ...
+    async def flush(self) -> None: ...
 
 
 class EventDispatcher:
@@ -107,4 +105,3 @@ class EventDispatcher:
         for consumer in consumers:
             clone.register(consumer)
         return clone
-

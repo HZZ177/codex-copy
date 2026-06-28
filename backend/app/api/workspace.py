@@ -603,9 +603,7 @@ def _update_annotation(
         else existing.anchor_type
     )
     comment = (
-        payload.comment
-        if "comment" in fields and payload.comment is not None
-        else existing.comment
+        payload.comment if "comment" in fields and payload.comment is not None else existing.comment
     )
     try:
         updated = repositories.workspace_file_annotations.update(
@@ -615,22 +613,16 @@ def _update_annotation(
             anchor_type=anchor_type,
             comment=comment,
             selected_text=(
-                payload.selected_text
-                if "selected_text" in fields
-                else existing.selected_text
+                payload.selected_text if "selected_text" in fields else existing.selected_text
             ),
             line_start=payload.line_start if "line_start" in fields else existing.line_start,
             line_end=payload.line_end if "line_end" in fields else existing.line_end,
             column_start=(
-                payload.column_start
-                if "column_start" in fields
-                else existing.column_start
+                payload.column_start if "column_start" in fields else existing.column_start
             ),
             column_end=payload.column_end if "column_end" in fields else existing.column_end,
             content_hash=(
-                payload.content_hash
-                if "content_hash" in fields
-                else existing.content_hash
+                payload.content_hash if "content_hash" in fields else existing.content_hash
             ),
             anchor_json=(
                 _annotation_anchor_payload(payload.anchor_json)
@@ -785,8 +777,7 @@ def _list_tree(scope: WorkspaceRuntimeContext, path: str) -> WorkspaceTreeRespon
         )
 
     entries = [
-        _entry_for_path(scope, child)
-        for child in sorted(target.iterdir(), key=_entry_sort_key)
+        _entry_for_path(scope, child) for child in sorted(target.iterdir(), key=_entry_sort_key)
     ]
     logger.debug(
         "[WorkspaceAPI] 列出目录 | "

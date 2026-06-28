@@ -414,8 +414,7 @@ class Database:
         with self.connect() as conn:
             legacy_session_columns = self._column_names(conn, "sessions")
             should_migrate_legacy_sessions = (
-                bool(legacy_session_columns)
-                and "workspace_id" not in legacy_session_columns
+                bool(legacy_session_columns) and "workspace_id" not in legacy_session_columns
             )
             conn.executescript(SCHEMA_SQL)
             self._ensure_column(conn, "sessions", "workspace_id", "text")
@@ -450,8 +449,7 @@ class Database:
     @staticmethod
     def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
         return {
-            str(row["name"])
-            for row in conn.execute(f"pragma table_info({table_name})").fetchall()
+            str(row["name"]) for row in conn.execute(f"pragma table_info({table_name})").fetchall()
         }
 
     @staticmethod
@@ -462,8 +460,7 @@ class Database:
         column_definition: str,
     ) -> None:
         columns = {
-            str(row["name"])
-            for row in conn.execute(f"pragma table_info({table_name})").fetchall()
+            str(row["name"]) for row in conn.execute(f"pragma table_info({table_name})").fetchall()
         }
         if column_name not in columns:
             conn.execute(f"alter table {table_name} add column {column_name} {column_definition}")

@@ -174,9 +174,13 @@ async def test_command_disabled_returns_disabled_result(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     repositories.settings.set("command_settings", {"command_enabled": False})
 
-    result = await _registry().require("run_command").run(
-        {"command": _write_file_command("disabled.txt")},
-        _context(tmp_path, repositories),
+    result = (
+        await _registry()
+        .require("run_command")
+        .run(
+            {"command": _write_file_command("disabled.txt")},
+            _context(tmp_path, repositories),
+        )
     )
 
     assert result.ok is True
@@ -194,9 +198,13 @@ async def test_command_settings_limit_captured_output(tmp_path) -> None:
         },
     )
 
-    result = await _registry().require("run_command").run(
-        {"command": f'"{sys.executable}" -c "print(\'abcdef\')"'},
-        _context(tmp_path, repositories),
+    result = (
+        await _registry()
+        .require("run_command")
+        .run(
+            {"command": f'"{sys.executable}" -c "print(\'abcdef\')"'},
+            _context(tmp_path, repositories),
+        )
     )
 
     assert result.ok is True
@@ -217,9 +225,16 @@ async def test_command_settings_clamp_timeout_seconds(tmp_path) -> None:
         },
     )
 
-    result = await _registry().require("run_command").run(
-        {"command": f'"{sys.executable}" -c "import time; time.sleep(1)"', "timeout_seconds": 5},
-        _context(tmp_path, repositories),
+    result = (
+        await _registry()
+        .require("run_command")
+        .run(
+            {
+                "command": f'"{sys.executable}" -c "import time; time.sleep(1)"',
+                "timeout_seconds": 5,
+            },
+            _context(tmp_path, repositories),
+        )
     )
 
     assert result.ok is True

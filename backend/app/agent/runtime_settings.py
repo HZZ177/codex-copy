@@ -44,7 +44,7 @@ class ContextCompressionRuntimeSettings(BaseModel):
     retain_rounds: int = Field(default=2, ge=0, le=20)
 
     @model_validator(mode="after")
-    def validate_threshold_order(self) -> "ContextCompressionRuntimeSettings":
+    def validate_threshold_order(self) -> ContextCompressionRuntimeSettings:
         if self.trigger_fraction >= self.emergency_fraction:
             raise PydanticCustomError(
                 "compression_threshold_order",
@@ -57,7 +57,9 @@ class AgentRuntimeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     auto_title: AutoTitleRuntimeSettings = Field(default_factory=AutoTitleRuntimeSettings)
-    tool_call_limit: ToolCallLimitRuntimeSettings = Field(default_factory=ToolCallLimitRuntimeSettings)
+    tool_call_limit: ToolCallLimitRuntimeSettings = Field(
+        default_factory=ToolCallLimitRuntimeSettings
+    )
     duplicate_tool_call_guard: DuplicateToolCallGuardRuntimeSettings = Field(
         default_factory=DuplicateToolCallGuardRuntimeSettings
     )

@@ -200,7 +200,9 @@ def test_agent_runner_applies_runtime_tool_limit_changes_on_next_agent(tmp_path)
     runner.create_agent(model="qwen-coder", system_prompt=None, tool_context=tool_context)
 
     limits = [
-        next(item for item in middleware if isinstance(item, ToolCallLimitMiddleware)).max_tool_calls
+        next(
+            item for item in middleware if isinstance(item, ToolCallLimitMiddleware)
+        ).max_tool_calls
         for middleware in factory.created_middleware
     ]
     assert limits == [2, 5]

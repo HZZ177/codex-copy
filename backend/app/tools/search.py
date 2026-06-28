@@ -913,10 +913,7 @@ def _context_window(
     else:
         start = line_number + 1
         end = min(len(lines), line_number + after)
-    return [
-        {"line": index, "text": lines[index - 1]}
-        for index in range(start, end + 1)
-    ]
+    return [{"line": index, "text": lines[index - 1]} for index in range(start, end + 1)]
 
 
 def _read_context_text_lines(path: Path) -> list[str] | None:

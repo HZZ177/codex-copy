@@ -80,15 +80,13 @@ class LocalTool(Protocol):
     parameters: dict[str, Any]
     enabled: bool
 
-    def to_tool_spec(self) -> ToolSpec:
-        ...
+    def to_tool_spec(self) -> ToolSpec: ...
 
     async def run(
         self,
         args: dict[str, Any],
         context: ToolExecutionContext,
-    ) -> ToolExecutionResult:
-        ...
+    ) -> ToolExecutionResult: ...
 
 
 ToolHandler = Callable[
@@ -245,9 +243,7 @@ class FunctionTool:
 
 def validate_tool_name(name: str) -> None:
     if not _TOOL_NAME_PATTERN.fullmatch(name):
-        raise ToolDefinitionError(
-            f"工具名称必须匹配 {_TOOL_NAME_PATTERN.pattern}: {name!r}"
-        )
+        raise ToolDefinitionError(f"工具名称必须匹配 {_TOOL_NAME_PATTERN.pattern}: {name!r}")
 
 
 def validate_tool_schema(parameters: dict[str, Any]) -> None:

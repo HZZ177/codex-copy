@@ -72,10 +72,7 @@ async def refresh_models(
         models = await provider_client.list_models(force_refresh=True)
     except ModelConfigError as exc:
         duration_ms = int((time.perf_counter() - started_at) * 1000)
-        logger.warning(
-            "[ModelsAPI] 模型配置无效 | "
-            f"duration_ms={duration_ms} | error={exc}"
-        )
+        logger.warning(f"[ModelsAPI] 模型配置无效 | duration_ms={duration_ms} | error={exc}")
         raise _api_error(
             status.HTTP_400_BAD_REQUEST,
             "model_config_invalid",
@@ -83,10 +80,7 @@ async def refresh_models(
         ) from exc
     except ModelProviderError as exc:
         duration_ms = int((time.perf_counter() - started_at) * 1000)
-        logger.warning(
-            "[ModelsAPI] 刷新模型列表失败 | "
-            f"duration_ms={duration_ms} | error={exc}"
-        )
+        logger.warning(f"[ModelsAPI] 刷新模型列表失败 | duration_ms={duration_ms} | error={exc}")
         raise _api_error(
             status.HTTP_502_BAD_GATEWAY,
             "model_refresh_failed",
@@ -97,10 +91,7 @@ async def refresh_models(
         [model.model_dump(mode="json") for model in models],
     )
     duration_ms = int((time.perf_counter() - started_at) * 1000)
-    logger.info(
-        "[ModelsAPI] 刷新模型列表成功 | "
-        f"count={len(models)} | duration_ms={duration_ms}"
-    )
+    logger.info(f"[ModelsAPI] 刷新模型列表成功 | count={len(models)} | duration_ms={duration_ms}")
     return ModelsResponse(models=models, cached=False)
 
 

@@ -226,10 +226,9 @@ async def process_agent_events(
                 structured_output = _structured_tool_output(output)
                 ui_payload = structured_output if isinstance(structured_output, dict) else None
                 files = _tool_files_from_structured_output(structured_output)
-                tool_call_id = (
-                    tool_chunk_pipeline.tool_call_id_for_run(run_id)
-                    or _tool_call_id_from_output(output)
-                )
+                tool_call_id = tool_chunk_pipeline.tool_call_id_for_run(
+                    run_id
+                ) or _tool_call_id_from_output(output)
                 if is_error:
                     logger.warning(
                         f"[AgentEvents] 工具返回错误 | session_id={session_id} | "
@@ -345,9 +344,7 @@ def _start_llm_request_log(
         return None
     request_id = run_id or new_id()
     resolved_model = (
-        _metadata_text(metadata, "ls_model_name")
-        or _metadata_text(metadata, "model")
-        or model
+        _metadata_text(metadata, "ls_model_name") or _metadata_text(metadata, "model") or model
     )
     if not resolved_model:
         resolved_model = "unknown"
@@ -611,10 +608,14 @@ def _usage_get(usage: Any, key: str) -> int:
 
 
 def _cache_read_tokens(usage: Any) -> int:
-    details = usage.get("input_token_details") if isinstance(usage, dict) else getattr(
-        usage,
-        "input_token_details",
-        None,
+    details = (
+        usage.get("input_token_details")
+        if isinstance(usage, dict)
+        else getattr(
+            usage,
+            "input_token_details",
+            None,
+        )
     )
     if isinstance(details, dict):
         return int(details.get("cache_read", 0) or 0)

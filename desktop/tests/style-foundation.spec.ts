@@ -317,8 +317,8 @@ describe("style foundation", () => {
     expect(shell).toMatch(/\.content\s*{[^}]*border-bottom-left-radius:\s*12px/s);
     expect(shell).toMatch(/\.menuItem\[data-active="true"\]\s*{[^}]*surface-active/s);
     expect(shell).not.toContain("暂未开放");
-    expect(model).toContain("width: min(672px, calc(100% - 136px))");
-    expect(model).toContain("padding: 92px 0 128px");
+    expect(model).toContain("width: min(860px, calc(100% - 96px))");
+    expect(model).toContain("padding: 76px 0 116px");
     expect(usage).toContain("width: min(826px, calc(100% - 136px))");
     expect(usage).toContain("padding: 92px 0 128px");
   });

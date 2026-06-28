@@ -19,8 +19,7 @@ class MessageEventAppender(Protocol):
         action: str,
         data: dict[str, Any] | None = None,
         trace_record_id: str | None = None,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 class PersistenceProjection:

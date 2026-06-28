@@ -192,7 +192,10 @@ async def test_system_messages_project_to_realtime_and_history(tmp_path) -> None
     chat_adapter = RecordingChatAdapter()
     event = _event(
         DomainEventType.MESSAGE_SYSTEM_CREATED,
-        {"content": "上下文已压缩，后续对话将从压缩分支继续。", "compression": {"kind": "context_compressed"}},
+        {
+            "content": "上下文已压缩，后续对话将从压缩分支继续。",
+            "compression": {"kind": "context_compressed"},
+        },
     )
 
     await _project_events([event], repositories=repositories, chat_adapter=chat_adapter)

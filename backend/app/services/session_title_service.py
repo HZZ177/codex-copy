@@ -54,7 +54,9 @@ class SessionTitleService:
             return None
         session = self._repositories.sessions.get(session_id)
         if session is None:
-            logger.debug(f"[SessionTitleService] 跳过自动标题：session 不存在 | session_id={session_id}")
+            logger.debug(
+                f"[SessionTitleService] 跳过自动标题：session 不存在 | session_id={session_id}"
+            )
             return None
         if not self._can_auto_update(session, settings):
             logger.debug(
@@ -74,7 +76,8 @@ class SessionTitleService:
         )
         if updated is None:
             logger.debug(
-                f"[SessionTitleService] 跳过自动标题写回：标题已被其他流程修改 | session_id={session_id}"
+                "[SessionTitleService] 跳过自动标题写回：标题已被其他流程修改 | "
+                f"session_id={session_id}"
             )
             return None
         logger.info(

@@ -100,8 +100,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 message = json.loads(raw)
             except json.JSONDecodeError as exc:
                 logger.warning(
-                    "[WebSocket] 收到非法 JSON | "
-                    f"trace_id={connection_trace_id} | error={exc}"
+                    f"[WebSocket] 收到非法 JSON | trace_id={connection_trace_id} | error={exc}"
                 )
                 await send_error("parse_error", f"消息不是合法 JSON：{exc}")
                 continue

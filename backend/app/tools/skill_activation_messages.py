@@ -26,8 +26,7 @@ def build_skill_activation_content(
             "read_text": ["read_file", "list_dir", "search_text", "search_files", "grep_files"],
             "execute_or_inspect": ["run_command"],
             "compatibility_fallback": (
-                f'{load_skill_tool_name}(skill_name="{skill.name}", '
-                'resource_path="<相对路径>")'
+                f'{load_skill_tool_name}(skill_name="{skill.name}", resource_path="<相对路径>")'
             ),
         },
     }

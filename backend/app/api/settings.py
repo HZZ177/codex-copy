@@ -198,7 +198,9 @@ def _public_model_default(
             model=default.model,
             missing_reason="provider_not_found",
         )
-    model_enabled = default.model in provider.models and provider.model_enabled.get(default.model) is not False
+    model_enabled = (
+        default.model in provider.models and provider.model_enabled.get(default.model) is not False
+    )
     configured = provider.enabled and model_enabled
     return PublicModelDefault(
         scope=_typed_model_default_scope(scope),
@@ -272,10 +274,7 @@ async def put_settings(
             APPEARANCE_SETTINGS_KEY,
             request.appearance.model_dump(mode="json"),
         )
-        logger.info(
-            "[SettingsAPI] 更新外观设置 | "
-            f"font_family={request.appearance.font_family}"
-        )
+        logger.info(f"[SettingsAPI] 更新外观设置 | font_family={request.appearance.font_family}")
     if request.command is not None:
         save_command_settings(repositories, request.command)
         logger.info(
@@ -344,7 +343,8 @@ async def put_extension_settings(
         f"auto_title={saved.auto_title.enabled} | "
         f"tool_call_limit={saved.tool_call_limit.enabled}:{saved.tool_call_limit.max_tool_calls} | "
         f"duplicate_tool_call_guard="
-        f"{saved.duplicate_tool_call_guard.enabled}:{saved.duplicate_tool_call_guard.max_repeats} | "
+        f"{saved.duplicate_tool_call_guard.enabled}:"
+        f"{saved.duplicate_tool_call_guard.max_repeats} | "
         f"context_compression={saved.context_compression.enabled}"
     )
     return saved

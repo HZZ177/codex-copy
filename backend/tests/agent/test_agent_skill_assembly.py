@@ -183,9 +183,7 @@ def test_default_middleware_uses_configured_tool_limit() -> None:
 
 def test_default_middleware_omits_duplicate_guard_when_disabled() -> None:
     middleware = build_default_middleware(
-        AgentRuntimeSettings(
-            duplicate_tool_call_guard={"enabled": False, "max_repeats": 3}
-        )
+        AgentRuntimeSettings(duplicate_tool_call_guard={"enabled": False, "max_repeats": 3})
     )
 
     assert not any(isinstance(item, DuplicateToolCallGuardMiddleware) for item in middleware)
@@ -193,9 +191,7 @@ def test_default_middleware_omits_duplicate_guard_when_disabled() -> None:
 
 def test_default_middleware_uses_configured_duplicate_guard_limit() -> None:
     middleware = build_default_middleware(
-        AgentRuntimeSettings(
-            duplicate_tool_call_guard={"enabled": True, "max_repeats": 6}
-        )
+        AgentRuntimeSettings(duplicate_tool_call_guard={"enabled": True, "max_repeats": 6})
     )
     duplicate_guard = next(
         item for item in middleware if isinstance(item, DuplicateToolCallGuardMiddleware)

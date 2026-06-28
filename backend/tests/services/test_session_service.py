@@ -325,9 +325,7 @@ def test_session_service_restores_multi_turn_history_and_turn_filter(tmp_path) -
     assert full_history["has_more_older"] is False
     assert full_history["list"][0]["turnIndex"] == 1
 
-    second_turn = service.get_history(
-        GetHistoryRequest(session_id="ses_history", turn_index=2)
-    )
+    second_turn = service.get_history(GetHistoryRequest(session_id="ses_history", turn_index=2))
 
     assert [item["content"] for item in second_turn["list"]] == ["第二轮", "思考中"]
     assert second_turn["turn_indexes"] == [2]
@@ -412,9 +410,7 @@ def test_session_service_pages_history_by_turn_without_splitting_messages(tmp_pa
     assert all_history["has_more_older"] is False
     assert all_history["next_cursor"] is None
     assert [
-        message["turnIndex"]
-        for message in all_history["list"]
-        if message["role"] == "user"
+        message["turnIndex"] for message in all_history["list"] if message["role"] == "user"
     ] == [
         1,
         2,

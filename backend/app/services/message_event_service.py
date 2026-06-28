@@ -343,10 +343,7 @@ class MessageEventService:
     ) -> dict[str, Any]:
         metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
         item_type = str(
-            metadata.get("kind")
-            or metadata.get("type")
-            or data.get("injectionSource")
-            or "follow"
+            metadata.get("kind") or metadata.get("type") or data.get("injectionSource") or "follow"
         )
         content = str(data.get("content") or "")
         item: dict[str, Any] = {
@@ -828,9 +825,7 @@ class MessageEventService:
         exit_code = ui_payload.get("exit_code", ui_payload.get("exitCode"))
         failed_status = status in {"failed", "error", "timed_out", "disabled", "rejected"}
         failed_exit = (
-            isinstance(exit_code, int)
-            and not isinstance(exit_code, bool)
-            and exit_code != 0
+            isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0
         )
         if not failed_status and not failed_exit:
             return ""
@@ -919,10 +914,7 @@ class MessageEventService:
     def _normalize_file_change(item: dict[str, Any]) -> dict[str, Any]:
         added = int(item.get("added_lines") or item.get("additions") or 0)
         deleted = int(
-            item.get("deleted_lines")
-            or item.get("removed_lines")
-            or item.get("deletions")
-            or 0
+            item.get("deleted_lines") or item.get("removed_lines") or item.get("deletions") or 0
         )
         return {
             **item,
@@ -1081,8 +1073,7 @@ class MessageEventService:
             return data_timestamp
         try:
             return int(
-                datetime.fromisoformat(event.created_at.replace("Z", "+00:00")).timestamp()
-                * 1000
+                datetime.fromisoformat(event.created_at.replace("Z", "+00:00")).timestamp() * 1000
             )
         except ValueError:
             return 0

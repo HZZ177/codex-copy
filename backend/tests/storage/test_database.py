@@ -56,20 +56,16 @@ def test_init_database_creates_workspace_schema_and_session_columns(tmp_path) ->
 
     with db.connect() as conn:
         workspace_columns = {
-            str(row["name"])
-            for row in conn.execute("pragma table_info(workspaces)").fetchall()
+            str(row["name"]) for row in conn.execute("pragma table_info(workspaces)").fetchall()
         }
         session_columns = {
-            str(row["name"])
-            for row in conn.execute("pragma table_info(sessions)").fetchall()
+            str(row["name"]) for row in conn.execute("pragma table_info(sessions)").fetchall()
         }
         workspace_indexes = {
-            str(row["name"])
-            for row in conn.execute("pragma index_list(workspaces)").fetchall()
+            str(row["name"]) for row in conn.execute("pragma index_list(workspaces)").fetchall()
         }
         session_indexes = {
-            str(row["name"])
-            for row in conn.execute("pragma index_list(sessions)").fetchall()
+            str(row["name"]) for row in conn.execute("pragma index_list(sessions)").fetchall()
         }
 
     assert {
@@ -156,8 +152,7 @@ def test_init_database_upgrades_legacy_session_schema_idempotently(tmp_path) -> 
 
     with db.connect() as conn:
         columns = {
-            str(row["name"])
-            for row in conn.execute("pragma table_info(sessions)").fetchall()
+            str(row["name"]) for row in conn.execute("pragma table_info(sessions)").fetchall()
         }
         row = conn.execute(
             """

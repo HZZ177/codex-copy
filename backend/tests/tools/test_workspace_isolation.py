@@ -17,9 +17,13 @@ def _context(root: Path, session_id: str) -> ToolExecutionContext:
 
 
 async def _run(tool_name: str, args: dict, root: Path, session_id: str):
-    return await create_default_tool_registry().require(tool_name).run(
-        args,
-        _context(root, session_id),
+    return (
+        await create_default_tool_registry()
+        .require(tool_name)
+        .run(
+            args,
+            _context(root, session_id),
+        )
     )
 
 

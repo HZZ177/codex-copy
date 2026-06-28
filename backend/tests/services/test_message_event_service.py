@@ -230,9 +230,7 @@ def test_message_event_service_keeps_deferred_tool_error_summary(tmp_path) -> No
             "tool_call_id": "call_error",
             "result": (
                 '{"code":"file_not_found","message":"文件不存在",'
-                '"details":{"path":"missing.txt","content":"'
-                + "x" * 5000
-                + '"}}'
+                '"details":{"path":"missing.txt","content":"' + "x" * 5000 + '"}}'
             ),
             "duration_ms": 12,
         },
@@ -432,8 +430,7 @@ def test_message_event_service_marks_serialized_tool_error_failed(tmp_path) -> N
         {
             "run_id": "tool_1",
             "result": (
-                '{"code":"file_not_found","message":"文件不存在",'
-                '"details":{"path":"missing.txt"}}'
+                '{"code":"file_not_found","message":"文件不存在","details":{"path":"missing.txt"}}'
             ),
         },
     )

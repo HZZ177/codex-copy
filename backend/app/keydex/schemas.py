@@ -48,7 +48,6 @@ def workspace_skills_response(snapshot: KeydexWorkspaceRuntimeSnapshot) -> Works
             for skill in snapshot.skill_catalog.sorted_skills()
         ],
         diagnostics=[
-            KeydexDiagnosticPayload(**diagnostic.to_dict())
-            for diagnostic in snapshot.diagnostics
+            KeydexDiagnosticPayload(**diagnostic.to_dict()) for diagnostic in snapshot.diagnostics
         ],
     )

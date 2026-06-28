@@ -57,4 +57,3 @@ class DomainEvent:
             timestamp_ms=int(value.get("timestamp_ms") or int(time.time() * 1000)),
             tags=dict(value.get("tags") or {}),
         )
-

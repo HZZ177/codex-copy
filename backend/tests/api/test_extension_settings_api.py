@@ -95,7 +95,11 @@ def test_extension_settings_api_fails_loudly_for_corrupt_persisted_config(tmp_pa
     app.state.repositories.settings.set(
         AGENT_RUNTIME_SETTINGS_KEY,
         {
-            "auto_title": {"enabled": False, "only_when_default_title": True, "max_title_length": 40},
+            "auto_title": {
+                "enabled": False,
+                "only_when_default_title": True,
+                "max_title_length": 40,
+            },
             "tool_call_limit": {"enabled": True, "max_tool_calls": 8, "exit_behavior": "error"},
             "duplicate_tool_call_guard": {"enabled": True, "max_repeats": 3},
             "context_compression": {

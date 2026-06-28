@@ -51,7 +51,11 @@ def create_e2e_model_transport(*, delay_ms: int = 80) -> httpx.MockTransport:
                 if "用户首轮问题" in user_message and "助手最终回复" in user_message:
                     return httpx.Response(
                         200,
-                        json={"choices": [{"message": {"role": "assistant", "content": "E2E 自动标题"}}]},
+                        json={
+                            "choices": [
+                                {"message": {"role": "assistant", "content": "E2E 自动标题"}}
+                            ]
+                        },
                     )
                 return httpx.Response(
                     200,
@@ -151,7 +155,7 @@ def _chat_chunks(payload: dict[str, Any]) -> list[str]:
         f"{long_paragraph}\n\n"
         f"{long_paragraph}\n\n"
         "```ts\n"
-        "const status = \"streaming\";\n"
+        'const status = "streaming";\n'
         "console.log(`当前状态: ${status}`);\n"
         "```\n\n"
         "最终检查点：Markdown、代码块和长文本已经完整显示。"
@@ -254,7 +258,7 @@ def _tool_sequence_chunks(payload: dict[str, Any]) -> list[str]:
                         "type": "function",
                         "function": {
                             "name": "read_file",
-                            "arguments": "{\"path\":\"README.md\",\"max_lines\":8}",
+                            "arguments": '{"path":"README.md","max_lines":8}',
                         },
                     },
                     {
@@ -332,7 +336,7 @@ def _tool_limit_chunks(payload: dict[str, Any]) -> list[str]:
                         "type": "function",
                         "function": {
                             "name": "read_file",
-                            "arguments": "{\"path\":\"README.md\",\"max_lines\":4}",
+                            "arguments": '{"path":"README.md","max_lines":4}',
                         },
                     }
                 ]
@@ -354,9 +358,9 @@ def _file_edit_progress_chunks(payload: dict[str, Any]) -> list[str]:
         "*** Begin Patch\n"
         "*** Update File: src/app.ts\n"
         "@@\n"
-        "-export const status = \"old\";\n"
-        "+export const status = \"new\";\n"
-        "+export const marker = \"e2e-edit-progress\";\n"
+        '-export const status = "old";\n'
+        '+export const status = "new";\n'
+        '+export const marker = "e2e-edit-progress";\n'
         "*** End Patch\n"
     )
     arguments = json.dumps({"patch": patch}, ensure_ascii=False, separators=(",", ":"))

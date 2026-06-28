@@ -35,9 +35,7 @@ class ModelSettings(ProtocolModel):
         preview = None
         if self.api_key:
             preview = (
-                f"{self.api_key[:4]}...{self.api_key[-4:]}"
-                if len(self.api_key) > 8
-                else "***"
+                f"{self.api_key[:4]}...{self.api_key[-4:]}" if len(self.api_key) > 8 else "***"
             )
         return {
             "base_url": self.base_url,

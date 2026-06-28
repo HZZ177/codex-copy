@@ -20,7 +20,9 @@ class SideTaskLLM:
 
 
 class SideTaskModelError(RuntimeError):
-    def __init__(self, code: str, message: str, *, scope: str, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, code: str, message: str, *, scope: str, details: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.scope = scope
@@ -28,8 +30,8 @@ class SideTaskModelError(RuntimeError):
 
 
 def create_side_task_llm(
-        repositories: StorageRepositories,
-        *,
+    repositories: StorageRepositories,
+    *,
     scope: str = MODEL_DEFAULT_FAST,
     factory: AgentFactory = agent_factory,
     http_transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,

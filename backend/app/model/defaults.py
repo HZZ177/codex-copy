@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.app.model.base import ModelSettings
-from backend.app.storage import MODEL_DEFAULT_CHAT, MODEL_DEFAULT_FAST, MODEL_DEFAULT_SCOPES, StorageRepositories
+from backend.app.storage import (
+    MODEL_DEFAULT_CHAT,
+    MODEL_DEFAULT_FAST,
+    MODEL_DEFAULT_SCOPES,
+    StorageRepositories,
+)
 
 
 @dataclass(frozen=True)
@@ -16,7 +21,9 @@ class ResolvedModelSelection:
 
 
 class ModelSelectionError(ValueError):
-    def __init__(self, code: str, message: str, *, scope: str, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, code: str, message: str, *, scope: str, details: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.scope = scope

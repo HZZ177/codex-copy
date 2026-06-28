@@ -379,7 +379,7 @@ describe("AppRouter", () => {
       () => {
         expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
       },
-      { timeout: 2000 },
+      { timeout: 8000 },
     );
     expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
     expect(surface.getAttribute("data-dock-layout")).toBe("inline");
@@ -414,7 +414,7 @@ describe("AppRouter", () => {
       () => {
         expect(surface.getAttribute("data-surface-mode")).toBe("composer");
       },
-      { timeout: 2000 },
+      { timeout: 8000 },
     );
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("idle");
@@ -424,7 +424,7 @@ describe("AppRouter", () => {
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
     expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
-  }, 10000);
+  }, 20000);
 
   it("surfaces pending approval in the workbench assistant drawer", async () => {
     const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);

@@ -500,11 +500,7 @@ def _sorted_children(directory: Path, *, include_hidden: bool) -> list[Path]:
         children = list(directory.iterdir())
     except OSError:
         return []
-    filtered = [
-        child
-        for child in children
-        if _include_child(child, include_hidden=include_hidden)
-    ]
+    filtered = [child for child in children if _include_child(child, include_hidden=include_hidden)]
     return sorted(filtered, key=lambda item: (0 if item.is_dir() else 1, item.name.lower()))
 
 

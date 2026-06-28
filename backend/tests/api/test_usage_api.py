@@ -133,8 +133,7 @@ def test_usage_api_trend_supports_cursor_pagination(tmp_path) -> None:
 
     first_page = client.get("/api/usage/trend?bucket=day&limit=1")
     second_page = client.get(
-        "/api/usage/trend"
-        f"?bucket=day&limit=1&start_after={first_page.json()['next_cursor']}"
+        f"/api/usage/trend?bucket=day&limit=1&start_after={first_page.json()['next_cursor']}"
     )
 
     assert first_page.status_code == 200

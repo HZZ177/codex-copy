@@ -206,10 +206,14 @@ def _zero_repeated_usage_field(usage: Any, key: str, seen: int | None) -> int | 
 
 
 def _zero_repeated_cache_read(usage: Any, seen: int | None) -> int | None:
-    details = usage.get("input_token_details") if isinstance(usage, dict) else getattr(
-        usage,
-        "input_token_details",
-        None,
+    details = (
+        usage.get("input_token_details")
+        if isinstance(usage, dict)
+        else getattr(
+            usage,
+            "input_token_details",
+            None,
+        )
     )
     if not details:
         return seen

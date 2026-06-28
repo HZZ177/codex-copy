@@ -190,11 +190,7 @@ class SessionService:
         )
         if request.title:
             keyword = request.title.strip().lower()
-            records = [
-                record
-                for record in records
-                if keyword in str(record.title or "").lower()
-            ]
+            records = [record for record in records if keyword in str(record.title or "").lower()]
         return records
 
     def get_session_detail(

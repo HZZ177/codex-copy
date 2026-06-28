@@ -7,8 +7,7 @@ from typing import Any
 
 import httpx
 from langchain.agents.middleware import AgentMiddleware, ToolCallRequest
-from langchain_core.messages import BaseMessage
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.types import Command
 
 from backend.app.agent.factory import AgentFactory, agent_factory
@@ -100,9 +99,7 @@ class AutoTitleMiddleware(AgentMiddleware):
             return None
         messages = _state_messages(state)
         if not messages:
-            logger.debug(
-                f"[AutoTitleMiddleware] 跳过自动标题：无消息 | session_id={session_id}"
-            )
+            logger.debug(f"[AutoTitleMiddleware] 跳过自动标题：无消息 | session_id={session_id}")
             return None
         task = self._schedule_task(
             self._generate_and_publish_title(

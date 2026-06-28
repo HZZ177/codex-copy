@@ -118,10 +118,7 @@ async def test_create_file_tool_creates_new_file_inside_workspace(tmp_path) -> N
     assert result.result["files"][0]["operation"] == "add"
     assert result.result["files"][0]["additions"] == 1
     assert result.result["files"][0]["diff"] == (
-        "--- /dev/null\n"
-        "+++ b/out/result.txt\n"
-        "@@ -0,0 +1 @@\n"
-        "+hello"
+        "--- /dev/null\n+++ b/out/result.txt\n@@ -0,0 +1 @@\n+hello"
     )
     assert (tmp_path / "out" / "result.txt").read_text(encoding="utf-8") == "hello"
 

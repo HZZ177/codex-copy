@@ -100,7 +100,9 @@ def test_create_side_task_llm_wraps_factory_failure(tmp_path) -> None:
         model="fast-model",
     )
 
-    error = _capture_error(lambda: create_side_task_llm(repositories, factory=RecordingFactory(fail=True)))
+    error = _capture_error(
+        lambda: create_side_task_llm(repositories, factory=RecordingFactory(fail=True))
+    )
 
     assert error.code == "side_task_model_create_failed"
     assert error.details["provider_id"] == provider.id

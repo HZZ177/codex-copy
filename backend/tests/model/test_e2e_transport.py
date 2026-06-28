@@ -102,7 +102,10 @@ async def test_e2e_transport_returns_deterministic_side_task_outputs() -> None:
                 "messages": [
                     {
                         "role": "user",
-                        "content": "请为下面的历史消息生成上下文压缩摘要，供后续 agent 继续任务使用。",
+                        "content": (
+                            "请为下面的历史消息生成上下文压缩摘要，"
+                            "供后续 agent 继续任务使用。"
+                        ),
                     }
                 ],
             },

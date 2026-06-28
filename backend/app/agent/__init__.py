@@ -4,7 +4,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.app.agent.runner import AgentAssemblyError, AgentRunner
-    from backend.app.agent.side_task_model import SideTaskLLM, SideTaskModelError, create_side_task_llm
+    from backend.app.agent.side_task_model import (
+        SideTaskLLM,
+        SideTaskModelError,
+        create_side_task_llm,
+    )
 
 __all__ = [
     "AgentAssemblyError",
@@ -25,7 +29,11 @@ def __getattr__(name: str):
         }
         return exports[name]
     if name in {"SideTaskLLM", "SideTaskModelError", "create_side_task_llm"}:
-        from backend.app.agent.side_task_model import SideTaskLLM, SideTaskModelError, create_side_task_llm
+        from backend.app.agent.side_task_model import (
+            SideTaskLLM,
+            SideTaskModelError,
+            create_side_task_llm,
+        )
 
         exports = {
             "SideTaskLLM": SideTaskLLM,

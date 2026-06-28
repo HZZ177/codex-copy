@@ -14,11 +14,16 @@ from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
 from backend.app.agent.middleware import ToolCallLimitExceededError
 from backend.app.core.config import AppSettings
+from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
 from backend.app.services import ChatRequest, ChatService
-from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
+from backend.app.storage import (
+    MODEL_DEFAULT_CHAT,
+    ModelProviderRecord,
+    StorageRepositories,
+    init_database,
+)
 from backend.app.tools import FunctionTool, ToolRegistry
-from backend.app.core.time import to_iso_z, utc_now
 
 
 class RecordingChatAdapter:
@@ -235,9 +240,16 @@ async def test_chat_service_uses_checkpoint_as_model_context(tmp_path) -> None:
     )
     service, _repositories, checkpointer, _factory = _service(tmp_path, model)
 
-    first = await service.handle_chat(ChatRequest(message="第一轮", provider_id="provider-1", model="qwen-coder"))
+    first = await service.handle_chat(
+        ChatRequest(message="第一轮", provider_id="provider-1", model="qwen-coder")
+    )
     second = await service.handle_chat(
-        ChatRequest(session_id=first.session_id, message="第二轮", provider_id="provider-1", model="qwen-coder")
+        ChatRequest(
+            session_id=first.session_id,
+            message="第二轮",
+            provider_id="provider-1",
+            model="qwen-coder",
+        )
     )
 
     assert first.turn_index == 1
@@ -364,7 +376,9 @@ async def test_chat_service_routes_langchain_tool_events(tmp_path) -> None:
     chat_adapter = RecordingChatAdapter()
 
     result = await service.handle_chat(
-        ChatRequest(session_id=session.id, message="读文件", provider_id="provider-1", model="qwen-coder"),
+        ChatRequest(
+            session_id=session.id, message="读文件", provider_id="provider-1", model="qwen-coder"
+        ),
         chat_adapter=chat_adapter,
     )
 
@@ -526,7 +540,9 @@ async def test_chat_service_fails_loudly_when_request_omits_model_selection(tmp_
 @pytest.mark.asyncio
 async def test_chat_service_fails_loudly_when_provider_is_missing(tmp_path) -> None:
     model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
-    service, repositories, _checkpointer, factory = _service(tmp_path, model, configure_provider=False)
+    service, repositories, _checkpointer, factory = _service(
+        tmp_path, model, configure_provider=False
+    )
     chat_adapter = RecordingChatAdapter()
 
     result = await service.handle_chat(

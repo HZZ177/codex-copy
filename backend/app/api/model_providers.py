@@ -219,10 +219,7 @@ async def check_model_health(
 ) -> HealthResponse:
     provider = _require_provider(repositories, provider_id)
     started = time.perf_counter()
-    logger.info(
-        "[ModelProviderAPI] 开始模型健康检查 | "
-        f"provider_id={provider.id} | model={model}"
-    )
+    logger.info(f"[ModelProviderAPI] 开始模型健康检查 | provider_id={provider.id} | model={model}")
     health: dict[str, Any]
     try:
         await _call_health(

@@ -295,8 +295,7 @@ async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: 
         message
         for message in state_messages
         if not (
-            isinstance(message, SystemMessage)
-            and getattr(message, "id", None) == _SLOT_MESSAGE_ID
+            isinstance(message, SystemMessage) and getattr(message, "id", None) == _SLOT_MESSAGE_ID
         )
     ]
     rebuilt.insert(0, SystemMessage(content=content, id=_SLOT_MESSAGE_ID))
@@ -622,7 +621,9 @@ class ChatService:
         finally:
             reset_request_context(context_token)
 
-    def _resolve_turn_model(self, request: ChatRequest) -> tuple[ChatRequest, ResolvedModelSelection]:
+    def _resolve_turn_model(
+        self, request: ChatRequest
+    ) -> tuple[ChatRequest, ResolvedModelSelection]:
         requested_provider_id = request.provider_id.strip()
         requested_model = request.model.strip()
         resolved = resolve_model_selection(
@@ -677,7 +678,8 @@ class ChatService:
             logger.debug(
                 "[ChatTurn] 上下文压缩检查完成 | "
                 f"session_id={session.id} | status={outcome.status} | "
-                f"reason={outcome.reason or '-'} | target_session_id={outcome.target_session_id or '-'}"
+                f"reason={outcome.reason or '-'} | "
+                f"target_session_id={outcome.target_session_id or '-'}"
             )
         except Exception as exc:
             logger.opt(exception=True).warning(

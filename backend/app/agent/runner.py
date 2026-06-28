@@ -46,10 +46,10 @@ class AgentRunner:
         factory: AgentFactory = agent_factory,
     ) -> None:
         self._model_settings_provider = model_settings_provider
-        self._runtime_settings_provider = runtime_settings_provider or default_agent_runtime_settings
-        self._model_http_transport_provider = model_http_transport_provider or (
-            lambda: None
+        self._runtime_settings_provider = (
+            runtime_settings_provider or default_agent_runtime_settings
         )
+        self._model_http_transport_provider = model_http_transport_provider or (lambda: None)
         self.checkpointer = checkpointer
         self.tool_registry = tool_registry
         self.default_system_prompt = default_system_prompt

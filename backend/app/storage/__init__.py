@@ -2,13 +2,13 @@
 
 from backend.app.storage.db import Database, init_database
 from backend.app.storage.repositories import (
+    MODEL_DEFAULT_CHAT,
+    MODEL_DEFAULT_FAST,
+    MODEL_DEFAULT_SCOPES,
     CommandApprovalAuditRecord,
     CommandApprovalRequestRecord,
     LLMRequestLogRecord,
     MessageEventRecord,
-    MODEL_DEFAULT_CHAT,
-    MODEL_DEFAULT_FAST,
-    MODEL_DEFAULT_SCOPES,
     ModelDefaultRecord,
     ModelProviderRecord,
     SessionRecord,

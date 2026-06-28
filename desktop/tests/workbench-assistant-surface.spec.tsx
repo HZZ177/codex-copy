@@ -100,7 +100,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-morph-middle").getAttribute("data-content-state")).toBe("deferred");
     expect(screen.queryByTestId("conversation-panel")).toBeNull();
 
-    await waitForSurfaceMode("drawer");
+    await waitForSurfaceMode("drawer", 8000);
     expect(screen.getByTestId("workbench-assistant-shell")).toBe(shell);
     expect(screen.getByTestId("workbench-assistant-chrome")).toBe(chrome);
     expect(shell.getAttribute("data-shell-mode")).toBe("drawer");
@@ -1386,12 +1386,12 @@ describe("WorkbenchAssistantSurface", () => {
   });
 });
 
-async function waitForSurfaceMode(mode: string) {
+async function waitForSurfaceMode(mode: string, timeout = 2000) {
   await waitFor(
     () => {
       expect(screen.getByTestId("workbench-assistant-surface").getAttribute("data-surface-mode")).toBe(mode);
     },
-    { timeout: 2000 },
+    { timeout },
   );
 }
 

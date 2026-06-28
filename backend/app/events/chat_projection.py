@@ -9,8 +9,7 @@ from backend.app.events.event_types import DomainEventType
 
 
 class ChatProjectionAdapter(Protocol):
-    async def send(self, *, session_id: str, action: str, data: dict[str, Any]) -> bool:
-        ...
+    async def send(self, *, session_id: str, action: str, data: dict[str, Any]) -> bool: ...
 
 
 class ChatProjection:

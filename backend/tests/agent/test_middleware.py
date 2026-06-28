@@ -4,7 +4,6 @@ import pytest
 from langchain.agents.middleware import ToolCallRequest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.app.agent.runtime_settings import AgentRuntimeSettings, AutoTitleRuntimeSettings
 from backend.app.agent.middleware import (
     AutoTitleMiddleware,
     DuplicateToolCallGuardMiddleware,
@@ -14,6 +13,7 @@ from backend.app.agent.middleware import (
     ToolErrorHandlingMiddleware,
     build_default_middleware,
 )
+from backend.app.agent.runtime_settings import AgentRuntimeSettings, AutoTitleRuntimeSettings
 from backend.app.core.request_context import reset_request_context, set_request_context
 from backend.app.events import DomainEvent, DomainEventType, EventDispatcher
 from backend.app.storage import StorageRepositories, init_database

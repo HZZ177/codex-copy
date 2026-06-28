@@ -8,4 +8,3 @@ def utc_now() -> datetime:
 def to_iso_z(value: datetime) -> str:
     normalized = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
     return normalized.isoformat().replace("+00:00", "Z")
-

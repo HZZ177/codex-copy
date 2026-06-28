@@ -58,7 +58,11 @@ def test_model_defaults_api_rejects_unknown_provider_and_model(tmp_path) -> None
         )
         missing_model = client.put(
             "/api/settings/model-defaults",
-            json={"defaults": {"default_chat": {"provider_id": provider["id"], "model": "missing-model"}}},
+            json={
+                "defaults": {
+                    "default_chat": {"provider_id": provider["id"], "model": "missing-model"}
+                }
+            },
         )
 
     assert missing_provider.status_code == 400
@@ -83,7 +87,11 @@ def test_model_defaults_api_rejects_disabled_provider_and_model(tmp_path) -> Non
 
         provider_response = client.put(
             "/api/settings/model-defaults",
-            json={"defaults": {"default_chat": {"provider_id": disabled_provider["id"], "model": "qwen-coder"}}},
+            json={
+                "defaults": {
+                    "default_chat": {"provider_id": disabled_provider["id"], "model": "qwen-coder"}
+                }
+            },
         )
         model_response = client.put(
             "/api/settings/model-defaults",
@@ -102,10 +110,14 @@ def test_model_defaults_api_clears_default_without_fallback(tmp_path) -> None:
         provider = _create_provider(client)
         client.put(
             "/api/settings/model-defaults",
-            json={"defaults": {"default_chat": {"provider_id": provider["id"], "model": "qwen-coder"}}},
+            json={
+                "defaults": {"default_chat": {"provider_id": provider["id"], "model": "qwen-coder"}}
+            },
         )
 
-        response = client.put("/api/settings/model-defaults", json={"defaults": {"default_chat": None}})
+        response = client.put(
+            "/api/settings/model-defaults", json={"defaults": {"default_chat": None}}
+        )
 
     assert response.status_code == 200
     assert response.json()["defaults"]["default_chat"]["configured"] is False

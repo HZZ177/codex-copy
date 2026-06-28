@@ -12,7 +12,12 @@ from backend.app.keydex.models import KeydexWorkspaceProfile
 from backend.app.keydex.skills import discover_workspace_skills
 from backend.app.services import ChatRequest, ChatService
 from backend.app.services.chat_service import SkillActivationError, _build_skill_activation_request
-from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
+from backend.app.storage import (
+    MODEL_DEFAULT_CHAT,
+    ModelProviderRecord,
+    StorageRepositories,
+    init_database,
+)
 from backend.app.tools.skill import run_load_skill
 
 

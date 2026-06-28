@@ -5,20 +5,25 @@ from pathlib import Path
 import pytest
 
 from backend.app.core.config import AppSettings
-from backend.app.core.time import to_iso_z, utc_now
 from backend.app.core.request_context import (
     get_keydex_snapshot,
     get_skill_catalog,
     get_tool_call_preset,
     reset_request_context,
 )
+from backend.app.core.time import to_iso_z, utc_now
 from backend.app.keydex import KeydexWorkspaceRuntimeCache
 from backend.app.services import ChatRequest, ChatService
 from backend.app.services.chat_service import (
     SkillActivationRequest,
     _build_skill_activation_preset,
 )
-from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
+from backend.app.storage import (
+    MODEL_DEFAULT_CHAT,
+    ModelProviderRecord,
+    StorageRepositories,
+    init_database,
+)
 
 
 def _service(tmp_path: Path) -> tuple[ChatService, StorageRepositories]:
@@ -105,7 +110,9 @@ def test_tool_context_uses_validated_keydex_snapshot(tmp_path: Path) -> None:
     snapshot = service.keydex_runtime_cache.get_snapshot(workspace_root)
 
     tool_context, enable_tools = service._build_tool_context(
-        request=ChatRequest(session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"),
+        request=ChatRequest(
+            session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"
+        ),
         session=session,
         trace_id="trace-1",
         turn_index=1,
@@ -121,7 +128,9 @@ def test_agent_runtime_context_sets_snapshot_catalog_and_force_preset(tmp_path: 
     service, session, workspace_root = _workspace_session(tmp_path)
     snapshot = service.keydex_runtime_cache.get_snapshot(workspace_root)
     tool_context, _enable_tools = service._build_tool_context(
-        request=ChatRequest(session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"),
+        request=ChatRequest(
+            session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"
+        ),
         session=session,
         trace_id="trace-1",
         turn_index=1,

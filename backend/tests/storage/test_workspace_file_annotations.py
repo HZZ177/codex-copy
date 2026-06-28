@@ -101,11 +101,14 @@ def test_workspace_file_annotations_create_update_delete_and_order(tmp_path) -> 
         scope_type="session",
         scope_id="ses_1",
     )
-    assert repositories.workspace_file_annotations.get(
-        first.id,
-        scope_type="session",
-        scope_id="ses_1",
-    ) is None
+    assert (
+        repositories.workspace_file_annotations.get(
+            first.id,
+            scope_type="session",
+            scope_id="ses_1",
+        )
+        is None
+    )
     assert [
         record.id
         for record in repositories.workspace_file_annotations.list(

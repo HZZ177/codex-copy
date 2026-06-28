@@ -15,7 +15,12 @@ from backend.app.services.chat_service import (
     _build_message_injection_items,
     _build_skill_activation_request,
 )
-from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
+from backend.app.storage import (
+    MODEL_DEFAULT_CHAT,
+    ModelProviderRecord,
+    StorageRepositories,
+    init_database,
+)
 
 
 def _service(tmp_path: Path) -> tuple[ChatService, StorageRepositories]:

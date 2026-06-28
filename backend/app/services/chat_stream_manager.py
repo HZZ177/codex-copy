@@ -155,11 +155,7 @@ class ChatStreamManager:
 
     async def status(self, session_id: str | None = None) -> dict[str, Any]:
         async with self._lock:
-            running = {
-                key: run
-                for key, run in self._runs.items()
-                if not run.task.done()
-            }
+            running = {key: run for key, run in self._runs.items() if not run.task.done()}
         cleaned = (session_id or "").strip()
         repositories = getattr(self._chat_service, "repositories", None)
         pending = (
@@ -180,10 +176,7 @@ class ChatStreamManager:
                 {"session_id": key, "started_at_ms": run.started_at_ms}
                 for key, run in sorted(running.items())
             ],
-            "waiting_approval_sessions": [
-                {"session_id": key}
-                for key in waiting_session_ids
-            ],
+            "waiting_approval_sessions": [{"session_id": key} for key in waiting_session_ids],
             "pending_approvals": [
                 {
                     "session_id": approval.session_id,

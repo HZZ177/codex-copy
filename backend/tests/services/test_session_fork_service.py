@@ -120,7 +120,9 @@ def test_session_reverse_creates_non_destructive_active_branch(tmp_path) -> None
 
 def test_session_fork_service_rolls_back_when_clone_fails(tmp_path) -> None:
     repositories, _saver = _prepare_source(tmp_path)
-    service = SessionForkService(repositories, checkpointer=FailingCloneCheckpointSaver(repositories.db))
+    service = SessionForkService(
+        repositories, checkpointer=FailingCloneCheckpointSaver(repositories.db)
+    )
 
     with pytest.raises(SessionForkServiceError) as exc_info:
         service.fork_session(

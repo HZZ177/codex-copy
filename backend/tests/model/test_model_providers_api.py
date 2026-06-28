@@ -173,9 +173,7 @@ def test_model_provider_health_check_persists_result(tmp_path) -> None:
             },
         ).json()
 
-        response = client.post(
-            f"/api/model-providers/{provider['id']}/models/qwen-coder/health"
-        )
+        response = client.post(f"/api/model-providers/{provider['id']}/models/qwen-coder/health")
 
     assert response.status_code == 200
     assert response.json()["health"]["status"] == "healthy"
@@ -200,9 +198,7 @@ def test_model_provider_health_check_persists_unhealthy_result(tmp_path) -> None
             },
         ).json()
 
-        response = client.post(
-            f"/api/model-providers/{provider['id']}/models/qwen-coder/health"
-        )
+        response = client.post(f"/api/model-providers/{provider['id']}/models/qwen-coder/health")
 
     assert response.status_code == 200
     body = response.json()

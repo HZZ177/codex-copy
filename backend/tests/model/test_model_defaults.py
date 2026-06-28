@@ -53,7 +53,9 @@ def test_resolve_model_default_returns_model_settings(tmp_path) -> None:
 def test_resolve_model_selection_requires_explicit_provider_and_model(tmp_path) -> None:
     repositories = _repositories(tmp_path)
 
-    error = _capture_error(lambda: resolve_model_selection(repositories, provider_id="", model="qwen-coder"))
+    error = _capture_error(
+        lambda: resolve_model_selection(repositories, provider_id="", model="qwen-coder")
+    )
 
     assert error.code == "model_selection_required"
     assert error.scope == "chat"
@@ -88,7 +90,9 @@ def test_resolve_model_default_reports_missing_fast_default(tmp_path) -> None:
 def test_resolve_model_default_rejects_disabled_provider_and_model(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     disabled_provider = _provider(id="disabled-provider", enabled=False)
-    disabled_model_provider = _provider(id="disabled-model-provider", model_enabled={"deepseek-coder": False})
+    disabled_model_provider = _provider(
+        id="disabled-model-provider", model_enabled={"deepseek-coder": False}
+    )
     repositories.model_providers.upsert(disabled_provider)
     repositories.model_providers.upsert(disabled_model_provider)
 

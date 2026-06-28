@@ -592,7 +592,7 @@ class WorkspacesRepository:
             cursor = conn.execute(
                 f"""
                 update workspaces
-                set {', '.join(assignments)}
+                set {", ".join(assignments)}
                 where id = ? and is_deleted = 0
                 """,
                 params,
@@ -1560,8 +1560,7 @@ class MessageEventsRepository:
 
     def count_turns(self, session_id: str, *, include_deleted: bool = False) -> int:
         query = (
-            "select count(distinct turn_index) as count "
-            "from message_events where session_id = ?"
+            "select count(distinct turn_index) as count from message_events where session_id = ?"
         )
         params: list[Any] = [session_id]
         if not include_deleted:
@@ -2450,7 +2449,7 @@ class CommandApprovalRequestsRepository:
             rows = conn.execute(
                 f"""
                 select * from command_approval_requests
-                where {' and '.join(filters)}
+                where {" and ".join(filters)}
                 order by created_at asc, id asc
                 limit ?
                 """,

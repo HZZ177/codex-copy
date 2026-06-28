@@ -50,9 +50,7 @@ class KeydexWorkspaceProfile:
         workspace_root = Path(self.workspace_root).expanduser().resolve()
         keydex_root = Path(self.keydex_root).expanduser().resolve()
         skills_root = (
-            Path(self.skills_root).expanduser().resolve()
-            if self.skills_root is not None
-            else None
+            Path(self.skills_root).expanduser().resolve() if self.skills_root is not None else None
         )
         object.__setattr__(self, "workspace_root", workspace_root)
         object.__setattr__(self, "keydex_root", keydex_root)

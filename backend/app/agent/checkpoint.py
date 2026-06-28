@@ -118,9 +118,7 @@ class SQLiteCheckpointSaver(BaseCheckpointSaver):
             (
                 write["task_id"],
                 write["channel"],
-                self.serde.loads_typed(
-                    (write["type"], bytes(write["value_blob"] or b""))
-                ),
+                self.serde.loads_typed((write["type"], bytes(write["value_blob"] or b""))),
             )
             for write in writes
         ]
@@ -446,9 +444,7 @@ class SQLiteCheckpointSaver(BaseCheckpointSaver):
                     f"checkpoint not found: thread_id={thread_id} "
                     f"checkpoint_ns={checkpoint_ns} checkpoint_id={checkpoint_id}"
                 )
-            checkpoint = self.serde.loads_typed(
-                (row["type"], bytes(row["checkpoint_blob"]))
-            )
+            checkpoint = self.serde.loads_typed((row["type"], bytes(row["checkpoint_blob"])))
             if not isinstance(checkpoint, dict):
                 raise ValueError("checkpoint payload must be a dict")
             channel_values = dict(checkpoint.get("channel_values") or {})

@@ -40,9 +40,8 @@ QUIET_THIRD_PARTY_LOGGERS = (
     "websockets",
 )
 
-DISABLED_THIRD_PARTY_LOGGERS = (
-    "uvicorn.access",
-)
+DISABLED_THIRD_PARTY_LOGGERS = ("uvicorn.access",)
+
 
 def trace_id_filter(record: dict[str, Any]) -> bool:
     record["extra"]["trace_id"] = trace_id_var.get()
@@ -111,9 +110,7 @@ def configure_logging(
             "filter": trace_id_filter,
         }
     )
-    logger.configure(
-        handlers=handlers
-    )
+    logger.configure(handlers=handlers)
     _quiet_third_party_loggers()
     _install_exception_hooks()
 

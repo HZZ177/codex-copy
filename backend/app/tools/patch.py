@@ -188,10 +188,7 @@ def _collect_update_operation(
 
 
 def _is_file_operation_header(line: str) -> bool:
-    return (
-        line.startswith("*** Update File: ")
-        or line.startswith("*** Delete File: ")
-    )
+    return line.startswith("*** Update File: ") or line.startswith("*** Delete File: ")
 
 
 def _raise_unrecognized_patch_line(line: str, line_number: int) -> None:

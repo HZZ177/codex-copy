@@ -234,7 +234,7 @@ async def test_process_agent_events_emits_tool_progress_from_model_chunks() -> N
                                     "name": "apply_patch",
                                     "args": (
                                         '{"patch":"*** Begin Patch\\n'
-                                        '*** Update File: src/app.py\\n'
+                                        "*** Update File: src/app.py\\n"
                                         '@@\\n-old\\n+one"}'
                                     ),
                                 }
@@ -288,8 +288,8 @@ async def test_process_agent_events_emits_tool_progress_for_streamed_apply_patch
                                     "name": "apply_patch",
                                     "args": (
                                         '{"patch":"*** Begin Patch\\n'
-                                        '*** Update File: docs/old.md\\n'
-                                        '*** Move to: docs/new.md\\n'
+                                        "*** Update File: docs/old.md\\n"
+                                        "*** Move to: docs/new.md\\n"
                                         '@@\\n-old\\n+new\\n*** End Patch"}'
                                     ),
                                 }

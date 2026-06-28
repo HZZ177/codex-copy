@@ -68,7 +68,9 @@ class ContextCompressionService:
         if source_session is None:
             return ContextCompressionOutcome(status="skipped", reason="session_not_found")
 
-        messages = self.message_event_service.get_display_messages(session_id, include_tool_details=False)
+        messages = self.message_event_service.get_display_messages(
+            session_id, include_tool_details=False
+        )
         token_count = _effective_token_count(messages, latest_usage)
         context_window_tokens = max(int(settings.context_window_tokens), 1)
         fraction = token_count / context_window_tokens
@@ -93,7 +95,9 @@ class ContextCompressionService:
 
         try:
             source = self.checkpoint_service.resolve_trace(session_id=session_id, trace_id=trace_id)
-            summary = await self.generate_summary(messages=messages, retain_rounds=settings.retain_rounds)
+            summary = await self.generate_summary(
+                messages=messages, retain_rounds=settings.retain_rounds
+            )
             target = self._create_compressed_session(
                 source_session=source_session,
                 source_active_session_id=source.active_session_id,
@@ -199,7 +203,9 @@ class ContextCompressionService:
         turn_index: int,
     ) -> SessionRecord:
         current_source = self.repositories.sessions.get(source_session.id)
-        current_active = (current_source.active_session_id or current_source.id) if current_source else ""
+        current_active = (
+            (current_source.active_session_id or current_source.id) if current_source else ""
+        )
         if current_active != source_active_session_id:
             raise RuntimeError("active_session_changed")
 
@@ -298,7 +304,9 @@ class ContextCompressionService:
         retain_rounds: int,
         turn_index: int,
     ) -> None:
-        retain_start = max(1, turn_index - retain_rounds + 1) if retain_rounds > 0 else turn_index + 1
+        retain_start = (
+            max(1, turn_index - retain_rounds + 1) if retain_rounds > 0 else turn_index + 1
+        )
         self.repositories.message_events.append(
             event_id=new_id(),
             session_id=target_session.id,
@@ -311,13 +319,16 @@ class ContextCompressionService:
                 "compression": {
                     "kind": "context_summary",
                     "source_session_id": source_session.id,
-                    "source_active_session_id": source_session.active_session_id or source_session.id,
+                    "source_active_session_id": source_session.active_session_id
+                    or source_session.id,
                 },
             },
         )
         if retain_rounds <= 0:
             return
-        for event in self.repositories.message_events.list_by_session(source_session.id, limit=5000):
+        for event in self.repositories.message_events.list_by_session(
+            source_session.id, limit=5000
+        ):
             if event.turn_index < retain_start:
                 continue
             self.repositories.message_events.append(
@@ -326,7 +337,9 @@ class ContextCompressionService:
                 trace_record_id=event.trace_record_id,
                 turn_index=event.turn_index,
                 action=event.action,
-                data=_copy_event_data(event, source_session=source_session, target_session=target_session),
+                data=_copy_event_data(
+                    event, source_session=source_session, target_session=target_session
+                ),
             )
 
     async def _emit_compression_notice(
@@ -433,7 +446,9 @@ def _compression_notice_payload(
     }
 
 
-def _effective_token_count(messages: list[dict[str, Any]], latest_usage: dict[str, Any] | None) -> int:
+def _effective_token_count(
+    messages: list[dict[str, Any]], latest_usage: dict[str, Any] | None
+) -> int:
     usage = latest_usage or {}
     total = _safe_int(usage.get("total_tokens"))
     if total <= 0:
@@ -494,10 +509,7 @@ def _clean_summary_text(content: Any) -> str:
 
 
 def _summary_system_content(summary: str) -> str:
-    return (
-        "以下是此前对话的压缩摘要。继续任务时必须优先遵守这些事实、约束和待办。\n\n"
-        f"{summary}"
-    )
+    return f"以下是此前对话的压缩摘要。继续任务时必须优先遵守这些事实、约束和待办。\n\n{summary}"
 
 
 def _retain_recent_state_messages(messages: list[Any], retain_rounds: int) -> list[BaseMessage]:
@@ -516,7 +528,10 @@ def _retain_recent_state_messages(messages: list[Any], retain_rounds: int) -> li
     return [
         message
         for message in retained
-        if not (isinstance(message, SystemMessage) and getattr(message, "id", None) == _SUMMARY_MESSAGE_ID)
+        if not (
+            isinstance(message, SystemMessage)
+            and getattr(message, "id", None) == _SUMMARY_MESSAGE_ID
+        )
     ]
 
 
