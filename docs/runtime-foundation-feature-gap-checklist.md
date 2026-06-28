@@ -6,22 +6,27 @@
 
 Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runtime，而不是企业多租户 Agent 平台。它需要补齐的是本地 agent 的可靠运行、可恢复、低成本旁路任务和可观察能力，而不是完整复刻基座项目里的 scene 版本、灰度、权限、监控聚合、计划任务、业务线等平台管理能力。
 
-下一期应优先补以下基础层：
+本期已经落地的基础层：
 
-- 模型角色配置：主执行模型、快速任务模型、辅助/观察模型。
-- 运行约束中间件：单轮工具调用上限、重复工具调用保护配置化、后续 subagent 共享预算预留。
-- 会话自动标题：由快速任务模型异步生成，失败不影响主对话。
-- checkpoint / fork / reverse：把已经存在的 checkpoint 与 session 链路字段真正产品化。
-- 上下文压缩：以 checkpoint-safe 的 active session fork 方式实现，而不是原地裁剪历史。
-- 中间件事件可见性：中间件动作需要进入实时事件与历史回放，否则用户只能看到结果变化。
+- 模型默认值配置：默认对话模型 `default_chat`、快速模型 `fast`。供应商配置只决定供应商/模型启用范围；对话每轮必须显式传 `provider_id + model`，不做自动降级或隐式回退。
+- 扩展功能配置：自动标题、单轮工具调用上限、重复工具调用保护、上下文压缩。
+- 会话自动标题：由快速模型异步生成，失败不影响主对话。
+- checkpoint / fork / reverse：完成态 trace 可从 checkpoint 派生分支，也可通过 reverse 创建新的 active branch。
+- 上下文压缩：以 checkpoint-safe 的 active session fork 方式实现，不原地裁剪原会话历史。
+- 系统消息可见性：系统提示进入实时投影与历史回放，用于压缩成功/失败、Skill 激活等轻量提示。
+
+本期明确不做：
+
+- observer/assistant 模型。Keydex 是个人 agent 助手，不需要像 C 端产品一样为 20 秒等待额外启动观察者模型。
+- 企业基座级 trace 追踪、middleware event 投影看板、业务线/灰度/权限/平台监控聚合。
 
 ## 2. Keydex 当前能力基线
 
 | 能力 | 当前状态 | 代码依据 | 判断 |
 | --- | --- | --- | --- |
-| 模型供应商管理 | 已有 OpenAI-compatible provider、模型刷新、健康检查、全局默认模型 | `backend/app/api/model_providers.py`, `backend/app/api/settings.py`, `desktop/src/renderer/pages/settings/model/ModelSettingsPage.tsx` | 已可用，但只有全局默认/运行时选择，没有 role-based 模型 |
-| 主模型运行选择 | 对话请求携带 `model`，`AgentRunner` 用该模型创建 ChatOpenAI | `backend/app/services/chat_service.py`, `backend/app/agent/runner.py`, `backend/app/agent/factory.py` | 主链路可用 |
-| 快速模型 | 无独立配置 | `model_defaults` 目前只实际用于 global default | 缺失 |
+| 模型供应商管理 | 已有 OpenAI-compatible provider、模型刷新、健康检查、供应商/模型启停 | `backend/app/api/model_providers.py`, `backend/app/api/settings.py`, `desktop/src/renderer/pages/settings/model/ModelSettingsPage.tsx` | 供应商配置只负责启用范围，不负责默认模型 |
+| 对话模型运行选择 | 对话请求携带 `provider_id + model`，`AgentRunner` 用显式选择创建 ChatOpenAI；session 记住切换后的当前模型 | `backend/app/services/chat_service.py`, `backend/app/agent/runner.py`, `backend/app/agent/factory.py` | 主链路可用，缺参显式报错 |
+| 快速模型 | 独立默认值配置 `fast` | `model_defaults` 表、`backend/app/model/defaults.py`、`backend/app/agent/side_task_model.py` | 用于标题生成、上下文压缩等 side task |
 | 辅助/观察模型 | 无独立配置，无 observer/sidecar 运行链路 | 当前 runtime 仅主 agent event loop | 缺失 |
 | 工具调用上限 | `AppSettings.max_tool_calls` 只影响 LangGraph `recursion_limit`；有重复同参数工具调用保护 | `backend/app/core/config.py`, `backend/app/services/chat_service.py`, `backend/app/agent/middleware.py` | 不是严格工具预算，配置也不在 UI |
 | 自动标题 | 新 session 用用户消息截断成标题；支持手动重命名 | `backend/app/services/chat_service.py`, `backend/app/services/session_service.py` | 缺 LLM 标题中间件 |
@@ -37,9 +42,9 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 
 | 基座能力 | 关键做法 | Keydex 借鉴方式 |
 | --- | --- | --- |
-| `fast_model_config` | scene 上配置 `{model_key, temperature, max_tokens, timeout}`；标题、压缩等旁路任务使用 fast model，可回退主模型 | Keydex 不引入 scene 表，改为模型角色 `fast`；是否回退主模型要显式配置 |
-| `observer_model` | 独立 observer 模型做 initial response、status update、progress fact，并把 observer 文案注入后续主链路 | Keydex 可以作为 P1/P2 辅助体验，不应先阻塞 P0 稳定性能力 |
-| `MiddlewareBlueprint` | 静态 bundle 汇总压缩、共享工具预算、快速模型、A2UI 等运行时配置 | Keydex 可做轻量版 `RuntimeAgentConfig`，由 SQLite settings + model role defaults 生成 |
+| `fast_model_config` | scene 上配置 `{model_key, temperature, max_tokens, timeout}`；标题、压缩等旁路任务使用 fast model | Keydex 不引入 scene 表，改为模型默认值 `fast`；不做对话模型/默认对话模型 fallback，缺失时按功能语义显式失败或跳过 |
+| `observer_model` | 独立 observer 模型做 initial response、status update、progress fact，并把 observer 文案注入后续主链路 | Keydex 本期不做。个人 agent 助手可以接受主链路等待，不需要 C 端式快速 observer 响应 |
+| `MiddlewareBlueprint` | 静态 bundle 汇总压缩、共享工具预算、快速模型、A2UI 等运行时配置 | Keydex 可做轻量版 `RuntimeAgentConfig`，由 SQLite settings + model defaults 生成 |
 | ToolCallLimit | 在 `aafter_model` 检查模型输出工具调用，超过预算直接阻断 | Keydex 应补严格单轮工具预算，不再只靠 recursion_limit |
 | SharedToolCallLimit | 主 agent、subagent、dynamic subagent 共享同一 trace 预算 | Keydex 当前无 subagent，先按单 agent 实现，但配置字段预留 shared 语义 |
 | AutoTitleMiddleware | 主回复完成后异步生成标题并发 session title update 事件 | Keydex 适合优先实现，收益高、风险低 |
@@ -56,38 +61,22 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 
 ## 4. 推荐配置模型
 
-### 4.1 模型角色
+### 4.1 模型默认值
 
-复用现有 `model_defaults.scope`，新增 role scope：
+复用 `model_defaults(scope, provider_id, model)`，但 scope 语义调整为用户可理解的默认值：
 
 | scope | 语义 | 默认策略 |
 | --- | --- | --- |
-| `global` | 主执行模型，保持兼容现状 | 必选 |
-| `fast` | 快速任务模型，用于标题、压缩摘要、轻量分类 | 可选；未配置时按功能级 fallback 策略处理 |
-| `assistant` | 辅助/观察模型，用于初始响应、状态更新、进展归纳 | 可选；未配置则辅助能力关闭 |
+| `default_chat` | 默认对话模型，只决定新建 session 时前端默认选中项 | 建议配置；对话框可随时切换。chat 请求缺少 `provider_id + model` 时后端显式报错，不读取该默认值兜底 |
+| `fast` | 快速模型，用于标题生成、上下文压缩摘要等 side task | 必选于启用相关功能；缺失时不回退主模型 |
 
-每个 role 除 provider/model 外还需要 role-level 参数：
+每个默认值只保存 provider/model 绑定。旁路任务参数由扩展功能配置保存：
 
 ```json
 {
-  "model_roles": {
-    "global": { "provider_id": "...", "model": "...", "temperature": 0.2, "timeout_seconds": 60 },
-    "fast": {
-      "provider_id": "...",
-      "model": "...",
-      "temperature": 0.3,
-      "max_tokens": 512,
-      "timeout_seconds": 30,
-      "fallback_to_global": true
-    },
-    "assistant": {
-      "provider_id": "...",
-      "model": "...",
-      "temperature": 0.5,
-      "max_tokens": 768,
-      "timeout_seconds": 30,
-      "enabled": false
-    }
+  "model_defaults": {
+    "default_chat": { "provider_id": "...", "model": "..." },
+    "fast": { "provider_id": "...", "model": "..." }
   }
 }
 ```
@@ -95,79 +84,72 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 建议落库：
 
 - 模型选择继续走 `model_defaults(scope, provider_id, model)`。
-- role 参数与功能开关放 `settings` 表的新 key：`agent_runtime_settings`。
+- 功能开关与参数放 `settings` 表的 `agent_runtime_settings`。
 - 不把这些配置塞进 `.env`。`.env/AppSettings` 只保留服务端硬默认和本地路径等启动项。
 
 ### 4.2 运行中间件配置
 
 ```json
 {
-  "runtime_limits": {
-    "max_tool_calls_per_turn": 80,
-    "shared_tool_call_limit": 80,
-    "duplicate_tool_repeat_limit": 3,
-    "tool_timeout_seconds": 120,
-    "recursion_limit_multiplier": 2
-  },
   "auto_title": {
     "enabled": true,
-    "model_role": "fast",
-    "only_when_title_is_default": true,
-    "max_title_chars": 20
+    "only_when_default_title": true,
+    "max_title_length": 40
+  },
+  "tool_call_limit": {
+    "enabled": true,
+    "max_tool_calls": 80,
+    "exit_behavior": "error"
+  },
+  "duplicate_tool_call_guard": {
+    "enabled": true,
+    "max_repeats": 3
   },
   "context_compression": {
     "enabled": false,
-    "model_role": "fast",
-    "retain_turns": 2,
+    "context_window_tokens": 128000,
     "trigger_fraction": 0.75,
     "emergency_fraction": 0.9,
-    "mode": "active_session_fork"
-  },
-  "assistant_observer": {
-    "enabled": false,
-    "model_role": "assistant",
-    "initial_response": true,
-    "status_update": true,
-    "progress_fact": true,
-    "idle_window_ms": 8000
+    "retain_rounds": 2
   }
 }
 ```
 
 配置优先级建议：
 
-1. 单轮请求可选择主模型，但不能绕过安全/预算/压缩配置。
+1. 单轮请求必须显式传入 `provider_id + model`，可以选择不同供应商的不同模型，但不能绕过安全/预算/压缩配置。
 2. SQLite settings 是用户可见的真实配置源。
 3. `.env/AppSettings` 只作为没有 settings 时的默认值。
+4. 默认对话模型只影响前端新 session 初始选择，不作为后端 chat 缺参兜底。
 
-## 5. 下一期功能清单
+## 5. 本期功能清单与状态
 
 ### P0: 运行可靠性与低成本旁路任务
 
-- [ ] 新增 `agent_runtime_settings` schema、API、前端设置入口。
-- [ ] 扩展模型设置为 role-based：主模型、快速模型、辅助模型。
-- [ ] 新增严格单轮工具调用预算中间件。
-- [ ] 将重复工具调用阈值配置化。
-- [ ] 工具预算/重复阻断需要发 middleware 事件，并进入历史回放。
-- [ ] 新增 AutoTitle 服务/中间件：使用 fast model，异步写回 session title。
-- [ ] WebSocket/前端补 `session.title_updated` 事件，侧栏标题实时更新。
-- [ ] LLM side task 计入 `llm_request_logs`，区分 `main/title/compression/assistant` request kind。
+- [x] 新增 `agent_runtime_settings` schema、API、前端设置入口。
+- [x] 扩展模型设置为默认值：默认对话模型、快速模型。
+- [x] 新增严格单轮工具调用预算中间件。
+- [x] 将重复工具调用阈值配置化。
+- [x] 工具预算/重复阻断进入实时错误和历史回放。
+- [x] 新增 AutoTitle 服务/中间件：使用 fast model，异步写回 session title。
+- [x] WebSocket/前端补 `session.title_updated` 事件，侧栏标题实时更新。
+- [ ] LLM side task 请求分类统计可继续增强；当前 E2E fake transport 已覆盖标题/压缩 side task 的 deterministic 输出。
 
 验收标准：
 
-- 用户能在设置里配置主模型和快速模型。
+- 用户能在设置里配置默认对话模型和快速模型。
 - 超过工具调用上限时，本轮明确失败，历史里能看到原因。
 - 新会话首轮完成后标题可自动更新，失败不影响主回复。
 - 所有新增能力无 mock fallback，配置缺失时行为明确。
 
 ### P1: Checkpoint 产品化与可恢复
 
-- [ ] 新增 `CheckpointService`：list latest/list by session/get metadata/clone to session。
-- [ ] 新增 session fork API：从最新 checkpoint、指定 trace、指定 turn 派生新 session。
-- [ ] fork 时复制 checkpoint，并复制 fork 点之前的 message_events。
-- [ ] 新增 UI 操作：“从这里分支”。
-- [ ] 新增 reverse 语义：默认不做破坏性删除，而是从目标 checkpoint 创建新的 active branch。
-- [ ] session 列表/详情展示 branch 来源：source trace、source checkpoint、parent/child。
+- [x] 新增 `CheckpointService`：resolve/list/clone/reverse 所需的 checkpoint 操作。
+- [x] 新增 session fork API：从指定 trace/turn 派生新 session。
+- [x] fork 时复制 checkpoint，并复制 fork 点之前的 message_events。
+- [x] 新增 UI 操作：“从这里继续”。
+- [x] 新增 reverse 语义：默认不做破坏性删除，而是从目标 checkpoint 创建新的 active branch。
+- [x] 会话详情保留 branch 来源字段：source trace、source checkpoint、parent/child。
 
 验收标准：
 
@@ -178,12 +160,12 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 
 ### P1: 上下文压缩
 
-- [ ] 基于 fast model 实现压缩 side task。
-- [ ] 补 model context window 配置；至少支持手动配置 context window tokens。
-- [ ] 压缩策略采用 `active_session_fork`，不原地覆盖原 session checkpoint。
-- [ ] `aafter_agent` 后台压缩，下一轮 `abefore_model` 应用压缩结果。
-- [ ] 保留最近 N 轮原始消息，旧消息替换为压缩摘要。
-- [ ] 压缩结果与 active session 切换写入中间件事件。
+- [x] 基于 fast model 实现压缩 side task。
+- [x] 补手动 `context_window_tokens` 配置。
+- [x] 压缩策略采用 `active_session_fork`，不原地覆盖原 session checkpoint。
+- [x] 使用 ChatService after-turn 压缩；下一轮请求通过 source `active_session_id` 自动进入压缩分支。
+- [x] 保留最近 N 轮原始消息，旧消息替换为压缩摘要。
+- [x] 压缩结果与 active session 切换写入系统提示和历史回放。
 
 验收标准：
 
@@ -191,7 +173,7 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 - 下一轮请求使用压缩后的 checkpoint。
 - parent/child 链路可回溯，reverse/fork 不受压缩破坏。
 
-### P2: 辅助/观察模型
+### P2: 辅助/观察模型（本期不做）
 
 - [ ] 定义辅助模型的产品边界：只做过程提示，不替代主回复。
 - [ ] 初始响应：主 agent 启动前给用户短反馈。
@@ -205,19 +187,40 @@ Keydex 当前更像一个本地桌面工作台内的 workspace-first agent runti
 - 辅助模型失败不影响主对话。
 - 主回复不会机械重复辅助提示，也不会与已展示事实冲突。
 
-## 6. 建议开发顺序
+## 6. 实际开发顺序
 
-1. 先做配置骨架：`agent_runtime_settings` + model role scopes。
-2. 再做工具预算中间件和 middleware event projection。
-3. 然后做 AutoTitle，因为它最能验证 fast model、side task、title update、LLM log 这条旁路链。
-4. 接着做 CheckpointService + fork API，这是 reverse 和 compression 的共同前置。
-5. 在 fork 能力稳定后做 active-session compression。
-6. 最后做 assistant observer，因为它体验价值高，但会增加 prompt 注入、流式事件、cache 稳定性和 UI 解释成本。
+1. 配置骨架：`agent_runtime_settings` + `main/fast` model role scopes。
+2. 扩展功能：工具预算、重复工具保护、AutoTitle。
+3. CheckpointService + fork/reverse API 与前端操作。
+4. active-session context compression。
+5. E2E fake transport、runtime foundation 脚本集合与旧配置隔离回归。
 
-## 7. 需要继续讨论的决策点
+## 7. 已确认决策
 
-- 快速模型未配置时，标题/压缩是否允许回退主模型？建议标题可以显式回退，压缩默认不回退，避免昂贵主模型被后台任务消耗。
-- reverse 的用户语义是“撤销当前会话到某一轮”，还是“从某一轮创建新分支并切过去”？建议默认采用后者，避免破坏历史。
-- 是否现在就引入 context window 模型元数据？如果要做压缩，至少需要最小版本。
-- 辅助模型是否进入下一期首批 scope？建议先完成 P0/P1 的可恢复链路，再做 observer。
-- 中间件事件在 UI 中展示为独立块，还是并入状态/ghost footer？建议工具预算和压缩需要独立块，标题生成只需要侧栏事件。
+- 快速模型未配置时不回退主模型。标题生成缺失 fast 时跳过或失败记录，不影响主对话；压缩缺失 fast 时显示压缩失败并继续使用当前上下文。
+- reverse 的用户语义采用“从目标 checkpoint 创建新分支并切为 active”，不破坏原会话历史。
+- 上下文压缩已引入手动 `context_window_tokens`，本期不做 provider 自动上下文窗口探测。
+- 辅助/观察模型不进入本期 scope。Keydex 不需要对标企业基座和 C 端 observer 响应链路。
+- 系统提示采用轻量实时 `system_message` + 历史回放，不做企业级 middleware trace 看板。
+
+## 8. 当前实现与验证入口
+
+本期实现范围：
+
+- 供应商配置与模型配置拆分；模型配置页管理 `main`/`fast` role。
+- 扩展功能页管理自动标题、单轮工具调用上限、重复工具调用保护、上下文压缩。
+- 自动标题和上下文压缩使用快速模型 side task。
+- 工具调用上限在单轮内严格阻断，阻断后本轮失败可见。
+- Session fork/reverse 基于完成态 trace/checkpoint 创建新分支，不破坏原历史。
+- 上下文压缩基于 active session fork：源会话记录压缩成功/失败提示，压缩分支写入摘要并保留最近轮次。
+- E2E fake model transport 在 `KEYDEX_E2E_MODEL_TRANSPORT=true` 时启用，覆盖主链路流式输出和快速模型非流式 side task。
+
+主要验证入口：
+
+```powershell
+.venv\Scripts\python.exe -m pytest backend/tests/model backend/tests/agent/test_side_task_model.py backend/tests/services/test_session_title_service.py backend/tests/services/test_context_compression_service.py
+pnpm --dir desktop exec vitest run tests/model-settings-page.spec.tsx tests/runtime-model-selector.spec.tsx tests/extension-settings-page.spec.tsx tests/agent-session-store.spec.ts
+pnpm run test:e2e:runtime-foundation
+```
+
+`pnpm run test:e2e:runtime-foundation` 不是默认 verify 的一部分，按需执行，避免日常验证成本过高。

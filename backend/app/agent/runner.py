@@ -9,6 +9,10 @@ from langchain_core.messages import SystemMessage
 from backend.app.agent.factory import AgentFactory, agent_factory
 from backend.app.agent.langchain_tools import registry_to_langchain_tools
 from backend.app.agent.middleware import build_default_middleware
+from backend.app.agent.runtime_settings import (
+    AgentRuntimeSettings,
+    default_agent_runtime_settings,
+)
 from backend.app.agent.state import KeydexAgentState
 from backend.app.agent.system_prompt import DEFAULT_SYSTEM_PROMPT
 from backend.app.core.logger import logger
@@ -36,11 +40,13 @@ class AgentRunner:
         model_settings_provider: Callable[[], ModelSettings],
         checkpointer: Any,
         tool_registry: ToolRegistry,
+        runtime_settings_provider: Callable[[], AgentRuntimeSettings] | None = None,
         model_http_transport_provider: ModelHttpTransportProvider | None = None,
         default_system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         factory: AgentFactory = agent_factory,
     ) -> None:
         self._model_settings_provider = model_settings_provider
+        self._runtime_settings_provider = runtime_settings_provider or default_agent_runtime_settings
         self._model_http_transport_provider = model_http_transport_provider or (
             lambda: None
         )
@@ -53,10 +59,14 @@ class AgentRunner:
     def model_settings(self) -> ModelSettings:
         return self._model_settings_provider()
 
+    def model_http_transport(self) -> httpx.BaseTransport | httpx.AsyncBaseTransport | None:
+        return self._model_http_transport_provider()
+
     def create_agent(
         self,
         *,
         model: str,
+        model_settings: ModelSettings | None = None,
         system_prompt: str | None,
         tool_context: ToolExecutionContext,
         enable_tools: bool = True,
@@ -65,11 +75,12 @@ class AgentRunner:
             logger.error("[AgentRunner] checkpointer 未配置，无法创建 agent")
             raise AgentAssemblyError("checkpointer 未配置")
 
-        settings = self.model_settings
+        settings = model_settings or self.model_settings
+        model_http_transport = self.model_http_transport()
         llm = self.factory.get_or_create_llm(
             settings,
             model=model,
-            http_transport=self._model_http_transport_provider(),
+            http_transport=model_http_transport,
         )
         tools = (
             registry_to_langchain_tools(
@@ -93,12 +104,18 @@ class AgentRunner:
             f"tools_enabled={enable_tools} | prompt_len={len(prompt)} | "
             f"skill_index_len={len(skill_index)} | workspace_root={tool_context.workspace_root}"
         )
+        runtime_settings = self._runtime_settings_provider()
         return self.factory.create_agent(
             model=llm,
             tools=tools,
             system_prompt=SystemMessage(content=prompt) if prompt else "",
             checkpointer=self.checkpointer,
-            middleware=build_default_middleware(),
+            middleware=build_default_middleware(
+                runtime_settings,
+                repositories=tool_context.metadata.get("repositories"),
+                dispatcher=tool_context.metadata.get("dispatcher"),
+                model_http_transport=model_http_transport,
+            ),
             state_schema=KeydexAgentState,
             name="desktop_agent",
         )

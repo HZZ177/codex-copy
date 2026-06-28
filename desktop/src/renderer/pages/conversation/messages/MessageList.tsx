@@ -67,6 +67,8 @@ export interface MessageListProps {
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onForkFromMessage?: (message: ConversationMessage) => void;
+  onReverseFromMessage?: (message: ConversationMessage) => void;
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void | Promise<void>;
@@ -104,6 +106,8 @@ export function MessageList({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onForkFromMessage,
+  onReverseFromMessage,
   hasMoreOlder = false,
   loadingOlder = false,
   onLoadOlder,
@@ -532,6 +536,8 @@ export function MessageList({
               onFilePreview,
               onLoadToolDetails,
               onQuoteSelection,
+              onForkFromMessage,
+              onReverseFromMessage,
             })}
           </div>
         ))}
@@ -572,6 +578,8 @@ export function MessageList({
           onFilePreview,
           onLoadToolDetails,
           onQuoteSelection,
+          onForkFromMessage,
+          onReverseFromMessage,
         })
       }
     />
@@ -703,6 +711,8 @@ function renderMessageTurn({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onForkFromMessage,
+  onReverseFromMessage,
 }: {
   turn: MessageTurn;
   renderMessage?: (message: ConversationMessage) => ReactNode;
@@ -714,6 +724,8 @@ function renderMessageTurn({
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onForkFromMessage?: (message: ConversationMessage) => void;
+  onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   return turn.items.map((item) => (
     <div className={styles.item} data-kind={itemKind(item)} role="listitem" key={item.id}>
@@ -729,6 +741,8 @@ function renderMessageTurn({
         onFilePreview,
         onLoadToolDetails,
         onQuoteSelection,
+        onForkFromMessage,
+        onReverseFromMessage,
       })}
     </div>
   ));
@@ -746,6 +760,8 @@ function renderMessageItem({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onForkFromMessage,
+  onReverseFromMessage,
 }: {
   item: ProcessedMessageItem;
   renderMessage?: (message: ConversationMessage) => ReactNode;
@@ -758,6 +774,8 @@ function renderMessageItem({
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onForkFromMessage?: (message: ConversationMessage) => void;
+  onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   if (item.type === "message") {
     const renderedMessage = renderMessage ? (
@@ -774,7 +792,10 @@ function renderMessageItem({
         onQuoteSelection={onQuoteSelection}
       />
     );
-    return withTurnEndStreamingCursor(withTurnActionFooter(renderedMessage, footerMessage), showTurnEndStreamingCursor);
+    return withTurnEndStreamingCursor(
+      withTurnActionFooter(renderedMessage, footerMessage, onForkFromMessage, onReverseFromMessage),
+      showTurnEndStreamingCursor,
+    );
   }
 
   const renderedGroup = (
@@ -798,10 +819,18 @@ function renderMessageItem({
       ))}
     </MessageGroupBlock>
   );
-  return withTurnEndStreamingCursor(withTurnActionFooter(renderedGroup, footerMessage), showTurnEndStreamingCursor);
+  return withTurnEndStreamingCursor(
+    withTurnActionFooter(renderedGroup, footerMessage, onForkFromMessage, onReverseFromMessage),
+    showTurnEndStreamingCursor,
+  );
 }
 
-function withTurnActionFooter(content: ReactNode, footerMessage?: ConversationMessage) {
+function withTurnActionFooter(
+  content: ReactNode,
+  footerMessage?: ConversationMessage,
+  onForkFromMessage?: (message: ConversationMessage) => void,
+  onReverseFromMessage?: (message: ConversationMessage) => void,
+) {
   if (!footerMessage) {
     return content;
   }
@@ -809,7 +838,12 @@ function withTurnActionFooter(content: ReactNode, footerMessage?: ConversationMe
     <>
       {content}
       <div className={styles.turnActionRow}>
-        <MessageActionFooter message={footerMessage} placement="turn" />
+        <MessageActionFooter
+          message={footerMessage}
+          placement="turn"
+          onForkFromMessage={onForkFromMessage}
+          onReverseFromMessage={onReverseFromMessage}
+        />
       </div>
     </>
   );

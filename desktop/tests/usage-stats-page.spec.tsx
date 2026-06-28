@@ -494,7 +494,6 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
       models: ["deepseek-v4-flash", "qwen3-coder-plus"],
       model_enabled: {},
       health: {},
-      default_model: "deepseek-v4-flash",
     },
   ];
 

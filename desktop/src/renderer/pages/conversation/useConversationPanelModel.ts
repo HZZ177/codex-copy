@@ -29,6 +29,7 @@ export interface UseConversationPanelModelOptions {
   sessionId: string;
   controller: AgentSessionController;
   registerPreviewHost?: boolean;
+  onBranchSessionCreated?: (sessionId: string) => void;
 }
 
 export type ConversationPanelModel = ReturnType<typeof useConversationPanelModel>;
@@ -38,6 +39,7 @@ export function useConversationPanelModel({
   sessionId,
   controller,
   registerPreviewHost = false,
+  onBranchSessionCreated,
 }: UseConversationPanelModelOptions) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollFrameRef = useRef<number | null>(null);
@@ -256,6 +258,42 @@ export function useConversationPanelModel({
     [runtime, sessionId],
   );
 
+  const branchFromMessage = useCallback(
+    async (message: ConversationMessage, mode: "fork" | "reverse") => {
+      const messageEventId = typeof message.payload.messageEventId === "string" ? message.payload.messageEventId : "";
+      if (!messageEventId) {
+        notifications.warning("该消息还不能从这里继续");
+        return;
+      }
+
+      try {
+        const response =
+          mode === "fork"
+            ? await runtime.conversation.forkSession(sessionId, { messageEventId })
+            : await runtime.conversation.reverseSession(sessionId, { messageEventId });
+        notifications.success(mode === "fork" ? "已创建分支会话" : "已回退到新分支");
+        onBranchSessionCreated?.(response.session.id);
+      } catch (reason) {
+        notifications.error(errorMessage(reason));
+      }
+    },
+    [notifications, onBranchSessionCreated, runtime, sessionId],
+  );
+
+  const forkFromMessage = useCallback(
+    (message: ConversationMessage) => {
+      void branchFromMessage(message, "fork");
+    },
+    [branchFromMessage],
+  );
+
+  const reverseFromMessage = useCallback(
+    (message: ConversationMessage) => {
+      void branchFromMessage(message, "reverse");
+    },
+    [branchFromMessage],
+  );
+
   return {
     messages,
     session,
@@ -286,6 +324,8 @@ export function useConversationPanelModel({
     openFileReference,
     openFileChangePreview,
     loadToolDetails,
+    forkFromMessage,
+    reverseFromMessage,
   };
 }
 
@@ -324,6 +364,21 @@ function runtimeErrorCode(reason: unknown): string | null {
     return details.code;
   }
   return null;
+}
+
+function errorMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message) {
+    return reason.message;
+  }
+  const record = objectRecord(reason);
+  if (typeof record?.message === "string") {
+    return record.message;
+  }
+  const detail = objectRecord(record?.detail);
+  if (typeof detail?.message === "string") {
+    return detail.message;
+  }
+  return "操作失败";
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {

@@ -50,6 +50,10 @@
   --workbench-assistant-compose-duration: var(--workbench-assistant-dock-out-duration);
 }
 
+.surface[data-session-title-visible="false"] {
+  --workbench-assistant-title-height: 0px;
+}
+
 .surface[data-message-trigger-state="streaming"],
 .surface[data-message-trigger-state="completed"],
 .surface[data-message-trigger-state="failed"],
@@ -591,6 +595,7 @@
 
 .composerFrameTitle[data-empty="true"] {
   opacity: 0;
+  visibility: hidden;
 }
 
 .composerFrameAccessory {

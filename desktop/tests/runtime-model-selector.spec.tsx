@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeModelSelector } from "@/renderer/components/model";
+import type { RuntimeModelOption } from "@/renderer/components/model";
 
 describe("RuntimeModelSelector", () => {
   it("selects models with arrow keys from the search field", async () => {
@@ -9,8 +10,8 @@ describe("RuntimeModelSelector", () => {
 
     render(
       <RuntimeModelSelector
-        model="qwen-coder"
-        modelOptions={["qwen-coder", "deepseek-coder", "kimi-k2"]}
+        model={{ providerId: "provider-a", model: "qwen-coder" }}
+        modelOptions={modelOptions()}
         modelLoadState="ready"
         modelError={null}
         onModelChange={onModelChange}
@@ -29,17 +30,17 @@ describe("RuntimeModelSelector", () => {
 
     fireEvent.keyDown(search, { key: "Enter" });
 
-    expect(onModelChange).toHaveBeenCalledWith("deepseek-coder");
+    expect(onModelChange).toHaveBeenCalledWith({ providerId: "provider-a", model: "deepseek-coder" });
     expect(screen.queryByRole("listbox", { name: "模型" })).toBeNull();
   });
 
-  it("wraps model keyboard navigation from the first option to the last", async () => {
+  it("wraps model keyboard navigation across provider headers", async () => {
     const onModelChange = vi.fn();
 
     render(
       <RuntimeModelSelector
-        model="qwen-coder"
-        modelOptions={["qwen-coder", "deepseek-coder", "kimi-k2"]}
+        model={{ providerId: "provider-a", model: "qwen-coder" }}
+        modelOptions={modelOptions()}
         modelLoadState="ready"
         modelError={null}
         onModelChange={onModelChange}
@@ -58,6 +59,39 @@ describe("RuntimeModelSelector", () => {
 
     fireEvent.keyDown(search, { key: "Enter" });
 
-    expect(onModelChange).toHaveBeenCalledWith("kimi-k2");
+    expect(onModelChange).toHaveBeenCalledWith({ providerId: "provider-b", model: "kimi-k2" });
+  });
+
+  it("filters across providers and models in a flat grouped list", async () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <RuntimeModelSelector
+        model={{ providerId: "provider-a", model: "qwen-coder" }}
+        modelOptions={modelOptions()}
+        modelLoadState="ready"
+        modelError={null}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "选择模型" }).textContent).toContain("qwen-coder");
+    expect(screen.getByRole("button", { name: "选择模型" }).textContent).not.toContain("供应商 A");
+
+    fireEvent.click(screen.getByRole("button", { name: "选择模型" }));
+    fireEvent.change(screen.getByLabelText("筛选模型"), { target: { value: "供应商 B" } });
+
+    expect(screen.getByText("供应商 B")).not.toBeNull();
+    expect(screen.getByRole("option", { name: "kimi-k2" })).not.toBeNull();
+    expect(screen.queryByText("供应商 A")).toBeNull();
+    expect(screen.queryByRole("option", { name: "qwen-coder" })).toBeNull();
   });
 });
+
+function modelOptions(): RuntimeModelOption[] {
+  return [
+    { providerId: "provider-a", providerName: "供应商 A", model: "qwen-coder" },
+    { providerId: "provider-a", providerName: "供应商 A", model: "deepseek-coder" },
+    { providerId: "provider-b", providerName: "供应商 B", model: "kimi-k2" },
+  ];
+}

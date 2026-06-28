@@ -128,6 +128,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         workspace_id=payload.get("workspace_id"),
                         cwd=payload.get("cwd"),
                         workspace_roots=payload.get("workspace_roots"),
+                        current_model_provider_id=payload.get("current_model_provider_id"),
+                        current_model=payload.get("current_model"),
                     )
                     bound_session_id = session["id"]
                     bound_session_ids.add(bound_session_id)
@@ -187,6 +189,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                             message=str(payload.get("message") or payload.get("content") or ""),
                             user_id=str(payload.get("user_id") or settings.default_user_id),
                             scene_id=str(payload.get("scene_id") or settings.default_scene_id),
+                            provider_id=str(payload.get("provider_id") or ""),
                             model=str(payload.get("model") or ""),
                             system_prompt=payload.get("system_prompt"),
                             runtime_params=_runtime_params(payload),

@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, GitBranch, RotateCcw } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -607,12 +607,17 @@ function numericMetadataValue(value: unknown): number | null {
 export function MessageActionFooter({
   message,
   placement = "inline",
+  onForkFromMessage,
+  onReverseFromMessage,
 }: {
   message: ConversationMessage;
   placement?: "inline" | "turn";
+  onForkFromMessage?: (message: ConversationMessage) => void;
+  onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const time = formatMessageTime(message.updatedAt || message.createdAt);
+  const canBranch = typeof message.payload.messageEventId === "string" && message.status !== "running";
 
   const handleCopy = async () => {
     try {
@@ -634,6 +639,28 @@ export function MessageActionFooter({
         {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
         <span>{copyState === "failed" ? "复制失败" : copyState === "copied" ? "已复制" : "复制"}</span>
       </button>
+      {canBranch && onForkFromMessage ? (
+        <button
+          className={styles.actionButton}
+          type="button"
+          aria-label="从这里继续"
+          onClick={() => onForkFromMessage(message)}
+        >
+          <GitBranch size={13} />
+          <span>从这里继续</span>
+        </button>
+      ) : null}
+      {canBranch && onReverseFromMessage ? (
+        <button
+          className={styles.actionButton}
+          type="button"
+          aria-label="回退到这里继续"
+          onClick={() => onReverseFromMessage(message)}
+        >
+          <RotateCcw size={13} />
+          <span>回退到这里继续</span>
+        </button>
+      ) : null}
       {time ? <time dateTime={message.updatedAt || message.createdAt}>{time}</time> : null}
     </footer>
   );

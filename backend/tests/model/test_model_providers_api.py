@@ -32,13 +32,13 @@ def test_model_providers_list_maps_legacy_settings_without_key_leak(tmp_path) ->
     assert provider["id"] == "legacy-openai-compatible"
     assert provider["api_key_set"] is True
     assert "api_key" not in provider
+    assert "default_model" not in provider
     assert provider["models"] == ["qwen-coder"]
-    assert provider["default_model"] == "qwen-coder"
 
 
-def test_model_provider_create_update_and_default(tmp_path) -> None:
+def test_model_provider_create_update_and_rejects_legacy_default_field(tmp_path) -> None:
     with _client(tmp_path) as client:
-        created = client.post(
+        legacy_payload = client.post(
             "/api/model-providers",
             json={
                 "name": "主模型",
@@ -48,11 +48,23 @@ def test_model_provider_create_update_and_default(tmp_path) -> None:
                 "default_model": "qwen-coder",
             },
         )
+        assert legacy_payload.status_code == 422
+
+        created = client.post(
+            "/api/model-providers",
+            json={
+                "name": "主模型",
+                "base_url": "http://provider.test/v1/",
+                "api_key": "sk-secret",
+                "models": ["qwen-coder"],
+            },
+        )
         assert created.status_code == 201
         provider = created.json()
         assert provider["base_url"] == "http://provider.test/v1"
         assert provider["api_key_set"] is True
         assert "api_key" not in provider
+        assert "default_model" not in provider
 
         patched = client.patch(
             f"/api/model-providers/{provider['id']}",
@@ -62,19 +74,12 @@ def test_model_provider_create_update_and_default(tmp_path) -> None:
         assert patched.json()["name"] == "主模型更新"
         assert patched.json()["api_key_set"] is True
 
-        default_response = client.put(
-            "/api/model-providers/default",
-            json={"provider_id": provider["id"], "model": "qwen-coder"},
-        )
-        assert default_response.status_code == 200
-        assert default_response.json()["providers"][0]["default_model"] == "qwen-coder"
-
         settings_response = client.get("/api/settings")
         assert settings_response.status_code == 200
         settings_payload = settings_response.json()["model"]
-        assert settings_payload["base_url"] == "http://provider.test/v1"
-        assert settings_payload["model"] == "qwen-coder"
-        assert settings_payload["api_key_set"] is True
+        assert settings_payload["base_url"] == ""
+        assert settings_payload["model"] == ""
+        assert settings_payload["api_key_set"] is False
 
         models_response = client.get("/api/models")
         assert models_response.status_code == 200
@@ -125,15 +130,15 @@ def test_model_provider_refresh_uses_real_models_endpoint_and_preserves_key(tmp_
 
     assert response.status_code == 200
     assert response.json()["models"] == ["qwen-coder"]
-    assert response.json()["provider"]["default_model"] == "qwen-coder"
+    assert "default_model" not in response.json()["provider"]
 
     with _client(tmp_path) as client:
         settings_response = client.get("/api/settings")
     assert settings_response.status_code == 200
     settings_payload = settings_response.json()["model"]
-    assert settings_payload["base_url"] == "http://provider.test/v1"
-    assert settings_payload["model"] == "qwen-coder"
-    assert settings_payload["api_key_set"] is True
+    assert settings_payload["base_url"] == ""
+    assert settings_payload["model"] == ""
+    assert settings_payload["api_key_set"] is False
 
 
 def test_model_provider_refresh_returns_structured_provider_error(tmp_path) -> None:

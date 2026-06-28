@@ -88,7 +88,7 @@ export function Titlebar({
             title="最小化"
             onClick={() => void controls.minimize()}
           >
-            <Minus size={13} strokeWidth={1.8} />
+            <Minus size={15} strokeWidth={1.8} />
           </button>
           <button
             className={styles.windowControl}
@@ -98,7 +98,7 @@ export function Titlebar({
             title="最大化或还原"
             onClick={() => void controls.toggleMaximize()}
           >
-            <Square size={12} strokeWidth={1.8} />
+            <Square size={14} strokeWidth={1.8} />
           </button>
           <button
             className={`${styles.windowControl} ${styles.closeControl}`}
@@ -108,7 +108,7 @@ export function Titlebar({
             title="关闭"
             onClick={() => void controls.close()}
           >
-            <X size={13} strokeWidth={1.8} />
+            <X size={15} strokeWidth={1.8} />
           </button>
         </div>
       </div>

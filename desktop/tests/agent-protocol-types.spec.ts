@@ -21,6 +21,7 @@ describe("agent protocol types", () => {
     expect(AGENT_CHAT_ACTIONS).toContain("tool_end");
     expect(AGENT_CHAT_ACTIONS).toContain("reasoning");
     expect(AGENT_CHAT_ACTIONS).toContain("completed");
+    expect(AGENT_CHAT_ACTIONS).toContain("session_title_updated");
     expect(AGENT_REPLAY_ACTIONS).toContain("stream_batch");
     expect(AGENT_REPLAY_ACTIONS).toContain("reasoning");
     expect(AGENT_COMPLETED_EVENT_ITEM_ACTIONS).toEqual([
@@ -67,6 +68,8 @@ describe("agent protocol types", () => {
       is_debug: false,
       is_scheduled: false,
       is_current: true,
+      current_model_provider_id: "provider-1",
+      current_model: "qwen-coder",
     } satisfies AgentSession;
 
     const messages = [

@@ -101,6 +101,23 @@ async def test_chat_projection_maps_turn_terminal_states() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_projection_maps_session_title_updates() -> None:
+    adapter = RecordingChatAdapter()
+    projection = ChatProjection(adapter)
+
+    await projection.handle(
+        _event(
+            DomainEventType.SESSION_TITLE_UPDATED,
+            {"session_id": "ses_original", "title": "自动标题"},
+        )
+    )
+
+    assert adapter.sent[0]["session_id"] == "ses_original"
+    assert adapter.sent[0]["action"] == "session_title_updated"
+    assert adapter.sent[0]["data"]["title"] == "自动标题"
+
+
+@pytest.mark.asyncio
 async def test_chat_projection_maps_subagent_events() -> None:
     adapter = RecordingChatAdapter()
     projection = ChatProjection(adapter)

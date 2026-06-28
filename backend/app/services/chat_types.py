@@ -21,6 +21,7 @@ class ChatRequest:
     session_id: str | None = None
     user_id: str | None = None
     scene_id: str | None = None
+    provider_id: str = ""
     model: str = ""
     system_prompt: str | None = None
     runtime_params: dict[str, Any] | None = None

@@ -24,6 +24,7 @@ def test_sessions_api_creates_lists_and_reads_detail(tmp_path) -> None:
     detail = client.get(f"/api/sessions/{session_id}")
 
     assert created.status_code == 200
+    assert created.json()["session"]["title_source"] == "auto_candidate"
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
     assert listed.json()["list"][0]["id"] == session_id
@@ -300,6 +301,7 @@ def test_sessions_api_updates_title_and_soft_deletes_session(tmp_path) -> None:
 
     assert renamed.status_code == 200
     assert renamed.json()["session"]["title"] == "新标题"
+    assert renamed.json()["session"]["title_source"] == "manual"
     assert listed_before_delete.json()["total"] == 1
     assert deleted.status_code == 204
     assert listed_after_delete.json()["total"] == 0

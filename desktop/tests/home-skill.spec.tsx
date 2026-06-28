@@ -43,11 +43,13 @@ describe("HomePage skill activation", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-1",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
     expect(onNavigateToConversation).toHaveBeenCalledWith(
       "ses-1",
-      "qwen-coder",
+      { providerId: "provider-1", model: "qwen-coder" },
       "implement this design",
       expect.objectContaining({
         contextItems: [
@@ -108,6 +110,8 @@ function fakeRuntime({
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: model ? "provider-1" : null,
+    current_model: model || null,
   };
 
   return {
@@ -121,9 +125,49 @@ function fakeRuntime({
           api_key_preview: "sk-***",
         },
       }),
+      getModelDefaults: vi.fn().mockResolvedValue({
+        defaults: {
+          default_chat: {
+            scope: "default_chat",
+            configured: Boolean(model),
+            provider_id: model ? "provider-1" : null,
+            provider_name: model ? "默认模型服务" : null,
+            model: model || null,
+            provider_enabled: model ? true : null,
+            model_enabled: model ? true : null,
+            missing_reason: model ? null : "not_configured",
+          },
+          fast: {
+            scope: "fast",
+            configured: false,
+            provider_id: null,
+            provider_name: null,
+            model: null,
+            provider_enabled: null,
+            model_enabled: null,
+            missing_reason: "not_configured",
+          },
+        },
+      }),
     },
     models: {
-      listModels: vi.fn().mockResolvedValue({ models, cached: true }),
+      listProviders: vi.fn().mockResolvedValue(
+        model
+          ? [
+              {
+                id: "provider-1",
+                name: "默认模型服务",
+                base_url: "https://api.example/v1",
+                enabled: true,
+                api_key_set: true,
+                api_key_preview: "sk-***",
+                models: models.map((item) => item.id),
+                model_enabled: {},
+                health: {},
+              },
+            ]
+          : [],
+      ),
     },
     workspaces: {
       list: vi.fn().mockResolvedValue({ list: workspaces, total: workspaces.length }),

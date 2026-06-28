@@ -7,22 +7,46 @@ import pytest
 
 from backend.app.core.config import AppSettings
 from backend.app.core.request_context import reset_request_context, set_request_context
+from backend.app.core.time import to_iso_z, utc_now
 from backend.app.keydex.models import KeydexWorkspaceProfile
 from backend.app.keydex.skills import discover_workspace_skills
 from backend.app.services import ChatRequest, ChatService
 from backend.app.services.chat_service import SkillActivationError, _build_skill_activation_request
-from backend.app.storage import StorageRepositories, init_database
+from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
 from backend.app.tools.skill import run_load_skill
 
 
 def _service(tmp_path: Path) -> tuple[ChatService, StorageRepositories]:
     repositories = StorageRepositories(init_database(tmp_path / "app.db"))
+    _configure_model_default(repositories)
     service = ChatService(
         settings=AppSettings(data_dir=tmp_path / "data", workspace_root=tmp_path),
         repositories=repositories,
         agent_runner=object(),
     )
     return service, repositories
+
+
+def _configure_model_default(repositories: StorageRepositories) -> None:
+    now = to_iso_z(utc_now())
+    provider = ModelProviderRecord(
+        id="provider-1",
+        name="测试模型服务",
+        base_url="http://model.test/v1",
+        api_key="test-key",
+        enabled=True,
+        models=["qwen-coder"],
+        model_enabled={},
+        health={},
+        created_at=now,
+        updated_at=now,
+    )
+    repositories.model_providers.upsert(provider)
+    repositories.model_providers.set_model_default(
+        scope=MODEL_DEFAULT_CHAT,
+        provider_id=provider.id,
+        model="qwen-coder",
+    )
 
 
 def _write_skill(workspace: Path, name: str = "dev-plan") -> Path:
@@ -88,6 +112,7 @@ async def test_missing_skill_turn_failure_uses_stable_code_without_absolute_path
         ChatRequest(
             session_id=session.id,
             message="use skill",
+            provider_id="provider-1",
             model="qwen-coder",
             runtime_params={"skill_activation": {"skill_name": "dev-plan"}},
         )

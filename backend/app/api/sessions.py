@@ -15,6 +15,10 @@ from backend.app.services.session_service import (
     SessionService,
     SessionValidationError,
 )
+from backend.app.services.session_fork_service import (
+    SessionForkService,
+    SessionForkServiceError,
+)
 from backend.app.services.workspace_service import (
     WorkspaceServiceError,
 )
@@ -35,15 +39,34 @@ class CreateSessionRequest(BaseModel):
     workspace_id: str | None = None
     cwd: str | None = None
     workspace_roots: list[str] | None = None
+    current_model_provider_id: str | None = None
+    current_model: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):
     title: str | None = None
     archived: bool | None = None
+    current_model_provider_id: str | None = None
+    current_model: str | None = None
+
+
+class SessionBranchRequest(BaseModel):
+    user_id: str | None = None
+    title: str | None = None
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    trace_id: str | None = None
+    message_event_id: str | None = None
+    turn_index: int | None = None
 
 
 class SessionResponse(BaseModel):
     session: dict[str, Any]
+
+
+class SessionBranchResponse(BaseModel):
+    session: dict[str, Any]
+    source: dict[str, Any]
 
 
 class SessionListResponse(BaseModel):
@@ -93,6 +116,8 @@ def create_session(
             workspace_id=payload.workspace_id,
             cwd=payload.cwd,
             workspace_roots=payload.workspace_roots,
+            current_model_provider_id=payload.current_model_provider_id,
+            current_model=payload.current_model,
         )
     except WorkspaceServiceError as exc:
         raise _workspace_error(exc) from exc
@@ -193,6 +218,13 @@ def update_session(
             session = service.delete_session(session_id)
         elif "title" in payload.model_fields_set:
             session = service.rename_session(session_id, payload.title or "")
+        elif {"current_model_provider_id", "current_model"} & payload.model_fields_set:
+            session = service.update_session_model(
+                session_id,
+                provider_id=payload.current_model_provider_id or "",
+                model=payload.current_model or "",
+                current_session_id=current_session_id,
+            )
         else:
             session = service.get_session_detail(
                 session_id,
@@ -215,6 +247,54 @@ def delete_session(
     except SessionNotFoundError as exc:
         raise _not_found(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{session_id}/fork", response_model=SessionBranchResponse)
+def fork_session(
+    session_id: str,
+    payload: SessionBranchRequest,
+    repositories: StorageRepositories = RepositoriesDep,
+    settings: AppSettings = SettingsDep,
+) -> SessionBranchResponse:
+    try:
+        result = _fork_service(repositories).fork_session(
+            session_id=session_id,
+            user_id=payload.user_id or settings.default_user_id,
+            title=payload.title,
+            checkpoint_id=payload.checkpoint_id,
+            checkpoint_ns=payload.checkpoint_ns,
+            trace_id=payload.trace_id,
+            message_event_id=payload.message_event_id,
+            turn_index=payload.turn_index,
+        )
+    except SessionForkServiceError as exc:
+        raise _branch_error(exc) from exc
+    session = _service(repositories).get_session_detail(result.session.id)
+    return SessionBranchResponse(session=session, source=result.source.to_dict())
+
+
+@router.post("/{session_id}/reverse", response_model=SessionBranchResponse)
+def reverse_session(
+    session_id: str,
+    payload: SessionBranchRequest,
+    repositories: StorageRepositories = RepositoriesDep,
+    settings: AppSettings = SettingsDep,
+) -> SessionBranchResponse:
+    try:
+        result = _fork_service(repositories).reverse_session(
+            session_id=session_id,
+            user_id=payload.user_id or settings.default_user_id,
+            title=payload.title,
+            checkpoint_id=payload.checkpoint_id,
+            checkpoint_ns=payload.checkpoint_ns,
+            trace_id=payload.trace_id,
+            message_event_id=payload.message_event_id,
+            turn_index=payload.turn_index,
+        )
+    except SessionForkServiceError as exc:
+        raise _branch_error(exc) from exc
+    session = _service(repositories).get_session_detail(result.session.id)
+    return SessionBranchResponse(session=session, source=result.source.to_dict())
 
 
 @router.get("/{session_id}/messages", response_model=SessionHistoryResponse)
@@ -316,6 +396,10 @@ def _service(repositories: StorageRepositories) -> SessionService:
     )
 
 
+def _fork_service(repositories: StorageRepositories) -> SessionForkService:
+    return SessionForkService(repositories)
+
+
 def _not_found(exc: SessionNotFoundError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -338,4 +422,29 @@ def _workspace_error(exc: WorkspaceServiceError) -> HTTPException:
     return HTTPException(
         status_code=status_code,
         detail={"code": exc.code, "message": exc.message, "details": exc.details},
+    )
+
+
+def _branch_error(exc: SessionForkServiceError) -> HTTPException:
+    status_code = {
+        "session_not_found": status.HTTP_404_NOT_FOUND,
+        "trace_not_found": status.HTTP_404_NOT_FOUND,
+        "message_event_not_found": status.HTTP_404_NOT_FOUND,
+        "turn_not_found": status.HTTP_404_NOT_FOUND,
+        "checkpoint_not_found": status.HTTP_404_NOT_FOUND,
+        "checkpoint_source_ambiguous": status.HTTP_400_BAD_REQUEST,
+        "checkpoint_id_empty": status.HTTP_400_BAD_REQUEST,
+        "trace_session_mismatch": status.HTTP_400_BAD_REQUEST,
+        "trace_not_completed": status.HTTP_400_BAD_REQUEST,
+        "trace_checkpoint_missing": status.HTTP_400_BAD_REQUEST,
+        "message_event_checkpoint_missing": status.HTTP_400_BAD_REQUEST,
+        "turn_checkpoint_missing": status.HTTP_400_BAD_REQUEST,
+    }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": exc.code,
+            "message": exc.message,
+            "details": exc.details,
+        },
     )

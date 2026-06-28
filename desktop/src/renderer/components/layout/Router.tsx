@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "re
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
+import type { RuntimeSelectedModel } from "@/renderer/components/model";
 import { queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { WorkspaceSelection } from "@/renderer/components/workspace";
@@ -46,6 +47,16 @@ const ModelSettingsPage = lazy(() =>
     default: module.ModelSettingsPage,
   })),
 );
+const ModelDefaultSettingsPage = lazy(() =>
+  import("@/renderer/pages/settings/modelDefaults/ModelDefaultSettingsPage").then((module) => ({
+    default: module.ModelDefaultSettingsPage,
+  })),
+);
+const ExtensionSettingsPage = lazy(() =>
+  import("@/renderer/pages/settings/extensions/ExtensionSettingsPage").then((module) => ({
+    default: module.ExtensionSettingsPage,
+  })),
+);
 const UsageStatsPage = lazy(() =>
   import("@/renderer/pages/settings/usage/UsageStatsPage").then((module) => ({
     default: module.UsageStatsPage,
@@ -72,7 +83,9 @@ export function AppRouter({ runtime = runtimeBridge }: AppRouterProps = {}) {
         <Route path="/workbench/:workspaceId/session/:sessionId" element={<WorkbenchRoute runtime={runtime} />} />
         <Route path="/conversation/:threadId" element={<ConversationRoute runtime={runtime} />} />
         <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
-        <Route path="/settings/model" element={<ModelSettingsRoute runtime={runtime} />} />
+        <Route path="/settings/providers" element={<ProviderSettingsRoute runtime={runtime} />} />
+        <Route path="/settings/model-defaults" element={<ModelDefaultSettingsRoute runtime={runtime} />} />
+        <Route path="/settings/extensions" element={<ExtensionSettingsRoute runtime={runtime} />} />
         <Route path="/settings/config" element={<ConfigSettingsRoute runtime={runtime} />} />
         <Route path="/settings/usage" element={<UsageSettingsRoute runtime={runtime} />} />
         <Route path="/settings/general" element={<GeneralSettingsRoute />} />
@@ -435,7 +448,7 @@ function HomeRoute({ runtime }: { runtime: RuntimeBridge }) {
             state: { initialModel, quickSendId: quickSend.id },
           });
         }}
-        onOpenModelSettings={() => void navigate("/settings/model", { state: { from: location.pathname } })}
+        onOpenModelSettings={() => void navigate("/settings/model-defaults", { state: { from: location.pathname } })}
       />
     </RoutedLayout>
   );
@@ -445,8 +458,12 @@ function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const routeState = location.state as { initialModel?: string; quickSendId?: string; initialMessage?: string } | null;
-  const initialModel = routeState?.initialModel ?? "";
+  const routeState = location.state as {
+    initialModel?: RuntimeSelectedModel;
+    quickSendId?: string;
+    initialMessage?: string;
+  } | null;
+  const initialModel = routeState?.initialModel ?? null;
   const quickSendId = routeState?.quickSendId ?? "";
   const clearQuickSend = useCallback(() => {
     if (!routeState?.quickSendId && !routeState?.initialMessage) {
@@ -467,7 +484,8 @@ function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
         initialModel={initialModel}
         quickSendId={quickSendId}
         onQuickSendConsumed={clearQuickSend}
-        onOpenModelSettings={() => void navigate("/settings/model", { state: { from: location.pathname } })}
+        onOpenModelSettings={() => void navigate("/settings/model-defaults", { state: { from: location.pathname } })}
+        onNavigateToConversation={(nextThreadId) => void navigate(conversationPath(nextThreadId))}
       />
     </RoutedLayout>
   );
@@ -481,10 +499,36 @@ function GeneralSettingsRoute() {
   );
 }
 
-function ModelSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
+function ProviderSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
   return (
-    <SettingsShell activeSection="model">
+    <SettingsShell activeSection="providers">
       <ModelSettingsPage runtime={runtime} />
+    </SettingsShell>
+  );
+}
+
+function ModelDefaultSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <SettingsShell activeSection="modelDefaults">
+      <ModelDefaultSettingsPage
+        runtime={runtime}
+        onOpenProviderSettings={() => void navigate("/settings/providers", { state: { from: location.pathname } })}
+      />
+    </SettingsShell>
+  );
+}
+
+function ExtensionSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <SettingsShell activeSection="extensions">
+      <ExtensionSettingsPage
+        runtime={runtime}
+        onOpenModelConfig={() => void navigate("/settings/model-defaults", { state: { from: location.pathname } })}
+      />
     </SettingsShell>
   );
 }

@@ -1,7 +1,8 @@
-import { ChevronDown, Plus, Settings2, Trash2 } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
+import { useNotifications } from "@/renderer/providers/NotificationProvider";
 
 import styles from "./ModelSettingsPage.module.css";
 import { ModelList } from "./ModelList";
@@ -16,6 +17,7 @@ export function ModelSettingsPage({
   runtime = runtimeBridge,
   onCreateProvider,
 }: ModelSettingsPageProps) {
+  const notifications = useNotifications();
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +36,10 @@ export function ModelSettingsPage({
       })
       .catch((reason: unknown) => {
         if (active) {
-          setError(errorMessage(reason));
+          const message = errorMessage(reason);
+          setError(message);
           setProviders([]);
+          notifications.error(message);
         }
       })
       .finally(() => {
@@ -46,26 +50,23 @@ export function ModelSettingsPage({
     return () => {
       active = false;
     };
-  }, [runtime]);
+  }, [notifications, runtime]);
 
   return (
     <main className={styles.page} data-testid="model-settings-page">
       <header className={styles.header}>
         <div>
-          <h1>供应商</h1>
+          <h1>供应商配置</h1>
           <p>配置本地智能体可调用的 OpenAI 兼容模型服务</p>
         </div>
         <button className={styles.primaryButton} type="button" onClick={() => openCreate(onCreateProvider, setModal)}>
-          <Plus size={15} />
           <span>新增供应商</span>
         </button>
       </header>
 
       {loading ? <div className={styles.muted}>正在读取供应商</div> : null}
-      {error ? <div className={styles.error} role="alert">{error}</div> : null}
       {!loading && !error && !providers.length ? (
         <section className={styles.empty}>
-          <Settings2 size={18} />
           <span>暂无供应商</span>
           <button type="button" onClick={() => openCreate(onCreateProvider, setModal)}>新增供应商</button>
         </section>
@@ -122,7 +123,7 @@ function ProviderCard({
   provider: ModelProvider;
   runtime: RuntimeBridge;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const enabledModels = provider.models.filter((model) => provider.model_enabled[model] !== false);
 
   return (
@@ -155,10 +156,10 @@ function ProviderCard({
         </button>
         <div className={styles.rowActions} aria-label={`${provider.name} 操作`}>
           <button aria-label={`编辑 ${provider.name}`} type="button" onClick={() => onEdit(provider)}>
-            <Settings2 size={14} />
+            编辑
           </button>
           <button aria-label={`删除 ${provider.name}`} type="button" onClick={() => onEdit(provider)}>
-            <Trash2 size={14} />
+            删除
           </button>
         </div>
       </div>
@@ -169,10 +170,6 @@ function ProviderCard({
             <div>
               <dt>密钥</dt>
               <dd>{provider.api_key_set ? (provider.api_key_preview ?? "已保存") : "未保存"}</dd>
-            </div>
-            <div>
-              <dt>默认模型</dt>
-              <dd>{provider.default_model ?? "未设置"}</dd>
             </div>
             <div>
               <dt>状态</dt>

@@ -6,7 +6,9 @@ import { SettingsShell } from "@/renderer/pages/settings/SettingsShell";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
 
-function renderShell(activeSection: "general" | "model" | "usage" | "config" = "model") {
+function renderShell(
+  activeSection: "general" | "providers" | "modelDefaults" | "extensions" | "usage" | "config" = "providers",
+) {
   return render(
     <ThemeProvider>
       <LayoutStateProvider>
@@ -22,12 +24,14 @@ function renderShell(activeSection: "general" | "model" | "usage" | "config" = "
 
 describe("SettingsShell", () => {
   it("renders only supported settings menu entries", () => {
-    renderShell("model");
+    renderShell("providers");
 
     expect(screen.getByRole("button", { name: "返回应用" })).not.toBeNull();
     expect(screen.getByLabelText("搜索设置")).not.toBeNull();
     expect(screen.getByRole("button", { name: "外观" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "供应商" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "供应商配置" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "模型配置" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "扩展功能" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "配置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "切换主题" })).not.toBeNull();
@@ -41,17 +45,35 @@ describe("SettingsShell", () => {
 
     expect(screen.getByRole("button", { name: "用量统计" }).getAttribute("data-active")).toBe("true");
     expect(screen.getByRole("button", { name: "外观" }).getAttribute("data-active")).toBe("false");
-    expect(screen.getByRole("button", { name: "供应商" }).getAttribute("data-active")).toBe("false");
+    expect(screen.getByRole("button", { name: "供应商配置" }).getAttribute("data-active")).toBe("false");
+    expect(screen.getByRole("button", { name: "模型配置" }).getAttribute("data-active")).toBe("false");
+    expect(screen.getByRole("button", { name: "扩展功能" }).getAttribute("data-active")).toBe("false");
+    expect(screen.getByRole("button", { name: "配置" }).getAttribute("data-active")).toBe("false");
+  });
+
+  it("marks model configuration separately from provider settings", () => {
+    renderShell("modelDefaults");
+
+    expect(screen.getByRole("button", { name: "模型配置" }).getAttribute("data-active")).toBe("true");
+    expect(screen.getByRole("button", { name: "供应商配置" }).getAttribute("data-active")).toBe("false");
+  });
+
+  it("marks extension settings separately from command configuration", () => {
+    renderShell("extensions");
+
+    expect(screen.getByRole("button", { name: "扩展功能" }).getAttribute("data-active")).toBe("true");
     expect(screen.getByRole("button", { name: "配置" }).getAttribute("data-active")).toBe("false");
   });
 
   it("filters current settings entries through search", () => {
-    renderShell("model");
+    renderShell("providers");
 
     fireEvent.change(screen.getByLabelText("搜索设置"), { target: { value: "用量" } });
 
     expect(screen.queryByRole("button", { name: "外观" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "供应商" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "供应商配置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "模型配置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "扩展功能" })).toBeNull();
     expect(screen.queryByRole("button", { name: "配置" })).toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
   });
@@ -63,7 +85,7 @@ describe("SettingsShell", () => {
   });
 
   it("keeps theme toggle in the settings footer", () => {
-    renderShell("model");
+    renderShell("providers");
 
     expect(screen.getByText("深色")).not.toBeNull();
 
@@ -74,7 +96,7 @@ describe("SettingsShell", () => {
   });
 
   it("resizes settings sidebar with the shared handle", () => {
-    renderShell("model");
+    renderShell("providers");
 
     const shell = screen.getByTestId("settings-shell");
     const handle = screen.getByRole("separator", { name: "调整侧边栏宽度" });
@@ -89,7 +111,7 @@ describe("SettingsShell", () => {
   });
 
   it("marks sidebar collapse transitions separately from resize", () => {
-    renderShell("model");
+    renderShell("providers");
 
     const shell = screen.getByTestId("settings-shell");
     const handle = screen.getByRole("separator", { name: "调整侧边栏宽度" });

@@ -1,8 +1,8 @@
 .page {
-  width: min(672px, calc(100% - 136px));
+  width: min(860px, calc(100% - 96px));
   min-height: 100%;
   margin: 0 auto;
-  padding: 92px 0 128px;
+  padding: 76px 0 116px;
   color: var(--color-text-primary);
 }
 
@@ -11,7 +11,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .header h1 {
@@ -25,6 +25,7 @@
   margin: 7px 0 0;
   color: var(--color-text-tertiary);
   font-size: 12px;
+  line-height: 1.45;
 }
 
 .primaryButton,
@@ -41,7 +42,6 @@
 
 .primaryButton {
   height: 32px;
-  gap: 7px;
   padding: 0 13px;
   background: var(--color-text-primary);
   color: var(--color-bg-elevated);
@@ -59,27 +59,18 @@
   line-height: 1.5;
 }
 
-.error {
-  margin-bottom: 14px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, transparent);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--color-danger) 7%, var(--surface-bg));
-  color: var(--color-danger);
-  font-size: 12px;
-}
-
 .empty {
   display: flex;
-  min-height: 180px;
-  flex-direction: column;
+  min-height: 64px;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 12px;
-  border: 1px dashed color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
   border-radius: var(--radius-md);
-  background: transparent;
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
   color: var(--color-text-tertiary);
+  padding: 13px 14px;
+  backdrop-filter: blur(18px);
 }
 
 .empty span {
@@ -172,7 +163,7 @@
 .cardHeader {
   display: grid;
   width: 100%;
-  grid-template-columns: 20px minmax(220px, 1fr) auto auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   border: 0;
@@ -201,12 +192,14 @@
 }
 
 .titleGroup {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 4px;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .titleGroup strong {
+  flex: 0 1 auto;
   overflow: hidden;
   color: var(--color-text-primary);
   font-size: 13px;
@@ -217,6 +210,7 @@
 }
 
 .titleGroup span {
+  flex: 1 1 auto;
   overflow: hidden;
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
@@ -229,20 +223,14 @@
 .metrics {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--color-text-tertiary);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .metrics span {
-  display: inline-flex;
-  height: 24px;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 54%, transparent);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  padding: 0 8px;
+  display: inline;
 }
 
 .switchTrack {
@@ -281,7 +269,7 @@
 
 .metaGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
 }
@@ -359,9 +347,9 @@
 }
 
 .rowActions button {
-  width: 30px;
+  width: auto;
   height: 30px;
-  padding: 0;
+  padding: 0 10px;
   background: transparent;
   color: var(--color-text-secondary);
 }

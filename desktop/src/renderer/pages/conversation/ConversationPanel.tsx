@@ -57,6 +57,8 @@ export function ConversationPanel({
         onFilePreview={model.openFileChangePreview}
         onLoadToolDetails={model.loadToolDetails}
         onQuoteSelection={model.quoteSelection}
+        onForkFromMessage={model.forkFromMessage}
+        onReverseFromMessage={model.reverseFromMessage}
         hasMoreOlder={Boolean(model.sessionViewState?.historyHasMoreOlder)}
         loadingOlder={model.loadingOlderHistory}
         onLoadOlder={model.loadOlderHistory}

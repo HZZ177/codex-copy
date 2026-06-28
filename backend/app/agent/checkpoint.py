@@ -325,6 +325,178 @@ class SQLiteCheckpointSaver(BaseCheckpointSaver):
             conn.execute("delete from checkpoint_writes_v2 where thread_id = ?", (thread_id,))
             conn.execute("delete from checkpoints_v2 where thread_id = ?", (thread_id,))
 
+    def clone_checkpoint_to_thread(
+        self,
+        *,
+        source_thread_id: str,
+        target_thread_id: str,
+        checkpoint_id: str,
+        checkpoint_ns: str = "",
+    ) -> None:
+        if not source_thread_id.strip():
+            raise ValueError("source_thread_id must not be empty")
+        if not target_thread_id.strip():
+            raise ValueError("target_thread_id must not be empty")
+        if source_thread_id == target_thread_id:
+            raise ValueError("source_thread_id and target_thread_id must be different")
+        if not checkpoint_id.strip():
+            raise ValueError("checkpoint_id must not be empty")
+
+        source_rows = self._load_checkpoint_chain(
+            thread_id=source_thread_id,
+            checkpoint_ns=checkpoint_ns,
+            checkpoint_id=checkpoint_id,
+        )
+        if not source_rows:
+            raise ValueError(
+                f"checkpoint not found: thread_id={source_thread_id} "
+                f"checkpoint_ns={checkpoint_ns} checkpoint_id={checkpoint_id}"
+            )
+        checkpoint_ids = [str(row["checkpoint_id"]) for row in source_rows]
+        now = to_iso_z(utc_now())
+        try:
+            with self.db.transaction() as conn:
+                conn.execute(
+                    "delete from checkpoint_writes_v2 where thread_id = ? and checkpoint_ns = ?",
+                    (target_thread_id, checkpoint_ns),
+                )
+                conn.execute(
+                    "delete from checkpoints_v2 where thread_id = ? and checkpoint_ns = ?",
+                    (target_thread_id, checkpoint_ns),
+                )
+                for row in reversed(source_rows):
+                    conn.execute(
+                        """
+                        insert into checkpoints_v2 (
+                          thread_id, checkpoint_ns, checkpoint_id, created_at,
+                          parent_checkpoint_id, type, checkpoint_blob, metadata
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            target_thread_id,
+                            checkpoint_ns,
+                            row["checkpoint_id"],
+                            now,
+                            row["parent_checkpoint_id"],
+                            row["type"],
+                            bytes(row["checkpoint_blob"]),
+                            row["metadata"],
+                        ),
+                    )
+                placeholders = ", ".join("?" for _ in checkpoint_ids)
+                writes = conn.execute(
+                    f"""
+                    select checkpoint_id, task_id, task_path, idx, channel, type, value_blob
+                    from checkpoint_writes_v2
+                    where thread_id = ? and checkpoint_ns = ? and checkpoint_id in ({placeholders})
+                    order by checkpoint_id asc, task_id asc, idx asc
+                    """,
+                    (source_thread_id, checkpoint_ns, *checkpoint_ids),
+                ).fetchall()
+                for write in writes:
+                    conn.execute(
+                        """
+                        insert into checkpoint_writes_v2 (
+                          thread_id, checkpoint_ns, checkpoint_id, task_id, task_path,
+                          idx, channel, type, value_blob, created_at
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            target_thread_id,
+                            checkpoint_ns,
+                            write["checkpoint_id"],
+                            write["task_id"],
+                            write["task_path"],
+                            write["idx"],
+                            write["channel"],
+                            write["type"],
+                            bytes(write["value_blob"] or b""),
+                            now,
+                        ),
+                    )
+        except Exception:
+            self.delete_thread(target_thread_id)
+            raise
+
+    def replace_checkpoint_messages(
+        self,
+        *,
+        thread_id: str,
+        checkpoint_id: str,
+        checkpoint_ns: str = "",
+        messages: Sequence[Any],
+    ) -> None:
+        if not thread_id.strip():
+            raise ValueError("thread_id must not be empty")
+        if not checkpoint_id.strip():
+            raise ValueError("checkpoint_id must not be empty")
+
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                """
+                select type, checkpoint_blob
+                from checkpoints_v2
+                where thread_id = ? and checkpoint_ns = ? and checkpoint_id = ?
+                limit 1
+                """,
+                (thread_id, checkpoint_ns, checkpoint_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"checkpoint not found: thread_id={thread_id} "
+                    f"checkpoint_ns={checkpoint_ns} checkpoint_id={checkpoint_id}"
+                )
+            checkpoint = self.serde.loads_typed(
+                (row["type"], bytes(row["checkpoint_blob"]))
+            )
+            if not isinstance(checkpoint, dict):
+                raise ValueError("checkpoint payload must be a dict")
+            channel_values = dict(checkpoint.get("channel_values") or {})
+            channel_values["messages"] = list(messages)
+            checkpoint = {**checkpoint, "channel_values": channel_values}
+            type_name, checkpoint_bytes = self.serde.dumps_typed(checkpoint)
+            conn.execute(
+                """
+                update checkpoints_v2
+                set type = ?, checkpoint_blob = ?, created_at = ?
+                where thread_id = ? and checkpoint_ns = ? and checkpoint_id = ?
+                """,
+                (
+                    type_name,
+                    bytes(checkpoint_bytes),
+                    to_iso_z(utc_now()),
+                    thread_id,
+                    checkpoint_ns,
+                    checkpoint_id,
+                ),
+            )
+
+    def _load_checkpoint_chain(
+        self,
+        *,
+        thread_id: str,
+        checkpoint_ns: str,
+        checkpoint_id: str,
+    ) -> list[Any]:
+        rows: list[Any] = []
+        next_checkpoint_id: str | None = checkpoint_id
+        with self.db.connect() as conn:
+            while next_checkpoint_id:
+                row = conn.execute(
+                    """
+                    select checkpoint_id, parent_checkpoint_id, type, checkpoint_blob, metadata
+                    from checkpoints_v2
+                    where thread_id = ? and checkpoint_ns = ? and checkpoint_id = ?
+                    limit 1
+                    """,
+                    (thread_id, checkpoint_ns, next_checkpoint_id),
+                ).fetchone()
+                if row is None:
+                    break
+                rows.append(row)
+                next_checkpoint_id = row["parent_checkpoint_id"]
+        return rows
+
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         return self.get_tuple(config)
 

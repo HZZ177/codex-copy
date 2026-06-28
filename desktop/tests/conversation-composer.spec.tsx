@@ -153,9 +153,9 @@ describe("ConversationComposer", () => {
 
 function modelSelection(): RuntimeModelSelection {
   return {
-    selectedModel: "qwen-coder",
+    selectedModel: { providerId: "provider-1", model: "qwen-coder" },
     setSelectedModel: vi.fn(),
-    modelOptions: ["qwen-coder"],
+    modelOptions: [{ providerId: "provider-1", providerName: "默认模型服务", model: "qwen-coder" }],
     modelLoadState: "ready",
     modelError: null,
   };

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.app.core.config import AppSettings
+from backend.app.core.time import to_iso_z, utc_now
 from backend.app.core.request_context import (
     get_keydex_snapshot,
     get_skill_catalog,
@@ -17,11 +18,12 @@ from backend.app.services.chat_service import (
     SkillActivationRequest,
     _build_skill_activation_preset,
 )
-from backend.app.storage import StorageRepositories, init_database
+from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
 
 
 def _service(tmp_path: Path) -> tuple[ChatService, StorageRepositories]:
     repositories = StorageRepositories(init_database(tmp_path / "app.db"))
+    _configure_model_default(repositories)
     service = ChatService(
         settings=AppSettings(data_dir=tmp_path / "data", workspace_root=tmp_path),
         repositories=repositories,
@@ -29,6 +31,28 @@ def _service(tmp_path: Path) -> tuple[ChatService, StorageRepositories]:
         keydex_runtime_cache=KeydexWorkspaceRuntimeCache(),
     )
     return service, repositories
+
+
+def _configure_model_default(repositories: StorageRepositories) -> None:
+    now = to_iso_z(utc_now())
+    provider = ModelProviderRecord(
+        id="provider-1",
+        name="测试模型服务",
+        base_url="http://model.test/v1",
+        api_key="test-key",
+        enabled=True,
+        models=["qwen-coder"],
+        model_enabled={},
+        health={},
+        created_at=now,
+        updated_at=now,
+    )
+    repositories.model_providers.upsert(provider)
+    repositories.model_providers.set_model_default(
+        scope=MODEL_DEFAULT_CHAT,
+        provider_id=provider.id,
+        model="qwen-coder",
+    )
 
 
 def _write_skill(workspace: Path, name: str = "dev-plan") -> None:
@@ -81,7 +105,7 @@ def test_tool_context_uses_validated_keydex_snapshot(tmp_path: Path) -> None:
     snapshot = service.keydex_runtime_cache.get_snapshot(workspace_root)
 
     tool_context, enable_tools = service._build_tool_context(
-        request=ChatRequest(session_id=session.id, message="use skill", model="qwen-coder"),
+        request=ChatRequest(session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"),
         session=session,
         trace_id="trace-1",
         turn_index=1,
@@ -97,7 +121,7 @@ def test_agent_runtime_context_sets_snapshot_catalog_and_force_preset(tmp_path: 
     service, session, workspace_root = _workspace_session(tmp_path)
     snapshot = service.keydex_runtime_cache.get_snapshot(workspace_root)
     tool_context, _enable_tools = service._build_tool_context(
-        request=ChatRequest(session_id=session.id, message="use skill", model="qwen-coder"),
+        request=ChatRequest(session_id=session.id, message="use skill", provider_id="provider-1", model="qwen-coder"),
         session=session,
         trace_id="trace-1",
         turn_index=1,
@@ -133,6 +157,7 @@ async def test_chat_service_rejects_empty_message_with_only_skill_activation(
         await service.handle_chat(
             ChatRequest(
                 message="",
+                provider_id="provider-1",
                 model="qwen-coder",
                 runtime_params={"skill_activation": {"skill_name": "dev-plan"}},
             )

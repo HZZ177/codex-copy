@@ -7,9 +7,11 @@ from backend.app.agent import AgentRunner
 from backend.app.agent.factory import AgentFactory
 from backend.app.agent.middleware import (
     DuplicateToolCallGuardMiddleware,
+    ToolCallLimitMiddleware,
     ToolErrorHandlingMiddleware,
     build_default_middleware,
 )
+from backend.app.agent.runtime_settings import AgentRuntimeSettings
 from backend.app.agent.skill_activation_middleware import SkillActivationInjectionMiddleware
 from backend.app.agent.state import KeydexAgentState
 from backend.app.agent.tool_call_preset_middleware import ToolCallPresetMiddleware
@@ -147,6 +149,56 @@ def test_default_middleware_order_matches_skill_design() -> None:
     assert [type(item) for item in middleware] == [
         ToolCallPresetMiddleware,
         SkillActivationInjectionMiddleware,
+        ToolCallLimitMiddleware,
         ToolErrorHandlingMiddleware,
         DuplicateToolCallGuardMiddleware,
     ]
+
+
+def test_default_middleware_omits_tool_limit_when_disabled() -> None:
+    middleware = build_default_middleware(
+        AgentRuntimeSettings(
+            tool_call_limit={"enabled": False, "max_tool_calls": 80, "exit_behavior": "error"}
+        )
+    )
+
+    assert [type(item) for item in middleware] == [
+        ToolCallPresetMiddleware,
+        SkillActivationInjectionMiddleware,
+        ToolErrorHandlingMiddleware,
+        DuplicateToolCallGuardMiddleware,
+    ]
+
+
+def test_default_middleware_uses_configured_tool_limit() -> None:
+    middleware = build_default_middleware(
+        AgentRuntimeSettings(
+            tool_call_limit={"enabled": True, "max_tool_calls": 5, "exit_behavior": "error"}
+        )
+    )
+    tool_limit = next(item for item in middleware if isinstance(item, ToolCallLimitMiddleware))
+
+    assert tool_limit.max_tool_calls == 5
+
+
+def test_default_middleware_omits_duplicate_guard_when_disabled() -> None:
+    middleware = build_default_middleware(
+        AgentRuntimeSettings(
+            duplicate_tool_call_guard={"enabled": False, "max_repeats": 3}
+        )
+    )
+
+    assert not any(isinstance(item, DuplicateToolCallGuardMiddleware) for item in middleware)
+
+
+def test_default_middleware_uses_configured_duplicate_guard_limit() -> None:
+    middleware = build_default_middleware(
+        AgentRuntimeSettings(
+            duplicate_tool_call_guard={"enabled": True, "max_repeats": 6}
+        )
+    )
+    duplicate_guard = next(
+        item for item in middleware if isinstance(item, DuplicateToolCallGuardMiddleware)
+    )
+
+    assert duplicate_guard.max_repeats == 6

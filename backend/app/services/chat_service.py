@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -11,6 +11,11 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from backend.app.agent import AgentRunner
 from backend.app.agent.event_processor import AgentEventResult, process_agent_events
+from backend.app.agent.middleware import (
+    DuplicateToolForceStopError,
+    ToolCallLimitExceededError,
+)
+from backend.app.agent.runtime_settings import load_agent_runtime_settings
 from backend.app.agent.tool_call_preset import ToolCallPreset, ToolCallPresetItem
 from backend.app.command_approval import ApprovalService
 from backend.app.core.config import AppSettings
@@ -28,7 +33,9 @@ from backend.app.events import (
 from backend.app.keydex import KeydexWorkspaceRuntimeCache
 from backend.app.keydex.runtime import KeydexWorkspaceRuntimeSnapshot
 from backend.app.keydex.skills import SkillCatalog
+from backend.app.model import ModelSelectionError, ResolvedModelSelection, resolve_model_selection
 from backend.app.services.chat_types import ChatCancellationToken, ChatRequest, ChatTurnResult
+from backend.app.services.context_compression_service import ContextCompressionService
 from backend.app.services.message_event_service import MessageEventService
 from backend.app.services.workspace_service import WorkspaceService
 from backend.app.storage import SessionRecord, StorageRepositories
@@ -211,8 +218,28 @@ def _build_skill_activation_preset(
 
 
 def _chat_turn_error(exc: Exception) -> tuple[str | int, str, dict[str, Any]]:
+    if isinstance(exc, ModelSelectionError):
+        return exc.code, str(exc), exc.details
     if isinstance(exc, SkillActivationError):
         return exc.code, exc.message, exc.details
+    if isinstance(exc, ToolCallLimitExceededError):
+        return (
+            "tool_call_limit_exceeded",
+            str(exc),
+            {
+                "max_tool_calls": exc.max_tool_calls,
+                "attempted_count": exc.attempted_count,
+            },
+        )
+    if isinstance(exc, DuplicateToolForceStopError):
+        return (
+            "duplicate_tool_call_stopped",
+            str(exc),
+            {
+                "tool_name": exc.tool_name,
+                "repeat_count": exc.repeat_count,
+            },
+        )
     return 500, str(exc), {}
 
 
@@ -358,12 +385,12 @@ class ChatService:
         )
 
         try:
-            if not request.model.strip():
-                logger.warning(
-                    f"[ChatTurn] 模型为空，终止本轮 | session_id={session.id} | "
-                    f"turn_index={turn_index} | trace_id={trace_id}"
-                )
-                raise ValueError("模型不能为空")
+            request, model_selection = self._resolve_turn_model(request)
+            self.repositories.sessions.update(
+                session.id,
+                current_model_provider_id=model_selection.provider_id,
+                current_model=model_selection.settings.model,
+            )
 
             skill_activation_snapshot = self._validate_skill_activation(skill_activation, session)
             await self._emit_turn_started(
@@ -403,6 +430,7 @@ class ChatService:
 
             outcome = await self._run_agent_loop(
                 request=request,
+                model_selection=model_selection,
                 session=session,
                 trace_id=trace_id,
                 turn_index=turn_index,
@@ -499,6 +527,14 @@ class ChatService:
                 f"output_tokens={usage.get('output_tokens', 0) or 0} | "
                 f"final_content_len={len(completed_payload.get('final_content', ''))}"
             )
+            await self._maybe_compress_context(
+                session=session,
+                trace_id=trace_id,
+                turn_index=turn_index,
+                user_id=request.user_id or session.user_id,
+                latest_usage=outcome.event_result.latest_llm_token_usage,
+                dispatcher=dispatcher,
+            )
             return ChatTurnResult(
                 session_id=session.id,
                 trace_id=trace_id,
@@ -586,10 +622,74 @@ class ChatService:
         finally:
             reset_request_context(context_token)
 
+    def _resolve_turn_model(self, request: ChatRequest) -> tuple[ChatRequest, ResolvedModelSelection]:
+        requested_provider_id = request.provider_id.strip()
+        requested_model = request.model.strip()
+        resolved = resolve_model_selection(
+            self.repositories,
+            provider_id=requested_provider_id,
+            model=requested_model,
+            scope="chat",
+            label="对话模型",
+            code_prefix="chat_model",
+        )
+        resolved_model = resolved.settings.model.strip()
+        logger.debug(
+            "[ChatTurn] 解析对话模型 | "
+            f"requested_provider_id={requested_provider_id or '-'} | "
+            f"requested_model={requested_model or '-'} | "
+            f"resolved_model={resolved_model} | provider_id={resolved.provider_id}"
+        )
+        return replace(request, provider_id=resolved.provider_id, model=resolved_model), resolved
+
+    async def _maybe_compress_context(
+        self,
+        *,
+        session: SessionRecord,
+        trace_id: str,
+        turn_index: int,
+        user_id: str,
+        latest_usage: dict[str, Any],
+        dispatcher: EventDispatcher,
+    ) -> None:
+        try:
+            runtime_settings = load_agent_runtime_settings(
+                self.repositories,
+                default_max_tool_calls=self.settings.max_tool_calls,
+            )
+            compression_settings = runtime_settings.context_compression
+            if not compression_settings.enabled:
+                return
+            service = ContextCompressionService(
+                self.repositories,
+                checkpointer=self.agent_runner.checkpointer,
+                http_transport=self.agent_runner.model_http_transport(),
+            )
+            outcome = await service.maybe_compress_after_turn(
+                session_id=session.id,
+                trace_id=trace_id,
+                turn_index=turn_index,
+                user_id=user_id,
+                settings=compression_settings,
+                latest_usage=latest_usage,
+                dispatcher=dispatcher,
+            )
+            logger.debug(
+                "[ChatTurn] 上下文压缩检查完成 | "
+                f"session_id={session.id} | status={outcome.status} | "
+                f"reason={outcome.reason or '-'} | target_session_id={outcome.target_session_id or '-'}"
+            )
+        except Exception as exc:
+            logger.opt(exception=True).warning(
+                "[ChatTurn] 上下文压缩检查异常，主对话结果保持 completed | "
+                f"session_id={session.id} | trace_id={trace_id} | error={exc}"
+            )
+
     async def _run_agent_loop(
         self,
         *,
         request: ChatRequest,
+        model_selection: ResolvedModelSelection,
         session: SessionRecord,
         trace_id: str,
         turn_index: int,
@@ -623,6 +723,7 @@ class ChatService:
         try:
             agent = self.agent_runner.create_agent(
                 model=request.model.strip(),
+                model_settings=model_selection.settings,
                 system_prompt=request.system_prompt,
                 tool_context=tool_context,
                 enable_tools=enable_tools,

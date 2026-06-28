@@ -32,10 +32,10 @@ $Root = Split-Path -Parent $PSScriptRoot
 $BackendPython = Join-Path $Root ".venv\Scripts\python.exe"
 $DesktopDir = Join-Path $Root "desktop"
 $TauriDir = Join-Path $DesktopDir "src-tauri"
-$Sidecar = Join-Path $Root "desktop\src-tauri\binaries\agent-server-x86_64-pc-windows-msvc.exe"
+$SidecarDir = Join-Path $Root "desktop\src-tauri\binaries\agent-server"
+$Sidecar = Join-Path $SidecarDir "agent-server.exe"
 $Installer = Join-Path $Root "desktop\src-tauri\target\release\bundle\nsis\Keydex_0.1.0_x64-setup.exe"
 $ReleaseApp = Join-Path $Root "desktop\src-tauri\target\release\keydex-desktop.exe"
-$ReleaseSidecar = Join-Path $Root "desktop\src-tauri\target\release\agent-server.exe"
 $ArtifactDir = Join-Path $Root "artifacts\windows"
 
 function Invoke-Step {
@@ -153,6 +153,23 @@ function Copy-Artifact {
     throw $lastError
 }
 
+function Copy-DirectoryArtifact {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+    $artifactRoot = [System.IO.Path]::GetFullPath($ArtifactDir)
+    $destinationFull = [System.IO.Path]::GetFullPath($Destination)
+    $artifactRootWithSeparator = $artifactRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $destinationFull.StartsWith($artifactRootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "拒绝递归覆盖 artifacts 目录之外的路径：$Destination"
+    }
+    if (Test-Path $Destination) {
+        Remove-Item -LiteralPath $Destination -Recurse -Force
+    }
+    Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+}
+
 $PackageMode = Resolve-PackageMode
 Apply-PackageMode -Mode $PackageMode
 
@@ -210,6 +227,7 @@ if (-not $SkipTests) {
 Invoke-Step "构建 Python sidecar" {
     Push-Location $Root
     try {
+        Stop-ArtifactProcesses -Directory (Join-Path $Root "desktop\src-tauri\binaries")
         $sidecarArgs = @("backend\packaging\build_agent_server.py")
         if (-not $RebuildSidecar -and -not $CleanSidecar) {
             $sidecarArgs += "--reuse-if-current"
@@ -222,6 +240,7 @@ Invoke-Step "构建 Python sidecar" {
         Pop-Location
     }
 }
+Assert-Path $SidecarDir "未生成 sidecar 目录：$SidecarDir。"
 Assert-Path $Sidecar "未生成 sidecar 二进制文件：$Sidecar。"
 
 if (-not $SkipRustChecks) {
@@ -250,7 +269,6 @@ Invoke-Step "构建 Tauri NSIS 安装包" {
 }
 Assert-Path $Installer "未生成安装包：$Installer。"
 Assert-Path $ReleaseApp "未生成发布版桌面程序：$ReleaseApp。"
-Assert-Path $ReleaseSidecar "未生成发布版 sidecar：$ReleaseSidecar。"
 
 Invoke-Step "复制发布产物到快速目录" {
     New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
@@ -258,19 +276,26 @@ Invoke-Step "复制发布产物到快速目录" {
 
     $artifactInstaller = Join-Path $ArtifactDir "Keydex_0.1.0_x64-setup.exe"
     $artifactApp = Join-Path $ArtifactDir "keydex-desktop.exe"
-    $artifactSidecar = Join-Path $ArtifactDir "agent-server.exe"
-    $artifactBuildSidecar = Join-Path $ArtifactDir "agent-server-x86_64-pc-windows-msvc.exe"
+    $artifactSidecarDir = Join-Path $ArtifactDir "binaries\agent-server"
+    $artifactSidecar = Join-Path $artifactSidecarDir "agent-server.exe"
+    $legacyArtifactSidecars = @(
+        (Join-Path $ArtifactDir "agent-server.exe"),
+        (Join-Path $ArtifactDir "agent-server-x86_64-pc-windows-msvc.exe")
+    )
 
     Copy-Artifact -Source $Installer -Destination $artifactInstaller
     Copy-Artifact -Source $ReleaseApp -Destination $artifactApp
-    Copy-Artifact -Source $ReleaseSidecar -Destination $artifactSidecar
-    Copy-Artifact -Source $Sidecar -Destination $artifactBuildSidecar
+    foreach ($legacySidecar in $legacyArtifactSidecars) {
+        if (Test-Path $legacySidecar) {
+            Remove-Item -LiteralPath $legacySidecar -Force
+        }
+    }
+    Copy-DirectoryArtifact -Source $SidecarDir -Destination $artifactSidecarDir
 
     $files = @(
         Get-Item -LiteralPath $artifactInstaller
         Get-Item -LiteralPath $artifactApp
         Get-Item -LiteralPath $artifactSidecar
-        Get-Item -LiteralPath $artifactBuildSidecar
     )
     $manifest = [ordered]@{
         generated_at = (Get-Date).ToString("o")
@@ -296,10 +321,9 @@ Invoke-Step "复制发布产物到快速目录" {
         "",
         "调试/直接运行二进制：",
         "  keydex-desktop.exe",
-        "  agent-server.exe",
         "",
-        "Tauri sidecar 输入二进制：",
-        "  agent-server-x86_64-pc-windows-msvc.exe",
+        "Tauri sidecar 目录：",
+        "  binaries\agent-server\agent-server.exe",
         "",
         "生成时间：",
         "  $($manifest.generated_at)"
@@ -310,6 +334,7 @@ Invoke-Step "复制发布产物到快速目录" {
 
 $InstallerInfo = Get-Item -LiteralPath $Installer
 $SidecarInfo = Get-Item -LiteralPath $Sidecar
+$SidecarDirBytes = (Get-ChildItem -LiteralPath $SidecarDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $ArtifactInstallerInfo = Get-Item -LiteralPath (Join-Path $ArtifactDir "Keydex_0.1.0_x64-setup.exe")
 
 Write-Host ""
@@ -318,5 +343,6 @@ Write-Host "安装包：$($InstallerInfo.FullName)"
 Write-Host "安装包大小：$($InstallerInfo.Length) 字节"
 Write-Host "快速产物目录：$ArtifactDir"
 Write-Host "快速安装包：$($ArtifactInstallerInfo.FullName)"
-Write-Host "Sidecar：$($SidecarInfo.FullName)"
-Write-Host "Sidecar 大小：$($SidecarInfo.Length) 字节"
+Write-Host "Sidecar 目录：$SidecarDir"
+Write-Host "Sidecar 入口：$($SidecarInfo.FullName)"
+Write-Host "Sidecar 目录大小：$SidecarDirBytes 字节"

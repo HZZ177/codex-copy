@@ -27,6 +27,35 @@ describe("MessageList", () => {
     expect(screen.getAllByRole("button", { name: "复制消息" }).length).toBe(2);
   });
 
+  it("shows branch actions only for persisted completed messages", () => {
+    const fork = vi.fn();
+    const reverse = vi.fn();
+    const branchable = {
+      ...message("m1", "assistant", "可以从这里继续"),
+      payload: { messageEventId: "evt-ai-1" },
+    };
+    const running = {
+      ...message("m2", "assistant", "还在输出"),
+      status: "running" as const,
+      payload: { messageEventId: "evt-ai-2" },
+    };
+    const { rerender } = render(
+      <MessageList messages={[branchable]} onForkFromMessage={fork} onReverseFromMessage={reverse} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "从这里继续" }));
+    fireEvent.click(screen.getByRole("button", { name: "回退到这里继续" }));
+    expect(fork).toHaveBeenCalledWith(branchable);
+    expect(reverse).toHaveBeenCalledWith(branchable);
+
+    rerender(<MessageList messages={[message("m3", "assistant", "没有事件")]} onForkFromMessage={fork} />);
+    expect(screen.queryByRole("button", { name: "从这里继续" })).toBeNull();
+
+    rerender(<MessageList messages={[running]} onForkFromMessage={fork} onReverseFromMessage={reverse} />);
+    expect(screen.queryByRole("button", { name: "从这里继续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "回退到这里继续" })).toBeNull();
+  });
+
   it("exposes the requested density variant on the list root and scroll surface", () => {
     render(<MessageList messages={[]} variant="compact" />);
 

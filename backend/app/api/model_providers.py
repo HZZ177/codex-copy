@@ -5,10 +5,10 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.api.dependencies import get_repositories
-from backend.app.api.settings import MODEL_SETTINGS_KEY, save_provider_model_settings
+from backend.app.api.settings import MODEL_SETTINGS_KEY
 from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.core.time import to_iso_z, utc_now
@@ -37,7 +37,6 @@ class PublicModelProvider(BaseModel):
     models: list[str]
     model_enabled: dict[str, bool]
     health: dict[str, Any]
-    default_model: str | None = None
     created_at: str
     updated_at: str
 
@@ -47,29 +46,25 @@ class ModelProvidersResponse(BaseModel):
 
 
 class UpsertProviderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1)
     base_url: str = Field(min_length=1)
     api_key: str | None = Field(default=None, repr=False)
     enabled: bool = True
     models: list[str] = Field(default_factory=list)
     model_enabled: dict[str, bool] = Field(default_factory=dict)
-    default_model: str | None = None
 
 
 class PatchProviderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     base_url: str | None = None
     api_key: str | None = Field(default=None, repr=False)
     enabled: bool | None = None
     models: list[str] | None = None
     model_enabled: dict[str, bool] | None = None
-    default_model: str | None = None
-
-
-class SetDefaultRequest(BaseModel):
-    provider_id: str
-    model: str
-    scope: str = "global"
 
 
 class RefreshProviderResponse(BaseModel):
@@ -110,20 +105,13 @@ async def create_provider(
         updated_at=now,
     )
     repositories.model_providers.upsert(provider)
-    if request.default_model:
-        repositories.model_providers.set_default(
-            scope="global",
-            provider_id=provider.id,
-            model=request.default_model,
-        )
-        save_provider_model_settings(repositories, provider, request.default_model)
     logger.info(
         "[ModelProviderAPI] 创建供应商 | "
         f"provider_id={provider.id} | name={provider.name} | "
         f"base_url={provider.base_url} | enabled={provider.enabled} | "
-        f"models={len(provider.models)} | default_model={request.default_model or ''}"
+        f"models={len(provider.models)}"
     )
-    return _public_provider(provider, repositories.model_providers.get_default())
+    return _public_provider(provider)
 
 
 @router.patch("/{provider_id}", response_model=PublicModelProvider)
@@ -154,23 +142,13 @@ async def update_provider(
         updated_at=to_iso_z(utc_now()),
     )
     repositories.model_providers.upsert(updated)
-    current_default = repositories.model_providers.get_default()
-    if request.default_model:
-        repositories.model_providers.set_default(
-            scope="global",
-            provider_id=updated.id,
-            model=request.default_model,
-        )
-        save_provider_model_settings(repositories, updated, request.default_model)
-    elif current_default is not None and current_default.provider_id == updated.id:
-        save_provider_model_settings(repositories, updated, current_default.model)
     logger.info(
         "[ModelProviderAPI] 更新供应商 | "
         f"provider_id={updated.id} | name={updated.name} | "
         f"base_url={updated.base_url} | enabled={updated.enabled} | "
-        f"models={len(updated.models)} | default_model={request.default_model or ''}"
+        f"models={len(updated.models)}"
     )
-    return _public_provider(updated, repositories.model_providers.get_default())
+    return _public_provider(updated)
 
 
 @router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -182,32 +160,6 @@ async def delete_provider(
         raise _api_error(status.HTTP_404_NOT_FOUND, "provider_not_found", "供应商不存在")
     logger.info(f"[ModelProviderAPI] 删除供应商 | provider_id={provider_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.put("/default", response_model=ModelProvidersResponse)
-async def set_default_provider(
-    request: SetDefaultRequest,
-    repositories: StorageRepositories = RepositoriesDep,
-) -> ModelProvidersResponse:
-    provider = repositories.model_providers.get(request.provider_id)
-    if provider is None:
-        raise _api_error(status.HTTP_404_NOT_FOUND, "provider_not_found", "供应商不存在")
-    if request.model not in provider.models:
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "model_not_found", "默认模型必须来自模型列表")
-    if provider.model_enabled.get(request.model) is False:
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "model_disabled", "默认模型必须已启用")
-    repositories.model_providers.set_default(
-        scope=request.scope,
-        provider_id=request.provider_id,
-        model=request.model,
-    )
-    if request.scope == "global":
-        save_provider_model_settings(repositories, provider, request.model)
-    logger.info(
-        "[ModelProviderAPI] 设置默认模型 | "
-        f"provider_id={request.provider_id} | model={request.model} | scope={request.scope}"
-    )
-    return ModelProvidersResponse(providers=_list_public_providers(repositories))
 
 
 @router.post("/{provider_id}/refresh", response_model=RefreshProviderResponse)
@@ -247,26 +199,13 @@ async def refresh_provider_models(
         }
     )
     repositories.model_providers.upsert(updated)
-    selected_default_model = _select_default_model_after_refresh(
-        provider_id=provider.id,
-        model_ids=model_ids,
-        current_default=repositories.model_providers.get_default(),
-    )
-    if selected_default_model:
-        repositories.model_providers.set_default(
-            scope="global",
-            provider_id=provider.id,
-            model=selected_default_model,
-        )
-        save_provider_model_settings(repositories, updated, selected_default_model)
     duration_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info(
         "[ModelProviderAPI] 刷新供应商模型成功 | "
-        f"provider_id={provider.id} | models={len(model_ids)} | "
-        f"default_model={selected_default_model or ''} | duration_ms={duration_ms}"
+        f"provider_id={provider.id} | models={len(model_ids)} | duration_ms={duration_ms}"
     )
     return RefreshProviderResponse(
-        provider=_public_provider(updated, repositories.model_providers.get_default()),
+        provider=_public_provider(updated),
         models=model_ids,
     )
 
@@ -318,7 +257,7 @@ async def check_model_health(
         f"status={health.get('status')} | latency_ms={health.get('latency_ms')}"
     )
     return HealthResponse(
-        provider=_public_provider(updated, repositories.model_providers.get_default()),
+        provider=_public_provider(updated),
         health=health,
     )
 
@@ -330,8 +269,7 @@ def _list_public_providers(repositories: StorageRepositories) -> list[PublicMode
             repositories.settings.get(MODEL_SETTINGS_KEY, default={})
         )
         providers = [legacy] if legacy is not None else []
-    default = repositories.model_providers.get_default()
-    return [_public_provider(provider, default) for provider in providers]
+    return [_public_provider(provider) for provider in providers]
 
 
 def _require_provider(
@@ -356,13 +294,7 @@ async def _call_health(
     await provider_client.check_chat_completion(model=model)
 
 
-def _public_provider(
-    provider: ModelProviderRecord,
-    default: Any,
-) -> PublicModelProvider:
-    default_model = default.model if default and default.provider_id == provider.id else None
-    if default_model is None and provider.id == "legacy-openai-compatible" and provider.models:
-        default_model = provider.models[0]
+def _public_provider(provider: ModelProviderRecord) -> PublicModelProvider:
     return PublicModelProvider(
         id=provider.id,
         name=provider.name,
@@ -373,7 +305,6 @@ def _public_provider(
         models=provider.models,
         model_enabled=provider.model_enabled,
         health=provider.health,
-        default_model=default_model,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     )
@@ -398,21 +329,6 @@ def _clean_models(models: list[str]) -> list[str]:
             seen.add(item)
             cleaned.append(item)
     return cleaned
-
-
-def _select_default_model_after_refresh(
-    *,
-    provider_id: str,
-    model_ids: list[str],
-    current_default: Any,
-) -> str | None:
-    if not model_ids:
-        return None
-    if current_default is None or current_default.provider_id != provider_id:
-        return model_ids[0]
-    if current_default.model not in model_ids:
-        return model_ids[0]
-    return current_default.model
 
 
 def _api_error(status_code: int, code: str, message: str) -> HTTPException:

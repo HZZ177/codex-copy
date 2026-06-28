@@ -70,6 +70,8 @@ def test_message_event_service_aggregates_user_stream_tool_and_completed(tmp_pat
     assert isinstance(messages[0]["timestamp"], int)
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "我来读取"
+    assert messages[1]["messageEventId"] == "evt_3"
+    assert messages[1]["turnIndex"] == 1
     assert isinstance(messages[1]["timestamp"], int)
     assert messages[1]["ghostStats"] == {
         "traceId": "trace_1",

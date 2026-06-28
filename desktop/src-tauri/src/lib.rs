@@ -95,6 +95,11 @@ fn health_probe(host: &str, port: u16) -> Result<(), String> {
 fn resolve_sidecar_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let resource_dir = app.path().resource_dir().map_err(|err| err.to_string())?;
     let candidates = [
+        resource_dir
+            .join("binaries")
+            .join("agent-server")
+            .join("agent-server.exe"),
+        resource_dir.join("agent-server").join("agent-server.exe"),
         resource_dir.join("agent-server.exe"),
         resource_dir
             .join("binaries")
@@ -147,7 +152,11 @@ fn start_sidecar(
         .to_string_lossy()
         .to_string();
     let binary = resolve_sidecar_binary(&app)?;
-    let mut command = Command::new(binary);
+    let binary_dir = binary.parent().map(PathBuf::from);
+    let mut command = Command::new(&binary);
+    if let Some(parent) = binary_dir {
+        command.current_dir(parent);
+    }
     command
         .arg("--host")
         .arg("127.0.0.1")

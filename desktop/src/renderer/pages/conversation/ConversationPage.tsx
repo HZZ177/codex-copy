@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WsConnectionStatus } from "@/runtime";
 import type { SelectedFile, SelectedQuote } from "@/renderer/components/chat/SendBox";
-import { useRuntimeModelSelection } from "@/renderer/components/model";
+import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
-import type { AgentActionEnvelope } from "@/types/protocol";
+import type { AgentActionEnvelope, AgentSession } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
 import { ConversationComposer } from "./ConversationComposer";
@@ -17,19 +17,21 @@ import { consumeQuickChatSend } from "./quickSend";
 export interface ConversationPageProps {
   threadId: string;
   runtime?: RuntimeBridge;
-  initialModel?: string;
+  initialModel?: RuntimeSelectedModel | null;
   quickSendId?: string;
   onOpenModelSettings?: () => void;
   onQuickSendConsumed?: () => void;
+  onNavigateToConversation?: (threadId: string) => void;
 }
 
 export function ConversationPage({
   threadId,
   runtime = runtimeBridge,
-  initialModel = "",
+  initialModel = null,
   quickSendId = "",
   onOpenModelSettings,
   onQuickSendConsumed,
+  onNavigateToConversation,
 }: ConversationPageProps) {
   const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
   const quickSendConsumedRef = useRef<string | null>(null);
@@ -78,12 +80,42 @@ export function ConversationPage({
     sessionId: threadId,
     controller,
     registerPreviewHost: true,
+    onBranchSessionCreated: onNavigateToConversation,
   });
   const runtimeState = panelModel.runtimeState;
   const title = session?.title || (threadId ? `对话 ${threadId}` : "对话");
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend;
   const canStop = controller.canStop;
+
+  useEffect(() => {
+    const providerId = session?.current_model_provider_id?.trim() ?? "";
+    const model = session?.current_model?.trim() ?? "";
+    if (providerId && model) {
+      modelSelection.setSelectedModel({ providerId, model });
+    }
+  }, [session?.current_model_provider_id, session?.current_model]);
+
+  const changeModel = useCallback(
+    (selection: RuntimeSelectedModel | null) => {
+      modelSelection.setSelectedModel(selection);
+      if (!selection || !session?.id) {
+        return;
+      }
+      void runtime.conversation
+        .updateSession(session.id, {
+          current_model_provider_id: selection.providerId,
+          current_model: selection.model,
+        })
+        .then((updated) => {
+          controller.dispatch({ type: "session/upsert", session: updated });
+        })
+        .catch((reason: unknown) => {
+          notifications.error(errorMessage(reason));
+        });
+    },
+    [controller, modelSelection, notifications, runtime, session?.id],
+  );
 
   useEffect(() => {
     scrollToBottomAfterSendRef.current = panelModel.scrollToBottomAfterSend;
@@ -115,7 +147,7 @@ export function ConversationPage({
 
   const send = useCallback(
     (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) =>
-      controller.send(files, quotes, modelSelection.selectedModel.trim()),
+      controller.send(files, quotes, modelSelection.selectedModel),
     [controller, modelSelection.selectedModel],
   );
 
@@ -162,7 +194,7 @@ export function ConversationPage({
   return (
     <ChatLayout
       title={title}
-      subtitle={connectionSubtitle(wsStatus)}
+      subtitle={conversationSubtitle(wsStatus, session)}
       composerAccessory={
         <ConversationPanelComposerAccessory model={panelModel} />
       }
@@ -182,7 +214,7 @@ export function ConversationPage({
             canSend={canSend}
             canStop={canStop}
             connectionReady={connectionReady}
-            modelSelection={modelSelection}
+            modelSelection={{ ...modelSelection, setSelectedModel: changeModel }}
             workspaceSkills={panelModel.workspaceSkills}
             selectedSkill={selectedSkill}
             onListWorkspaceDirectory={panelModel.listWorkspaceDirectory}
@@ -210,6 +242,17 @@ export function ConversationPage({
   );
 }
 
+function conversationSubtitle(status: WsConnectionStatus, session: AgentSession | null): string {
+  const base = connectionSubtitle(status);
+  if (session?.parent_session_id) {
+    return `分支会话 · ${base}`;
+  }
+  if (session?.active_session_id && session.active_session_id !== session.id) {
+    return `已切换到分支 · ${base}`;
+  }
+  return base;
+}
+
 function connectionSubtitle(status: WsConnectionStatus): string {
   switch (status) {
     case "open":
@@ -224,5 +267,15 @@ function connectionSubtitle(status: WsConnectionStatus): string {
     case "idle":
       return "等待连接智能体运行时";
   }
+}
+
+function errorMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message) {
+    return reason.message;
+  }
+  if (reason && typeof reason === "object" && typeof (reason as { message?: unknown }).message === "string") {
+    return (reason as { message: string }).message;
+  }
+  return "操作失败";
 }
 

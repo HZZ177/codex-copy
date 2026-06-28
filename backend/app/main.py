@@ -17,7 +17,7 @@ from backend.app.api.health import router as health_router
 from backend.app.api.model_providers import router as model_providers_router
 from backend.app.api.models import router as models_router
 from backend.app.api.sessions import router as sessions_router
-from backend.app.api.settings import load_effective_model_settings
+from backend.app.api.settings import load_effective_model_settings, load_model_settings
 from backend.app.api.settings import router as settings_router
 from backend.app.api.usage import router as usage_router
 from backend.app.api.websocket import router as websocket_router
@@ -98,11 +98,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     def build_chat_service():
         from backend.app.agent import AgentRunner
         from backend.app.agent.checkpoint import SQLiteCheckpointSaver
+        from backend.app.agent.runtime_settings import load_agent_runtime_settings
         from backend.app.services.chat_service import ChatService
 
         checkpointer = SQLiteCheckpointSaver(app.state.database)
         agent_runner = AgentRunner(
-            model_settings_provider=lambda: load_effective_model_settings(app.state.repositories),
+            model_settings_provider=lambda: load_model_settings(app.state.repositories),
+            runtime_settings_provider=lambda: load_agent_runtime_settings(
+                app.state.repositories,
+                default_max_tool_calls=resolved_settings.max_tool_calls,
+            ),
             model_http_transport_provider=lambda: getattr(app.state, "model_http_transport", None),
             checkpointer=checkpointer,
             tool_registry=app.state.tool_registry,

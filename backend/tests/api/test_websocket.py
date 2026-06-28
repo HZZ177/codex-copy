@@ -13,9 +13,11 @@ from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
 from backend.app.core.config import AppSettings
+from backend.app.core.time import to_iso_z, utc_now
 from backend.app.main import create_app
 from backend.app.model import ModelSettings
 from backend.app.services import ChatService, ChatStreamManager
+from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories
 from backend.app.tools import FunctionTool, ToolRegistry
 
 
@@ -49,6 +51,7 @@ def _client(
 ) -> TestClient:
     app = create_app(AppSettings(data_dir=tmp_path / "data", workspace_root=tmp_path))
     if model is not None:
+        _configure_model_default(app.state.repositories)
         runner = AgentRunner(
             model_settings_provider=lambda: ModelSettings(
                 base_url="http://model.test/v1",
@@ -70,6 +73,28 @@ def _client(
         app.state.chat_stream_manager = ChatStreamManager(chat_service)
         app.state.runtime.chat_stream_manager = app.state.chat_stream_manager
     return TestClient(app)
+
+
+def _configure_model_default(repositories: StorageRepositories) -> None:
+    now = to_iso_z(utc_now())
+    provider = ModelProviderRecord(
+        id="provider-1",
+        name="测试模型服务",
+        base_url="http://model.test/v1",
+        api_key="test-key",
+        enabled=True,
+        models=["qwen-coder", "fake-default"],
+        model_enabled={},
+        health={},
+        created_at=now,
+        updated_at=now,
+    )
+    repositories.model_providers.upsert(provider)
+    repositories.model_providers.set_model_default(
+        scope=MODEL_DEFAULT_CHAT,
+        provider_id=provider.id,
+        model="fake-default",
+    )
 
 
 def test_websocket_create_bind_and_ping(tmp_path) -> None:
@@ -144,6 +169,7 @@ def test_websocket_chat_streams_projection_actions(tmp_path) -> None:
                 "action": "chat",
                 "session_id": session_id,
                 "message": "你好",
+                "provider_id": "provider-1",
                 "model": "qwen-coder",
             }
         )
@@ -217,6 +243,7 @@ def test_websocket_chat_streams_tool_actions_and_history(tmp_path) -> None:
                 "action": "chat",
                 "session_id": session_id,
                 "message": "读文件",
+                "provider_id": "provider-1",
                 "model": "qwen-coder",
             }
         )
@@ -240,19 +267,20 @@ def test_websocket_chat_streams_tool_actions_and_history(tmp_path) -> None:
     assert messages[2]["content"] == "已读取"
 
 
-def test_websocket_chat_requires_runtime_model(tmp_path) -> None:
+def test_websocket_chat_requires_explicit_model_selection(tmp_path) -> None:
     client = _client(tmp_path)
 
     with client.websocket_connect("/agent-base/ws/chat") as ws:
         ws.send_json({"action": "create_session"})
         session_id = ws.receive_json()["data"]["session_id"]
 
-        ws.send_json({"action": "chat", "session_id": session_id, "message": "缺少模型"})
+        ws.send_json({"action": "chat", "session_id": session_id, "message": "缺少模型选择"})
         error = ws.receive_json()
 
     assert error["action"] == "error"
     assert error["data"]["session_id"] == session_id
-    assert error["data"]["message"] == "模型不能为空"
+    assert error["data"]["message"] == "对话模型必须显式指定供应商和模型"
+    assert error["data"]["code"] == "chat_model_required"
 
 
 def test_websocket_returns_structured_error_for_unknown_action(tmp_path) -> None:

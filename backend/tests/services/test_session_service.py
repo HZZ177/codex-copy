@@ -452,6 +452,8 @@ def test_session_service_renames_and_deletes_session(tmp_path) -> None:
     renamed = service.rename_session("ses_mutation", "  新标题  ")
 
     assert renamed["title"] == "新标题"
+    assert renamed["title_source"] == "manual"
+    assert repositories.sessions.get("ses_mutation").title_source == "manual"
     with pytest.raises(SessionValidationError, match="会话标题不能为空"):
         service.rename_session("ses_mutation", "  ")
 

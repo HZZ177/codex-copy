@@ -8,6 +8,7 @@ class ChatAction(StrEnum):
     BIND_OK = "bind_ok"
     UNBIND_OK = "unbind_ok"
     STREAM = "stream"
+    SYSTEM_MESSAGE = "system_message"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     TOOL_START = "tool_start"
@@ -22,6 +23,7 @@ class ChatAction(StrEnum):
     PONG = "pong"
     STATUS = "status"
     SESSION_CLOSED = "session_closed"
+    SESSION_TITLE_UPDATED = "session_title_updated"
     TASK_RESULT = "task_result"
     REASONING = "reasoning"
 

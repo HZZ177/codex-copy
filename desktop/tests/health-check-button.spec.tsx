@@ -93,7 +93,6 @@ function provider(overrides: Partial<ModelProvider> = {}): ModelProvider {
     models: ["qwen3-coder"],
     model_enabled: {},
     health: {},
-    default_model: "qwen3-coder",
     ...overrides,
   };
 }

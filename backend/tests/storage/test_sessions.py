@@ -33,6 +33,7 @@ def test_session_repository_create_get_and_list(tmp_path) -> None:
     assert first.status == "active"
     assert first.active_session_id == "ses_first"
     assert first.session_type == "chat"
+    assert first.title_source == "auto_candidate"
     assert first.workspace_id is None
     assert first.cwd is None
     assert first.workspace_roots == []
@@ -121,6 +122,47 @@ def test_session_repository_update_status_title_and_touch(tmp_path) -> None:
     touched = repositories.sessions.touch(session.id)
     assert touched is not None
     assert touched.updated_at >= closed.updated_at
+
+
+def test_session_repository_auto_title_write_respects_title_source(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    auto_session = repositories.sessions.create(
+        session_id="ses_auto_title",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="默认标题",
+    )
+    manual_session = repositories.sessions.create(
+        session_id="ses_manual_title",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="默认标题",
+    )
+    repositories.sessions.update(manual_session.id, title="手动标题", title_source="manual")
+
+    updated = repositories.sessions.update_title_if_auto_allowed(
+        auto_session.id,
+        title="自动标题",
+        only_when_default_title=True,
+    )
+    blocked = repositories.sessions.update_title_if_auto_allowed(
+        manual_session.id,
+        title="不应覆盖",
+        only_when_default_title=False,
+    )
+    blocked_second_update = repositories.sessions.update_title_if_auto_allowed(
+        auto_session.id,
+        title="二次自动标题",
+        only_when_default_title=True,
+    )
+
+    assert updated is not None
+    assert updated.title == "自动标题"
+    assert updated.title_source == "auto"
+    assert blocked is None
+    assert repositories.sessions.get(manual_session.id).title == "手动标题"
+    assert blocked_second_update is None
+    assert repositories.sessions.get(auto_session.id).title == "自动标题"
 
 
 def test_session_repository_filters_soft_deleted_records_and_clamps_limit(tmp_path) -> None:

@@ -83,6 +83,8 @@ class SessionService:
         workspace_id: str | None = None,
         cwd: str | None = None,
         workspace_roots: list[str] | None = None,
+        current_model_provider_id: str | None = None,
+        current_model: str | None = None,
     ) -> dict[str, Any]:
         workspace_context = self._resolve_workspace_create_context(
             session_type=session_type,
@@ -102,6 +104,8 @@ class SessionService:
             session_type=session_type,
             cwd=workspace_context["cwd"],
             workspace_roots=workspace_context["workspace_roots"],
+            current_model_provider_id=current_model_provider_id,
+            current_model=current_model,
         )
         logger.info(
             f"[SessionService] 创建会话 | session_id={record.id} | "
@@ -208,11 +212,37 @@ class SessionService:
         cleaned = title.strip()
         if not cleaned:
             raise SessionValidationError("会话标题不能为空")
-        record = self._sessions.update(session_id, title=cleaned)
+        record = self._sessions.update(session_id, title=cleaned, title_source="manual")
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
         logger.info(f"[SessionService] 重命名会话 | session_id={session_id} | title={cleaned}")
         return self._serialize_session(record)
+
+    def update_session_model(
+        self,
+        session_id: str,
+        *,
+        provider_id: str,
+        model: str,
+        current_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_session(session_id)
+        cleaned_provider_id = provider_id.strip()
+        cleaned_model = model.strip()
+        if not cleaned_provider_id or not cleaned_model:
+            raise SessionValidationError("当前模型必须包含供应商和模型")
+        record = self._sessions.update(
+            session_id,
+            current_model_provider_id=cleaned_provider_id,
+            current_model=cleaned_model,
+        )
+        if record is None:
+            raise SessionNotFoundError(f"会话不存在: {session_id}")
+        logger.info(
+            f"[SessionService] 更新会话模型 | session_id={session_id} | "
+            f"provider_id={cleaned_provider_id} | model={cleaned_model}"
+        )
+        return self._serialize_session(record, current_session_id=current_session_id)
 
     def delete_session(self, session_id: str) -> dict[str, Any]:
         self._require_session(session_id)
@@ -451,15 +481,21 @@ class SessionService:
             "scene_id": record.scene_id,
             "status": record.status,
             "title": record.title,
+            "title_source": record.title_source,
             "session_tag": record.session_tag,
             "active_session_id": record.active_session_id,
             "parent_session_id": record.parent_session_id,
             "child_session_id": record.child_session_id,
             "source_trace_id": record.source_trace_id,
+            "source_active_session_id": record.source_active_session_id,
+            "source_checkpoint_id": record.source_checkpoint_id,
+            "source_checkpoint_ns": record.source_checkpoint_ns,
             "workspace_id": record.workspace_id,
             "session_type": record.session_type,
             "cwd": record.cwd,
             "workspace_roots": record.workspace_roots,
+            "current_model_provider_id": record.current_model_provider_id,
+            "current_model": record.current_model,
             "workspace": workspace,
             "created_at": record.created_at,
             "updated_at": record.updated_at,

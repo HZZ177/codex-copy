@@ -2,6 +2,7 @@ import { Activity, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ModelHealth, ModelProvider, RuntimeBridge } from "@/runtime";
+import { useNotifications } from "@/renderer/providers/NotificationProvider";
 
 import styles from "./HealthCheckButton.module.css";
 
@@ -20,21 +21,20 @@ export function HealthCheckButton({
   runtime,
   onProviderChange,
 }: HealthCheckButtonProps) {
+  const notifications = useNotifications();
   const [checking, setChecking] = useState(false);
   const [localHealth, setLocalHealth] = useState<ModelHealth | undefined>(health);
-  const [error, setError] = useState<string | null>(null);
   const displayed = localHealth ?? health;
   const label = useMemo(() => healthLabel(displayed), [displayed]);
 
   async function checkHealth() {
     setChecking(true);
-    setError(null);
     try {
       const response = await runtime.models.checkModelHealth(providerId, model);
       setLocalHealth(response.health);
       onProviderChange(response.provider);
     } catch (reason) {
-      setError(errorMessage(reason));
+      notifications.error(errorMessage(reason));
     } finally {
       setChecking(false);
     }
@@ -57,7 +57,6 @@ export function HealthCheckButton({
       {displayed?.status === "unhealthy" && displayed.error ? (
         <span className={styles.healthError}>{displayed.error}</span>
       ) : null}
-      {error ? <span className={styles.healthError} role="alert">{error}</span> : null}
     </div>
   );
 }

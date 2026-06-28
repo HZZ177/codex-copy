@@ -73,3 +73,42 @@ async def test_e2e_transport_command_approval_ignores_old_tool_messages() -> Non
     assert response.status_code == 200
     assert "run_command" in body
     assert "e2e-approval-exact-different" in body
+
+
+@pytest.mark.asyncio
+async def test_e2e_transport_returns_deterministic_side_task_outputs() -> None:
+    async with httpx.AsyncClient(
+        base_url="http://e2e-model.test",
+        transport=create_e2e_model_transport(delay_ms=0),
+    ) as client:
+        title_response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": E2E_MODEL_ID,
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "用户首轮问题：整理计划\n助手最终回复：已完成计划",
+                    }
+                ],
+            },
+        )
+        compression_response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": E2E_MODEL_ID,
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "请为下面的历史消息生成上下文压缩摘要，供后续 agent 继续任务使用。",
+                    }
+                ],
+            },
+        )
+
+    assert title_response.status_code == 200
+    assert title_response.json()["choices"][0]["message"]["content"] == "E2E 自动标题"
+    assert compression_response.status_code == 200
+    assert "E2E 压缩摘要" in compression_response.json()["choices"][0]["message"]["content"]

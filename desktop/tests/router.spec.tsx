@@ -107,10 +107,36 @@ describe("AppRouter", () => {
     expect(await screen.findByTestId("settings-shell", undefined, { timeout: 10000 })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "用量统计" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "外观" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "供应商" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "供应商配置" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "模型配置" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "扩展功能" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "用量统计" })).not.toBeNull();
     fireEvent.click(screen.getByText("返回应用"));
     expect(await screen.findByTestId("home-page", undefined, { timeout: 10000 })).not.toBeNull();
+  });
+
+  it("opens the model configuration settings route", async () => {
+    renderRouter(["/settings/model-defaults"]);
+
+    expect(await screen.findByRole("heading", { name: "模型配置" }, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByTestId("model-default-settings-page")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "默认对话模型" }, { timeout: 10000 })).not.toBeNull();
+  });
+
+  it("opens the provider settings route", async () => {
+    renderRouter(["/settings/providers"]);
+
+    expect(await screen.findByRole("heading", { name: "供应商配置" }, { timeout: 10000 })).not.toBeNull();
+  });
+
+  it("opens the extension settings route", async () => {
+    renderRouter(["/settings/extensions"]);
+
+    expect(await screen.findByRole("heading", { name: "扩展功能" }, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByTestId("extension-settings-page")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "标题生成" }, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "单轮工具调用上限" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "上下文压缩" })).not.toBeNull();
   });
 
   it("opens the general settings route", async () => {
@@ -196,11 +222,14 @@ describe("AppRouter", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "workspace A",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
     expect(runtime.__spies.chat).toHaveBeenCalledWith({
       session_id: "new-workbench-session",
       message: "生成验收说明",
+      provider_id: "provider-1",
       model: "qwen-coder",
     });
     await waitFor(() => {
@@ -581,6 +610,34 @@ function fakeRuntime(options: FakeRuntimeOptions = {}): TestRuntimeBridge {
             api_key_preview: "sk-***",
           },
         }),
+      getModelDefaults: () =>
+        Promise.resolve({
+          defaults: {
+            default_chat: {
+              scope: "default_chat",
+              configured: true,
+              provider_id: "provider-1",
+              provider_name: "默认模型服务",
+              model: "qwen-coder",
+              provider_enabled: true,
+              model_enabled: true,
+              missing_reason: null,
+            },
+            fast: {
+              scope: "fast",
+              configured: false,
+              provider_id: null,
+              provider_name: null,
+              model: null,
+              provider_enabled: null,
+              model_enabled: null,
+              missing_reason: "not_configured",
+            },
+          },
+        }),
+      saveModelDefaults: vi.fn(),
+      getExtensionSettings: () => Promise.resolve(defaultExtensionSettings()),
+      saveExtensionSettings: vi.fn((payload) => Promise.resolve(payload)),
       resolveApproval: vi.fn((approvalId: string) =>
         Promise.resolve({
           ...commandApproval("session 1", approvalId),
@@ -590,8 +647,20 @@ function fakeRuntime(options: FakeRuntimeOptions = {}): TestRuntimeBridge {
       ),
     },
     models: {
-      listModels: () => Promise.resolve({ models: [{ id: "qwen-coder" }], cached: true }),
-      listProviders: () => Promise.resolve([]),
+      listProviders: () =>
+        Promise.resolve([
+          {
+            id: "provider-1",
+            name: "默认模型服务",
+            base_url: "https://api.example/v1",
+            enabled: true,
+            api_key_set: true,
+            api_key_preview: "sk-***",
+            models: ["qwen-coder"],
+            model_enabled: {},
+            health: {},
+          },
+        ]),
     },
     workspaces: {
       list: () => Promise.resolve({ list: [workspace("workspace A", "keydex")], total: 1 }),
@@ -653,6 +722,32 @@ function fakeRuntime(options: FakeRuntimeOptions = {}): TestRuntimeBridge {
       getRequestDetail: () => Promise.reject(new Error("not implemented")),
     },
   } as unknown as TestRuntimeBridge;
+}
+
+function defaultExtensionSettings() {
+  return {
+    auto_title: {
+      enabled: false,
+      only_when_default_title: true,
+      max_title_length: 40,
+    },
+    tool_call_limit: {
+      enabled: true,
+      max_tool_calls: 80,
+      exit_behavior: "error" as const,
+    },
+    duplicate_tool_call_guard: {
+      enabled: true,
+      max_repeats: 3,
+    },
+    context_compression: {
+      enabled: false,
+      context_window_tokens: 128000,
+      trigger_fraction: 0.75,
+      emergency_fraction: 0.9,
+      retain_rounds: 2,
+    },
+  };
 }
 
 function WorkbenchFileOpenProbe() {
@@ -721,6 +816,8 @@ function agentSession(patch: Partial<AgentSession> = {}): AgentSession {
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
     ...patch,
   };
 }

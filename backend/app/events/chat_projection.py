@@ -16,6 +16,7 @@ class ChatProjectionAdapter(Protocol):
 class ChatProjection:
     EVENT_TYPE_TO_ACTION = {
         DomainEventType.LLM_STREAM: ChatAction.STREAM,
+        DomainEventType.MESSAGE_SYSTEM_CREATED: ChatAction.SYSTEM_MESSAGE,
         DomainEventType.LLM_TOOL_STARTED: ChatAction.TOOL_START,
         DomainEventType.LLM_TOOL_PROGRESS: ChatAction.TOOL_PROGRESS,
         DomainEventType.LLM_TOOL_FINISHED: ChatAction.TOOL_END,
@@ -31,6 +32,7 @@ class ChatProjection:
         DomainEventType.TASK_FINISHED_CHAT: ChatAction.TASK_RESULT,
         DomainEventType.REASONING_STREAM: ChatAction.REASONING,
         DomainEventType.REASONING_FINISHED: ChatAction.REASONING,
+        DomainEventType.SESSION_TITLE_UPDATED: ChatAction.SESSION_TITLE_UPDATED,
     }
     _REASONING_EVENT_TYPES = {
         DomainEventType.REASONING_STREAM,

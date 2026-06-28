@@ -6,19 +6,21 @@ def test_build_with_pyinstaller_embeds_system_prompt_in_code(monkeypatch, tmp_pa
 
     def fake_run(command: list[str], check: bool) -> None:
         calls.append((command, check))
+        create_fake_sidecar(tmp_path)
 
     monkeypatch.setattr(build_agent_server.subprocess, "run", fake_run)
-    monkeypatch.setattr(build_agent_server, "copy_with_retry", lambda source, target: None)
 
     binary = build_agent_server.build_with_pyinstaller(tmp_path)
 
-    assert binary.name.startswith("agent-server")
+    assert binary == build_agent_server.expected_binary(tmp_path)
     assert calls
     command, check = calls[0]
     assert check is True
     assert "--clean" not in command
     assert "--add-data" not in command
     assert "--add-binary" in command
+    assert "--onedir" in command
+    assert "--onefile" not in command
     add_binary_index = command.index("--add-binary")
     assert command[add_binary_index + 1].startswith(
         str(build_agent_server.BUNDLED_RIPGREP_BINARY)
@@ -33,9 +35,9 @@ def test_build_with_pyinstaller_can_clean(monkeypatch, tmp_path) -> None:
 
     def fake_run(command: list[str], check: bool) -> None:
         calls.append((command, check))
+        create_fake_sidecar(tmp_path)
 
     monkeypatch.setattr(build_agent_server.subprocess, "run", fake_run)
-    monkeypatch.setattr(build_agent_server, "copy_with_retry", lambda source, target: None)
 
     build_agent_server.build_with_pyinstaller(tmp_path, clean=True)
 
@@ -46,6 +48,7 @@ def test_build_with_pyinstaller_can_clean(monkeypatch, tmp_path) -> None:
 def test_build_with_pyinstaller_reuses_current_sidecar(monkeypatch, tmp_path) -> None:
     calls: list[list[str]] = []
     binary = build_agent_server.expected_binary(tmp_path)
+    binary.parent.mkdir(parents=True, exist_ok=True)
     binary.write_bytes(b"existing sidecar")
     fingerprint, inputs = build_agent_server.sidecar_fingerprint()
     build_agent_server.write_manifest(tmp_path, binary, fingerprint, inputs)
@@ -59,6 +62,12 @@ def test_build_with_pyinstaller_reuses_current_sidecar(monkeypatch, tmp_path) ->
 
     assert result == binary
     assert calls == []
+
+
+def create_fake_sidecar(output_dir) -> None:
+    binary = build_agent_server.expected_binary(output_dir)
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"fake sidecar")
 
 
 def assert_collect_submodules(command: list[str], package_name: str) -> None:

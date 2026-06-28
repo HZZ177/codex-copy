@@ -13,7 +13,7 @@ import {
   type SelectedFile,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
-import { RuntimeModelSelector, useRuntimeModelSelection } from "@/renderer/components/model";
+import { RuntimeModelSelector, useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace/WorkspaceSelector";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
@@ -35,7 +35,7 @@ export interface HomePageProps {
   autoFocusInputKey?: string;
   onNavigateToConversation: (
     sessionId: string,
-    initialModel: string,
+    initialModel: RuntimeSelectedModel,
     initialMessage: string,
     options?: { runtimeParams?: RuntimeParamsWithInjection; contextItems?: AgentContextItem[] },
   ) => void;
@@ -67,7 +67,7 @@ export function HomePage({
   const runtimeConnection = useOptionalRuntimeConnection();
   const backendReady = runtimeConnection?.ready ?? true;
   const backendError = runtimeConnection?.status === "error";
-  const modelSelection = useRuntimeModelSelection(runtime, "", { enabled: backendReady });
+  const modelSelection = useRuntimeModelSelection(runtime, null, { enabled: backendReady });
   const notifications = useNotifications();
   const previewContext = useOptionalPreview();
   const setPreviewHostContext = previewContext?.setPreviewHostContext;
@@ -307,9 +307,9 @@ export function HomePage({
         notifications.warning("本地服务尚未就绪");
         return false;
       }
-      const model = modelSelection.selectedModel.trim();
+      const model = modelSelection.selectedModel;
       if (!model) {
-        notifications.error("请先在设置中选择模型");
+        notifications.error("请先选择模型");
         onOpenModelSettings();
         return false;
       }
@@ -332,11 +332,15 @@ export function HomePage({
               session_tag: "chat",
               sessionType: "workspace" as const,
               workspaceId: sessionWorkspace.id,
+              currentModelProviderId: model.providerId,
+              currentModel: model.model,
             }
           : {
               title: sessionTitleFromPreparedMessage(text, prepared.contextItems),
               session_tag: "chat",
               sessionType: "chat" as const,
+              currentModelProviderId: model.providerId,
+              currentModel: model.model,
             };
 
       const session = await runtime.conversation.createSession(sessionPayload);

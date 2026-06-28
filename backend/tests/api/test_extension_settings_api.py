@@ -1,0 +1,141 @@
+from fastapi.testclient import TestClient
+
+from backend.app.agent.runtime_settings import AGENT_RUNTIME_SETTINGS_KEY
+from backend.app.core.config import AppSettings
+from backend.app.main import create_app
+
+
+def test_extension_settings_api_returns_defaults_from_app_hard_default(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data", max_tool_calls=17))
+    with TestClient(app) as client:
+        response = client.get("/api/settings/extensions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["auto_title"]["enabled"] is False
+    assert body["context_compression"]["enabled"] is False
+    assert body["context_compression"]["context_window_tokens"] == 128000
+    assert body["tool_call_limit"]["enabled"] is True
+    assert body["tool_call_limit"]["max_tool_calls"] == 17
+    assert body["duplicate_tool_call_guard"]["enabled"] is True
+    assert body["duplicate_tool_call_guard"]["max_repeats"] == 3
+
+
+def test_extension_settings_api_saves_and_reads_full_config(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    payload = {
+        "auto_title": {
+            "enabled": True,
+            "only_when_default_title": False,
+            "max_title_length": 64,
+        },
+        "tool_call_limit": {
+            "enabled": True,
+            "max_tool_calls": 9,
+            "exit_behavior": "error",
+        },
+        "duplicate_tool_call_guard": {
+            "enabled": True,
+            "max_repeats": 4,
+        },
+        "context_compression": {
+            "enabled": True,
+            "context_window_tokens": 32000,
+            "trigger_fraction": 0.55,
+            "emergency_fraction": 0.88,
+            "retain_rounds": 4,
+        },
+    }
+    with TestClient(app) as client:
+        put_response = client.put("/api/settings/extensions", json=payload)
+        get_response = client.get("/api/settings/extensions")
+
+    assert put_response.status_code == 200
+    assert put_response.json() == payload
+    assert get_response.status_code == 200
+    assert get_response.json() == payload
+
+
+def test_extension_settings_api_rejects_invalid_tool_limit(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    payload = _valid_payload()
+    payload["tool_call_limit"]["max_tool_calls"] = 0
+
+    with TestClient(app) as client:
+        response = client.put("/api/settings/extensions", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_extension_settings_api_rejects_invalid_compression_thresholds(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    payload = _valid_payload()
+    payload["context_compression"]["trigger_fraction"] = 0.9
+    payload["context_compression"]["emergency_fraction"] = 0.9
+
+    with TestClient(app) as client:
+        response = client.put("/api/settings/extensions", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_extension_settings_api_rejects_unknown_fields(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    payload = _valid_payload()
+    payload["tool_call_limit"]["mode"] = "warn"
+
+    with TestClient(app) as client:
+        response = client.put("/api/settings/extensions", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_extension_settings_api_fails_loudly_for_corrupt_persisted_config(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    app.state.repositories.settings.set(
+        AGENT_RUNTIME_SETTINGS_KEY,
+        {
+            "auto_title": {"enabled": False, "only_when_default_title": True, "max_title_length": 40},
+            "tool_call_limit": {"enabled": True, "max_tool_calls": 8, "exit_behavior": "error"},
+            "duplicate_tool_call_guard": {"enabled": True, "max_repeats": 3},
+            "context_compression": {
+                "enabled": True,
+                "context_window_tokens": 128000,
+                "trigger_fraction": 0.95,
+                "emergency_fraction": 0.9,
+                "retain_rounds": 2,
+            },
+        },
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/settings/extensions")
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "agent_runtime_settings_invalid"
+
+
+def _valid_payload() -> dict:
+    return {
+        "auto_title": {
+            "enabled": False,
+            "only_when_default_title": True,
+            "max_title_length": 40,
+        },
+        "tool_call_limit": {
+            "enabled": True,
+            "max_tool_calls": 80,
+            "exit_behavior": "error",
+        },
+        "duplicate_tool_call_guard": {
+            "enabled": True,
+            "max_repeats": 3,
+        },
+        "context_compression": {
+            "enabled": False,
+            "context_window_tokens": 128000,
+            "trigger_fraction": 0.75,
+            "emergency_fraction": 0.9,
+            "retain_rounds": 2,
+        },
+    }

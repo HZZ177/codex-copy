@@ -7,11 +7,12 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 WINDOWS_TAURI_TRIPLE = "x86_64-pc-windows-msvc"
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
+SIDECAR_DIR_NAME = "agent-server"
+SIDECAR_EXE_NAME = "agent-server.exe" if sys.platform == "win32" else "agent-server"
 ROOT = Path(__file__).resolve().parents[2]
 ENTRY_POINT = ROOT / "backend" / "packaging" / "agent_server_entry.py"
 BUNDLED_RIPGREP_BINARY = (
@@ -31,23 +32,8 @@ PYINSTALLER_COLLECT_SUBMODULES = (
 )
 
 
-def copy_with_retry(source: Path, target: Path, attempts: int = 10) -> None:
-    last_error: OSError | None = None
-    for _ in range(attempts):
-        try:
-            shutil.copy2(source, target)
-            return
-        except OSError as err:
-            last_error = err
-            time.sleep(0.5)
-    if last_error is not None:
-        raise last_error
-
-
 def expected_binary(output_dir: Path) -> Path:
-    if sys.platform == "win32":
-        return output_dir / f"agent-server-{WINDOWS_TAURI_TRIPLE}.exe"
-    return output_dir / "agent-server"
+    return output_dir / SIDECAR_DIR_NAME / SIDECAR_EXE_NAME
 
 
 def manifest_path(output_dir: Path) -> Path:
@@ -103,15 +89,17 @@ def is_current_build(output_dir: Path, fingerprint: str) -> bool:
     return (
         payload.get("manifest_version") == MANIFEST_VERSION
         and payload.get("fingerprint") == fingerprint
-        and payload.get("binary") == binary.name
+        and payload.get("bundle_mode") == "onedir"
+        and payload.get("binary") == binary.relative_to(output_dir).as_posix()
     )
 
 
 def write_manifest(output_dir: Path, binary: Path, fingerprint: str, inputs: list[str]) -> None:
     payload = {
         "manifest_version": MANIFEST_VERSION,
+        "bundle_mode": "onedir",
         "fingerprint": fingerprint,
-        "binary": binary.name,
+        "binary": binary.relative_to(output_dir).as_posix(),
         "inputs": inputs,
     }
     manifest_path(output_dir).write_text(
@@ -136,6 +124,15 @@ def build_with_pyinstaller(
     if reuse_if_current and not clean and is_current_build(output_dir, fingerprint):
         print(f"复用已有 sidecar：{reusable_binary}")
         return reusable_binary
+    sidecar_dir = output_dir / SIDECAR_DIR_NAME
+    if sidecar_dir.exists():
+        shutil.rmtree(sidecar_dir)
+    for legacy_binary in (
+        output_dir / "agent-server.exe",
+        output_dir / f"agent-server-{WINDOWS_TAURI_TRIPLE}.exe",
+    ):
+        if legacy_binary.exists():
+            legacy_binary.unlink()
     command = [
         sys.executable,
         "-m",
@@ -153,10 +150,10 @@ def build_with_pyinstaller(
     )
     command.extend(
         [
-            "--onefile",
+            "--onedir",
             "--noconsole",
             "--name",
-            "agent-server",
+            SIDECAR_DIR_NAME,
             "--distpath",
             str(output_dir),
             str(ENTRY_POINT),
@@ -166,12 +163,9 @@ def build_with_pyinstaller(
         command,
         check=True,
     )
-    built = output_dir / ("agent-server.exe" if sys.platform == "win32" else "agent-server")
-    if sys.platform == "win32":
-        tauri_name = output_dir / f"agent-server-{WINDOWS_TAURI_TRIPLE}.exe"
-        copy_with_retry(built, tauri_name)
-        write_manifest(output_dir, tauri_name, fingerprint, inputs)
-        return tauri_name
+    built = expected_binary(output_dir)
+    if not built.is_file():
+        raise FileNotFoundError(f"PyInstaller 未生成 sidecar：{built}")
     write_manifest(output_dir, built, fingerprint, inputs)
     return built
 

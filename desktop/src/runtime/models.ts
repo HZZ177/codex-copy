@@ -17,7 +17,6 @@ export interface ModelProvider {
   models: string[];
   model_enabled: Record<string, boolean>;
   health: Record<string, ModelHealth>;
-  default_model: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -36,7 +35,6 @@ export interface ModelProviderInput {
   enabled?: boolean;
   models?: string[];
   model_enabled?: Record<string, boolean>;
-  default_model?: string | null;
 }
 
 export interface ModelHealthResponse {
@@ -62,7 +60,6 @@ export interface ModelsRuntime {
   deleteProvider(providerId: string): Promise<void>;
   refreshProviderModels(providerId: string): Promise<ModelProvider>;
   checkModelHealth(providerId: string, modelId: string): Promise<ModelHealthResponse>;
-  setDefaultModel(providerId: string, modelId: string): Promise<ModelProvider>;
 }
 
 export function createModelsRuntime(http: HttpClient): ModelsRuntime {
@@ -110,17 +107,6 @@ export function createModelsRuntime(http: HttpClient): ModelsRuntime {
         `/api/model-providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}/health`,
         { method: "POST" },
       );
-    },
-    async setDefaultModel(providerId, modelId) {
-      const response = await http.request<ModelProvidersResponse>("/api/model-providers/default", {
-        method: "PUT",
-        body: { provider_id: providerId, model: modelId },
-      });
-      const provider = response.providers.find((item) => item.id === providerId);
-      if (!provider) {
-        throw new Error("默认模型已保存，但响应中未返回 Provider");
-      }
-      return provider;
     },
   };
 }

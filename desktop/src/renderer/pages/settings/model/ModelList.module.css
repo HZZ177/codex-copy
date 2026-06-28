@@ -14,12 +14,11 @@
   display: inline-flex;
   min-width: 0;
   flex: 1 1 auto;
-  height: 30px;
+  height: 32px;
   align-items: center;
-  gap: 7px;
   border: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
-  border-radius: var(--radius-pill);
-  background: transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 58%, transparent);
   color: var(--color-text-tertiary);
   padding: 0 10px;
 }
@@ -39,10 +38,9 @@
   color: var(--color-text-tertiary);
 }
 
-.toolbar button,
-.defaultButton {
+.toolbar button {
   display: inline-flex;
-  height: 30px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -53,65 +51,45 @@
 
 .toolbar button {
   flex: 0 0 auto;
-  gap: 6px;
-  padding: 0 10px;
-  background: transparent;
+  padding: 0 12px;
+  background: var(--surface-muted);
   color: var(--color-text-secondary);
 }
 
-.toolbar button:hover:not(:disabled),
-.defaultButton:hover:not(:disabled) {
+.toolbar button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface-hover) 82%, var(--color-bg-elevated));
   color: var(--color-text-primary);
 }
 
 .toolbar button:disabled,
-.defaultButton:disabled,
 .switchButton:disabled {
   cursor: default;
   opacity: 0.52;
 }
 
-.spinning {
-  animation: spin 0.9s linear infinite;
-}
-
-.error {
-  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-danger) 7%, var(--surface-bg));
-  color: var(--color-danger);
-  font-size: 11px;
-  line-height: 1.45;
-  padding: 8px 9px;
-}
-
 .rows {
   display: grid;
-  gap: 2px;
-}
-
-.rowsHeader {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) minmax(92px, auto) auto;
-  gap: 8px;
-  color: var(--color-text-tertiary);
-  font-size: 10px;
-  line-height: var(--ui-line-height-tight);
-  padding: 0 8px 4px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 76%, transparent);
+  border-radius: 8px;
 }
 
 .row {
   display: grid;
-  min-height: 34px;
-  grid-template-columns: 38px minmax(0, 1fr) minmax(92px, auto) auto;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(92px, auto);
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
-  padding: 4px 8px;
+  padding: 6px 10px;
   transition: background var(--motion-fast) var(--motion-ease-out);
+}
+
+.row + .row {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 76%, transparent);
 }
 
 .row:hover {
@@ -169,36 +147,11 @@
   text-decoration: line-through;
 }
 
-.defaultBadge {
-  display: inline-flex;
-  height: 26px;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-accent);
-  font-size: 11px;
-  padding: 0 9px;
-}
-
-.defaultButton {
-  background: transparent;
-  color: var(--color-text-tertiary);
-  padding: 0 9px;
-}
-
 .empty {
   margin: 0;
   color: var(--color-text-tertiary);
   font-size: 12px;
   line-height: 1.5;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 @media (max-width: 680px) {
@@ -208,17 +161,11 @@
   }
 
   .row {
-    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .rowsHeader {
-    display: none;
-  }
-
-  .healthCell,
-  .defaultBadge,
-  .defaultButton {
-    grid-column: 2;
+  .healthCell {
+    grid-column: 1 / -1;
     justify-self: start;
   }
 }

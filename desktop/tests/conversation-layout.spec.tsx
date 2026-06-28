@@ -83,6 +83,8 @@ function fakeRuntime(): RuntimeBridge {
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
   };
   const history: AgentHistoryResponse = {
     list: [],
@@ -117,9 +119,10 @@ function fakeRuntime(): RuntimeBridge {
           api_key_preview: "sk-***",
         },
       }),
+      getModelDefaults: vi.fn().mockResolvedValue(modelDefaultsResponse()),
     },
     models: {
-      listModels: vi.fn().mockResolvedValue({ models: [{ id: "qwen-coder" }], cached: true }),
+      listProviders: vi.fn().mockResolvedValue([modelProvider()]),
     },
     conversation: {
       loadHistory: vi.fn().mockResolvedValue(history),
@@ -129,4 +132,45 @@ function fakeRuntime(): RuntimeBridge {
       }),
     },
   } as unknown as RuntimeBridge;
+}
+
+function modelDefaultsResponse() {
+  return {
+    defaults: {
+      default_chat: {
+        scope: "default_chat",
+        configured: true,
+        provider_id: "provider-1",
+        provider_name: "默认模型服务",
+        model: "qwen-coder",
+        provider_enabled: true,
+        model_enabled: true,
+        missing_reason: null,
+      },
+      fast: {
+        scope: "fast",
+        configured: false,
+        provider_id: null,
+        provider_name: null,
+        model: null,
+        provider_enabled: null,
+        model_enabled: null,
+        missing_reason: "not_configured",
+      },
+    },
+  };
+}
+
+function modelProvider() {
+  return {
+    id: "provider-1",
+    name: "默认模型服务",
+    base_url: "https://api.example/v1",
+    enabled: true,
+    api_key_set: true,
+    api_key_preview: "sk-***",
+    models: ["qwen-coder"],
+    model_enabled: {},
+    health: {},
+  };
 }

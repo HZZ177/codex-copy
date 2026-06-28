@@ -187,6 +187,27 @@ async def test_realtime_persistence_and_history_keep_completed_sequence(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_system_messages_project_to_realtime_and_history(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    chat_adapter = RecordingChatAdapter()
+    event = _event(
+        DomainEventType.MESSAGE_SYSTEM_CREATED,
+        {"content": "上下文已压缩，后续对话将从压缩分支继续。", "compression": {"kind": "context_compressed"}},
+    )
+
+    await _project_events([event], repositories=repositories, chat_adapter=chat_adapter)
+
+    persisted_events = repositories.message_events.list_by_session(SESSION_ID)
+    messages = MessageEventService(repositories.message_events).get_display_messages(SESSION_ID)
+
+    assert [item["action"] for item in chat_adapter.sent] == ["system_message"]
+    assert chat_adapter.sent[0]["data"]["content"] == "上下文已压缩，后续对话将从压缩分支继续。"
+    assert [event.action for event in persisted_events] == ["system_message"]
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "上下文已压缩，后续对话将从压缩分支继续。"
+
+
+@pytest.mark.asyncio
 async def test_realtime_persistence_and_history_keep_cancelled_sequence(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     chat_adapter = RecordingChatAdapter()

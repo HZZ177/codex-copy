@@ -12,11 +12,13 @@ from langchain_core.messages import AIMessage
 from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
+from backend.app.agent.middleware import ToolCallLimitExceededError
 from backend.app.core.config import AppSettings
 from backend.app.model import ModelSettings
 from backend.app.services import ChatRequest, ChatService
-from backend.app.storage import StorageRepositories, init_database
+from backend.app.storage import MODEL_DEFAULT_CHAT, ModelProviderRecord, StorageRepositories, init_database
 from backend.app.tools import FunctionTool, ToolRegistry
+from backend.app.core.time import to_iso_z, utc_now
 
 
 class RecordingChatAdapter:
@@ -80,13 +82,46 @@ class FakeAgentFactory(AgentFactory):
         )
 
 
+class ToolLimitFailingAgent:
+    async def astream_events(self, *_args, **_kwargs):
+        if False:
+            yield {}
+        raise ToolCallLimitExceededError(max_tool_calls=1, attempted_count=2)
+
+
+class ToolLimitFailingRunner:
+    def create_agent(self, **_kwargs) -> ToolLimitFailingAgent:
+        return ToolLimitFailingAgent()
+
+
 def _service(
     tmp_path: Path,
     model: ToolFriendlyFakeModel,
     registry: ToolRegistry | None = None,
+    configure_provider: bool = True,
 ) -> tuple[ChatService, StorageRepositories, SQLiteCheckpointSaver, FakeAgentFactory]:
     database = init_database(tmp_path / "app.db")
     repositories = StorageRepositories(database)
+    if configure_provider:
+        now = to_iso_z(utc_now())
+        provider = ModelProviderRecord(
+            id="provider-1",
+            name="测试模型服务",
+            base_url="http://model.test/v1",
+            api_key="test-key",
+            enabled=True,
+            models=["qwen-coder", "qwen3-coder", "fake-default"],
+            model_enabled={},
+            health={},
+            created_at=now,
+            updated_at=now,
+        )
+        repositories.model_providers.upsert(provider)
+        repositories.model_providers.set_model_default(
+            scope=MODEL_DEFAULT_CHAT,
+            provider_id=provider.id,
+            model="fake-default",
+        )
     settings = AppSettings(data_dir=tmp_path / "data", workspace_root=tmp_path)
     checkpointer = SQLiteCheckpointSaver(database)
     factory = FakeAgentFactory(model)
@@ -140,7 +175,7 @@ async def test_chat_service_uses_langchain_agent_and_persists_history(tmp_path) 
     chat_adapter = RecordingChatAdapter()
 
     result = await service.handle_chat(
-        ChatRequest(message="你好", model="qwen-coder"),
+        ChatRequest(message="你好", provider_id="provider-1", model="qwen-coder"),
         chat_adapter=chat_adapter,
     )
 
@@ -160,6 +195,34 @@ async def test_chat_service_uses_langchain_agent_and_persists_history(tmp_path) 
     assert llm_logs[0].session_id == result.session_id
     assert llm_logs[0].model == "qwen-coder"
     assert llm_logs[0].status == "completed"
+    session = repositories.sessions.get(result.session_id)
+    assert session.current_model_provider_id == "provider-1"
+    assert session.current_model == "qwen-coder"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_projects_tool_call_limit_as_turn_failure(tmp_path) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="不会输出")])
+    service, repositories, _checkpointer, _factory = _service(tmp_path, model)
+    service.agent_runner = ToolLimitFailingRunner()
+    chat_adapter = RecordingChatAdapter()
+
+    result = await service.handle_chat(
+        ChatRequest(message="请连续调用工具", provider_id="provider-1", model="qwen-coder"),
+        chat_adapter=chat_adapter,
+    )
+
+    assert result.status == "failed"
+    assert result.error == "本轮工具调用已达到上限 1 次，已阻止第 2 次工具调用"
+    assert repositories.sessions.get(result.session_id).status == "failed"
+    error_events = [item for item in chat_adapter.sent if item["action"] == "error"]
+    assert error_events
+    assert error_events[-1]["data"]["code"] == "tool_call_limit_exceeded"
+    assert error_events[-1]["data"]["message"] == result.error
+    assert error_events[-1]["data"]["details"] == {
+        "max_tool_calls": 1,
+        "attempted_count": 2,
+    }
 
 
 @pytest.mark.asyncio
@@ -172,9 +235,9 @@ async def test_chat_service_uses_checkpoint_as_model_context(tmp_path) -> None:
     )
     service, _repositories, checkpointer, _factory = _service(tmp_path, model)
 
-    first = await service.handle_chat(ChatRequest(message="第一轮", model="qwen-coder"))
+    first = await service.handle_chat(ChatRequest(message="第一轮", provider_id="provider-1", model="qwen-coder"))
     second = await service.handle_chat(
-        ChatRequest(session_id=first.session_id, message="第二轮", model="qwen-coder")
+        ChatRequest(session_id=first.session_id, message="第二轮", provider_id="provider-1", model="qwen-coder")
     )
 
     assert first.turn_index == 1
@@ -200,6 +263,7 @@ async def test_chat_service_injects_follow_messages_and_restores_context_items(t
     result = await service.handle_chat(
         ChatRequest(
             message="总结一下",
+            provider_id="provider-1",
             model="qwen-coder",
             runtime_params={
                 "message_injection": [
@@ -300,7 +364,7 @@ async def test_chat_service_routes_langchain_tool_events(tmp_path) -> None:
     chat_adapter = RecordingChatAdapter()
 
     result = await service.handle_chat(
-        ChatRequest(session_id=session.id, message="读文件", model="qwen-coder"),
+        ChatRequest(session_id=session.id, message="读文件", provider_id="provider-1", model="qwen-coder"),
         chat_adapter=chat_adapter,
     )
 
@@ -346,6 +410,7 @@ async def test_chat_service_runs_skill_activation_chain_with_message_injection(
         ChatRequest(
             session_id=session.id,
             message="拆成开发 issues",
+            provider_id="provider-1",
             model="qwen-coder",
             runtime_params={
                 "skill_activation": {
@@ -378,9 +443,10 @@ async def test_chat_service_runs_skill_activation_chain_with_message_injection(
     assert "Use the project planning workflow." not in factory.system_prompts[0]
 
     actions = [item["action"] for item in chat_adapter.sent]
-    assert actions == ["tool_start", "tool_end", "stream", "completed"]
-    assert chat_adapter.sent[0]["data"]["tool"] == "load_skill"
-    tool_result = json.loads(chat_adapter.sent[1]["data"]["result"])
+    assert actions == ["system_message", "tool_start", "tool_end", "stream", "completed"]
+    assert chat_adapter.sent[0]["data"]["content"] == "Build a structured development plan."
+    assert chat_adapter.sent[1]["data"]["tool"] == "load_skill"
+    tool_result = json.loads(chat_adapter.sent[2]["data"]["result"])
     assert tool_result["skill_name"] == "dev-plan"
     assert tool_result["found"] is True
     assert tool_result["loaded"] is True
@@ -428,7 +494,7 @@ async def test_chat_service_disables_project_tools_for_chat_session(tmp_path) ->
     chat_adapter = RecordingChatAdapter()
 
     result = await service.handle_chat(
-        ChatRequest(message="只聊天", model="qwen-coder"),
+        ChatRequest(message="只聊天", provider_id="provider-1", model="qwen-coder"),
         chat_adapter=chat_adapter,
     )
 
@@ -438,7 +504,7 @@ async def test_chat_service_disables_project_tools_for_chat_session(tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_chat_service_requires_runtime_model_parameter(tmp_path) -> None:
+async def test_chat_service_fails_loudly_when_request_omits_model_selection(tmp_path) -> None:
     model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
     service, repositories, _checkpointer, factory = _service(tmp_path, model)
     chat_adapter = RecordingChatAdapter()
@@ -449,10 +515,31 @@ async def test_chat_service_requires_runtime_model_parameter(tmp_path) -> None:
     )
 
     assert result.status == "failed"
-    assert result.error == "模型不能为空"
+    assert result.error == "对话模型必须显式指定供应商和模型"
     assert factory.requested_models == []
     assert chat_adapter.sent[-1]["action"] == "error"
-    assert chat_adapter.sent[-1]["data"]["message"] == "模型不能为空"
+    assert chat_adapter.sent[-1]["data"]["message"] == "对话模型必须显式指定供应商和模型"
+    assert chat_adapter.sent[-1]["data"]["code"] == "chat_model_required"
+    assert repositories.sessions.get(result.session_id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_fails_loudly_when_provider_is_missing(tmp_path) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
+    service, repositories, _checkpointer, factory = _service(tmp_path, model, configure_provider=False)
+    chat_adapter = RecordingChatAdapter()
+
+    result = await service.handle_chat(
+        ChatRequest(message="你好", provider_id="provider-1", model="qwen-coder"),
+        chat_adapter=chat_adapter,
+    )
+
+    assert result.status == "failed"
+    assert result.error == "对话模型供应商不存在"
+    assert factory.requested_models == []
+    assert chat_adapter.sent[-1]["action"] == "error"
+    assert chat_adapter.sent[-1]["data"]["message"] == "对话模型供应商不存在"
+    assert chat_adapter.sent[-1]["data"]["code"] == "chat_model_provider_not_found"
     assert repositories.sessions.get(result.session_id).status == "failed"
 
 
@@ -468,7 +555,7 @@ async def test_chat_service_converts_task_cancel_to_cancelled_turn(tmp_path, mon
     monkeypatch.setattr(service, "_run_agent_loop", raise_cancelled)
 
     result = await service.handle_chat(
-        ChatRequest(message="取消这轮", model="qwen-coder"),
+        ChatRequest(message="取消这轮", provider_id="provider-1", model="qwen-coder"),
         chat_adapter=chat_adapter,
     )
 

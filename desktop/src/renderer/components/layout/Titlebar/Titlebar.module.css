@@ -146,9 +146,14 @@
   border-radius: 0;
   background: transparent;
   color: var(--color-text-2);
+  line-height: 0;
   transition:
     background var(--motion-fast) ease,
     color var(--motion-fast) ease;
+}
+
+.windowControl svg {
+  display: block;
 }
 
 .windowControl:hover {

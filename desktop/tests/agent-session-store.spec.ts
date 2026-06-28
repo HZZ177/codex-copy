@@ -26,6 +26,7 @@ describe("agentSessionStore reducer", () => {
       "bind_ok",
       "unbind_ok",
       "stream",
+      "system_message",
       "completed",
       "cancelled",
       "tool_start",
@@ -38,6 +39,7 @@ describe("agentSessionStore reducer", () => {
       "pong",
       "status",
       "session_closed",
+      "session_title_updated",
       "task_result",
       "reasoning",
       "workspaceSkillsChanged",
@@ -68,6 +70,31 @@ describe("agentSessionStore reducer", () => {
 
     expect(selectAgentSessions(state).map((item) => item.id)).toEqual(["ses-live", "ses-new", "ses-old"]);
     expect(selectAgentSessionState(state)?.sessionId).toBe("ses-live");
+  });
+
+  it("updates session title from realtime title update events", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "sessions/set",
+      sessions: [session("ses-old", "2026-06-18T08:00:00Z"), session("ses-new", "2026-06-18T09:00:00Z")],
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "session_title_updated",
+      data: {
+        session: {
+          ...session("ses-old", "2026-06-18T10:00:00Z"),
+          title: "自动标题",
+          title_source: "auto",
+        },
+      },
+    });
+
+    expect(selectAgentSessions(state).map((item) => item.id)).toEqual(["ses-old", "ses-new"]);
+    expect(selectAgentSessions(state)[0]).toMatchObject({
+      id: "ses-old",
+      title: "自动标题",
+      title_source: "auto",
+    });
   });
 
   it("loads history into the same message view model as realtime messages", () => {
@@ -461,6 +488,40 @@ describe("agentSessionStore reducer", () => {
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("running");
   });
 
+  it("appends realtime system messages", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "system_message",
+      data: {
+        session_id: "ses-1",
+        content: "上下文已压缩，后续对话将从压缩分支继续。",
+        message_event_id: "evt-system-1",
+        turn_index: 2,
+        compression: { kind: "context_compressed" },
+        timestamp_ms: 1_782_600_000_000,
+      },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "system_message",
+      data: {
+        session_id: "ses-1",
+        content: "上下文已压缩，后续对话将从压缩分支继续。",
+        message_event_id: "evt-system-1",
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      {
+        role: "system",
+        content: "上下文已压缩，后续对话将从压缩分支继续。",
+        messageEventId: "evt-system-1",
+        turnIndex: 2,
+        metadata: { compression: { kind: "context_compressed" } },
+        streaming: false,
+      },
+    ]);
+  });
+
   it("keeps tool lifecycle idempotent by run id", () => {
     let state = createInitialAgentConversationState();
     state = reduceAgentWsEvent(state, toolStart("ses-1", "run-1", "read_file"));
@@ -845,6 +906,24 @@ describe("agentSessionStore reducer", () => {
       status: "failed",
     });
     expect(selectAgentRuntimeState(state, "ses-2")).toBe("failed");
+
+    state = reduceAgentWsEvent(state, {
+      action: "error",
+      data: {
+        session_id: "ses-2",
+        code: "tool_call_limit_exceeded",
+        message: "本轮工具调用已达到上限 1 次，已阻止第 2 次工具调用",
+        trace_id: "trace-3",
+        details: { max_tool_calls: 1, attempted_count: 2 },
+      },
+    });
+    expect(selectAgentMessages(state, "ses-2").at(-1)).toMatchObject({
+      role: "error",
+      content: "本轮工具调用已达到上限 1 次，已阻止第 2 次工具调用",
+      traceId: "trace-3",
+      status: "failed",
+    });
+    expect(selectAgentRuntimeState(state, "ses-2")).toBe("failed");
   });
 
   it("does not synthesize ghost stats when completed has no trace or token data", () => {
@@ -885,6 +964,8 @@ function session(id: string, updatedAt: string, status: AgentSession["status"] =
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
   };
 }
 

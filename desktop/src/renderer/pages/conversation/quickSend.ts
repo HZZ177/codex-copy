@@ -1,10 +1,11 @@
 import type { ChatPayload } from "@/runtime";
+import type { RuntimeSelectedModel } from "@/renderer/components/model";
 import type { AgentContextItem } from "@/types/protocol";
 
 export interface QueuedQuickChatSend {
   id: string;
   sessionId: string;
-  model: string;
+  model: RuntimeSelectedModel;
   message: string;
   runtimeParams?: ChatPayload["runtime_params"];
   contextItems?: AgentContextItem[];

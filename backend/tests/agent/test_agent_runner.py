@@ -9,6 +9,8 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
+from backend.app.agent.middleware import ToolCallLimitMiddleware
+from backend.app.agent.runtime_settings import AgentRuntimeSettings
 from backend.app.model import ModelSettings
 from backend.app.storage import init_database
 from backend.app.tools import FunctionTool, ToolExecutionContext, ToolRegistry
@@ -20,6 +22,7 @@ class RecordingAgentFactory(AgentFactory):
         self.model = model
         self.requested_models: list[str] = []
         self.created_tool_counts: list[int] = []
+        self.created_middleware: list[tuple[Any, ...]] = []
 
     def get_or_create_llm(
         self,
@@ -46,6 +49,7 @@ class RecordingAgentFactory(AgentFactory):
         name: str = "desktop_agent",
     ) -> Any:
         self.created_tool_counts.append(len(tools))
+        self.created_middleware.append(middleware)
         return super().create_agent(
             model=model,
             tools=tools,
@@ -79,6 +83,7 @@ def _runner(
     *,
     registry: ToolRegistry | None = None,
     model: Any | None = None,
+    runtime_settings_provider: Any | None = None,
 ) -> tuple[AgentRunner, RecordingAgentFactory]:
     factory = RecordingAgentFactory(model or FakeListChatModel(responses=["ok"]))
     runner = AgentRunner(
@@ -87,6 +92,7 @@ def _runner(
             api_key="test-key",
             model="fake-default",
         ),
+        runtime_settings_provider=runtime_settings_provider,
         checkpointer=SQLiteCheckpointSaver(init_database(tmp_path / "app.db")),
         tool_registry=registry or ToolRegistry(),
         default_system_prompt="系统提示",
@@ -112,6 +118,92 @@ def test_agent_runner_requests_runtime_model(tmp_path) -> None:
 
     assert agent is not None
     assert factory.requested_models == ["qwen-coder"]
+
+
+def test_agent_runner_uses_runtime_middleware_settings(tmp_path) -> None:
+    runner, factory = _runner(
+        tmp_path,
+        runtime_settings_provider=lambda: AgentRuntimeSettings(
+            tool_call_limit={"enabled": True, "max_tool_calls": 3, "exit_behavior": "error"}
+        ),
+    )
+
+    runner.create_agent(
+        model="qwen-coder",
+        system_prompt=None,
+        tool_context=ToolExecutionContext(
+            session_id="ses_1",
+            user_id="user_1",
+            workspace_root=tmp_path,
+            turn_index=1,
+            trace_id="trace_1",
+        ),
+    )
+
+    tool_limit = next(
+        item for item in factory.created_middleware[-1] if isinstance(item, ToolCallLimitMiddleware)
+    )
+    assert tool_limit.max_tool_calls == 3
+
+
+def test_agent_runner_resets_tool_limit_middleware_between_agent_creations(tmp_path) -> None:
+    runner, factory = _runner(
+        tmp_path,
+        runtime_settings_provider=lambda: AgentRuntimeSettings(
+            tool_call_limit={"enabled": True, "max_tool_calls": 2, "exit_behavior": "error"}
+        ),
+    )
+    tool_context = ToolExecutionContext(
+        session_id="ses_1",
+        user_id="user_1",
+        workspace_root=tmp_path,
+        turn_index=1,
+        trace_id="trace_1",
+    )
+
+    runner.create_agent(model="qwen-coder", system_prompt=None, tool_context=tool_context)
+    first_tool_limit = next(
+        item for item in factory.created_middleware[-1] if isinstance(item, ToolCallLimitMiddleware)
+    )
+    first_tool_limit.tool_call_count = 2
+
+    runner.create_agent(model="qwen-coder", system_prompt=None, tool_context=tool_context)
+    second_tool_limit = next(
+        item for item in factory.created_middleware[-1] if isinstance(item, ToolCallLimitMiddleware)
+    )
+
+    assert second_tool_limit is not first_tool_limit
+    assert second_tool_limit.tool_call_count == 0
+    assert second_tool_limit.max_tool_calls == 2
+
+
+def test_agent_runner_applies_runtime_tool_limit_changes_on_next_agent(tmp_path) -> None:
+    current_settings = AgentRuntimeSettings(
+        tool_call_limit={"enabled": True, "max_tool_calls": 2, "exit_behavior": "error"}
+    )
+    runner, factory = _runner(
+        tmp_path,
+        runtime_settings_provider=lambda: current_settings,
+    )
+    tool_context = ToolExecutionContext(
+        session_id="ses_1",
+        user_id="user_1",
+        workspace_root=tmp_path,
+        turn_index=1,
+        trace_id="trace_1",
+    )
+
+    runner.create_agent(model="qwen-coder", system_prompt=None, tool_context=tool_context)
+    current_settings = AgentRuntimeSettings(
+        tool_call_limit={"enabled": True, "max_tool_calls": 5, "exit_behavior": "error"}
+    )
+    runner.create_agent(model="qwen-coder", system_prompt=None, tool_context=tool_context)
+
+    limits = [
+        next(item for item in middleware if isinstance(item, ToolCallLimitMiddleware)).max_tool_calls
+        for middleware in factory.created_middleware
+    ]
+    assert limits == [2, 5]
 
 
 @pytest.mark.asyncio

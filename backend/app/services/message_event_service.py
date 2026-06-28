@@ -101,6 +101,8 @@ class MessageEventService:
                     "content": data.get("content", ""),
                     "attachments": data.get("attachments", []),
                     "timestamp": self._event_timestamp_ms(event),
+                    "messageEventId": event.id,
+                    "turnIndex": event.turn_index,
                 }
                 if pending_context_items:
                     message["contextItems"] = pending_context_items
@@ -116,6 +118,8 @@ class MessageEventService:
                         "role": "system",
                         "content": data.get("content", ""),
                         "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
                     }
                 )
                 continue
@@ -126,6 +130,8 @@ class MessageEventService:
                         "role": "assistant",
                         "content": data.get("content", ""),
                         "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
                     }
                 )
                 continue
@@ -134,6 +140,7 @@ class MessageEventService:
                 self._append_stream_batch(
                     messages,
                     active_subagents,
+                    event,
                     data,
                     self._event_timestamp_ms(event),
                 )
@@ -216,6 +223,8 @@ class MessageEventService:
                         "content": str(data.get("text", data.get("content", "")) or ""),
                         "reasoningKind": data.get("kind", "reasoning"),
                         "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
                     }
                 )
                 continue
@@ -235,6 +244,8 @@ class MessageEventService:
                         "content": data.get("message", data.get("error", "")),
                         "traceId": data.get("trace_id"),
                         "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
                     }
                 )
 
@@ -397,6 +408,7 @@ class MessageEventService:
     def _append_stream_batch(
         messages: list[dict[str, Any]],
         active_subagents: dict[str, int],
+        event: MessageEventRecord,
         data: dict[str, Any],
         timestamp: int,
     ) -> None:
@@ -412,8 +424,18 @@ class MessageEventService:
             and messages[-1].get("status") != "cancelled"
         ):
             messages[-1]["content"] += content
+            messages[-1]["messageEventId"] = event.id
+            messages[-1]["turnIndex"] = event.turn_index
             return
-        messages.append({"role": "assistant", "content": content, "timestamp": timestamp})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "timestamp": timestamp,
+                "messageEventId": event.id,
+                "turnIndex": event.turn_index,
+            }
+        )
 
     @staticmethod
     def _append_tool_start(

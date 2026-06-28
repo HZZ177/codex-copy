@@ -790,6 +790,8 @@ function thread(patch: Partial<AgentSession> = {}): AgentSession {
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
     ...patch,
   };
 }

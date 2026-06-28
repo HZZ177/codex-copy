@@ -33,6 +33,10 @@ SENSITIVE_METADATA_KEYS = {
     "headers",
 }
 
+MODEL_DEFAULT_CHAT = "default_chat"
+MODEL_DEFAULT_FAST = "fast"
+MODEL_DEFAULT_SCOPES = frozenset({MODEL_DEFAULT_CHAT, MODEL_DEFAULT_FAST})
+
 
 def _clip_text(value: str | None, limit: int = 4000) -> str | None:
     if value is None:
@@ -120,7 +124,10 @@ class SessionRecord:
     session_type: str = "chat"
     cwd: str | None = None
     workspace_roots: list[str] = field(default_factory=list)
+    current_model_provider_id: str | None = None
+    current_model: str | None = None
     is_deleted: bool = False
+    title_source: str = "manual"
 
 
 @dataclass(frozen=True)
@@ -381,7 +388,11 @@ class ModelProvidersRepository:
             cursor = conn.execute("delete from model_providers where id = ?", (provider_id,))
         return cursor.rowcount > 0
 
-    def set_default(self, *, scope: str, provider_id: str, model: str) -> None:
+    def set_model_default(self, *, scope: str, provider_id: str, model: str) -> None:
+        cleaned_scope = _require_model_default_scope(scope)
+        cleaned_model = model.strip()
+        if not cleaned_model:
+            raise ValueError("model default model must not be empty")
         with self.db.transaction() as conn:
             conn.execute(
                 """
@@ -392,14 +403,15 @@ class ModelProvidersRepository:
                   model=excluded.model,
                   updated_at=excluded.updated_at
                 """,
-                (scope, provider_id, model, to_iso_z(utc_now())),
+                (cleaned_scope, provider_id, cleaned_model, to_iso_z(utc_now())),
             )
 
-    def get_default(self, scope: str = "global") -> ModelDefaultRecord | None:
+    def get_model_default(self, scope: str) -> ModelDefaultRecord | None:
+        cleaned_scope = _require_model_default_scope(scope)
         with self.db.connect() as conn:
             row = conn.execute(
                 "select * from model_defaults where scope = ?",
-                (scope,),
+                (cleaned_scope,),
             ).fetchone()
         return (
             ModelDefaultRecord(
@@ -411,6 +423,12 @@ class ModelProvidersRepository:
             if row
             else None
         )
+
+    def delete_model_default(self, scope: str) -> bool:
+        cleaned_scope = _require_model_default_scope(scope)
+        with self.db.transaction() as conn:
+            cursor = conn.execute("delete from model_defaults where scope = ?", (cleaned_scope,))
+        return cursor.rowcount > 0
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> ModelProviderRecord:
@@ -645,6 +663,7 @@ class WorkspacesRepository:
 class SessionsRepository:
     VALID_STATUSES = {"active", "closed", "failed", "running", "waiting_approval"}
     VALID_SESSION_TYPES = {"workspace", "chat"}
+    VALID_TITLE_SOURCES = {"auto_candidate", "auto", "manual"}
 
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -665,9 +684,19 @@ class SessionsRepository:
         session_type: str = "chat",
         cwd: str | None = None,
         workspace_roots: list[str] | None = None,
+        current_model_provider_id: str | None = None,
+        current_model: str | None = None,
+        title_source: str = "auto_candidate",
+        parent_session_id: str | None = None,
+        child_session_id: str | None = None,
+        source_trace_id: str | None = None,
+        source_active_session_id: str | None = None,
+        source_checkpoint_id: str | None = None,
+        source_checkpoint_ns: str | None = None,
     ) -> SessionRecord:
         self._validate_status(status)
         self._validate_session_type(session_type)
+        self._validate_title_source(title_source)
         now = to_iso_z(utc_now())
         resolved_active_session_id = active_session_id or session_id
         with self.db.transaction() as conn:
@@ -676,8 +705,11 @@ class SessionsRepository:
                 insert into sessions (
                   id, user_id, scene_id, scene_version_seq, status, is_debug,
                   session_tag, active_session_id, workspace_id, session_type, cwd,
-                  workspace_roots_json, title, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  workspace_roots_json, current_model_provider_id, current_model,
+                  title, title_source, parent_session_id, child_session_id,
+                  source_trace_id, source_active_session_id,
+                  source_checkpoint_id, source_checkpoint_ns, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -692,7 +724,16 @@ class SessionsRepository:
                     session_type,
                     cwd,
                     _json_dumps(workspace_roots or []),
+                    current_model_provider_id,
+                    current_model,
                     title,
+                    title_source,
+                    parent_session_id,
+                    child_session_id,
+                    source_trace_id,
+                    source_active_session_id,
+                    source_checkpoint_id,
+                    source_checkpoint_ns,
                     now,
                     now,
                 ),
@@ -773,12 +814,25 @@ class SessionsRepository:
         session_type: str | None = None,
         cwd: str | None = None,
         workspace_roots: list[str] | None = None,
+        current_model_provider_id: str | None = None,
+        current_model: str | None = None,
+        title_source: str | None = None,
+        parent_session_id: str | None = None,
+        child_session_id: str | None = None,
+        source_trace_id: str | None = None,
+        source_active_session_id: str | None = None,
+        source_checkpoint_id: str | None = None,
+        source_checkpoint_ns: str | None = None,
     ) -> SessionRecord | None:
         assignments: list[str] = []
         params: list[Any] = []
         if title is not None:
             assignments.append("title = ?")
             params.append(title)
+        if title_source is not None:
+            self._validate_title_source(title_source)
+            assignments.append("title_source = ?")
+            params.append(title_source)
         if status is not None:
             self._validate_status(status)
             assignments.append("status = ?")
@@ -799,6 +853,30 @@ class SessionsRepository:
         if workspace_roots is not None:
             assignments.append("workspace_roots_json = ?")
             params.append(_json_dumps(workspace_roots))
+        if current_model_provider_id is not None:
+            assignments.append("current_model_provider_id = ?")
+            params.append(current_model_provider_id)
+        if current_model is not None:
+            assignments.append("current_model = ?")
+            params.append(current_model)
+        if parent_session_id is not None:
+            assignments.append("parent_session_id = ?")
+            params.append(parent_session_id)
+        if child_session_id is not None:
+            assignments.append("child_session_id = ?")
+            params.append(child_session_id)
+        if source_trace_id is not None:
+            assignments.append("source_trace_id = ?")
+            params.append(source_trace_id)
+        if source_active_session_id is not None:
+            assignments.append("source_active_session_id = ?")
+            params.append(source_active_session_id)
+        if source_checkpoint_id is not None:
+            assignments.append("source_checkpoint_id = ?")
+            params.append(source_checkpoint_id)
+        if source_checkpoint_ns is not None:
+            assignments.append("source_checkpoint_ns = ?")
+            params.append(source_checkpoint_ns)
         if not assignments:
             return self.get(session_id)
 
@@ -810,6 +888,36 @@ class SessionsRepository:
                 f"update sessions set {', '.join(assignments)} where id = ? and is_deleted = 0",
                 params,
             )
+        return self.get(session_id)
+
+    def update_title_if_auto_allowed(
+        self,
+        session_id: str,
+        *,
+        title: str,
+        only_when_default_title: bool,
+    ) -> SessionRecord | None:
+        cleaned = title.strip()
+        if not cleaned:
+            raise ValueError("title must not be empty")
+        allowed_sources = (
+            ("auto_candidate",) if only_when_default_title else ("auto_candidate", "auto")
+        )
+        placeholders = ", ".join("?" for _ in allowed_sources)
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                f"""
+                update sessions
+                set title = ?, title_source = 'auto', updated_at = ?
+                where id = ?
+                  and is_deleted = 0
+                  and title_source in ({placeholders})
+                """,
+                [cleaned, now, session_id, *allowed_sources],
+            )
+        if cursor.rowcount == 0:
+            return None
         return self.get(session_id)
 
     def touch(self, session_id: str) -> SessionRecord | None:
@@ -851,6 +959,11 @@ class SessionsRepository:
         if session_type not in cls.VALID_SESSION_TYPES:
             raise ValueError(f"不支持的 session 类型: {session_type}")
 
+    @classmethod
+    def _validate_title_source(cls, title_source: str) -> None:
+        if title_source not in cls.VALID_TITLE_SOURCES:
+            raise ValueError(f"不支持的 title 来源: {title_source}")
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> SessionRecord:
         return SessionRecord(
@@ -875,7 +988,10 @@ class SessionsRepository:
             session_type=row["session_type"],
             cwd=row["cwd"],
             workspace_roots=_json_loads(row["workspace_roots_json"], []),
+            current_model_provider_id=row["current_model_provider_id"],
+            current_model=row["current_model"],
             title=row["title"],
+            title_source=row["title_source"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_deleted=bool(row["is_deleted"]),
@@ -2830,3 +2946,18 @@ def legacy_model_provider_from_settings(value: dict[str, Any]) -> ModelProviderR
         created_at=now,
         updated_at=now,
     )
+
+
+def _clean_model_default_scope(scope: str) -> str:
+    cleaned = scope.strip()
+    if not cleaned:
+        raise ValueError("model default scope must not be empty")
+    return cleaned
+
+
+def _require_model_default_scope(scope: str) -> str:
+    cleaned = _clean_model_default_scope(scope)
+    if cleaned not in MODEL_DEFAULT_SCOPES:
+        expected = ", ".join(sorted(MODEL_DEFAULT_SCOPES))
+        raise ValueError(f"unknown model default scope '{cleaned}', expected one of: {expected}")
+    return cleaned

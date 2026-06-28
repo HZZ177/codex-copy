@@ -1,16 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { runtimeBridge, type RuntimeBridge } from "@/runtime";
-import type { ModelInfo } from "@/types/protocol";
+import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
 
 export type ModelLoadState = "idle" | "loading" | "ready" | "error";
 
+export interface RuntimeSelectedModel {
+  providerId: string;
+  model: string;
+}
+
+export interface RuntimeModelOption {
+  providerId: string;
+  providerName: string;
+  model: string;
+}
+
 export interface RuntimeModelSelection {
-  selectedModel: string;
-  modelOptions: string[];
+  selectedModel: RuntimeSelectedModel | null;
+  modelOptions: RuntimeModelOption[];
   modelLoadState: ModelLoadState;
   modelError: string | null;
-  setSelectedModel: (model: string) => void;
+  setSelectedModel: (selection: RuntimeSelectedModel | null) => void;
 }
 
 export interface RuntimeModelSelectionOptions {
@@ -19,27 +29,29 @@ export interface RuntimeModelSelectionOptions {
 
 export function useRuntimeModelSelection(
   runtime: RuntimeBridge = runtimeBridge,
-  initialModel = "",
+  initialModel: RuntimeSelectedModel | null = null,
   options: RuntimeModelSelectionOptions = {},
 ): RuntimeModelSelection {
   const enabled = options.enabled ?? true;
-  const [selectedModel, setSelectedModel] = useState(() => initialModel.trim());
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModel, setSelectedModel] = useState<RuntimeSelectedModel | null>(() =>
+    normalizeSelection(initialModel),
+  );
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [modelLoadState, setModelLoadState] = useState<ModelLoadState>("idle");
   const [modelError, setModelError] = useState<string | null>(null);
 
   useEffect(() => {
-    const model = initialModel.trim();
-    if (model) {
-      setSelectedModel(model);
+    const selection = normalizeSelection(initialModel);
+    if (selection) {
+      setSelectedModel(selection);
     }
-  }, [initialModel]);
+  }, [initialModel?.providerId, initialModel?.model]);
 
   useEffect(() => {
     if (!enabled) {
       setModelLoadState("idle");
       setModelError(null);
-      setAvailableModels([]);
+      setProviders([]);
       return;
     }
 
@@ -48,28 +60,29 @@ export function useRuntimeModelSelection(
     setModelError(null);
 
     const loadModels = async () => {
-      const [settingsResult, modelsResult] = await Promise.allSettled([
-        runtime.settings.getSettings(),
-        runtime.models.listModels(),
+      const [defaultsResult, providersResult] = await Promise.allSettled([
+        runtime.settings.getModelDefaults(),
+        runtime.models.listProviders(),
       ]);
       if (!active) {
         return;
       }
 
       let nextError: string | null = null;
-      if (settingsResult.status === "fulfilled") {
-        const model = settingsResult.value.model.model?.trim();
-        if (model) {
-          setSelectedModel((current) => current || model);
-        }
+      if (providersResult.status === "fulfilled") {
+        setProviders(providersResult.value);
       } else {
-        nextError = `读取模型配置失败：${errorMessage(settingsResult.reason)}`;
+        nextError = `读取模型列表失败：${errorMessage(providersResult.reason)}`;
+        setProviders([]);
       }
 
-      if (modelsResult.status === "fulfilled") {
-        setAvailableModels(modelsResult.value.models);
+      if (defaultsResult.status === "fulfilled") {
+        const defaultChat = defaultsResult.value.defaults.default_chat;
+        if (defaultChat?.configured && defaultChat.provider_id && defaultChat.model) {
+          setSelectedModel((current) => current ?? { providerId: defaultChat.provider_id!, model: defaultChat.model! });
+        }
       } else {
-        nextError = `读取模型列表失败：${errorMessage(modelsResult.reason)}`;
+        nextError = `读取默认模型失败：${errorMessage(defaultsResult.reason)}`;
       }
 
       setModelError(nextError);
@@ -82,10 +95,7 @@ export function useRuntimeModelSelection(
     };
   }, [enabled, runtime]);
 
-  const modelOptions = useMemo(
-    () => buildModelOptions(availableModels, selectedModel),
-    [availableModels, selectedModel],
-  );
+  const modelOptions = useMemo(() => buildModelOptions(providers, selectedModel), [providers, selectedModel]);
 
   return {
     selectedModel,
@@ -96,19 +106,47 @@ export function useRuntimeModelSelection(
   };
 }
 
-function buildModelOptions(models: ModelInfo[], selectedModel: string): string[] {
-  const ids = new Set<string>();
-  for (const model of models) {
-    const id = model.id.trim();
-    if (id) {
-      ids.add(id);
+function buildModelOptions(providers: ModelProvider[], selectedModel: RuntimeSelectedModel | null): RuntimeModelOption[] {
+  const options: RuntimeModelOption[] = [];
+  const seen = new Set<string>();
+  for (const provider of providers) {
+    if (!provider.enabled) {
+      continue;
+    }
+    for (const model of provider.models) {
+      const modelId = model.trim();
+      if (!modelId || provider.model_enabled[modelId] === false) {
+        continue;
+      }
+      const key = optionKey(provider.id, modelId);
+      seen.add(key);
+      options.push({ providerId: provider.id, providerName: provider.name, model: modelId });
     }
   }
-  const selected = selectedModel.trim();
-  if (selected) {
-    ids.add(selected);
+  if (selectedModel) {
+    const key = optionKey(selectedModel.providerId, selectedModel.model);
+    if (!seen.has(key)) {
+      options.push({
+        providerId: selectedModel.providerId,
+        providerName: selectedModel.providerId,
+        model: selectedModel.model,
+      });
+    }
   }
-  return [...ids];
+  return options;
+}
+
+function normalizeSelection(selection: RuntimeSelectedModel | null | undefined): RuntimeSelectedModel | null {
+  const providerId = selection?.providerId.trim() ?? "";
+  const model = selection?.model.trim() ?? "";
+  if (!providerId || !model) {
+    return null;
+  }
+  return { providerId, model };
+}
+
+function optionKey(providerId: string, model: string): string {
+  return `${providerId}\u0000${model}`;
 }
 
 function errorMessage(reason: unknown): string {

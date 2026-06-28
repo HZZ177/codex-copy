@@ -1,9 +1,12 @@
 import type {
   AppearanceSettings,
+  AgentRuntimeSettings,
   CommandApprovalAuditRecord,
   CommandApprovalDecisionPayload,
   CommandApprovalRequest,
   CommandSettings,
+  ModelDefaultsResponse,
+  UpdateModelDefaultsPayload,
   ModelSettings,
   SettingsResponse,
   TrustedCommandRule,
@@ -23,6 +26,10 @@ export interface HealthResponse {
 export interface SettingsRuntime {
   health(): Promise<HealthResponse>;
   getSettings(): Promise<SettingsResponse>;
+  getModelDefaults(): Promise<ModelDefaultsResponse>;
+  saveModelDefaults(payload: UpdateModelDefaultsPayload): Promise<ModelDefaultsResponse>;
+  getExtensionSettings(): Promise<AgentRuntimeSettings>;
+  saveExtensionSettings(payload: AgentRuntimeSettings): Promise<AgentRuntimeSettings>;
   saveSettings(model: ModelSettings): Promise<SettingsResponse>;
   saveAppearanceSettings(appearance: AppearanceSettings): Promise<SettingsResponse>;
   saveCommandSettings(command: CommandSettings): Promise<SettingsResponse>;
@@ -45,6 +52,24 @@ export function createSettingsRuntime(http: HttpClient): SettingsRuntime {
     },
     getSettings() {
       return http.request<SettingsResponse>("/api/settings");
+    },
+    getModelDefaults() {
+      return http.request<ModelDefaultsResponse>("/api/settings/model-defaults");
+    },
+    saveModelDefaults(payload) {
+      return http.request<ModelDefaultsResponse>("/api/settings/model-defaults", {
+        method: "PUT",
+        body: payload,
+      });
+    },
+    getExtensionSettings() {
+      return http.request<AgentRuntimeSettings>("/api/settings/extensions");
+    },
+    saveExtensionSettings(payload) {
+      return http.request<AgentRuntimeSettings>("/api/settings/extensions", {
+        method: "PUT",
+        body: payload,
+      });
     },
     saveSettings(model) {
       return http.request<SettingsResponse>("/api/settings", {

@@ -81,7 +81,10 @@ create table if not exists sessions (
   session_type text not null default 'chat',
   cwd text,
   workspace_roots_json text not null default '[]',
+  current_model_provider_id text,
+  current_model text,
   title text,
+  title_source text not null default 'manual',
   created_at text not null,
   updated_at text not null,
   is_deleted integer not null default 0,
@@ -429,6 +432,10 @@ class Database:
                 "workspace_roots_json",
                 "text not null default '[]'",
             )
+            self._ensure_column(conn, "sessions", "current_model_provider_id", "text")
+            self._ensure_column(conn, "sessions", "current_model", "text")
+            self._ensure_column(conn, "sessions", "title_source", "text not null default 'manual'")
+            self._migrate_model_default_scopes(conn)
             self._ensure_column(conn, "llm_request_logs", "gateway_thread_id", "text")
             self._ensure_column(conn, "llm_request_logs", "gateway_trace_id", "text")
             self._ensure_column(conn, "workspace_file_annotations", "anchor_json", "text")
@@ -460,6 +467,29 @@ class Database:
         }
         if column_name not in columns:
             conn.execute(f"alter table {table_name} add column {column_name} {column_definition}")
+
+    @staticmethod
+    def _migrate_model_default_scopes(conn: sqlite3.Connection) -> None:
+        """Normalize legacy model default scopes to explicit product semantics."""
+        rows = conn.execute("select scope, provider_id, model from model_defaults").fetchall()
+        scopes = {str(row["scope"]) for row in rows}
+        if "default_chat" not in scopes:
+            source = next((row for row in rows if str(row["scope"]) == "main"), None)
+            if source is None:
+                source = next((row for row in rows if str(row["scope"]) == "global"), None)
+            if source is not None:
+                conn.execute(
+                    """
+                    insert into model_defaults (scope, provider_id, model, updated_at)
+                    values ('default_chat', ?, ?, ?)
+                    on conflict(scope) do update set
+                      provider_id=excluded.provider_id,
+                      model=excluded.model,
+                      updated_at=excluded.updated_at
+                    """,
+                    (source["provider_id"], source["model"], to_iso_z(utc_now())),
+                )
+        conn.execute("delete from model_defaults where scope in ('main', 'global')")
 
     @staticmethod
     def _migrate_legacy_sessions_to_default_workspace(

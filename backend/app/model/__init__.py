@@ -7,13 +7,23 @@ from backend.app.model.provider_client import (
     OpenAICompatibleProviderClient,
     parse_model_list,
 )
+from backend.app.model.defaults import (
+    ModelSelectionError,
+    ResolvedModelSelection,
+    resolve_model_default,
+    resolve_model_selection,
+)
 
 __all__ = [
     "ModelConfigError",
     "ModelInfo",
+    "ModelSelectionError",
     "ModelSettings",
     "ModelProviderError",
     "OpenAICompatibleProviderClient",
+    "ResolvedModelSelection",
     "ToolSpec",
     "parse_model_list",
+    "resolve_model_default",
+    "resolve_model_selection",
 ]

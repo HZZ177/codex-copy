@@ -147,6 +147,64 @@ export interface PublicModelSettings {
   api_key_preview: string | null;
 }
 
+export type ModelDefaultScope = "default_chat" | "fast";
+
+export interface PublicModelDefault {
+  scope: ModelDefaultScope;
+  configured: boolean;
+  provider_id: string | null;
+  provider_name: string | null;
+  model: string | null;
+  provider_enabled: boolean | null;
+  model_enabled: boolean | null;
+  missing_reason: string | null;
+}
+
+export interface ModelDefaultsResponse {
+  defaults: Record<ModelDefaultScope, PublicModelDefault>;
+}
+
+export interface ModelDefaultSelection {
+  provider_id: string;
+  model: string;
+}
+
+export interface UpdateModelDefaultsPayload {
+  defaults: Partial<Record<ModelDefaultScope, ModelDefaultSelection | null>>;
+}
+
+export interface AutoTitleRuntimeSettings {
+  enabled: boolean;
+  only_when_default_title: boolean;
+  max_title_length: number;
+}
+
+export interface ToolCallLimitRuntimeSettings {
+  enabled: boolean;
+  max_tool_calls: number;
+  exit_behavior: "error";
+}
+
+export interface DuplicateToolCallGuardRuntimeSettings {
+  enabled: boolean;
+  max_repeats: number;
+}
+
+export interface ContextCompressionRuntimeSettings {
+  enabled: boolean;
+  context_window_tokens: number;
+  trigger_fraction: number;
+  emergency_fraction: number;
+  retain_rounds: number;
+}
+
+export interface AgentRuntimeSettings {
+  auto_title: AutoTitleRuntimeSettings;
+  tool_call_limit: ToolCallLimitRuntimeSettings;
+  duplicate_tool_call_guard: DuplicateToolCallGuardRuntimeSettings;
+  context_compression: ContextCompressionRuntimeSettings;
+}
+
 export type AppFontFamily = "system" | "maple-mono" | "jetbrains-mono";
 
 export interface AppearanceSettings {
@@ -345,6 +403,7 @@ export const AGENT_CHAT_ACTIONS = [
   "bind_ok",
   "unbind_ok",
   "stream",
+  "system_message",
   "completed",
   "cancelled",
   "tool_start",
@@ -359,6 +418,7 @@ export const AGENT_CHAT_ACTIONS = [
   "pong",
   "status",
   "session_closed",
+  "session_title_updated",
   "task_result",
   "reasoning",
   "workspaceSkillsChanged",
@@ -437,16 +497,22 @@ export interface AgentSession {
   scene_id: string;
   status: AgentSessionStatus;
   title: string | null;
+  title_source?: "auto_candidate" | "auto" | "manual" | null;
   session_tag: string;
   session_type: AgentSessionType;
   workspace_id: string | null;
   cwd: string | null;
   workspace_roots: string[];
   workspace: Workspace | null;
+  current_model_provider_id: string | null;
+  current_model: string | null;
   active_session_id: string | null;
   parent_session_id: string | null;
   child_session_id: string | null;
   source_trace_id: string | null;
+  source_active_session_id?: string | null;
+  source_checkpoint_id?: string | null;
+  source_checkpoint_ns?: string | null;
   created_at: string;
   updated_at: string;
   is_debug: boolean;
@@ -457,6 +523,22 @@ export interface AgentSession {
 
 export interface AgentSessionResponse {
   session: AgentSession;
+}
+
+export interface AgentSessionBranchSource {
+  session_id: string;
+  active_session_id: string;
+  checkpoint_id: string;
+  checkpoint_ns: string;
+  trace_id: string | null;
+  turn_index: number | null;
+  message_event_id: string | null;
+  source_type: string;
+}
+
+export interface AgentSessionBranchResponse {
+  session: AgentSession;
+  source: AgentSessionBranchSource;
 }
 
 export interface AgentSessionListResponse {

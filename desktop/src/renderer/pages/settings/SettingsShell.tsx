@@ -1,9 +1,11 @@
 import {
   ArrowLeft,
   BarChart3,
+  Bot,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Search,
   Settings2,
   SlidersHorizontal,
@@ -23,11 +25,13 @@ import { useTheme } from "@/renderer/providers/ThemeProvider";
 
 import styles from "./SettingsShell.module.css";
 
-export type SettingsSection = "general" | "model" | "config" | "usage";
+export type SettingsSection = "general" | "providers" | "modelDefaults" | "extensions" | "config" | "usage";
 
 const settingsItems = [
   { id: "general", label: "外观", path: "/settings/general", icon: SlidersHorizontal },
-  { id: "model", label: "供应商", path: "/settings/model", icon: Settings2 },
+  { id: "providers", label: "供应商配置", path: "/settings/providers", icon: Settings2 },
+  { id: "modelDefaults", label: "模型配置", path: "/settings/model-defaults", icon: Bot },
+  { id: "extensions", label: "扩展功能", path: "/settings/extensions", icon: Puzzle },
   { id: "config", label: "配置", path: "/settings/config", icon: Wrench },
   { id: "usage", label: "用量统计", path: "/settings/usage", icon: BarChart3 },
 ] satisfies Array<{ id: SettingsSection; label: string; path: string; icon: LucideIcon }>;

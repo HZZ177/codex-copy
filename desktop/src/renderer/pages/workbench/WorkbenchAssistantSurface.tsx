@@ -21,7 +21,7 @@ import {
 } from "@/runtime";
 import { type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
 import { LoadingSkeleton } from "@/renderer/components/loading";
-import { useRuntimeModelSelection } from "@/renderer/components/model";
+import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
@@ -147,7 +147,7 @@ export function WorkbenchAssistantSurface({
   const [unreadAssistantMessageKey, setUnreadAssistantMessageKey] = useState<string | null>(null);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
     useState<MessageListTurnNavigationRequest | null>(null);
-  const modelSelection = useRuntimeModelSelection(runtime, "");
+  const modelSelection = useRuntimeModelSelection(runtime, null);
   const workspaceSkillScope = useMemo(() => ({ workspaceId }), [workspaceId]);
   const { state: workspaceSkillsState } = useWorkspaceSkills({
     runtime,
@@ -185,7 +185,7 @@ export function WorkbenchAssistantSurface({
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
   const canStop = controller.canStop;
-  const selectedModel = modelSelection.selectedModel.trim();
+  const selectedModel = modelSelection.selectedModel;
   const drawerWidth = layout.state.workbenchAssistantDrawerWidth;
   const dockInlineWidth = resolveDockInlineWidth(drawerWidth);
   const surfaceMode = assistantState.mode;
@@ -206,9 +206,37 @@ export function WorkbenchAssistantSurface({
         ? dockOutTargetMode
         : surfaceMode === "expanded"
           ? "composer"
-          : surfaceMode;
+            : surfaceMode;
   const composerFocusSeq = assistantState.focusSeq;
+
+  useEffect(() => {
+    const providerId = controller.session?.current_model_provider_id?.trim() ?? "";
+    const model = controller.session?.current_model?.trim() ?? "";
+    if (providerId && model) {
+      modelSelection.setSelectedModel({ providerId, model });
+    }
+  }, [controller.session?.current_model_provider_id, controller.session?.current_model]);
+
+  const changeModel = useCallback(
+    (selection: RuntimeSelectedModel | null) => {
+      modelSelection.setSelectedModel(selection);
+      if (!selection || !controller.session?.id) {
+        return;
+      }
+      void runtime.conversation
+        .updateSession(controller.session.id, {
+          current_model_provider_id: selection.providerId,
+          current_model: selection.model,
+        })
+        .then((updated) => {
+          controller.dispatch({ type: "session/upsert", session: updated });
+        })
+        .catch(() => undefined);
+    },
+    [controller, modelSelection, runtime],
+  );
   const currentSessionTitle = controller.session?.title?.trim() || controller.session?.id?.trim() || "";
+  const sessionTitleVisible = Boolean(currentSessionTitle);
   const collapsedDraftPreview = controller.draft.replace(/\s+/g, " ").trim();
   const collapsedComposerLabel = collapsedDraftPreview || "要求后续变更";
   const composeOpen = bottomSurfaceMode !== "capsule";
@@ -727,7 +755,7 @@ export function WorkbenchAssistantSurface({
       canSend={canSend}
       canStop={canStop}
       connectionReady={connectionReady}
-      modelSelection={modelSelection}
+      modelSelection={{ ...modelSelection, setSelectedModel: changeModel }}
       workspaceSkills={workspaceSkills}
       selectedSkill={controller.selectedSkill}
       fileChipRequest={composerFileChipRequest}
@@ -868,6 +896,7 @@ export function WorkbenchAssistantSurface({
       data-dock-layout={dockLayout}
       data-dock-transition={dockTransitionPhase ?? "idle"}
       data-message-trigger-state={messageTriggerLayoutState}
+      data-session-title-visible={sessionTitleVisible ? "true" : "false"}
       data-running={runtimeState === "running" ? "true" : "false"}
       data-pending-approval={pendingApproval ? "true" : "false"}
       style={
@@ -943,12 +972,13 @@ export function WorkbenchAssistantSurface({
               data-message-trigger-visible={messageButtonVisible ? "true" : "false"}
               data-mini-navigator-visible={showMiniTurnNavigator ? "true" : "false"}
               data-new-session-enabled={onCreateSession ? "true" : "false"}
+              data-session-title-visible={sessionTitleVisible ? "true" : "false"}
               data-testid={renderDrawerContent ? "workbench-assistant-drawer-composer-frame" : "workbench-assistant-composer-frame"}
             >
               <div className={styles.composerFrameHeader}>
                 <div
                   className={styles.composerFrameTitle}
-                  data-empty={currentSessionTitle ? "false" : "true"}
+                  data-empty={sessionTitleVisible ? "false" : "true"}
                   data-testid="workbench-assistant-session-title"
                   title={currentSessionTitle || undefined}
                 >

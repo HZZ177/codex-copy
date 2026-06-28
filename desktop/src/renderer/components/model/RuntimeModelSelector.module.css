@@ -164,6 +164,19 @@
   scrollbar-width: thin;
 }
 
+.providerHeader {
+  min-width: 0;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.25;
+  padding: 8px 7px 4px;
+}
+
+.providerHeader:first-child {
+  padding-top: 3px;
+}
+
 .option {
   display: grid;
   height: 32px;

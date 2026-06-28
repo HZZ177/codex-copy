@@ -16,6 +16,7 @@ import type {
   AgentChatMessagePayload,
   AgentHistoryResponse,
   AgentSession,
+  AgentSessionBranchSource,
   AgentToolDetails,
   CommandApprovalRequest,
   Workspace,
@@ -156,6 +157,83 @@ describe("ConversationPage", () => {
     expect(await screen.findByText("历史问题")).not.toBeNull();
     expect(await screen.findByText("历史回答")).not.toBeNull();
     expect(screen.queryByTestId("conversation-empty")).toBeNull();
+  });
+
+  it("renders context compression history notices", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("system", "上下文已压缩，后续对话将从压缩分支继续。", {
+          messageEventId: "evt-compressed",
+          turnIndex: 2,
+        }),
+      ],
+    });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    expect(await screen.findByText("上下文已压缩，后续对话将从压缩分支继续。")).not.toBeNull();
+  });
+
+  it("forks a restored message and navigates to the new branch session", async () => {
+    const navigateToConversation = vi.fn();
+    const forkSession = vi.fn().mockResolvedValue({
+      session: agentSession({
+        id: "ses-fork",
+        title: "从这里继续",
+        parent_session_id: "ses-1",
+        source_checkpoint_id: "checkpoint-1",
+      }),
+      source: branchSource({ message_event_id: "evt-ai-1" }),
+    });
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "历史问题", { messageEventId: "evt-user-1" }),
+        historyMessage("assistant", "历史回答", { messageEventId: "evt-ai-1" }),
+      ],
+      forkSession,
+    });
+
+    renderConversation(
+      <ConversationPage threadId="ses-1" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "从这里继续" }));
+
+    await waitFor(() => {
+      expect(forkSession).toHaveBeenCalledWith("ses-1", { messageEventId: "evt-ai-1" });
+      expect(navigateToConversation).toHaveBeenCalledWith("ses-fork");
+    });
+  });
+
+  it("reverses a restored message by creating and opening a branch session", async () => {
+    const navigateToConversation = vi.fn();
+    const reverseSession = vi.fn().mockResolvedValue({
+      session: agentSession({
+        id: "ses-reverse",
+        title: "回退分支",
+        parent_session_id: "ses-1",
+        source_checkpoint_id: "checkpoint-1",
+      }),
+      source: branchSource({ message_event_id: "evt-ai-1" }),
+    });
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "历史问题", { messageEventId: "evt-user-1" }),
+        historyMessage("assistant", "历史回答", { messageEventId: "evt-ai-1" }),
+      ],
+      reverseSession,
+    });
+
+    renderConversation(
+      <ConversationPage threadId="ses-1" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "回退到这里继续" }));
+
+    await waitFor(() => {
+      expect(reverseSession).toHaveBeenCalledWith("ses-1", { messageEventId: "evt-ai-1" });
+      expect(navigateToConversation).toHaveBeenCalledWith("ses-reverse");
+    });
   });
 
   it("renders command approval as the composer instead of a conversation message", async () => {
@@ -890,7 +968,12 @@ describe("ConversationPage", () => {
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
 
-    expect(channel.chat).toHaveBeenCalledWith({ session_id: "ses-1", message: "继续修改", model: "qwen-coder" });
+    expect(channel.chat).toHaveBeenCalledWith({
+      session_id: "ses-1",
+      message: "继续修改",
+      provider_id: "provider-1",
+      model: "qwen-coder",
+    });
     expect(screen.getByLabelText("停止")).not.toBeNull();
     expect(screen.queryByText("智能体正在处理")).toBeNull();
     expect(screen.getByLabelText("继续输入").getAttribute("contenteditable")).toBe("true");
@@ -899,8 +982,16 @@ describe("ConversationPage", () => {
   });
 
   it("uses the initial runtime model passed from quick chat", async () => {
-    const { runtime, channel } = fakeRuntime();
-    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} initialModel="deepseek-coder" />);
+    const { runtime, channel } = fakeRuntime({
+      session: agentSession({ current_model: "deepseek-coder" }),
+    });
+    renderConversation(
+      <ConversationPage
+        threadId="ses-1"
+        runtime={runtime}
+        initialModel={{ providerId: "provider-1", model: "deepseek-coder" }}
+      />,
+    );
 
     await readyComposer();
     expect(screen.getByLabelText("选择模型").textContent).toContain("deepseek-coder");
@@ -911,6 +1002,34 @@ describe("ConversationPage", () => {
     expect(channel.chat).toHaveBeenCalledWith({
       session_id: "ses-1",
       message: "使用首页模型",
+      provider_id: "provider-1",
+      model: "deepseek-coder",
+    });
+  });
+
+  it("persists model changes on the session before sending", async () => {
+    const { runtime, channel } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    fireEvent.click(screen.getByLabelText("选择模型"));
+    fireEvent.click(screen.getByRole("option", { name: "deepseek-coder" }));
+
+    await waitFor(() => {
+      expect(runtime.conversation.updateSession).toHaveBeenCalledWith("ses-1", {
+        current_model_provider_id: "provider-1",
+        current_model: "deepseek-coder",
+      });
+    });
+
+    typeComposer("使用切换后的模型");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    expect(channel.chat).toHaveBeenCalledWith({
+      session_id: "ses-1",
+      message: "使用切换后的模型",
+      provider_id: "provider-1",
       model: "deepseek-coder",
     });
   });
@@ -919,7 +1038,7 @@ describe("ConversationPage", () => {
     const { runtime, channel } = fakeRuntime();
     const queued = queueQuickChatSend({
       sessionId: "ses-1",
-      model: "deepseek-coder",
+      model: { providerId: "provider-1", model: "deepseek-coder" },
       message: "从快速对话发送",
     });
     const onQuickSendConsumed = vi.fn();
@@ -927,7 +1046,7 @@ describe("ConversationPage", () => {
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
-        initialModel="deepseek-coder"
+        initialModel={{ providerId: "provider-1", model: "deepseek-coder" }}
         quickSendId={queued.id}
         onQuickSendConsumed={onQuickSendConsumed}
       />,
@@ -937,6 +1056,7 @@ describe("ConversationPage", () => {
       expect(channel.chat).toHaveBeenCalledWith({
         session_id: "ses-1",
         message: "从快速对话发送",
+        provider_id: "provider-1",
         model: "deepseek-coder",
       });
     });
@@ -950,7 +1070,7 @@ describe("ConversationPage", () => {
     });
     const queued = queueQuickChatSend({
       sessionId: "ses-1",
-      model: "deepseek-coder",
+      model: { providerId: "provider-1", model: "deepseek-coder" },
       message: "从快速对话发送",
     });
     const onQuickSendConsumed = vi.fn();
@@ -959,7 +1079,7 @@ describe("ConversationPage", () => {
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
-        initialModel="deepseek-coder"
+        initialModel={{ providerId: "provider-1", model: "deepseek-coder" }}
         quickSendId={queued.id}
         onQuickSendConsumed={onQuickSendConsumed}
       />,
@@ -980,7 +1100,7 @@ describe("ConversationPage", () => {
       <ConversationPage
         threadId="ses-1"
         runtime={runtime}
-        initialModel="deepseek-coder"
+        initialModel={{ providerId: "provider-1", model: "deepseek-coder" }}
         quickSendId="quick:missing"
         onQuickSendConsumed={onQuickSendConsumed}
       />,
@@ -1011,7 +1131,41 @@ describe("ConversationPage", () => {
     fireEvent.click(screen.getByLabelText("发送"));
 
     expect(chat).toHaveBeenCalledTimes(2);
-    expect(chat).toHaveBeenLastCalledWith({ session_id: "ses-1", message: "修正后继续", model: "qwen-coder" });
+    expect(chat).toHaveBeenLastCalledWith({
+      session_id: "ses-1",
+      message: "修正后继续",
+      provider_id: "provider-1",
+      model: "qwen-coder",
+    });
+  });
+
+  it("allows sending another message after a tool limit turn failure event", async () => {
+    const chat = vi.fn();
+    const { runtime, emit } = fakeRuntime({ chat });
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await act(async () => {
+      emit(agentEvent("error", {
+        session_id: "ses-1",
+        code: "tool_call_limit_exceeded",
+        message: "本轮工具调用已达到上限 1 次，已阻止第 2 次工具调用",
+        trace_id: "trace-tool-limit",
+        details: { max_tool_calls: 1, attempted_count: 2 },
+      }));
+    });
+
+    expect(await screen.findByText("本轮工具调用已达到上限 1 次，已阻止第 2 次工具调用")).not.toBeNull();
+    typeComposer("调整后继续");
+    await waitSendEnabled();
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    expect(chat).toHaveBeenCalledWith({
+      session_id: "ses-1",
+      message: "调整后继续",
+      provider_id: "provider-1",
+      model: "qwen-coder",
+    });
   });
 
   it("folds stack trace details out of the ordinary request error UI", async () => {
@@ -1657,6 +1811,14 @@ function fakeRuntime({
   session = agentSession(),
   chat = vi.fn(),
   cancel = vi.fn(),
+  forkSession = vi.fn().mockResolvedValue({
+    session: agentSession({ id: "ses-fork", parent_session_id: session.id }),
+    source: branchSource(),
+  }),
+  reverseSession = vi.fn().mockResolvedValue({
+    session: agentSession({ id: "ses-reverse", parent_session_id: session.id }),
+    source: branchSource(),
+  }),
   workspaceSearch = vi.fn().mockResolvedValue([]),
   workspaceListSkills = vi.fn().mockResolvedValue({
     workspace_root: "D:/repo",
@@ -1676,6 +1838,8 @@ function fakeRuntime({
   session?: AgentSession;
   chat?: ReturnType<typeof vi.fn>;
   cancel?: ReturnType<typeof vi.fn>;
+  forkSession?: ReturnType<typeof vi.fn>;
+  reverseSession?: ReturnType<typeof vi.fn>;
   workspaceSearch?: ReturnType<typeof vi.fn>;
   workspaceListSkills?: ReturnType<typeof vi.fn>;
   workspaceEntriesByPath?: Record<string, WorkspaceEntry[]>;
@@ -1701,6 +1865,11 @@ function fakeRuntime({
   };
   const runtime = {
     conversation: {
+      forkSession,
+      reverseSession,
+      updateSession: vi.fn().mockImplementation((_sessionId: string, patch: Partial<AgentSession>) =>
+        Promise.resolve({ ...session, ...patch }),
+      ),
       loadHistory: historyError
         ? vi.fn().mockRejectedValue(historyError)
         : vi.fn().mockResolvedValue(historyResponse(session, history)),
@@ -1734,6 +1903,30 @@ function fakeRuntime({
           max_output_chars: 65536,
         },
       }),
+      getModelDefaults: vi.fn().mockResolvedValue({
+        defaults: {
+          default_chat: {
+            scope: "default_chat",
+            configured: Boolean(model),
+            provider_id: model ? "provider-1" : null,
+            provider_name: model ? "默认模型服务" : null,
+            model: model || null,
+            provider_enabled: model ? true : null,
+            model_enabled: model ? true : null,
+            missing_reason: model ? null : "not_configured",
+          },
+          fast: {
+            scope: "fast",
+            configured: false,
+            provider_id: null,
+            provider_name: null,
+            model: null,
+            provider_enabled: null,
+            model_enabled: null,
+            missing_reason: "not_configured",
+          },
+        },
+      }),
       resolveApproval: vi.fn((approvalId: string) =>
         Promise.resolve({
           ...commandApproval(approvalId),
@@ -1745,7 +1938,23 @@ function fakeRuntime({
       ),
     },
     models: {
-      listModels: vi.fn().mockResolvedValue({ models: model ? [{ id: model }] : [], cached: true }),
+      listProviders: vi.fn().mockResolvedValue(
+        model
+          ? [
+              {
+                id: "provider-1",
+                name: "默认模型服务",
+                base_url: "https://api.example/v1",
+                enabled: true,
+                api_key_set: true,
+                api_key_preview: "sk-***",
+                models: [model, "deepseek-coder"],
+                model_enabled: {},
+                health: {},
+              },
+            ]
+          : [],
+      ),
     },
     workspace: {
       listSkills: workspaceListSkills,
@@ -1818,6 +2027,22 @@ function agentSession(patch: Partial<AgentSession> = {}): AgentSession {
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
+    ...patch,
+  };
+}
+
+function branchSource(patch: Partial<AgentSessionBranchSource> = {}): AgentSessionBranchSource {
+  return {
+    session_id: "ses-1",
+    active_session_id: "ses-1",
+    checkpoint_id: "checkpoint-1",
+    checkpoint_ns: "",
+    trace_id: "trace-1",
+    turn_index: 1,
+    message_event_id: "evt-ai-1",
+    source_type: "message_event",
     ...patch,
   };
 }

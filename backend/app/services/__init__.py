@@ -24,6 +24,14 @@ _EXPORTS = {
         "backend.app.services.chat_stream_manager",
         "ChatStreamMissingSessionError",
     ),
+    "ContextCompressionOutcome": (
+        "backend.app.services.context_compression_service",
+        "ContextCompressionOutcome",
+    ),
+    "ContextCompressionService": (
+        "backend.app.services.context_compression_service",
+        "ContextCompressionService",
+    ),
     "GetHistoryRequest": ("backend.app.services.session_service", "GetHistoryRequest"),
     "ListSessionsRequest": ("backend.app.services.session_service", "ListSessionsRequest"),
     "MessageEventService": ("backend.app.services.message_event_service", "MessageEventService"),

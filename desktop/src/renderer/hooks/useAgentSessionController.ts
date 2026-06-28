@@ -12,6 +12,7 @@ import {
   type SelectedFile,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
+import type { RuntimeSelectedModel } from "@/renderer/components/model";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import {
   agentConversationReducer,
@@ -39,6 +40,7 @@ export interface AgentSessionControllerEnsureSessionRequest {
   title: string;
   message: string;
   contextItems: AgentContextItem[];
+  model?: RuntimeSelectedModel | null;
 }
 
 export type AgentSessionControllerEnsureSessionResult = string | AgentSession | null;
@@ -103,14 +105,14 @@ export interface AgentSessionController {
   loadOlderHistory: () => Promise<void>;
   sendText: (
     text: string,
-    model: string,
+    model: RuntimeSelectedModel | null,
     options?: {
       clearDraft?: boolean;
       contextItems?: ChatPayload["contextItems"];
       runtimeParams?: ChatPayload["runtime_params"];
     },
   ) => Promise<boolean>;
-  send: (files?: SelectedFile[], quotes?: SelectedQuote[], model?: string) => Promise<boolean>;
+  send: (files?: SelectedFile[], quotes?: SelectedQuote[], model?: RuntimeSelectedModel | null) => Promise<boolean>;
   stop: () => void;
   submitApproval: (decision: CommandApprovalDecisionPayload) => Promise<void>;
   approvalSubmitting: boolean;
@@ -366,7 +368,7 @@ export function useAgentSessionController({
   }, []);
 
   const resolveSessionId = useCallback(
-    async (message: string, contextItems: AgentContextItem[]) => {
+    async (message: string, contextItems: AgentContextItem[], model: RuntimeSelectedModel | null) => {
       if (sessionId) {
         return sessionId;
       }
@@ -377,6 +379,7 @@ export function useAgentSessionController({
         title: sessionTitleFromPreparedMessage(message, contextItems),
         message,
         contextItems,
+        model,
       });
       if (!ensured) {
         return null;
@@ -393,7 +396,7 @@ export function useAgentSessionController({
   const sendText = useCallback(
     async (
       text: string,
-      model: string,
+      model: RuntimeSelectedModel | null,
       options: {
         clearDraft?: boolean;
         contextItems?: ChatPayload["contextItems"];
@@ -401,12 +404,13 @@ export function useAgentSessionController({
       } = {},
     ) => {
       const trimmedText = text.trim();
-      const trimmedModel = model.trim();
+      const providerId = model?.providerId.trim() ?? "";
+      const trimmedModel = model?.model.trim() ?? "";
       const contextItems = options.contextItems ?? [];
       if ((!trimmedText && !contextItems.length) || isBusy(runtimeState)) {
         return false;
       }
-      if (!trimmedModel) {
+      if (!providerId || !trimmedModel) {
         const message = "请先选择模型";
         setRuntimeDetail(message);
         onNotice?.(message, "error");
@@ -423,7 +427,7 @@ export function useAgentSessionController({
       let targetSessionId: string | null = sessionId || null;
       if (!targetSessionId) {
         try {
-          targetSessionId = await resolveSessionId(trimmedText, contextItems);
+          targetSessionId = await resolveSessionId(trimmedText, contextItems, model);
         } catch (reason) {
           const message = publicRuntimeDetail(errorMessage(reason));
           setRuntimeDetail(message);
@@ -447,6 +451,7 @@ export function useAgentSessionController({
         const payload: ChatPayload = {
           session_id: targetSessionId,
           message: trimmedText,
+          provider_id: providerId,
           model: trimmedModel,
           ...(options.runtimeParams ? { runtime_params: options.runtimeParams } : {}),
         };
@@ -488,7 +493,7 @@ export function useAgentSessionController({
   );
 
   const send = useCallback(
-    async (files: SelectedFile[] = [], quotes: SelectedQuote[] = [], model = "") => {
+    async (files: SelectedFile[] = [], quotes: SelectedQuote[] = [], model: RuntimeSelectedModel | null = null) => {
       const prepared = prepareComposerMessage(draft, files, { quotes, selectedSkill });
       if (!prepared.message && !prepared.contextItems.length) {
         return false;

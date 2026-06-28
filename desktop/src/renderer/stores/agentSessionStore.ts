@@ -129,6 +129,9 @@ export function reduceAgentWsEvent(
     case "stream":
       next = handleStream(state, event.data as unknown as AgentStreamActionData);
       break;
+    case "system_message":
+      next = handleSystemMessage(state, event.data);
+      break;
     case "reasoning":
       next = handleReasoning(state, event.data as unknown as AgentReasoningData);
       break;
@@ -170,6 +173,9 @@ export function reduceAgentWsEvent(
       break;
     case "session_closed":
       next = handleSessionClosed(state, event.data);
+      break;
+    case "session_title_updated":
+      next = handleSessionTitleUpdated(state, event.data);
       break;
     case "workspaceSkillsChanged":
       next = state;
@@ -489,6 +495,34 @@ function handleStream(state: AgentConversationState, data: AgentStreamActionData
   }
   view.isStreaming = true;
   markTurnInProgress(view);
+  return next;
+}
+
+function handleSystemMessage(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
+  const sessionId = sessionIdFromData(data) || state.selectedSessionId || "";
+  const content = stringValue(data.content) || stringValue(data.text);
+  if (!sessionId || !content) {
+    return state;
+  }
+  const messageEventId = stringValue(data.message_event_id) || stringValue(data.event_id) || stringValue(data.id);
+  const next = cloneState(state);
+  const view = ensureSessionState(next, sessionId);
+  if (messageEventId && view.messages.some((message) => message.messageEventId === messageEventId)) {
+    return state;
+  }
+  const compression = asRecord(data.compression);
+  view.messages.push({
+    id: messageEventId ? `system:${sessionId}:${messageEventId}` : nextMessageId(next, "system", sessionId),
+    sessionId,
+    messageEventId: messageEventId || undefined,
+    turnIndex: numberValue(data.turn_index),
+    role: "system",
+    content,
+    timestamp: timestampFromData(data),
+    metadata: compression ? { compression } : undefined,
+    streaming: false,
+  });
+  view.isStreaming = hasStreamingMessage(view);
   return next;
 }
 
@@ -1003,6 +1037,34 @@ function handleSessionClosed(state: AgentConversationState, data: Record<string,
       [sessionId]: { ...existing, status: "closed" },
     };
   }
+  return next;
+}
+
+function handleSessionTitleUpdated(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
+  const session = sessionFromData(data);
+  if (session) {
+    return upsertSession(state, session, { select: false });
+  }
+  const sessionId = sessionIdFromData(data);
+  const title = nullableString(data.title);
+  if (!sessionId || title === null) {
+    return state;
+  }
+  const existing = state.sessionsById[sessionId];
+  if (!existing) {
+    return state;
+  }
+  const next = cloneState(state);
+  next.sessionsById = {
+    ...next.sessionsById,
+    [sessionId]: {
+      ...existing,
+      title,
+      title_source: nullableString(data.title_source) as AgentSession["title_source"],
+      updated_at: stringValue(data.updated_at) || existing.updated_at,
+    },
+  };
+  next.sessionIds = sortSessionIds(Object.values(next.sessionsById));
   return next;
 }
 
@@ -1629,6 +1691,7 @@ function normalizeSession(data: Record<string, unknown>): AgentSession {
     scene_id: stringValue(data.scene_id) || "desktop-agent",
     status: isAgentSessionStatus(status) ? status : "active",
     title: typeof data.title === "string" ? data.title : null,
+    title_source: nullableString(data.title_source) as AgentSession["title_source"],
     session_tag: stringValue(data.session_tag) || "chat",
     session_type: isAgentSessionType(sessionType) ? sessionType : "chat",
     workspace_id: nullableString(data.workspace_id),
@@ -1639,11 +1702,16 @@ function normalizeSession(data: Record<string, unknown>): AgentSession {
     parent_session_id: nullableString(data.parent_session_id),
     child_session_id: nullableString(data.child_session_id),
     source_trace_id: nullableString(data.source_trace_id),
+    source_active_session_id: nullableString(data.source_active_session_id),
+    source_checkpoint_id: nullableString(data.source_checkpoint_id),
+    source_checkpoint_ns: nullableString(data.source_checkpoint_ns),
     created_at: stringValue(data.created_at) || now,
     updated_at: stringValue(data.updated_at) || now,
     is_debug: Boolean(data.is_debug),
     is_scheduled: Boolean(data.is_scheduled),
     is_current: Boolean(data.is_current),
+    current_model_provider_id: nullableString(data.current_model_provider_id),
+    current_model: nullableString(data.current_model),
     scene_version_seq: typeof data.scene_version_seq === "number" ? data.scene_version_seq : null,
   };
 }

@@ -68,7 +68,7 @@ export function WorkbenchModePage({
   const showPicker = !workspaceId;
   const showWorkspaceUnavailable = Boolean(workspaceId && workspaceError && !selectedWorkspace);
   const ensureWorkbenchSession = useCallback(
-    async ({ title }: { title: string }) => {
+    async ({ title, model }: { title: string; model?: { providerId: string; model: string } | null }) => {
       if (!workspaceId) {
         return null;
       }
@@ -79,6 +79,12 @@ export function WorkbenchModePage({
           session_tag: "chat",
           sessionType: "workspace",
           workspaceId,
+          ...(model
+            ? {
+                currentModelProviderId: model.providerId,
+                currentModel: model.model,
+              }
+            : {}),
         });
         emitSessionCreated(session);
         onSessionCreated?.(session);

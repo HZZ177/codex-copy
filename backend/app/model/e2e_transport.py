@@ -34,7 +34,29 @@ def create_e2e_model_transport(*, delay_ms: int = 80) -> httpx.MockTransport:
                     json={"error": {"message": "E2E 模型返回 HTTP 400"}},
                 )
             if payload.get("stream") is False:
-                return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+                if "上下文压缩摘要" in user_message:
+                    return httpx.Response(
+                        200,
+                        json={
+                            "choices": [
+                                {
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "E2E 压缩摘要：已保留关键目标、约束和最近对话。",
+                                    }
+                                }
+                            ]
+                        },
+                    )
+                if "用户首轮问题" in user_message and "助手最终回复" in user_message:
+                    return httpx.Response(
+                        200,
+                        json={"choices": [{"message": {"role": "assistant", "content": "E2E 自动标题"}}]},
+                    )
+                return httpx.Response(
+                    200,
+                    json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+                )
             chunks = _chat_chunks(payload)
             return httpx.Response(
                 200,
@@ -66,6 +88,26 @@ def _chat_chunks(payload: dict[str, Any]) -> list[str]:
         return _file_edit_progress_chunks(payload)
     if "工具时序" in user_message:
         return _tool_sequence_chunks(payload)
+    if "工具上限" in user_message:
+        return _tool_limit_chunks(payload)
+    if "SessionFork第一轮" in user_message:
+        return _content_chunks(
+            payload,
+            f"SessionFork 第一轮检查点 {_scenario_marker(user_message)}",
+            usage={"prompt_tokens": 10, "completion_tokens": 8},
+        )
+    if "SessionFork第二轮" in user_message:
+        return _content_chunks(
+            payload,
+            f"SessionFork 第二轮检查点 {_scenario_marker(user_message)}",
+            usage={"prompt_tokens": 10, "completion_tokens": 8},
+        )
+    if "SessionFork分支继续" in user_message:
+        return _content_chunks(
+            payload,
+            f"SessionFork 分支继续检查点 {_scenario_marker(user_message)}",
+            usage={"prompt_tokens": 10, "completion_tokens": 8},
+        )
     if "预览面板" in user_message:
         return _preview_panel_chunks(payload)
     if "工具失败" in user_message:
@@ -185,6 +227,11 @@ def _command_for_approval_prompt(user_message: str) -> str:
     return "echo e2e-approval-default"
 
 
+def _scenario_marker(user_message: str) -> str:
+    parts = user_message.strip().split()
+    return parts[-1] if parts else "default"
+
+
 def _tool_sequence_chunks(payload: dict[str, Any]) -> list[str]:
     if _has_tool_message(payload):
         return _content_chunks(
@@ -226,6 +273,68 @@ def _tool_sequence_chunks(payload: dict[str, Any]) -> list[str]:
                             ),
                         },
                     },
+                ]
+            },
+            finish_reason="tool_calls",
+        ),
+        _sse_done(),
+    ]
+
+
+def _tool_limit_chunks(payload: dict[str, Any]) -> list[str]:
+    tool_message_count = _tool_message_count_since_last_user(payload)
+    if tool_message_count >= 2:
+        return _content_chunks(
+            payload,
+            "工具上限关闭后已经完成两次工具调用，新的请求已经恢复。",
+            usage={"prompt_tokens": 18, "completion_tokens": 12},
+        )
+    if tool_message_count == 1:
+        return [
+            _chat_sse(
+                payload,
+                delta={"reasoning_content": "继续请求第二个工具，用于触发单轮工具调用上限。"},
+            ),
+            _chat_sse(
+                payload,
+                delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_e2e_tool_limit_list_dir",
+                            "type": "function",
+                            "function": {
+                                "name": "list_dir",
+                                "arguments": json.dumps(
+                                    {"path": ".", "depth": 1, "limit": 5},
+                                    separators=(",", ":"),
+                                ),
+                            },
+                        }
+                    ]
+                },
+                finish_reason="tool_calls",
+            ),
+            _sse_done(),
+        ]
+    return [
+        _chat_sse(
+            payload,
+            delta={"reasoning_content": "先请求第一个工具，随后将继续请求第二个工具。"},
+        ),
+        _chat_sse(
+            payload,
+            delta={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_e2e_tool_limit_read_file",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"README.md\",\"max_lines\":4}",
+                        },
+                    }
                 ]
             },
             finish_reason="tool_calls",
@@ -417,14 +526,18 @@ def _last_user_message(payload: dict[str, Any]) -> str:
 
 
 def _has_tool_message(payload: dict[str, Any]) -> bool:
+    return _tool_message_count_since_last_user(payload) > 0
+
+
+def _tool_message_count_since_last_user(payload: dict[str, Any]) -> int:
     messages = payload.get("messages")
     if not isinstance(messages, list):
-        return False
+        return 0
     last_user_index = -1
     for index, message in enumerate(messages):
         if isinstance(message, dict) and message.get("role") == "user":
             last_user_index = index
-    return any(
+    return sum(
         isinstance(message, dict) and message.get("role") == "tool"
         for message in messages[last_user_index + 1 :]
     )

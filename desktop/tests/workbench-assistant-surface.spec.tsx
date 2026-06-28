@@ -981,6 +981,11 @@ describe("WorkbenchAssistantSurface", () => {
     });
 
     expect(screen.getByText("要求后续变更")).not.toBeNull();
+    expect(screen.getByTestId("workbench-assistant-surface").getAttribute("data-session-title-visible")).toBe("false");
+    expect(screen.getByTestId("workbench-assistant-composer-frame").getAttribute("data-session-title-visible")).toBe(
+      "false",
+    );
+    expect(screen.getByTestId("workbench-assistant-session-title").getAttribute("data-empty")).toBe("true");
     expect(screen.getByRole("button", { name: "展开工作台输入框" }).getAttribute("title")).toBe("要求后续变更");
   });
 
@@ -1676,9 +1681,47 @@ function fakeRuntime({ skills = [] }: { skills?: WorkspaceSkillSummary[] } = {})
             api_key_preview: "sk-***",
           },
         }),
+      getModelDefaults: () =>
+        Promise.resolve({
+          defaults: {
+            default_chat: {
+              scope: "default_chat",
+              configured: true,
+              provider_id: "provider-1",
+              provider_name: "默认模型服务",
+              model: "qwen-coder",
+              provider_enabled: true,
+              model_enabled: true,
+              missing_reason: null,
+            },
+            fast: {
+              scope: "fast",
+              configured: false,
+              provider_id: null,
+              provider_name: null,
+              model: null,
+              provider_enabled: null,
+              model_enabled: null,
+              missing_reason: "not_configured",
+            },
+          },
+        }),
     },
     models: {
-      listModels: () => Promise.resolve({ models: [{ id: "qwen-coder" }], cached: true }),
+      listProviders: () =>
+        Promise.resolve([
+          {
+            id: "provider-1",
+            name: "默认模型服务",
+            base_url: "https://api.example/v1",
+            enabled: true,
+            api_key_set: true,
+            api_key_preview: "sk-***",
+            models: ["qwen-coder"],
+            model_enabled: {},
+            health: {},
+          },
+        ]),
     },
     workspace: {
       listSkills: () =>
@@ -1724,5 +1767,7 @@ function session(id = "ses-1"): AgentSession {
     workspace: workspace(),
     created_at: "2026-06-26T00:00:00Z",
     updated_at: "2026-06-26T00:00:00Z",
+    current_model_provider_id: "provider-1",
+    current_model: "qwen-coder",
   } as AgentSession;
 }

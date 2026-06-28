@@ -8,6 +8,7 @@ import type {
   CommandApprovalDecisionPayload,
   AgentHistoryResponse,
   AgentSession,
+  AgentSessionBranchResponse,
   AgentSessionType,
   AgentSessionListResponse,
   AgentSessionResponse,
@@ -33,6 +34,8 @@ export interface CreateSessionPayload {
   workspaceId?: string | null;
   cwd?: string | null;
   workspaceRoots?: string[];
+  currentModelProviderId?: string | null;
+  currentModel?: string | null;
 }
 
 export interface ListSessionsOptions {
@@ -62,6 +65,18 @@ export type LoadToolDetailsOptions = AgentToolDetailRef;
 
 export interface UpdateSessionPayload {
   title?: string | null;
+  current_model_provider_id?: string | null;
+  current_model?: string | null;
+}
+
+export interface SessionBranchPayload {
+  userId?: string;
+  title?: string | null;
+  checkpointId?: string | null;
+  checkpointNs?: string | null;
+  traceId?: string | null;
+  messageEventId?: string | null;
+  turnIndex?: number | null;
 }
 
 export interface ChatPayload {
@@ -69,6 +84,7 @@ export interface ChatPayload {
   message: string;
   user_id?: string;
   scene_id?: string;
+  provider_id?: string;
   model?: string;
   system_prompt?: string | null;
   runtime_params?: Record<string, unknown> | null;
@@ -112,6 +128,8 @@ export interface ConversationRuntime {
   getSession(sessionId: string): Promise<AgentSession>;
   updateSession(sessionId: string, payload: UpdateSessionPayload): Promise<AgentSession>;
   deleteSession(sessionId: string): Promise<void>;
+  forkSession(sessionId: string, payload: SessionBranchPayload): Promise<AgentSessionBranchResponse>;
+  reverseSession(sessionId: string, payload: SessionBranchPayload): Promise<AgentSessionBranchResponse>;
   loadHistory(sessionId: string, options?: LoadHistoryOptions): Promise<AgentHistoryResponse>;
   loadToolDetails(sessionId: string, ref: LoadToolDetailsOptions): Promise<AgentToolDetails>;
   openChatChannel(
@@ -154,6 +172,18 @@ export function createConversationRuntime(
     deleteSession(sessionId) {
       return http.request<void>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
         method: "DELETE",
+      });
+    },
+    forkSession(sessionId, payload) {
+      return http.request<AgentSessionBranchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, {
+        method: "POST",
+        body: branchPayload(payload),
+      });
+    },
+    reverseSession(sessionId, payload) {
+      return http.request<AgentSessionBranchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/reverse`, {
+        method: "POST",
+        body: branchPayload(payload),
       });
     },
     loadHistory(sessionId, historyOptions = {}) {
@@ -259,5 +289,19 @@ function snakeSessionPayload(payload: CreateSessionPayload): Record<string, unkn
     ...(payload.workspaceId !== undefined ? { workspace_id: payload.workspaceId } : {}),
     ...(payload.cwd !== undefined ? { cwd: payload.cwd } : {}),
     ...(payload.workspaceRoots !== undefined ? { workspace_roots: payload.workspaceRoots } : {}),
+    ...(payload.currentModelProviderId !== undefined ? { current_model_provider_id: payload.currentModelProviderId } : {}),
+    ...(payload.currentModel !== undefined ? { current_model: payload.currentModel } : {}),
+  };
+}
+
+function branchPayload(payload: SessionBranchPayload): Record<string, unknown> {
+  return {
+    ...(payload.userId !== undefined ? { user_id: payload.userId } : {}),
+    ...(payload.title !== undefined ? { title: payload.title } : {}),
+    ...(payload.checkpointId !== undefined ? { checkpoint_id: payload.checkpointId } : {}),
+    ...(payload.checkpointNs !== undefined ? { checkpoint_ns: payload.checkpointNs } : {}),
+    ...(payload.traceId !== undefined ? { trace_id: payload.traceId } : {}),
+    ...(payload.messageEventId !== undefined ? { message_event_id: payload.messageEventId } : {}),
+    ...(payload.turnIndex !== undefined ? { turn_index: payload.turnIndex } : {}),
   };
 }

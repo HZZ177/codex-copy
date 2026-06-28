@@ -337,6 +337,8 @@ describe("RuntimeBridge", () => {
       is_debug: false,
       is_scheduled: false,
       is_current: false,
+      current_model_provider_id: "provider-1",
+      current_model: "qwen-coder",
     };
     const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
       const url = requestUrl(input);
@@ -375,6 +377,40 @@ describe("RuntimeBridge", () => {
               toolName: "read_file",
               toolParams: { path: "README.md" },
               toolResult: "content",
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/api/sessions/ses%201/fork") && init.method === "POST") {
+        return Promise.resolve(
+          jsonResponse(200, {
+            session: { ...session, id: "ses-fork", parent_session_id: "ses 1" },
+            source: {
+              session_id: "ses 1",
+              active_session_id: "ses 1",
+              checkpoint_id: "ckpt_1",
+              checkpoint_ns: "",
+              trace_id: "trace_1",
+              turn_index: 1,
+              message_event_id: "evt 1",
+              source_type: "message_event",
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/api/sessions/ses%201/reverse") && init.method === "POST") {
+        return Promise.resolve(
+          jsonResponse(200, {
+            session: { ...session, id: "ses-reverse", parent_session_id: "ses 1" },
+            source: {
+              session_id: "ses 1",
+              active_session_id: "ses 1",
+              checkpoint_id: "ckpt_1",
+              checkpoint_ns: "",
+              trace_id: "trace_1",
+              turn_index: 1,
+              message_event_id: "evt 1",
+              source_type: "message_event",
             },
           }),
         );
@@ -422,6 +458,17 @@ describe("RuntimeBridge", () => {
       toolName: "read_file",
       toolResult: "content",
     });
+    await expect(
+      runtime.conversation.forkSession("ses 1", {
+        messageEventId: "evt 1",
+        title: "从这里继续",
+      }),
+    ).resolves.toMatchObject({ session: { id: "ses-fork" }, source: { checkpoint_id: "ckpt_1" } });
+    await expect(
+      runtime.conversation.reverseSession("ses 1", {
+        traceId: "trace_1",
+      }),
+    ).resolves.toMatchObject({ session: { id: "ses-reverse" }, source: { trace_id: "trace_1" } });
 
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
@@ -471,6 +518,22 @@ describe("RuntimeBridge", () => {
       7,
       "http://127.0.0.1:8765/api/sessions/ses%201/tool-details?start_event_id=evt+start&end_event_id=evt+end",
       expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      8,
+      "http://127.0.0.1:8765/api/sessions/ses%201/fork",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "从这里继续", message_event_id: "evt 1" }),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      9,
+      "http://127.0.0.1:8765/api/sessions/ses%201/reverse",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ trace_id: "trace_1" }),
+      }),
     );
   });
 
@@ -624,7 +687,6 @@ describe("RuntimeBridge", () => {
       models: ["qwen-coder"],
       model_enabled: { "qwen-coder": true },
       health: {},
-      default_model: "qwen-coder",
     };
     const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
       const url = requestUrl(input);
@@ -656,9 +718,6 @@ describe("RuntimeBridge", () => {
           }),
         );
       }
-      if (url.endsWith("/api/model-providers/default") && init.method === "PUT") {
-        return Promise.resolve(jsonResponse(200, { providers: [provider] }));
-      }
       if (url.endsWith("/api/model-providers/provider-1") && init.method === "DELETE") {
         return Promise.resolve(new Response(null, { status: 204 }));
       }
@@ -677,7 +736,6 @@ describe("RuntimeBridge", () => {
     await expect(runtime.models.checkModelHealth("provider-1", "qwen-coder")).resolves.toMatchObject({
       health: { status: "healthy" },
     });
-    await expect(runtime.models.setDefaultModel("provider-1", "qwen-coder")).resolves.toEqual(provider);
     await expect(runtime.models.deleteProvider("provider-1")).resolves.toBeUndefined();
   });
 });

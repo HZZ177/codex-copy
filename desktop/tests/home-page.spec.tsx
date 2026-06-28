@@ -10,7 +10,7 @@ import { NotificationProvider } from "@/renderer/providers/NotificationProvider"
 import { PreviewProvider } from "@/renderer/providers/PreviewProvider";
 import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
-import type { AgentSession, ModelInfo, Workspace } from "@/types/protocol";
+import type { AgentSession, Workspace } from "@/types/protocol";
 
 describe("HomePage", () => {
   it("creates a session from the centered quick chat prompt", async () => {
@@ -38,9 +38,15 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-1",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
-    expect(onNavigateToConversation).toHaveBeenCalledWith("ses-1", "qwen-coder", "实现一个新功能");
+    expect(onNavigateToConversation).toHaveBeenCalledWith(
+      "ses-1",
+      { providerId: "provider-1", model: "qwen-coder" },
+      "实现一个新功能",
+    );
     expect(onOpenModelSettings).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("工作目录")).toBeNull();
     expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
@@ -76,7 +82,7 @@ describe("HomePage", () => {
   it("keeps model selection available with a real workspace selector", async () => {
     const runtime = fakeRuntime({
       model: "qwen-coder",
-      models: [{ id: "qwen-coder" }, { id: "deepseek-coder" }, { id: "kimi-k2" }],
+      models: ["qwen-coder", "deepseek-coder", "kimi-k2"],
     });
 
     const onNavigateToConversation = vi.fn();
@@ -111,9 +117,15 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-1",
+        currentModelProviderId: "provider-1",
+        currentModel: "deepseek-coder",
       });
     });
-    expect(onNavigateToConversation).toHaveBeenCalledWith("ses-1", "deepseek-coder", "读取仓库结构");
+    expect(onNavigateToConversation).toHaveBeenCalledWith(
+      "ses-1",
+      { providerId: "provider-1", model: "deepseek-coder" },
+      "读取仓库结构",
+    );
     expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
     expect(screen.queryByLabelText("快速对话上下文")).toBeNull();
     expect(screen.queryByRole("button", { name: "完全访问" })).toBeNull();
@@ -224,11 +236,13 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-1",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
     expect(onNavigateToConversation).toHaveBeenCalledWith(
       "ses-1",
-      "qwen-coder",
+      { providerId: "provider-1", model: "qwen-coder" },
       "",
       expect.objectContaining({
         contextItems: [expect.objectContaining({ type: "file", path: "README.md", source: "follow" })],
@@ -290,13 +304,15 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-1",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
 
     const options = onNavigateToConversation.mock.calls.at(-1)?.[3];
     expect(onNavigateToConversation).toHaveBeenCalledWith(
       "ses-1",
-      "qwen-coder",
+      { providerId: "provider-1", model: "qwen-coder" },
       "",
       expect.objectContaining({
         contextItems: [
@@ -361,6 +377,8 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-recent",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
   });
@@ -397,6 +415,8 @@ describe("HomePage", () => {
         session_tag: "chat",
         sessionType: "workspace",
         workspaceId: "ws-target",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
   });
@@ -431,6 +451,8 @@ describe("HomePage", () => {
         title: "只聊方案",
         session_tag: "chat",
         sessionType: "chat",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
   });
@@ -459,6 +481,8 @@ describe("HomePage", () => {
         title: "先聊一下方案",
         session_tag: "chat",
         sessionType: "chat",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
   });
@@ -524,7 +548,7 @@ describe("HomePage", () => {
     expect((screen.getByRole("button", { name: "正在准备发送" }) as HTMLButtonElement).disabled).toBe(true);
     expect(runtime.workspaces.list).not.toHaveBeenCalled();
     expect(runtime.settings.getSettings).not.toHaveBeenCalled();
-    expect(runtime.models.listModels).not.toHaveBeenCalled();
+    expect(runtime.models.listProviders).not.toHaveBeenCalled();
 
     await act(async () => {
       deferred.resolve({
@@ -604,7 +628,7 @@ describe("HomePage", () => {
     enterPrompt("开始对话");
     fireEvent.click(screen.getByLabelText("发送"));
 
-    expect((await screen.findByRole("alert")).textContent).toBe("请先在设置中选择模型");
+    expect((await screen.findByRole("alert")).textContent).toBe("请先选择模型");
     expect(screen.getByTestId("notification-item")).not.toBeNull();
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "打开模型设置" })).not.toBeNull();
@@ -640,9 +664,15 @@ describe("HomePage", () => {
         title: "只聊思路",
         session_tag: "chat",
         sessionType: "chat",
+        currentModelProviderId: "provider-1",
+        currentModel: "qwen-coder",
       });
     });
-    expect(onNavigateToConversation).toHaveBeenCalledWith("ses-1", "qwen-coder", "只聊思路");
+    expect(onNavigateToConversation).toHaveBeenCalledWith(
+      "ses-1",
+      { providerId: "provider-1", model: "qwen-coder" },
+      "只聊思路",
+    );
     expect(screen.queryByLabelText("快速对话上下文")).toBeNull();
     expect(screen.queryByRole("button", { name: "添加附件" })).toBeNull();
   });
@@ -762,7 +792,7 @@ function createDeferred<T>() {
 
 function fakeRuntime({
   model,
-  models = model ? [{ id: model }] : [],
+  models = model ? [model] : [],
   workspaces = [workspace("ws-1", "keydex")],
   workspaceSearch = vi.fn().mockResolvedValue([]),
   workspaceEntriesByPath = { "": [] },
@@ -771,7 +801,7 @@ function fakeRuntime({
   pickDirectory = vi.fn().mockResolvedValue(null),
 }: {
   model: string;
-  models?: ModelInfo[];
+  models?: string[];
   workspaces?: Workspace[];
   workspaceSearch?: ReturnType<typeof vi.fn>;
   workspaceEntriesByPath?: Record<string, WorkspaceEntry[]>;
@@ -800,6 +830,8 @@ function fakeRuntime({
     is_debug: false,
     is_scheduled: false,
     is_current: false,
+    current_model_provider_id: model ? "provider-1" : null,
+    current_model: model || null,
   };
 
   return {
@@ -813,9 +845,49 @@ function fakeRuntime({
           api_key_preview: "sk-***",
         },
       }),
+      getModelDefaults: vi.fn().mockResolvedValue({
+        defaults: {
+          default_chat: {
+            scope: "default_chat",
+            configured: Boolean(model),
+            provider_id: model ? "provider-1" : null,
+            provider_name: model ? "默认模型服务" : null,
+            model: model || null,
+            provider_enabled: model ? true : null,
+            model_enabled: model ? true : null,
+            missing_reason: model ? null : "not_configured",
+          },
+          fast: {
+            scope: "fast",
+            configured: false,
+            provider_id: null,
+            provider_name: null,
+            model: null,
+            provider_enabled: null,
+            model_enabled: null,
+            missing_reason: "not_configured",
+          },
+        },
+      }),
     },
     models: {
-      listModels: vi.fn().mockResolvedValue({ models, cached: true }),
+      listProviders: vi.fn().mockResolvedValue(
+        model
+          ? [
+              {
+                id: "provider-1",
+                name: "默认模型服务",
+                base_url: "https://api.example/v1",
+                enabled: true,
+                api_key_set: true,
+                api_key_preview: "sk-***",
+                models,
+                model_enabled: {},
+                health: {},
+              },
+            ]
+          : [],
+      ),
     },
     workspaces: {
       list: vi.fn().mockResolvedValue({ list: workspaces, total: workspaces.length }),
