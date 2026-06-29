@@ -229,11 +229,16 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
       updateBottomState(scrollElement);
       return;
     }
+
+    scrollToBottom("auto");
+    lastProgrammaticScrollAtRef.current = 0;
+    lastScrollTopRef.current = scrollElement.scrollTop;
     window.requestAnimationFrame(() => {
       if (userPinnedRef.current) {
         return;
       }
       scrollToBottom("auto");
+      lastProgrammaticScrollAtRef.current = 0;
       lastScrollTopRef.current = scrollElement.scrollTop;
     });
   }, [autoFollow, getScrollElement, itemCount, scrollToBottom, updateBottomState]);

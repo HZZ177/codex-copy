@@ -5,6 +5,7 @@ import type { RuntimeBridge } from "@/runtime";
 import { MessageList } from "@/renderer/pages/conversation/messages";
 import { visibleTurnIndexesFromMountedTurns } from "@/renderer/pages/conversation/messages/MessageList";
 import { MessageGroupBlock } from "@/renderer/pages/conversation/messages/MessageGroupBlock";
+import { useAutoScroll } from "@/renderer/pages/conversation/messages/useAutoScroll";
 import { useVirtuosoAutoScroll } from "@/renderer/pages/conversation/messages/useVirtuosoAutoScroll";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
@@ -931,6 +932,21 @@ describe("MessageList", () => {
     expect(scroller.scrollTop).toBe(800);
   });
 
+  it("pins the static list to the bottom before the first paint", () => {
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 200 });
+
+    try {
+      render(<AutoScrollHarness />);
+      expect(screen.getByTestId("auto-scroll-container").scrollTop).toBe(800);
+    } finally {
+      restorePrototypeDescriptor("scrollHeight", scrollHeightDescriptor);
+      restorePrototypeDescriptor("clientHeight", clientHeightDescriptor);
+    }
+  });
+
   it("does not force scroll when the user has scrolled up", async () => {
     const first = message("m1", "assistant", "第一段");
     const second = message("m2", "assistant", "第二段");
@@ -1284,6 +1300,22 @@ function mockElementTopSequence(element: HTMLElement, tops: number[]) {
       } as DOMRect;
     },
   });
+}
+
+function AutoScrollHarness() {
+  const autoScroll = useAutoScroll({ deps: [], itemCount: 1 });
+  return <div ref={autoScroll.containerRef} data-testid="auto-scroll-container" />;
+}
+
+function restorePrototypeDescriptor(
+  property: "clientHeight" | "scrollHeight",
+  descriptor: PropertyDescriptor | undefined,
+) {
+  if (descriptor) {
+    Object.defineProperty(HTMLElement.prototype, property, descriptor);
+    return;
+  }
+  delete (HTMLElement.prototype as unknown as Record<string, unknown>)[property];
 }
 
 function fakeRuntime(readMedia: ReturnType<typeof vi.fn>): RuntimeBridge {

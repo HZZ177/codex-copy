@@ -281,7 +281,7 @@ export function WorkbenchAssistantSurface({
   const collapsingComposer = (!composeOpen && keepComposerContentDuringCollapse) || dockOutCollapsingToCapsule;
   const dockLayout = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out" ? "inline" : "overlay";
   const renderDrawerContent = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out";
-  const bottomSessionTitleVisible = sessionTitleVisible && !renderDrawerContent;
+  const bottomSessionTitleVisible = sessionTitleVisible && !renderDrawerContent && dockTransitionPhase !== "dock-in";
   const previewDrawerWidth = useCallback(
     (width: number) => {
       setDrawerWidthPreview(width);

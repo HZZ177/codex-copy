@@ -130,6 +130,11 @@ describe("WorkbenchAssistantSurface", () => {
     expect(surface.getAttribute("data-visual-mode")).toBe("dock-morph");
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("dock-in");
+    expect(surface.getAttribute("data-session-title-visible")).toBe("false");
+    expect(screen.getByTestId("workbench-assistant-composer-frame").getAttribute("data-session-title-visible")).toBe(
+      "false",
+    );
+    expect(screen.getByTestId("workbench-assistant-session-title").getAttribute("data-empty")).toBe("true");
     expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-header")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-morph-middle")).not.toBeNull();
