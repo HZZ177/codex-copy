@@ -9,6 +9,7 @@ import {
 import { RuntimeModelSelector, type RuntimeModelSelection } from "@/renderer/components/model";
 import { runtimeBridge, type RuntimeBridge, type WorkspaceSearchResult, type WorkspaceSkillSummary } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import type { FileAccessMode } from "@/types/protocol";
 import type { ContextWindowUsageStatus } from "./useConversationPanelModel";
 
 import styles from "./ConversationComposer.module.css";
@@ -24,6 +25,8 @@ export interface ConversationComposerProps {
   selectedSkill: WorkspaceSkillSummary | null;
   runtime?: RuntimeBridge;
   sessionId?: string | null;
+  fileAccessMode?: FileAccessMode;
+  workspaceRoots?: string[];
   onSearchWorkspace?: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenModelSettings?: () => void;
@@ -60,6 +63,8 @@ export function ConversationComposer({
   selectedSkill,
   runtime = runtimeBridge,
   sessionId,
+  fileAccessMode = "workspace_trusted",
+  workspaceRoots = [],
   onSearchWorkspace,
   onListWorkspaceDirectory,
   onOpenModelSettings,
@@ -117,6 +122,8 @@ export function ConversationComposer({
       onStop={onStop}
       runtime={runtime}
       sessionId={sessionId}
+      fileAccessMode={fileAccessMode}
+      workspaceRoots={workspaceRoots}
       onEscape={onEscape}
       onOpenFileReference={onOpenFileReference}
       externalFileRequest={externalFileRequest}

@@ -10,8 +10,8 @@ from backend.app.agent.tool_call_progress import (
     normalize_file_change,
 )
 from backend.app.core.logger import logger
-from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
+from backend.app.tools.file_access import FileAccessOperation, relative_tool_path, resolve_file_access_path
 from backend.app.tools.registry import ToolRegistry
 
 MAX_READ_BYTES = 512 * 1024
@@ -33,18 +33,18 @@ IGNORED_DIRS = {
 }
 
 READ_FILE_DESCRIPTION = (
-    "读取当前工作区内的 UTF-8 文本文件，支持从 1 开始的行号窗口。"
+    "读取文件访问权限允许范围内的 UTF-8 文本文件，支持从 1 开始的行号窗口。"
     "当目标文件已知或已定位时使用。返回原始 content、带行号的 numbered_content、"
     "总行数、截断信息和用于继续分页的 next_start_line。"
 )
 
 CREATE_FILE_DESCRIPTION = (
-    "在当前工作区内创建新的 UTF-8 文本文件，并返回文件变更 diff。"
+    "在文件访问权限允许范围内创建新的 UTF-8 文本文件，并返回文件变更 diff。"
     "目标文件已存在时会失败；修改、删除或移动已有文件请使用 edit_file。"
 )
 
 LIST_DIR_DESCRIPTION = (
-    "以有界目录树形式列出工作区目录。适合了解陌生目录、项目布局或目录下有哪些资源。"
+    "以有界目录树形式列出文件访问权限允许范围内的目录。适合了解陌生目录、项目布局或目录下有哪些资源。"
     "支持 depth、offset、limit，返回结构化 entries 和便于模型阅读的 tree 文本。"
 )
 
@@ -69,6 +69,12 @@ class DirectoryEntry:
         return result
 
 
+@dataclass(frozen=True)
+class DirectoryEntryCollection:
+    entries: list[DirectoryEntry]
+    truncated: bool
+
+
 def create_filesystem_tools() -> list[FunctionTool]:
     return [
         FunctionTool(
@@ -79,7 +85,7 @@ def create_filesystem_tools() -> list[FunctionTool]:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区相对路径，或位于工作区内的绝对文件路径。",
+                        "description": "工作区相对路径；完全访问时也可使用绝对文件路径。",
                     },
                     "start_line": {
                         "type": "integer",
@@ -121,7 +127,7 @@ def create_filesystem_tools() -> list[FunctionTool]:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区相对路径，或位于工作区内的绝对文件路径。",
+                        "description": "工作区相对路径；完全访问时也可使用绝对文件路径。",
                     },
                     "content": {"type": "string", "description": "要写入的 UTF-8 文本内容。"},
                 },
@@ -135,7 +141,10 @@ def create_filesystem_tools() -> list[FunctionTool]:
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "工作区目录路径，默认工作区根目录。"},
+                    "path": {
+                        "type": "string",
+                        "description": "工作区目录路径，默认工作区根目录；完全访问时也可使用绝对目录路径。",
+                    },
                     "depth": {
                         "type": "integer",
                         "minimum": 1,
@@ -178,7 +187,7 @@ async def read_file_tool(
     args: dict[str, Any],
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    path = _resolve(args.get("path"), context)
+    path = _resolve(args.get("path"), context, operation="read")
     if not path.exists():
         raise ToolExecutionError("文件不存在", code="file_not_found", details={"path": str(path)})
     if not path.is_file():
@@ -255,7 +264,7 @@ async def write_file_tool(
     args: dict[str, Any],
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    path = _resolve(args.get("path"), context)
+    path = _resolve(args.get("path"), context, operation="write")
     content = args.get("content")
     if not isinstance(content, str):
         raise ToolExecutionError("content 必须是字符串", code="invalid_tool_args")
@@ -298,7 +307,7 @@ async def list_dir_tool(
     args: dict[str, Any],
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    path = _resolve(args.get("path") or ".", context)
+    path = _resolve(args.get("path") or ".", context, operation="read")
     if not path.exists():
         raise ToolExecutionError("目录不存在", code="directory_not_found")
     if not path.is_dir():
@@ -309,14 +318,17 @@ async def list_dir_tool(
     offset = _non_negative_int(args.get("offset"), default=0)
     include_hidden = bool(args.get("include_hidden", False))
 
-    all_entries = _collect_directory_entries(
+    collected = _collect_directory_entries(
         path,
         context=context,
         max_depth=depth,
         include_hidden=include_hidden,
+        max_entries=offset + limit + 1,
     )
+    all_entries = collected.entries
     selected = all_entries[offset : offset + limit]
-    next_offset = offset + len(selected) if offset + len(selected) < len(all_entries) else None
+    has_more = collected.truncated or offset + len(selected) < len(all_entries)
+    next_offset = offset + len(selected) if selected and has_more else None
     result_entries = [entry.to_result() for entry in selected]
     relative = _relative(path, context)
     result = {
@@ -327,37 +339,25 @@ async def list_dir_tool(
         "offset": offset,
         "limit": limit,
         "total_entries": len(all_entries),
+        "total_entries_exact": not collected.truncated,
         "truncated": next_offset is not None,
         "next_offset": next_offset,
     }
     logger.info(
         "[FilesystemTool] 列出目录树 | "
         f"path={relative or '.'} | depth={depth} | entries={len(result_entries)} | "
-        f"total_entries={len(all_entries)} | truncated={result['truncated']}"
+        f"collected_entries={len(all_entries)} | total_entries_exact={not collected.truncated} | "
+        f"truncated={result['truncated']}"
     )
     return result
 
 
-def _resolve(raw_path: Any, context: ToolExecutionContext) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ToolExecutionError("path 必须是非空字符串", code="invalid_tool_args")
-    try:
-        return resolve_workspace_path(
-            raw_path,
-            cwd=context.workspace_root,
-            workspace_roots=[context.workspace_root],
-        )
-    except WorkspacePathError as exc:
-        raise ToolExecutionError(
-            str(exc),
-            code="workspace_path_forbidden",
-            details={"path": raw_path},
-        ) from exc
+def _resolve(raw_path: Any, context: ToolExecutionContext, *, operation: FileAccessOperation) -> Path:
+    return resolve_file_access_path(raw_path, context, operation=operation)
 
 
 def _relative(path: Path, context: ToolExecutionContext) -> str:
-    rel = path.resolve().relative_to(context.workspace_root).as_posix()
-    return rel or "."
+    return relative_tool_path(path, context)
 
 
 def _positive_int(value: Any, *, default: int) -> int:
@@ -466,14 +466,22 @@ def _collect_directory_entries(
     context: ToolExecutionContext,
     max_depth: int,
     include_hidden: bool,
-) -> list[DirectoryEntry]:
+    max_entries: int,
+) -> DirectoryEntryCollection:
     entries: list[DirectoryEntry] = []
+    truncated = False
 
     def visit(directory: Path, depth: int) -> None:
+        nonlocal truncated
+        if truncated:
+            return
         if depth > max_depth:
             return
         children = _sorted_children(directory, include_hidden=include_hidden)
         for child in children:
+            if len(entries) >= max_entries:
+                truncated = True
+                return
             try:
                 stat = child.stat()
             except OSError:
@@ -490,9 +498,11 @@ def _collect_directory_entries(
             )
             if child.is_dir() and depth < max_depth and child.name not in IGNORED_DIRS:
                 visit(child, depth + 1)
+            if truncated:
+                return
 
     visit(root, 1)
-    return entries
+    return DirectoryEntryCollection(entries=entries, truncated=truncated)
 
 
 def _sorted_children(directory: Path, *, include_hidden: bool) -> list[Path]:

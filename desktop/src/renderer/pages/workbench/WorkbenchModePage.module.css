@@ -89,6 +89,11 @@
   will-change: auto;
 }
 
+.workspace[data-dock-transition-phase="resize"] .canvas {
+  transition: none;
+  will-change: margin-right;
+}
+
 .canvasContent {
   height: 100%;
   min-width: 0;

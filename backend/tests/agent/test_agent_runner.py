@@ -78,6 +78,26 @@ def _tool_registry() -> ToolRegistry:
     return registry
 
 
+def _file_tool_registry() -> ToolRegistry:
+    registry = _tool_registry()
+    registry.register(
+        FunctionTool(
+            name="create_file",
+            description="创建文件",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+            handler=lambda args, context: {"path": args["path"]},
+        )
+    )
+    return registry
+
+
 def _runner(
     tmp_path: Path,
     *,
@@ -276,3 +296,43 @@ def test_agent_runner_can_disable_registered_tools(tmp_path) -> None:
     assert agent is not None
     assert runner.tool_registry.names() == ["read_file"]
     assert factory.created_tool_counts == [0]
+
+
+def test_agent_runner_keeps_file_tools_visible_when_file_access_disabled(tmp_path) -> None:
+    runner, factory = _runner(tmp_path, registry=_file_tool_registry())
+
+    runner.create_agent(
+        model="qwen-coder",
+        system_prompt="自定义提示",
+        tool_context=ToolExecutionContext(
+            session_id="ses_1",
+            user_id="user_1",
+            workspace_root=tmp_path,
+            turn_index=1,
+            trace_id="trace_1",
+            metadata={"file_access_mode": "no_file_access"},
+        ),
+    )
+
+    assert runner.tool_registry.names() == ["create_file", "read_file"]
+    assert factory.created_tool_counts == [2]
+
+
+def test_agent_runner_keeps_write_file_tools_visible_in_read_only_mode(tmp_path) -> None:
+    runner, factory = _runner(tmp_path, registry=_file_tool_registry())
+
+    runner.create_agent(
+        model="qwen-coder",
+        system_prompt="自定义提示",
+        tool_context=ToolExecutionContext(
+            session_id="ses_1",
+            user_id="user_1",
+            workspace_root=tmp_path,
+            turn_index=1,
+            trace_id="trace_1",
+            metadata={"file_access_mode": "workspace_read_only"},
+        ),
+    )
+
+    assert runner.tool_registry.names() == ["create_file", "read_file"]
+    assert factory.created_tool_counts == [2]

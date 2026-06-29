@@ -20,7 +20,9 @@ import {
 } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WorkspaceSearchResult, type WorkspaceSkillSummary } from "@/runtime";
+import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import type { FileAccessMode } from "@/types/protocol";
 import { getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu/atFiles";
 import popupStyles from "@/renderer/components/chat/ComposerPopupMenu/ComposerPopupMenu.module.css";
 import {
@@ -69,6 +71,8 @@ const LazyAtFileMenu = lazy(() =>
 
 const MISSING_SOURCE_FILE_PATH_MESSAGE =
   "无法获取源文件路径，已拒绝作为临时副本添加。请在桌面端选择文件，或将文件放入工作区后用 @ 引用。";
+const FILE_ACCESS_DISABLED_MESSAGE = "当前文件访问权限为「无文件访问权限」，不能引入文件上下文。";
+const WORKSPACE_FILE_ONLY_MESSAGE = "当前文件访问权限仅允许引入工作区内文件，请将文件放入工作区后用 @ 引用。";
 
 export interface SendBoxProps {
   value: string;
@@ -88,6 +92,8 @@ export interface SendBoxProps {
   variant?: "conversation" | "keydex";
   autoFocusKey?: string;
   allowFileSelection?: boolean;
+  fileAccessMode?: FileAccessMode;
+  workspaceRoots?: string[];
   externalFileRequest?: SendBoxExternalFileRequest | null;
   externalQuoteRequest?: SendBoxExternalQuoteRequest | null;
   leftHint?: ReactNode;
@@ -138,6 +144,8 @@ export function SendBox({
   variant = "conversation",
   autoFocusKey,
   allowFileSelection = true,
+  fileAccessMode = "workspace_trusted",
+  workspaceRoots = [],
   externalFileRequest = null,
   externalQuoteRequest = null,
   leftHint = null,
@@ -186,9 +194,13 @@ export function SendBox({
     quoteSelectionReducer,
     initialQuoteSelectionState,
   );
+  const notifications = useNotifications();
   const editorValue = value;
   const busy = isBusy(runtimeState);
   const inputDisabled = disabled || (busy && runtimeState !== "running");
+  const canUseFileContext = allowFileSelection && fileAccessMode !== "no_file_access";
+  const filePickerAllowsGlobalPaths = fileAccessMode === "full_access";
+  const fileAccessHint = fileAccessMessage(fileAccessMode);
   const selectedSkill = controlledSelectedSkill !== undefined ? controlledSelectedSkill : uncontrolledSelectedSkill;
   const setSelectedSkill = useCallback(
     (skill: WorkspaceSkillSummary | null) => {
@@ -291,16 +303,19 @@ export function SendBox({
     !busy &&
     !slashOpen;
   const atDirectoryPath =
-    atOpen && onListWorkspaceDirectory && (atBrowsePath !== null || !atQuery) ? atBrowsePath ?? "" : null;
+    atOpen && canUseFileContext && onListWorkspaceDirectory && (atBrowsePath !== null || !atQuery)
+      ? atBrowsePath ?? ""
+      : null;
   const atSearchQuery = atDirectoryPath === null ? atQuery ?? "" : "";
   const atSearchState = useWorkspaceFileSearch({
-    enabled: atOpen && atDirectoryPath === null && Boolean(onSearchWorkspace),
+    enabled: atOpen && canUseFileContext && atDirectoryPath === null && Boolean(onSearchWorkspace),
     query: atSearchQuery,
     search: onSearchWorkspace,
   });
-  const atResults = atDirectoryPath === null ? atSearchState.results : atDirectoryResults;
-  const atLoading = atDirectoryPath === null ? atSearchState.loading : atDirectoryLoading;
-  const atError = atDirectoryPath === null ? atSearchState.error : atDirectoryError;
+  const atResults = canUseFileContext ? (atDirectoryPath === null ? atSearchState.results : atDirectoryResults) : [];
+  const atLoading = canUseFileContext && (atDirectoryPath === null ? atSearchState.loading : atDirectoryLoading);
+  const atError = canUseFileContext ? (atDirectoryPath === null ? atSearchState.error : atDirectoryError) : null;
+  const atHint = atOpen && !canUseFileContext ? fileAccessHint : null;
   const composition = useCompositionInput({
     disabled: inputDisabled || !canSubmit,
     onSubmit: requestSend,
@@ -388,7 +403,7 @@ export function SendBox({
   }, [atBrowseState, atQuery, editorValue]);
 
   useEffect(() => {
-    if (!externalFileRequest || !allowFileSelection) {
+    if (!externalFileRequest || !canUseFileContext) {
       return;
     }
     if (handledExternalFileRequestIdRef.current === externalFileRequest.requestId) {
@@ -397,7 +412,7 @@ export function SendBox({
     handledExternalFileRequestIdRef.current = externalFileRequest.requestId;
     dispatchFileSelection({ type: "add", file: externalFileRequest.file });
     inputRef.current?.focus();
-  }, [allowFileSelection, externalFileRequest]);
+  }, [canUseFileContext, externalFileRequest]);
 
   useEffect(() => {
     if (!externalQuoteRequest) {
@@ -413,7 +428,7 @@ export function SendBox({
 
   useEffect(() => {
     let active = true;
-    if (!atOpen || atDirectoryPath === null || !onListWorkspaceDirectory) {
+    if (!atOpen || !canUseFileContext || atDirectoryPath === null || !onListWorkspaceDirectory) {
       if (hadAtDirectoryRequestRef.current) {
         hadAtDirectoryRequestRef.current = false;
         setAtDirectoryResults([]);
@@ -447,7 +462,7 @@ export function SendBox({
     return () => {
       active = false;
     };
-  }, [atDirectoryPath, atOpen, onListWorkspaceDirectory]);
+  }, [atDirectoryPath, atOpen, canUseFileContext, onListWorkspaceDirectory]);
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -539,6 +554,12 @@ export function SendBox({
 
   const addSelectedFilePath = useCallback(
     (path: string, source: SelectedFileSource, name?: string | null) => {
+      if (!canUseFileContext) {
+        return false;
+      }
+      if (!filePickerAllowsGlobalPaths && source !== "workspace" && !isWorkspaceAllowedPath(path, workspaceRoots)) {
+        return false;
+      }
       const selected = selectedFileFromPath(path, source, name, "file");
       if (!selected) {
         return false;
@@ -546,7 +567,22 @@ export function SendBox({
       dispatchFileSelection({ type: "add", file: selected });
       return true;
     },
-    [],
+    [canUseFileContext, filePickerAllowsGlobalPaths, workspaceRoots],
+  );
+
+  const reportAttachmentSelectionResult = useCallback(
+    (message: string | null, level: "warning" | "error" = "warning") => {
+      if (!message) {
+        dispatchFileSelection({ type: "error", error: null });
+        return;
+      }
+      const notificationId =
+        level === "error"
+          ? notifications.error(message)
+          : notifications.warning(message);
+      dispatchFileSelection({ type: "error", error: notificationId ? null : message });
+    },
+    [notifications],
   );
 
   const addPickedPaths = useCallback(
@@ -558,27 +594,50 @@ export function SendBox({
       setAttachmentLoading(true);
       try {
         let added = 0;
+        let blockedByFileAccess = false;
+        let blockedByWorkspaceScope = false;
         for (const path of cleanedPaths) {
           if (isImagePath(path)) {
             await addImagePath(path, source);
             added += 1;
             continue;
           }
-          if (allowFileSelection && addSelectedFilePath(path, source)) {
+          if (!canUseFileContext) {
+            blockedByFileAccess = true;
+            continue;
+          }
+          if (!filePickerAllowsGlobalPaths && source !== "workspace" && !isWorkspaceAllowedPath(path, workspaceRoots)) {
+            blockedByWorkspaceScope = true;
+            continue;
+          }
+          if (addSelectedFilePath(path, source)) {
             added += 1;
           }
         }
-        dispatchFileSelection({
-          type: "error",
-          error: added ? null : "不支持的文件，无法获取路径",
-        });
+        reportAttachmentSelectionResult(
+          blockedByFileAccess
+            ? FILE_ACCESS_DISABLED_MESSAGE
+            : blockedByWorkspaceScope
+              ? fileAccessHint || WORKSPACE_FILE_ONLY_MESSAGE
+              : added
+                ? null
+                : "不支持的文件，无法获取路径",
+        );
       } catch (reason) {
-        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+        reportAttachmentSelectionResult(errorMessage(reason), "error");
       } finally {
         setAttachmentLoading(false);
       }
     },
-    [addImagePath, addSelectedFilePath, allowFileSelection],
+    [
+      addImagePath,
+      addSelectedFilePath,
+      canUseFileContext,
+      fileAccessHint,
+      filePickerAllowsGlobalPaths,
+      reportAttachmentSelectionResult,
+      workspaceRoots,
+    ],
   );
 
   const addImageUrl = useCallback(
@@ -588,14 +647,14 @@ export function SendBox({
         const record = await runtime.attachments.importImageUrl(url, { source: "url", sessionId });
         const media = await runtime.attachments.readMedia(record.attachment_id || record.id);
         addImageAttachment(selectedImageAttachmentFromRecord(record, media.data_url));
-        dispatchFileSelection({ type: "error", error: null });
+        reportAttachmentSelectionResult(null);
       } catch (reason) {
-        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+        reportAttachmentSelectionResult(errorMessage(reason), "error");
       } finally {
         setAttachmentLoading(false);
       }
     },
-    [addImageAttachment, runtime, sessionId],
+    [addImageAttachment, reportAttachmentSelectionResult, runtime, sessionId],
   );
 
   const addFiles = useCallback(
@@ -607,6 +666,8 @@ export function SendBox({
       setAttachmentLoading(true);
       try {
         let added = 0;
+        let blockedByFileAccess = false;
+        let blockedByWorkspaceScope = false;
         let missingSourcePath = false;
         for (const file of items) {
           if (isImageFile(file)) {
@@ -630,38 +691,52 @@ export function SendBox({
             }
             continue;
           }
-          if (!allowFileSelection) {
+          if (!canUseFileContext) {
+            blockedByFileAccess = true;
             continue;
           }
           const selected = selectedFileFromFile(file, source);
           if (selected) {
-            dispatchFileSelection({ type: "add", file: selected });
-            added += 1;
+            if (!filePickerAllowsGlobalPaths && !isWorkspaceAllowedPath(selected.path, workspaceRoots)) {
+              blockedByWorkspaceScope = true;
+              continue;
+            }
+            if (addSelectedFilePath(selected.path, source, selected.name)) {
+              added += 1;
+            }
             continue;
           }
-          if (source !== "pasted") {
-            missingSourcePath = true;
-            continue;
-          }
-          const stored = await runtime.attachments.uploadLocalFile(file, {
-            filename: file.name,
-            source,
-          });
-          if (addSelectedFilePath(stored.path, source, stored.name)) {
-            added += 1;
-          }
+          missingSourcePath = true;
         }
-        dispatchFileSelection({
-          type: "error",
-          error: added ? null : missingSourcePath ? MISSING_SOURCE_FILE_PATH_MESSAGE : "不支持的文件，无法获取路径",
-        });
+        reportAttachmentSelectionResult(
+          blockedByFileAccess
+            ? FILE_ACCESS_DISABLED_MESSAGE
+            : blockedByWorkspaceScope
+              ? fileAccessHint || WORKSPACE_FILE_ONLY_MESSAGE
+              : missingSourcePath
+                ? MISSING_SOURCE_FILE_PATH_MESSAGE
+                : added
+                  ? null
+                  : "不支持的文件，无法获取路径",
+        );
       } catch (reason) {
-        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+        reportAttachmentSelectionResult(errorMessage(reason), "error");
       } finally {
         setAttachmentLoading(false);
       }
     },
-    [addImageAttachment, addImagePath, addSelectedFilePath, allowFileSelection, runtime, sessionId],
+    [
+      addImageAttachment,
+      addImagePath,
+      addSelectedFilePath,
+      canUseFileContext,
+      fileAccessHint,
+      filePickerAllowsGlobalPaths,
+      reportAttachmentSelectionResult,
+      runtime,
+      sessionId,
+      workspaceRoots,
+    ],
   );
 
   const handleAttachmentPick = useCallback(() => {
@@ -961,6 +1036,7 @@ export function SendBox({
             activeIndex={atActiveIndex}
             loading={atLoading}
             error={atError}
+            hint={atHint}
             directoryPath={atDirectoryPath}
             query={atQuery ?? ""}
             onNavigateDirectory={navigateAtDirectory}
@@ -1097,6 +1173,38 @@ function fileSystemPathFromFile(file: File): string | null {
 
 function isLikelyFilesystemPath(path: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\");
+}
+
+function fileAccessMessage(mode: FileAccessMode): string {
+  if (mode === "no_file_access") {
+    return FILE_ACCESS_DISABLED_MESSAGE;
+  }
+  if (mode === "workspace_read_only") {
+    return "当前文件访问权限为「工作区内只读」，只能引入工作区内文件。";
+  }
+  if (mode === "workspace_trusted") {
+    return "当前文件访问权限为「工作区内信任」，只能引入工作区内文件。";
+  }
+  return "";
+}
+
+function isWorkspaceAllowedPath(path: string, workspaceRoots: string[]): boolean {
+  const cleaned = path.trim();
+  if (!cleaned) {
+    return false;
+  }
+  if (!isLikelyFilesystemPath(cleaned)) {
+    return true;
+  }
+  const target = comparablePath(cleaned);
+  return workspaceRoots.some((root) => {
+    const normalizedRoot = comparablePath(root);
+    return Boolean(normalizedRoot) && (target === normalizedRoot || target.startsWith(`${normalizedRoot}/`));
+  });
+}
+
+function comparablePath(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 function imageUrlFromClipboard(data: DataTransfer): string | null {

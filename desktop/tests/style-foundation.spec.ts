@@ -265,6 +265,7 @@ describe("style foundation", () => {
     const resizeHandle = readSource("renderer/components/layout/SidebarResizeHandle.module.css");
     const rightResizeHandle = readSource("renderer/components/layout/RightSidebarResizeHandle.module.css");
     const titlebar = readSource("renderer/components/layout/Titlebar/Titlebar.module.css");
+    const workspaceSelector = readSource("renderer/components/workspace/WorkspaceSelector.module.css");
     const shell = readSource("renderer/pages/settings/SettingsShell.module.css");
     const model = readSource("renderer/pages/settings/model/ModelSettingsPage.module.css");
     const usage = readSource("renderer/pages/settings/usage/UsageStatsPage.module.css");
@@ -290,6 +291,22 @@ describe("style foundation", () => {
     expect(mainLayout).not.toContain("rightSidebarEnter");
     expect(titlebar).not.toMatch(/\.titlebar\s*{[^}]*border-bottom/s);
     expect(titlebar).toMatch(/\.titlebar\s*{[^}]*background:\s*var\(--sidebar-bg\)/s);
+    expect(titlebar).toMatch(
+      /\.modeSwitch\s*{[^}]*width:\s*max\(\s*176px,\s*calc\(\s*var\(--sidebar-width\)\s*-\s*var\(--titlebar-left-padding\)\s*-\s*var\(--titlebar-brand-size\)\s*-\s*var\(--titlebar-left-gap\)\s*\)\s*\)/s,
+    );
+    expect(titlebar).toMatch(
+      /\.modeSwitch\s*{[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-active\) 74%,\s*var\(--sidebar-bg\)\)/s,
+    );
+    expect(titlebar).toMatch(/\.modeSwitch::before\s*{[^}]*0 2px 7px rgb\(15 23 42 \/ 13%\)/s);
+    expect(workspaceSelector).toMatch(
+      /\.root\[data-variant="titlebar"\]\s+\.trigger\s*{[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-active\) 76%,\s*var\(--sidebar-bg\)\)/s,
+    );
+    expect(workspaceSelector).toMatch(
+      /\.root\[data-variant="titlebar"\]\s+\.trigger\s*{[^}]*color:\s*var\(--color-text-1\)/s,
+    );
+    expect(workspaceSelector).toMatch(
+      /\.root\[data-variant="titlebar"\]\s+\.trigger svg:first-child\s*{[^}]*var\(--color-primary-6\) 44%/s,
+    );
     expect(sider).toMatch(/\.sider\s*{[^}]*width:\s*var\(--sidebar-width\)/s);
     expect(sider).toMatch(/\.sider\s*{[^}]*flex:\s*0 0 var\(--sidebar-width\)/s);
     expect(sider).not.toContain("border-right:");

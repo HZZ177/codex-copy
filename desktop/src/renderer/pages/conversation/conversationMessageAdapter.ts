@@ -43,9 +43,6 @@ export function conversationKindFromAgent(message: AgentChatMessage): Conversati
     if (message.toolName === "load_skill") {
       return "skill";
     }
-    if (isEditToolName(message.toolName) && hasFileChanges(message)) {
-      return "file_change";
-    }
     return message.toolName === "run_command" ? "command" : "tool";
   }
   if (message.role === "approval") {
@@ -162,14 +159,6 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
   }
 
   return base;
-}
-
-function isEditToolName(toolName: string | undefined): boolean {
-  return ["write_file", "apply_patch", "edit_file", "create_file", "delete_file"].includes(toolName ?? "");
-}
-
-function hasFileChanges(message: AgentChatMessage): boolean {
-  return Boolean(message.fileChanges?.length || fileChangesFromUiPayload(message.uiPayload).length);
 }
 
 function isContextCompressionMessage(message: AgentChatMessage): boolean {

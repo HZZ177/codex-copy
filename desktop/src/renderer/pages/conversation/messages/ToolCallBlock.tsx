@@ -14,6 +14,9 @@ import { useMemo, useState } from "react";
 
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
+import { formatErrorText, readableErrorText } from "./errorText";
+import type { FileChangePreview } from "./FileChangeBlock";
+import { LineChangeTicker } from "./LineChangeTicker";
 import { copyText } from "./markdown";
 import styles from "./ToolCallBlock.module.css";
 import { useLazyToolDetails, type ToolDetailsLoader } from "./useLazyToolDetails";
@@ -24,13 +27,14 @@ const INLINE_ERROR_MAX_CHARS = 240;
 
 export interface ToolCallBlockProps {
   message: ConversationMessage;
+  onPreviewFile?: (file: FileChangePreview) => void;
   onLoadDetails?: ToolDetailsLoader;
 }
 
 type CopyTarget = "input" | "output";
 type CopyStatus = "idle" | "copied" | "failed";
 
-export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
+export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCallBlockProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [copyState, setCopyState] = useState<{ target: CopyTarget; status: Exclude<CopyStatus, "idle"> } | null>(null);
   const details = useLazyToolDetails(message, onLoadDetails);
@@ -68,9 +72,10 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
       data-status={failed ? "failed" : details.message.status}
       data-testid="tool-call-block"
     >
-      <button
+      <div
         className={styles.header}
-        type="button"
+        role="button"
+        tabIndex={0}
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? "收起工具详情" : "展开工具详情"}
         onClick={(event) => {
@@ -82,9 +87,24 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
             return !open;
           });
         }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          event.preventDefault();
+          captureExpansionAnchor(event.currentTarget);
+          setDetailsOpen((open) => {
+            if (!open) {
+              void details.load();
+            }
+            return !open;
+          });
+        }}
       >
-        <span className={styles.icon} aria-hidden="true">
-          {toolIcon(tool.name, failed)}
+        <span className={styles.leadingIcon} aria-hidden="true">
+          <span className={styles.icon}>
+            {toolIcon(tool.name, failed)}
+          </span>
         </span>
         <div className={styles.titleGroup}>
           <div className={styles.title}>
@@ -92,16 +112,31 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
               <>
                 <span>{tool.actionLabel}</span>
                 <span> </span>
-                <span className={tool.fileTarget ? styles.fileTarget : undefined}>{tool.target}</span>
+                <FileTarget
+                  diff={tool.fileChange?.diff ?? ""}
+                  onPreviewFile={onPreviewFile}
+                  path={tool.target}
+                />
               </>
             ) : (
               tool.title
             )}
           </div>
+          {tool.fileChange && !failed && hasLineDeltas(tool.fileChange) ? (
+            <LineChangeTicker
+              className={styles.inlineTicker}
+              label=""
+              added={tool.fileChange.additions}
+              removed={tool.fileChange.deletions}
+              unit=""
+            />
+          ) : null}
           {tool.duration ? <div className={styles.meta}>{tool.duration}</div> : null}
         </div>
-        <ChevronDown className={styles.chevron} size={14} />
-      </button>
+        <span className={styles.trailingIcon} aria-hidden="true">
+          <ChevronDown className={styles.chevron} size={14} />
+        </span>
+      </div>
 
       {failed && tool.errorPreview ? (
         <p className={styles.errorMessage}>错误信息：{tool.errorPreview}</p>
@@ -182,6 +217,36 @@ export function ToolCallBlock({ message, onLoadDetails }: ToolCallBlockProps) {
   );
 }
 
+function hasLineDeltas(file: ToolFileChange): boolean {
+  return file.additions > 0 || file.deletions > 0;
+}
+
+function FileTarget({
+  diff,
+  onPreviewFile,
+  path,
+}: {
+  diff: string;
+  onPreviewFile?: (file: FileChangePreview) => void;
+  path: string;
+}) {
+  if (!onPreviewFile) {
+    return <span className={styles.fileTarget}>{path}</span>;
+  }
+  return (
+    <button
+      className={styles.fileTargetButton}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onPreviewFile({ path, diff });
+      }}
+    >
+      {path}
+    </button>
+  );
+}
+
 function copyStatus(
   state: { target: CopyTarget; status: Exclude<CopyStatus, "idle"> } | null,
   target: CopyTarget,
@@ -205,6 +270,7 @@ interface ParsedToolPayload {
   actionLabel: string;
   target: string;
   fileTarget: boolean;
+  fileChange: ToolFileChange | null;
   argsText: string;
   resultText: string;
   resultStatus: string | null;
@@ -221,18 +287,112 @@ function parseToolPayload(message: ConversationMessage): ParsedToolPayload {
   const resultStatus = stringValue(result?.status);
   const target = toolTarget(args, message.payload, summary);
   const actionLabel = toolActionLabel(name, message.status, resultStatus);
+  const outputText = resultText(result, message.payload);
+  const fileChange = isFileMutationTool(name) ? singleToolFileChange(message, target) : null;
   return {
     name,
     title: target ? `${actionLabel} ${target}` : actionLabel,
     actionLabel,
     target,
     fileTarget: isFileMutationTool(name),
+    fileChange,
     argsText: stringify(args),
-    resultText: resultText(result, message.payload),
+    resultText: outputText,
     resultStatus,
     duration: formatDuration(result?.duration_ms ?? result?.durationMs ?? message.payload.duration_ms ?? message.payload.durationMs),
-    errorPreview: truncateInlineError(resultText(result, message.payload)),
+    errorPreview: truncateInlineError(errorText(result, message.payload, outputText)),
   };
+}
+
+interface ToolFileChange {
+  path: string;
+  additions: number;
+  deletions: number;
+  diff: string;
+}
+
+function singleToolFileChange(message: ConversationMessage, target: string): ToolFileChange | null {
+  const files = toolFileChanges(message, target);
+  return files.length === 1 ? files[0] : null;
+}
+
+function toolFileChanges(message: ConversationMessage, target: string): ToolFileChange[] {
+  const result = asRecord(message.payload.result);
+  const changes = new Map<string, ToolFileChange>();
+  collectToolFileChanges(message.payload.files, changes);
+  collectToolFileChanges(filesFromUiPayload(asRecord(message.payload.ui_payload)), changes);
+  collectToolFileChanges(result?.files, changes);
+  collectToolFileChanges(filesFromUiPayload(asRecord(result?.ui_payload)), changes);
+  if (!changes.size && target) {
+    changes.set(target, { path: target, additions: 0, deletions: 0, diff: "" });
+  }
+  return [...changes.values()];
+}
+
+function collectToolFileChanges(source: unknown, changes: Map<string, ToolFileChange>) {
+  if (!Array.isArray(source)) {
+    return;
+  }
+  source.forEach((item, index) => {
+    const file = toolFileChangeFromRecord(asRecord(item), index);
+    if (!file) {
+      return;
+    }
+    const existing = changes.get(file.path);
+    changes.set(file.path, {
+      path: file.path,
+      additions: file.additions || existing?.additions || 0,
+      deletions: file.deletions || existing?.deletions || 0,
+      diff: file.diff || existing?.diff || "",
+    });
+  });
+}
+
+function filesFromUiPayload(uiPayload: Record<string, unknown> | null): unknown {
+  if (!uiPayload) {
+    return [];
+  }
+  return Array.isArray(uiPayload.files) ? uiPayload.files : uiPayload.changes;
+}
+
+function toolFileChangeFromRecord(record: Record<string, unknown> | null, index: number): ToolFileChange | null {
+  if (!record) {
+    return null;
+  }
+  const path = stringValue(record.path) || `文件 ${index + 1}`;
+  const diff = stringValue(record.diff);
+  return {
+    path,
+    additions: numberValue(record.additions) ?? numberValue(record.added_lines) ?? countDiff(diff, "+"),
+    deletions:
+      numberValue(record.deletions) ??
+      numberValue(record.deleted_lines) ??
+      numberValue(record.removed_lines) ??
+      countDiff(diff, "-"),
+    diff,
+  };
+}
+
+function countDiff(diff: string, sign: "+" | "-"): number {
+  if (!diff) {
+    return 0;
+  }
+  return diff
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith(sign) && !line.startsWith(`${sign}${sign}${sign}`))
+    .length;
+}
+
+function errorText(
+  result: Record<string, unknown> | null,
+  payload: Record<string, unknown>,
+  outputText: string,
+): string {
+  return (
+    formatErrorText(result?.error) ||
+    formatErrorText(payload.error) ||
+    readableErrorText(outputText)
+  );
 }
 
 function resultText(result: Record<string, unknown> | null, payload: Record<string, unknown>): string {

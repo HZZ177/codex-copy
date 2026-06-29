@@ -74,8 +74,10 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
           });
         }}
       >
-        <span className={styles.icon} aria-hidden="true">
-          {negative ? <XCircle size={16} /> : running ? <LoaderCircle size={16} /> : <SquareTerminal size={16} />}
+        <span className={styles.leadingIcon} aria-hidden="true">
+          <span className={styles.icon}>
+            {negative ? <XCircle size={16} /> : running ? <LoaderCircle size={16} /> : <SquareTerminal size={16} />}
+          </span>
         </span>
         <div className={styles.titleGroup}>
           <div className={styles.command}>{command.title}</div>
@@ -91,7 +93,9 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
             {command.trustedRuleId ? <span>已信任规则</span> : null}
           </div>
         </div>
-        <ChevronDown className={styles.chevron} size={14} />
+        <span className={styles.trailingIcon} aria-hidden="true">
+          <ChevronDown className={styles.chevron} size={14} />
+        </span>
       </button>
 
       {rejected && command.rejectMessage ? (

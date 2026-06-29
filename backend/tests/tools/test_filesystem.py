@@ -4,12 +4,14 @@ from backend.app.tools import ToolExecutionContext, ToolRegistry
 from backend.app.tools.filesystem import register_filesystem_tools
 
 
-def _context(tmp_path) -> ToolExecutionContext:
+def _context(tmp_path, *, file_access_mode: str | None = None) -> ToolExecutionContext:
+    metadata = {"file_access_mode": file_access_mode} if file_access_mode else {}
     return ToolExecutionContext(
         session_id="ses_files",
         user_id="local-user",
         workspace_root=tmp_path,
         turn_index=1,
+        metadata=metadata,
     )
 
 
@@ -17,8 +19,8 @@ def _registry() -> ToolRegistry:
     return register_filesystem_tools(ToolRegistry())
 
 
-async def _run(name: str, args: dict, tmp_path):
-    return await _registry().require(name).run(args, _context(tmp_path))
+async def _run(name: str, args: dict, tmp_path, *, file_access_mode: str | None = None):
+    return await _registry().require(name).run(args, _context(tmp_path, file_access_mode=file_access_mode))
 
 
 async def test_read_file_tool_reads_utf8_text_with_line_window(tmp_path) -> None:
@@ -101,6 +103,20 @@ async def test_list_dir_tool_returns_depth_limited_tree_and_pagination(tmp_path)
     assert "src/" in result.result["tree"]
 
 
+async def test_list_dir_tool_stops_collecting_after_page_budget(tmp_path) -> None:
+    for index in range(6):
+        (tmp_path / f"file-{index}.txt").write_text("", encoding="utf-8")
+
+    result = await _run("list_dir", {"path": ".", "depth": 1, "limit": 2}, tmp_path)
+
+    assert result.ok is True
+    assert len(result.result["entries"]) == 2
+    assert result.result["truncated"] is True
+    assert result.result["next_offset"] == 2
+    assert result.result["total_entries"] == 3
+    assert result.result["total_entries_exact"] is False
+
+
 async def test_create_file_tool_creates_new_file_inside_workspace(tmp_path) -> None:
     result = await _run(
         "create_file",
@@ -146,6 +162,66 @@ async def test_filesystem_tools_reject_workspace_escape(tmp_path) -> None:
 
     assert result.ok is False
     assert result.error["code"] == "workspace_path_forbidden"
+
+
+async def test_filesystem_tools_respect_no_file_access_mode(tmp_path) -> None:
+    (tmp_path / "note.md").write_text("secret", encoding="utf-8")
+
+    result = await _run(
+        "read_file",
+        {"path": "note.md"},
+        tmp_path,
+        file_access_mode="no_file_access",
+    )
+
+    assert result.ok is False
+    assert result.error["code"] == "file_access_disabled"
+
+
+async def test_filesystem_tools_reject_writes_in_workspace_read_only_mode(tmp_path) -> None:
+    result = await _run(
+        "create_file",
+        {"path": "out.txt", "content": "blocked"},
+        tmp_path,
+        file_access_mode="workspace_read_only",
+    )
+
+    assert result.ok is False
+    assert result.error["code"] == "file_write_forbidden"
+    assert not (tmp_path / "out.txt").exists()
+
+
+async def test_filesystem_tools_allow_external_read_in_full_access_mode(tmp_path) -> None:
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("external", encoding="utf-8")
+
+    result = await _run(
+        "read_file",
+        {"path": str(outside)},
+        tmp_path,
+        file_access_mode="full_access",
+    )
+
+    assert result.ok is True
+    assert result.result["path"] == outside.resolve().as_posix()
+    assert result.result["content"] == "external"
+
+
+async def test_filesystem_tools_allow_external_write_in_full_access_mode(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-created.txt"
+    if outside.exists():
+        outside.unlink()
+
+    result = await _run(
+        "create_file",
+        {"path": str(outside), "content": "external write"},
+        tmp_path,
+        file_access_mode="full_access",
+    )
+
+    assert result.ok is True
+    assert result.result["files"][0]["path"] == outside.resolve().as_posix()
+    assert outside.read_text(encoding="utf-8") == "external write"
 
 
 async def test_read_file_tool_reports_missing_file(tmp_path) -> None:

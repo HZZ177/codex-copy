@@ -8,13 +8,10 @@
 
 .header {
   --ghost-row-height: 20px;
-  --ghost-text-offset-y: -1px;
 
-  display: grid;
+  display: inline-flex;
   width: fit-content;
   max-width: 100%;
-  grid-template-columns: 18px minmax(0, auto) 16px;
-  grid-auto-rows: var(--ghost-row-height);
   align-items: center;
   gap: 6px;
   color: var(--color-text-tertiary);
@@ -24,7 +21,6 @@
 }
 
 .header[data-single="true"] {
-  grid-template-columns: 18px minmax(0, auto) 16px;
   gap: 7px;
 }
 
@@ -52,22 +48,22 @@
 
 .titleGroup {
   display: inline-flex;
+  height: var(--ghost-row-height);
   min-width: 0;
-  min-height: var(--ghost-row-height);
   align-items: center;
   gap: 6px;
-  transform: translateY(var(--ghost-text-offset-y));
 }
 
 .toggleGlyph,
 .chevronGlyph {
   display: inline-grid;
   width: 18px;
-  height: 18px;
-  align-self: center;
+  height: var(--ghost-row-height);
+  flex: 0 0 18px;
   place-items: center;
   border-radius: var(--radius-sm);
   color: inherit;
+  line-height: 0;
 }
 
 .pathButton:focus-visible {

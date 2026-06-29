@@ -19,7 +19,7 @@ from backend.app.agent.middleware.common import (
     ToolCallLimitExceededError,
 )
 from backend.app.agent.tool_call_preset import ToolCallPreset, ToolCallPresetItem
-from backend.app.command_approval import ApprovalService
+from backend.app.command_approval import ApprovalService, load_command_settings
 from backend.app.core.config import AppSettings
 from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
@@ -785,6 +785,7 @@ class ChatService:
         )
         tool_context.metadata["repositories"] = self.repositories
         tool_context.metadata["dispatcher"] = dispatcher
+        tool_context.metadata["file_access_mode"] = load_command_settings(self.repositories).file_access_mode
         workspace_root_label = str(tool_context.workspace_root) if enable_tools else "-"
         logger.info(
             f"[AgentLoop] 创建 agent | session_id={session.id} | turn_index={turn_index} | "

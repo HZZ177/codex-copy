@@ -760,6 +760,28 @@ describe("MessageList", () => {
     expect(screen.queryByText(/查看失败 3 个目录/)).toBeNull();
   });
 
+  it("keeps failed search_files and create_file panels available inside grouped tools", () => {
+    render(
+      <MessageList
+        messages={[
+          failedToolMessage("search-failed", "search_files", { query: "README" }),
+          failedToolMessage("create-failed", "create_file", { path: "test.txt", content: "hello" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "搜索文件失败 1 次，创建失败 1 个文件详情" })).not.toBeNull();
+    expect(screen.queryByTestId("tool-call-block")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索文件失败 1 次，创建失败 1 个文件详情" }));
+
+    const toolBlocks = screen.getAllByTestId("tool-call-block");
+    expect(toolBlocks).toHaveLength(2);
+    expect(screen.getByText("搜索文件失败 README")).not.toBeNull();
+    expect(toolBlocks[1].textContent).toContain("创建文件失败 test.txt");
+    expect(screen.getAllByText("错误信息：失败")).toHaveLength(2);
+  });
+
   it("groups grep_files as search activity", () => {
     render(
       <MessageList

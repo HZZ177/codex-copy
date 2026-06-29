@@ -211,10 +211,13 @@ export interface AppearanceSettings {
   font_family: AppFontFamily;
 }
 
+export type FileAccessMode = "no_file_access" | "workspace_read_only" | "workspace_trusted" | "full_access";
+
 export interface CommandSettings {
   command_enabled: boolean;
   require_approval_for_untrusted: boolean;
   allow_persistent_trust: boolean;
+  file_access_mode: FileAccessMode;
   default_timeout_seconds: number;
   max_timeout_seconds: number;
   max_output_chars: number;

@@ -23,6 +23,21 @@ describe("ChatLayout", () => {
     expect(screen.queryByRole("complementary")).toBeNull();
   });
 
+  it("shows the current workspace in the top bar when provided", () => {
+    render(
+      <ChatLayout title="对话 thread-1" workspaceLabel="keydex" workspaceTitle={"keydex\nD:/repo/keydex"}>
+        <div data-testid="message-flow">消息流</div>
+      </ChatLayout>,
+    );
+
+    const meta = screen.getByTestId("chat-workspace-meta");
+    const topBarText = meta.parentElement?.textContent ?? "";
+    expect(meta.textContent).toContain("工作区");
+    expect(meta.textContent).toContain("keydex");
+    expect(meta.getAttribute("title")).toBe("keydex\nD:/repo/keydex");
+    expect(topBarText.indexOf("keydex")).toBeLessThan(topBarText.indexOf("对话 thread-1"));
+  });
+
   it("keeps the message flow mounted when the conversation menu opens", () => {
     let mounts = 0;
     function MessageFlow() {

@@ -21,12 +21,14 @@ from backend.app.storage import (
 COMMAND_SETTINGS_KEY = "command_settings"
 DEFAULT_APPROVAL_WAIT_SECONDS = 24 * 60 * 60
 BROAD_PREFIX_COMMANDS = {"powershell", "pwsh", "cmd", "python", "node", "npm", "pnpm", "git"}
+FileAccessMode = Literal["no_file_access", "workspace_read_only", "workspace_trusted", "full_access"]
 
 
 class CommandSettings(BaseModel):
     command_enabled: bool = True
     require_approval_for_untrusted: bool = True
     allow_persistent_trust: bool = True
+    file_access_mode: FileAccessMode = "workspace_trusted"
     default_timeout_seconds: float = Field(default=120, ge=0.1, le=600)
     max_timeout_seconds: float = Field(default=600, ge=0.1, le=3600)
     max_output_chars: int = Field(default=65536, ge=1, le=1024 * 1024)

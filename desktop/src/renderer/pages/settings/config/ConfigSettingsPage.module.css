@@ -50,8 +50,7 @@
 
 .header + .settingsGroup,
 .loading + .settingsGroup,
-.error + .settingsGroup,
-.success + .settingsGroup {
+.error + .settingsGroup {
   margin-top: 0;
 }
 
@@ -86,6 +85,10 @@
   padding: 13px 14px;
 }
 
+.policyBlock + .policyBlock {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-default) 48%, transparent);
+}
+
 .policyText {
   min-width: 0;
 }
@@ -115,6 +118,10 @@
   width: min(310px, 100%);
   min-width: 0;
   justify-self: end;
+}
+
+.policyMenu[data-open="true"] {
+  z-index: 160;
 }
 
 .policyTrigger {
@@ -551,8 +558,7 @@
 
 .empty,
 .loading,
-.error,
-.success {
+.error {
   margin-top: 12px;
   border-radius: 8px;
   padding: 10px 12px;
@@ -581,11 +587,6 @@
 .error {
   background: color-mix(in srgb, var(--color-danger) 8%, var(--surface-bg));
   color: var(--color-danger);
-}
-
-.success {
-  background: color-mix(in srgb, var(--color-success-6) 9%, var(--surface-bg));
-  color: var(--color-success-6);
 }
 
 @media (max-width: 680px) {

@@ -928,7 +928,7 @@ function DefaultMessage({
     return <MessageThinking message={message} />;
   }
   if (message.kind === "tool") {
-    return <ToolCallBlock message={message} onLoadDetails={onLoadToolDetails} />;
+    return <ToolCallBlock message={message} onPreviewFile={onFilePreview} onLoadDetails={onLoadToolDetails} />;
   }
   if (message.kind === "skill") {
     return (

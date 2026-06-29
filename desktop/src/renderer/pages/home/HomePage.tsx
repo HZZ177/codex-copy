@@ -27,7 +27,7 @@ import {
 } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
-import type { AgentContextItem, AgentFileAttachment, Workspace } from "@/types/protocol";
+import type { AgentContextItem, AgentFileAttachment, FileAccessMode, Workspace } from "@/types/protocol";
 import styles from "./HomePage.module.css";
 
 export interface HomePageProps {
@@ -68,6 +68,7 @@ export function HomePage({
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>({ type: "chat" });
   const [selectedSkill, setSelectedSkill] = useState<WorkspaceSkillSummary | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [fileAccessMode, setFileAccessMode] = useState<FileAccessMode>("workspace_trusted");
   const selectionTouchedRef = useRef(false);
   const pendingWorkspaceRegistrationRef = useRef<PendingWorkspaceRegistration | null>(null);
   const runtimeConnection = useOptionalRuntimeConnection();
@@ -88,6 +89,25 @@ export function HomePage({
     enabled: backendReady && Boolean(selectedWorkspaceId),
   });
   const workspaceSkills = selectedWorkspaceId ? workspaceSkillsState.skills : [];
+
+  useEffect(() => {
+    let active = true;
+    void runtime.settings
+      .getSettings()
+      .then((settings) => {
+        if (active) {
+          setFileAccessMode(settings.command.file_access_mode);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setFileAccessMode("workspace_trusted");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [runtime]);
 
   const upsertWorkspace = useCallback((workspace: Workspace) => {
     setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
@@ -398,6 +418,8 @@ export function HomePage({
           autoFocusKey={autoFocusInputKey}
           className={styles.compactComposer}
           allowFileSelection={workspaceSelection.type === "workspace"}
+          fileAccessMode={fileAccessMode}
+          workspaceRoots={workspaceSelection.type === "workspace" ? [workspaceSelection.workspace.root_path] : []}
           workspaceSkills={workspaceSkills}
           selectedSkill={selectedSkill}
           onListWorkspaceDirectory={listWorkspaceDirectory}

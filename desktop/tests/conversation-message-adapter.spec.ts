@@ -41,8 +41,12 @@ describe("conversation message adapter", () => {
           uiPayload: { files: [{ path: "src/app.ts", operation: "modify" }] },
         }),
       ),
-    ).toBe("file_change");
+    ).toBe("tool");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "search_text" }))).toBe("tool");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "search_files" }))).toBe("tool");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "create_file", status: "error" }))).toBe(
+      "tool",
+    );
   });
 
   it("preserves tool payload data for shared drawer and overlay rendering", () => {

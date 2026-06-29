@@ -13,6 +13,7 @@ from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
 from backend.app.agent.middleware.common import ToolCallLimitExceededError
+from backend.app.command_approval import CommandSettings, save_command_settings
 from backend.app.core.config import AppSettings
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
@@ -24,6 +25,7 @@ from backend.app.storage import (
     init_database,
 )
 from backend.app.tools import FunctionTool, ToolRegistry
+from backend.app.tools.factory import create_default_tool_registry
 
 
 class RecordingChatAdapter:
@@ -398,6 +400,181 @@ async def test_chat_service_routes_langchain_tool_events(tmp_path) -> None:
     assert [message["role"] for message in history] == ["user", "tool", "assistant"]
     assert history[1]["toolName"] == "read_file"
     assert history[2]["content"] == "已读取"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_args"),
+    [
+        ("read_file", {"path": "README.md"}),
+        ("list_dir", {"path": "."}),
+        ("search_text", {"query": "README", "path": "."}),
+        ("search_files", {"query": "README", "path": "."}),
+        ("grep_files", {"query": "README", "regex": False, "path": "."}),
+        ("create_file", {"path": "test.txt", "content": "hello"}),
+        (
+            "edit_file",
+            {
+                "patch": (
+                    "*** Begin Patch\n"
+                    "*** Update File: README.md\n"
+                    "@@\n"
+                    "-old\n"
+                    "+new\n"
+                    "*** End Patch"
+                )
+            },
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_file_access_blocked_tools_emit_failed_tool_events(
+    tmp_path,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "README.md").write_text("old\n", encoding="utf-8")
+    model = ToolFriendlyFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": tool_name,
+                        "args": tool_args,
+                        "id": f"call_{tool_name}",
+                    }
+                ],
+            ),
+            AIMessage(content="工具失败已处理"),
+        ]
+    )
+    service, repositories, _checkpointer, _factory = _service(
+        tmp_path,
+        model,
+        create_default_tool_registry(),
+    )
+    save_command_settings(
+        repositories,
+        CommandSettings(file_access_mode="no_file_access"),
+    )
+    workspace = repositories.workspaces.create(workspace_id="ws_project", root_path=project)
+    session = repositories.sessions.create(
+        session_id=f"ses_{tool_name}",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        session_type="workspace",
+        workspace_id=workspace.id,
+        cwd=str(project),
+        workspace_roots=[str(project)],
+    )
+    chat_adapter = RecordingChatAdapter()
+
+    result = await service.handle_chat(
+        ChatRequest(
+            session_id=session.id,
+            message=f"调用 {tool_name}",
+            provider_id="provider-1",
+            model="qwen-coder",
+        ),
+        chat_adapter=chat_adapter,
+    )
+
+    tool_events = [item for item in chat_adapter.sent if item["action"] in {"tool_start", "tool_end"}]
+    assert [item["action"] for item in tool_events] == ["tool_start", "tool_end"]
+    assert tool_events[0]["data"]["tool"] == tool_name
+    assert tool_events[1]["data"]["tool"] == tool_name
+    assert tool_events[1]["data"]["status"] == "failed"
+    assert "file_access_disabled" in tool_events[1]["data"]["result"]
+    assert result.status == "completed"
+
+    history = service.message_event_service.get_display_messages(result.session_id)
+    tool_messages = [message for message in history if message["role"] == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["toolName"] == tool_name
+    assert tool_messages[0]["status"] == "error"
+    assert "文件访问权限已关闭" in str(tool_messages[0].get("toolError") or "")
+
+
+@pytest.mark.asyncio
+async def test_file_access_blocked_sequential_tools_each_emit_failed_events(tmp_path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "README.md").write_text("old\n", encoding="utf-8")
+    model = ToolFriendlyFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_files",
+                        "args": {"query": "README", "path": "."},
+                        "id": "call_search_files",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "create_file",
+                        "args": {"path": "test.txt", "content": "hello"},
+                        "id": "call_create_file",
+                    }
+                ],
+            ),
+            AIMessage(content="工具失败已处理"),
+        ]
+    )
+    service, repositories, _checkpointer, _factory = _service(
+        tmp_path,
+        model,
+        create_default_tool_registry(),
+    )
+    save_command_settings(
+        repositories,
+        CommandSettings(file_access_mode="no_file_access"),
+    )
+    workspace = repositories.workspaces.create(workspace_id="ws_project", root_path=project)
+    session = repositories.sessions.create(
+        session_id="ses_blocked_sequential_file_tools",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        session_type="workspace",
+        workspace_id=workspace.id,
+        cwd=str(project),
+        workspace_roots=[str(project)],
+    )
+    chat_adapter = RecordingChatAdapter()
+
+    result = await service.handle_chat(
+        ChatRequest(
+            session_id=session.id,
+            message="连续调用 search_files 和 create_file",
+            provider_id="provider-1",
+            model="qwen-coder",
+        ),
+        chat_adapter=chat_adapter,
+    )
+
+    tool_events = [item for item in chat_adapter.sent if item["action"] in {"tool_start", "tool_end"}]
+    assert [item["action"] for item in tool_events] == ["tool_start", "tool_end", "tool_start", "tool_end"]
+    assert [item["data"]["tool"] for item in tool_events] == [
+        "search_files",
+        "search_files",
+        "create_file",
+        "create_file",
+    ]
+    assert [tool_events[1]["data"]["status"], tool_events[3]["data"]["status"]] == ["failed", "failed"]
+    assert "file_access_disabled" in tool_events[1]["data"]["result"]
+    assert "file_access_disabled" in tool_events[3]["data"]["result"]
+    assert result.status == "completed"
+
+    history = service.message_event_service.get_display_messages(result.session_id)
+    tool_messages = [message for message in history if message["role"] == "tool"]
+    assert [message["toolName"] for message in tool_messages] == ["search_files", "create_file"]
+    assert [message["status"] for message in tool_messages] == ["error", "error"]
 
 
 @pytest.mark.asyncio

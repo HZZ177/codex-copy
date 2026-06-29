@@ -137,6 +137,29 @@ describe("ToolCallBlock", () => {
     expect(screen.getByText("读取失败")).not.toBeNull();
   });
 
+  it("shows readable previews for structured JSON tool errors", () => {
+    render(
+      <ToolCallBlock
+        message={toolMessage("failed", {
+          status: "error",
+          model_content: JSON.stringify({
+            tool: "read_file",
+            ok: false,
+            status: "failed",
+            code: "file_access_disabled",
+            message: "文件访问权限已关闭",
+            details: { file_access_mode: "no_file_access" },
+          }),
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/错误信息：文件访问权限已关闭/)).not.toBeNull();
+    expect(screen.getByText(/错误码：file_access_disabled/)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+    expect(screen.getByRole("region", { name: "工具错误" }).textContent).toContain('"tool":"read_file"');
+  });
+
   it("renders failed file mutation tools with file-change style target", () => {
     render(
       <ToolCallBlock
@@ -155,6 +178,71 @@ describe("ToolCallBlock", () => {
     expect(block.textContent).toContain("编辑文件失败 docs/project-structure.md");
     expect(screen.getByText("docs/project-structure.md")).not.toBeNull();
     expect(block.querySelector("svg.lucide-circle-x")).not.toBeNull();
+  });
+
+  it("renders file mutation rows with ticker stats and clickable filename", () => {
+    const onPreviewFile = vi.fn();
+    render(
+      <ToolCallBlock
+        message={toolMessage(
+          "running",
+          {
+            status: "running",
+            model_content: "",
+            files: [
+              {
+                path: "src/main.py",
+                operation: "update",
+                added_lines: 4,
+                deleted_lines: 2,
+              },
+            ],
+          },
+          "apply_patch",
+          { path: "src/main.py", patch: "*** Begin Patch" },
+        )}
+        onPreviewFile={onPreviewFile}
+      />,
+    );
+
+    expect(screen.getByText("正在编辑文件")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "src/main.py" })).not.toBeNull();
+    expect(screen.getByTestId("line-change-ticker").textContent).toContain("+4");
+    expect(screen.getByTestId("line-change-ticker").textContent).toContain("-2");
+    expect(screen.getByTestId("line-change-ticker").textContent).not.toContain("行");
+
+    fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
+    expect(onPreviewFile).toHaveBeenCalledWith({
+      path: "src/main.py",
+      diff: "",
+    });
+  });
+
+  it("passes file mutation preview clicks through MessageList", () => {
+    const onPreviewFile = vi.fn();
+    render(
+      <MessageList
+        messages={[
+          toolMessage(
+            "running",
+            {
+              status: "running",
+              model_content: "",
+              files: [{ path: "src/main.py", operation: "update", added_lines: 4, deleted_lines: 2 }],
+            },
+            "apply_patch",
+            { path: "src/main.py", patch: "*** Begin Patch" },
+          ),
+        ]}
+        onFilePreview={onPreviewFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
+    expect(onPreviewFile).toHaveBeenCalledWith({
+      path: "src/main.py",
+      diff: "",
+    });
   });
 
   it("is used by MessageList for tool messages", () => {

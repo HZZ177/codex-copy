@@ -67,7 +67,7 @@ describe("SendBox file selection", () => {
     expect(screen.queryByLabelText("移除文件引用 src/main.ts")).toBeNull();
   });
 
-  it("stores pasted files without a native path before adding them as file chips", async () => {
+  it("rejects pasted files without a native path instead of creating temporary file chips", async () => {
     const runtime = fileRuntime();
     render(<FileSendBox runtime={runtime} />);
     const file = new File(["content is not read"], "notes.txt", { type: "text/plain" });
@@ -76,11 +76,8 @@ describe("SendBox file selection", () => {
       clipboardData: { files: [file] },
     });
 
-    expect(await screen.findByLabelText("移除文件引用 D:/keydex/local-files/notes.txt")).not.toBeNull();
-    expect(runtime.attachments.uploadLocalFile).toHaveBeenCalledWith(file, {
-      filename: "notes.txt",
-      source: "pasted",
-    });
+    expect(await screen.findByText(/无法获取源文件路径/)).not.toBeNull();
+    expect(runtime.attachments.uploadLocalFile).not.toHaveBeenCalled();
   });
 });
 

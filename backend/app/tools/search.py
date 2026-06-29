@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -11,8 +10,8 @@ from typing import Any
 
 from backend.app.core.logger import logger
 from backend.app.core.ripgrep import BUNDLED_RIPGREP_BINARY_NAME, resolve_ripgrep_binary
-from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
+from backend.app.tools.file_access import relative_tool_path, resolve_file_access_path
 from backend.app.tools.registry import ToolRegistry
 
 IGNORED_DIRS = {
@@ -33,6 +32,19 @@ class RipgrepJsonResult:
     truncated: bool
 
 
+@dataclass(slots=True)
+class RipgrepFileSearchResult:
+    results: list[dict[str, Any]]
+    scanned_files: int
+    truncated: bool
+
+
+@dataclass(slots=True)
+class RipgrepPathListResult:
+    paths: list[str]
+    truncated: bool
+
+
 DEFAULT_SEARCH_LIMIT = 50
 MAX_SEARCH_LIMIT = 200
 DEFAULT_GREP_FILE_LIMIT = 50
@@ -41,18 +53,18 @@ MAX_CONTEXT_FILE_BYTES = 512 * 1024
 RIPGREP_TIMEOUT_SECONDS = 30
 
 SEARCH_TEXT_DESCRIPTION = (
-    "在工作区目录或单个文本文件中搜索具体匹配行，返回 path、line、snippet 和可选上下文。"
+    "在文件访问权限允许范围内的目录或单个文本文件中搜索具体匹配行，返回 path、line、snippet 和可选上下文。"
     "当需要确认某段文本、符号、错误信息或关键词出现在哪些行时使用；"
     "如果只需要在某个已知文件内搜索，可将 path 设为该文件路径。"
 )
 
 SEARCH_FILES_DESCRIPTION = (
-    "只按工作区文件名、目录名或相对路径搜索，不搜索文件内容。"
+    "只按文件访问权限允许范围内的文件名、目录名或路径搜索，不搜索文件内容。"
     "当用户给出文件名、目录名、路径片段或约定资源名称但完整路径不确定时使用。"
 )
 
 GREP_FILES_DESCRIPTION = (
-    "在工作区目录或单个文件内查找内容匹配正则或固定字符串的文件，"
+    "在文件访问权限允许范围内的目录或单个文件内查找内容匹配正则或固定字符串的文件，"
     "发现候选文件并返回匹配文件路径。"
     "当目标是查找某段内容、符号、错误信息或关键词分布在哪些文件中时使用；"
     "如果用户给出的是文件名或路径片段，应使用 search_files 或 read_file。"
@@ -70,7 +82,7 @@ def create_search_tools() -> list[FunctionTool]:
                     "query": {"type": "string", "description": "要搜索的文本或正则表达式。"},
                     "path": {
                         "type": "string",
-                        "description": "搜索目录或单个文件，默认工作区根目录。",
+                        "description": "搜索目录或单个文件，默认工作区根目录；完全访问时也可使用绝对路径。",
                     },
                     "regex": {
                         "type": "boolean",
@@ -121,7 +133,7 @@ def create_search_tools() -> list[FunctionTool]:
                     },
                     "path": {
                         "type": "string",
-                        "description": "搜索目录或单个文件，默认工作区根目录。",
+                        "description": "搜索目录或单个文件，默认工作区根目录；完全访问时也可使用绝对路径。",
                     },
                     "regex": {
                         "type": "boolean",
@@ -163,7 +175,10 @@ def create_search_tools() -> list[FunctionTool]:
                         "type": "string",
                         "description": "文件名或相对路径关键字；不会搜索文件内容。",
                     },
-                    "path": {"type": "string", "description": "搜索目录，默认工作区根目录。"},
+                    "path": {
+                        "type": "string",
+                        "description": "搜索目录，默认工作区根目录；完全访问时也可使用绝对路径。",
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -237,10 +252,9 @@ async def grep_files_tool(
     exclude = _normalize_globs(args.get("exclude"))
 
     path_arg = _relative(root, context)
-    code, stdout, stderr = await _run_ripgrep(
+    rg_paths = await _run_ripgrep_path_list(
         [
             "--files-with-matches",
-            "--sortr=modified",
             "--no-messages",
             "--color",
             "never",
@@ -255,15 +269,10 @@ async def grep_files_tool(
             path_arg,
         ],
         cwd=context.workspace_root,
+        query=query,
+        limit=limit,
     )
-    if code == 1:
-        paths: list[str] = []
-    elif code == 0:
-        paths = [_normalize_rg_path(line) for line in stdout.splitlines() if line.strip()]
-    else:
-        _raise_ripgrep_error(stderr, query=query)
-
-    paths = paths[:limit]
+    paths = rg_paths.paths
     details = await _grep_file_details(
         paths,
         context=context,
@@ -297,11 +306,12 @@ async def grep_files_tool(
         "scanned_files": len(paths),
         "limit": limit,
         "engine": "ripgrep",
+        "truncated": rg_paths.truncated,
     }
     logger.info(
         "[SearchTool] grep_files 完成 | "
         f"path={result['path']} | query_chars={len(query)} | results={len(matches)} | "
-        f"matched_files={len(paths)} | limit={limit}"
+        f"matched_files={len(paths)} | limit={limit} | truncated={rg_paths.truncated}"
     )
     return result
 
@@ -311,44 +321,26 @@ async def search_files_tool(
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
     query = _require_non_empty_text(args.get("query"), "query")
-    needle = query.lower()
     root = _resolve_search_root(args.get("path") or ".", context)
     limit = min(_positive_int(args.get("limit"), default=DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT)
     include_hidden = bool(args.get("include_hidden", False))
 
-    results: list[dict[str, Any]] = []
-    for current_text, dir_names, file_names in os.walk(root):
-        dir_names[:] = [
-            name
-            for name in sorted(dir_names, key=str.lower)
-            if _include_path_name(name, include_hidden=include_hidden)
-        ]
-        current = Path(current_text)
-        candidates = [
-            *(current / name for name in dir_names),
-            *(
-                current / name
-                for name in sorted(file_names, key=str.lower)
-                if _include_path_name(name, include_hidden=include_hidden)
-            ),
-        ]
-        for candidate in sorted(
-            candidates,
-            key=lambda item: (0 if item.is_dir() else 1, item.name.lower()),
-        ):
-            rel = _relative(candidate, context)
-            if needle not in candidate.name.lower() and needle not in rel.lower():
-                continue
-            results.append(
-                {
-                    "name": candidate.name,
-                    "path": rel,
-                    "type": "directory" if candidate.is_dir() else "file",
-                }
-            )
-            if len(results) >= limit:
-                return _search_files_result(query, root, context, results, limit)
-    return _search_files_result(query, root, context, results, limit)
+    rg_result = await _run_ripgrep_file_search(
+        root=root,
+        context=context,
+        query=query,
+        include_hidden=include_hidden,
+        limit=limit,
+    )
+    return _search_files_result(
+        query,
+        root,
+        context,
+        rg_result.results,
+        limit,
+        scanned_files=rg_result.scanned_files,
+        truncated=rg_result.truncated,
+    )
 
 
 def _search_text_result(
@@ -384,20 +376,297 @@ def _search_files_result(
     context: ToolExecutionContext,
     results: list[dict[str, Any]],
     limit: int,
+    *,
+    scanned_files: int,
+    truncated: bool,
 ) -> dict[str, Any]:
     result = {
         "query": query,
         "path": _relative(root, context),
         "results": results,
         "limit": limit,
-        "engine": "python",
+        "engine": "ripgrep",
         "search_scope": "path",
+        "scanned_files": scanned_files,
+        "truncated": truncated,
     }
     logger.info(
         "[SearchTool] 文件路径搜索完成 | "
-        f"path={result['path']} | query_chars={len(query)} | results={len(results)} | limit={limit}"
+        f"path={result['path']} | query_chars={len(query)} | results={len(results)} | "
+        f"scanned_files={scanned_files} | limit={limit} | truncated={truncated}"
     )
     return result
+
+
+async def _run_ripgrep_path_list(
+    args: list[str],
+    *,
+    cwd: Path,
+    query: str,
+    limit: int,
+    timeout_seconds: int = RIPGREP_TIMEOUT_SECONDS,
+) -> RipgrepPathListResult:
+    return await asyncio.to_thread(
+        _run_ripgrep_path_list_blocking,
+        args,
+        cwd,
+        query,
+        limit,
+        timeout_seconds,
+    )
+
+
+def _run_ripgrep_path_list_blocking(
+    args: list[str],
+    cwd: Path,
+    query: str,
+    limit: int,
+    timeout_seconds: int,
+) -> RipgrepPathListResult:
+    rg = _require_ripgrep_binary()
+    try:
+        process = subprocess.Popen(
+            [str(rg), *args],
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        raise ToolExecutionError(
+            f"启动 ripgrep 失败：{exc}",
+            code="search_engine_unavailable",
+            details={"engine": "ripgrep"},
+        ) from exc
+
+    paths: list[str] = []
+    truncated = False
+    timed_out = False
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    def kill_after_timeout() -> None:
+        nonlocal timed_out
+        timed_out = True
+        _kill_process(process)
+
+    timer = threading.Timer(timeout_seconds, kill_after_timeout)
+    timer.start()
+    try:
+        for line in process.stdout:
+            path = _normalize_rg_file_line(line)
+            if not path:
+                continue
+            paths.append(path)
+            if len(paths) >= limit:
+                truncated = True
+                _kill_process(process)
+                break
+        process.wait()
+    finally:
+        timer.cancel()
+
+    stderr = process.stderr.read()
+    if timed_out:
+        raise ToolExecutionError(
+            f"ripgrep 搜索超过 {timeout_seconds} 秒，已停止",
+            code="search_timed_out",
+            details={"engine": "ripgrep", "timeout_seconds": timeout_seconds},
+        )
+    if process.returncode not in (0, 1, None) and not truncated:
+        _raise_ripgrep_error(stderr, query=query)
+    return RipgrepPathListResult(paths=paths, truncated=truncated)
+
+
+async def _run_ripgrep_file_search(
+    *,
+    root: Path,
+    context: ToolExecutionContext,
+    query: str,
+    include_hidden: bool,
+    limit: int,
+) -> RipgrepFileSearchResult:
+    root_label = _relative(root, context)
+    return await asyncio.to_thread(
+        _run_ripgrep_file_search_blocking,
+        _ripgrep_file_args(root_label, include_hidden=include_hidden),
+        context.workspace_root,
+        root_label,
+        query,
+        limit,
+    )
+
+
+def _run_ripgrep_file_search_blocking(
+    args: list[str],
+    cwd: Path,
+    root_label: str,
+    query: str,
+    limit: int,
+) -> RipgrepFileSearchResult:
+    rg = _require_ripgrep_binary()
+    try:
+        process = subprocess.Popen(
+            [str(rg), *args],
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        raise ToolExecutionError(
+            f"启动 ripgrep 失败：{exc}",
+            code="search_engine_unavailable",
+            details={"engine": "ripgrep"},
+        ) from exc
+
+    results: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    scanned_files = 0
+    truncated = False
+    timed_out = False
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    def kill_after_timeout() -> None:
+        nonlocal timed_out
+        timed_out = True
+        _kill_process(process)
+
+    timer = threading.Timer(RIPGREP_TIMEOUT_SECONDS, kill_after_timeout)
+    timer.start()
+    try:
+        for line in process.stdout:
+            path = _normalize_rg_file_line(line)
+            if not path:
+                continue
+            scanned_files += 1
+            if _append_search_file_matches(
+                path,
+                root_label=root_label,
+                needle=query.lower(),
+                results=results,
+                seen_paths=seen_paths,
+                limit=limit,
+            ):
+                truncated = True
+                _kill_process(process)
+                break
+        process.wait()
+    finally:
+        timer.cancel()
+
+    stderr = process.stderr.read()
+    if timed_out:
+        raise ToolExecutionError(
+            f"ripgrep 文件路径搜索超过 {RIPGREP_TIMEOUT_SECONDS} 秒，已停止",
+            code="search_timed_out",
+            details={"engine": "ripgrep", "timeout_seconds": RIPGREP_TIMEOUT_SECONDS},
+        )
+    if process.returncode not in (0, 1, None) and not truncated:
+        _raise_ripgrep_error(stderr, query=query)
+    return RipgrepFileSearchResult(
+        results=results,
+        scanned_files=scanned_files,
+        truncated=truncated,
+    )
+
+
+def _ripgrep_file_args(path_arg: str, *, include_hidden: bool) -> list[str]:
+    args = [
+        "--files",
+        "--no-messages",
+        "--color",
+        "never",
+    ]
+    if include_hidden:
+        args.append("--hidden")
+    for name in sorted(IGNORED_DIRS):
+        args.extend(["--glob", f"!{name}/**", "--glob", f"!**/{name}/**"])
+    args.extend(["--", path_arg])
+    return args
+
+
+def _normalize_rg_file_line(line: str) -> str:
+    raw = _normalize_rg_path(line.strip())
+    if not raw or raw == "." or raw.startswith("../") or "/../" in raw:
+        return ""
+    return raw
+
+
+def _append_search_file_matches(
+    path: str,
+    *,
+    root_label: str,
+    needle: str,
+    results: list[dict[str, Any]],
+    seen_paths: set[str],
+    limit: int,
+) -> bool:
+    for candidate_path, candidate_name, candidate_type in _search_file_candidate_entries(
+        path,
+        root_label=root_label,
+    ):
+        if candidate_path in seen_paths:
+            continue
+        if needle not in candidate_name.lower() and needle not in candidate_path.lower():
+            continue
+        seen_paths.add(candidate_path)
+        results.append(
+            {
+                "name": candidate_name,
+                "path": candidate_path,
+                "type": candidate_type,
+            }
+        )
+        if len(results) >= limit:
+            return True
+    return False
+
+
+def _search_file_candidate_entries(
+    path: str,
+    *,
+    root_label: str,
+) -> list[tuple[str, str, str]]:
+    prefix, relative_path = _split_path_under_root(path, root_label=root_label)
+    parts = [part for part in relative_path.split("/") if part and part != "."]
+    if not parts:
+        return []
+
+    candidates: list[tuple[str, str, str]] = []
+    current = prefix
+    for part in parts[:-1]:
+        current = f"{current}/{part}" if current else part
+        candidates.append((current, part, "directory"))
+    candidates.append((path, parts[-1], "file"))
+    return candidates
+
+
+def _split_path_under_root(path: str, *, root_label: str) -> tuple[str, str]:
+    prefix = root_label.rstrip("/")
+    if not prefix or prefix == ".":
+        return "", path
+    if _path_has_prefix(path, prefix):
+        return prefix, path[len(prefix) + 1 :]
+    return "", path
+
+
+def _path_has_prefix(path: str, prefix: str) -> bool:
+    folded_path = path.casefold()
+    folded_prefix = prefix.casefold()
+    return folded_path.startswith(f"{folded_prefix}/")
+
+
+def _kill_process(process: subprocess.Popen[str]) -> None:
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 async def _run_ripgrep(
@@ -847,25 +1116,11 @@ def _resolve_search_path(raw_path: Any, context: ToolExecutionContext) -> Path:
 
 
 def _resolve(raw_path: Any, context: ToolExecutionContext) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ToolExecutionError("path 必须是非空字符串", code="invalid_tool_args")
-    try:
-        return resolve_workspace_path(
-            raw_path,
-            cwd=context.workspace_root,
-            workspace_roots=[context.workspace_root],
-        )
-    except WorkspacePathError as exc:
-        raise ToolExecutionError(
-            str(exc),
-            code="workspace_path_forbidden",
-            details={"path": raw_path},
-        ) from exc
+    return resolve_file_access_path(raw_path, context, operation="read")
 
 
 def _relative(path: Path, context: ToolExecutionContext) -> str:
-    rel = path.resolve().relative_to(context.workspace_root).as_posix()
-    return rel or "."
+    return relative_tool_path(path, context)
 
 
 def _require_non_empty_text(value: Any, name: str) -> str:
@@ -923,11 +1178,3 @@ def _read_context_text_lines(path: Path) -> list[str] | None:
         return path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return None
-
-
-def _include_path_name(name: str, *, include_hidden: bool) -> bool:
-    if name in IGNORED_DIRS:
-        return False
-    if not include_hidden and name.startswith("."):
-        return False
-    return True

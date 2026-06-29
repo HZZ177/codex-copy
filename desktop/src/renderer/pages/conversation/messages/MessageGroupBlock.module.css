@@ -38,6 +38,7 @@
   display: block;
   align-self: center;
   color: currentColor;
+  translate: 0 var(--ghost-text-offset-y);
   transition: transform 220ms var(--motion-ease-out);
 }
 
@@ -52,6 +53,7 @@
   align-self: center;
   place-items: center;
   color: currentColor;
+  translate: 0 var(--ghost-text-offset-y);
 }
 
 .block[data-state="running"] .icon,

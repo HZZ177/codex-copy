@@ -76,6 +76,7 @@ describe("ConversationPage", () => {
     renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
     await readyComposer();
+    expect(screen.getByTestId("chat-workspace-meta").textContent).toContain("repo");
     expect(screen.queryByLabelText("选择工作区")).toBeNull();
   });
 
@@ -2048,6 +2049,7 @@ function fakeRuntime({
           command_enabled: true,
           require_approval_for_untrusted: true,
           allow_persistent_trust: true,
+          file_access_mode: "workspace_trusted",
           default_timeout_seconds: 120,
           max_timeout_seconds: 600,
           max_output_chars: 65536,

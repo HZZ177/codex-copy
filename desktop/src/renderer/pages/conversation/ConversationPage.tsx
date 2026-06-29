@@ -6,6 +6,7 @@ import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { AgentActionEnvelope, AgentSession } from "@/types/protocol";
+import type { FileAccessMode } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
 import { ConversationComposer } from "./ConversationComposer";
@@ -34,6 +35,7 @@ export function ConversationPage({
   onNavigateToConversation,
 }: ConversationPageProps) {
   const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
+  const [fileAccessMode, setFileAccessMode] = useState<FileAccessMode>("workspace_trusted");
   const quickSendConsumedRef = useRef<string | null>(null);
   const scrollToBottomAfterSendRef = useRef<(() => void) | null>(null);
   const runtimeEventSideEffectsRef = useRef<(event: AgentActionEnvelope) => void>(() => undefined);
@@ -84,6 +86,7 @@ export function ConversationPage({
   });
   const runtimeState = panelModel.runtimeState;
   const title = session?.title || (threadId ? `对话 ${threadId}` : "对话");
+  const workspaceMeta = conversationWorkspaceMeta(session);
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend;
   const canStop = controller.canStop;
@@ -133,11 +136,13 @@ export function ConversationPage({
       .then((settings) => {
         if (active) {
           setAllowPersistentTrust(settings.command.allow_persistent_trust);
+          setFileAccessMode(settings.command.file_access_mode);
         }
       })
       .catch(() => {
         if (active) {
           setAllowPersistentTrust(true);
+          setFileAccessMode("workspace_trusted");
         }
       });
     return () => {
@@ -196,6 +201,8 @@ export function ConversationPage({
     <ChatLayout
       title={title}
       subtitle={conversationSubtitle(wsStatus, session)}
+      workspaceLabel={workspaceMeta?.label}
+      workspaceTitle={workspaceMeta?.title}
       composerAccessory={
         <ConversationPanelComposerAccessory model={panelModel} />
       }
@@ -220,6 +227,8 @@ export function ConversationPage({
             selectedSkill={selectedSkill}
             runtime={runtime}
             sessionId={threadId}
+            fileAccessMode={fileAccessMode}
+            workspaceRoots={sessionWorkspaceRoots(session)}
             onListWorkspaceDirectory={panelModel.listWorkspaceDirectory}
             onSearchWorkspace={panelModel.searchWorkspace}
             onOpenModelSettings={onOpenModelSettings}
@@ -255,6 +264,58 @@ function conversationSubtitle(status: WsConnectionStatus, session: AgentSession 
     return `已切换到分支 · ${base}`;
   }
   return base;
+}
+
+function conversationWorkspaceMeta(session: AgentSession | null): { label: string; title: string } | null {
+  if (!session) {
+    return null;
+  }
+  const workspaceName = session.workspace?.name?.trim() ?? "";
+  const rootPath = (
+    session.workspace?.root_path ??
+    session.cwd ??
+    session.workspace_roots?.find((root) => root.trim()) ??
+    ""
+  ).trim();
+  const label = workspaceName || workspaceNameFromPath(rootPath);
+  if (!label) {
+    return null;
+  }
+  return {
+    label,
+    title: rootPath ? `${label}\n${rootPath}` : label,
+  };
+}
+
+function workspaceNameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  return segments.at(-1) ?? normalized;
+}
+
+function sessionWorkspaceRoots(session: AgentSession | null): string[] {
+  if (!session) {
+    return [];
+  }
+  return uniqueStrings([
+    session.workspace?.root_path ?? "",
+    session.cwd ?? "",
+    ...(session.workspace_roots ?? []),
+  ]);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const cleaned = value.trim();
+    if (!cleaned || seen.has(cleaned)) {
+      continue;
+    }
+    seen.add(cleaned);
+    result.push(cleaned);
+  }
+  return result;
 }
 
 function connectionSubtitle(status: WsConnectionStatus): string {

@@ -96,14 +96,14 @@ export function useRafPanelResize({
 
     const handlePointerMove = (event: PointerEvent) => {
       const drag = dragRef.current;
-      if (!drag || event.pointerId !== drag.pointerId) {
+      if (!drag || pointerIdValue(event) !== drag.pointerId) {
         return;
       }
       event.preventDefault();
       schedulePreview(optionsRef.current.getWidth(drag.startWidth, drag.startX, event.clientX));
     };
     const handlePointerEnd = (event: PointerEvent) => {
-      finishDrag(event.pointerId);
+      finishDrag(pointerIdValue(event));
     };
 
     const previousCursor = document.body.style.cursor;
@@ -144,13 +144,14 @@ export function useRafPanelResize({
         return;
       }
       event.preventDefault();
+      const pointerId = pointerIdValue(event);
       try {
-        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.currentTarget.setPointerCapture?.(pointerId);
       } catch {
         // Window-level pointer listeners below keep resizing available without capture.
       }
       dragRef.current = {
-        pointerId: event.pointerId,
+        pointerId,
         target: event.currentTarget,
         startWidth: width,
         startX: event.clientX,
@@ -164,4 +165,8 @@ export function useRafPanelResize({
   );
 
   return { dragging, startDrag, finishDrag };
+}
+
+function pointerIdValue(event: Pick<PointerEvent | ReactPointerEvent<HTMLDivElement>, "pointerId">): number {
+  return Number.isFinite(event.pointerId) ? event.pointerId : 1;
 }

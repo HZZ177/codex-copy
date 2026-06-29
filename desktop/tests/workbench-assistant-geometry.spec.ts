@@ -138,6 +138,7 @@ describe("workbench assistant geometry", () => {
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-out"\]\s*\{[\s\S]*--workbench-dock-layout-duration: var\(--workbench-dock-layout-out-duration\)/);
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-in"\] \.canvas\s*\{[\s\S]*animation: workbenchCanvasDockIn var\(--workbench-dock-layout-duration\)/);
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-out"\] \.canvas\s*\{[\s\S]*animation: workbenchCanvasDockOut var\(--workbench-dock-layout-duration\)/);
+    expect(css).toMatch(/\.workspace\[data-dock-transition-phase="resize"\] \.canvas\s*\{[\s\S]*transition: none/);
   });
 
   it("keeps the base chrome as the single morphing shell for bottom and drawer states", () => {

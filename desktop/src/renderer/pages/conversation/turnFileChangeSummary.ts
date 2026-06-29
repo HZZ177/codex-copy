@@ -37,7 +37,7 @@ export function buildTurnFileChangeSummary(messages: ConversationMessage[]): Tur
   const filesByKey = new Map<string, TurnFileChangeItem>();
 
   messages.forEach((message, messageIndex) => {
-    if (message.kind !== "file_change" || isFailedFileChangeMessage(message)) {
+    if (!isFileChangeSummarySource(message) || isFailedFileChangeMessage(message)) {
       return;
     }
     fileChangeItemsFromMessage(message, messageIndex).forEach((file) => {
@@ -57,6 +57,16 @@ export function buildTurnFileChangeSummary(messages: ConversationMessage[]): Tur
     editedCount: files.filter((file) => file.kind === "edited").length,
     files,
   };
+}
+
+function isFileChangeSummarySource(message: ConversationMessage): boolean {
+  if (message.kind === "file_change") {
+    return true;
+  }
+  if (message.kind !== "tool") {
+    return false;
+  }
+  return operationFromToolName(toolNameFromMessage(message)) !== "unknown";
 }
 
 function isFailedFileChangeMessage(message: ConversationMessage): boolean {

@@ -26,9 +26,11 @@ import {
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
 import { LoadingSkeleton } from "@/renderer/components/loading";
+import { useRafPanelResize } from "@/renderer/components/layout/useRafPanelResize";
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { clampWorkbenchAssistantDrawerWidth } from "@/renderer/hooks/layout/layoutStore";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { ComposerApprovalCard } from "@/renderer/pages/conversation/ComposerApprovalCard";
 import { ConversationComposer } from "@/renderer/pages/conversation/ConversationComposer";
@@ -47,6 +49,7 @@ import type {
   AgentChatMessage,
   AgentFileChange,
   CommandApprovalRequest,
+  FileAccessMode,
   Workspace,
 } from "@/types/protocol";
 
@@ -79,7 +82,7 @@ const MINI_TURN_MARKER_HIT_HEIGHT = 14;
 const MINI_TURN_SCROLL_EDGE = 12;
 
 export interface WorkbenchAssistantDockTransitionState {
-  phase: DockTransitionPhase | "idle";
+  phase: DockTransitionPhase | "idle" | "resize";
   reservedWidth: number;
 }
 
@@ -122,6 +125,7 @@ export interface WorkbenchAssistantSurfaceProps {
 export function WorkbenchAssistantSurface({
   runtime,
   workspaceId,
+  workspace = null,
   controller,
   creatingSession = false,
   onRequestNewSession,
@@ -153,7 +157,9 @@ export function WorkbenchAssistantSurface({
   const [messageTriggerPriming, setMessageTriggerPriming] = useState(false);
   const [unreadAssistantMessageKey, setUnreadAssistantMessageKey] = useState<string | null>(null);
   const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
+  const [fileAccessMode, setFileAccessMode] = useState<FileAccessMode>("workspace_trusted");
   const [expandedBottomGap, setExpandedBottomGap] = useState(160);
+  const [drawerWidthPreview, setDrawerWidthPreview] = useState<number | null>(null);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
     useState<MessageListTurnNavigationRequest | null>(null);
   const modelSelection = useRuntimeModelSelection(runtime, null);
@@ -195,7 +201,7 @@ export function WorkbenchAssistantSurface({
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
   const canStop = controller.canStop;
   const selectedModel = modelSelection.selectedModel;
-  const drawerWidth = layout.state.workbenchAssistantDrawerWidth;
+  const drawerWidth = drawerWidthPreview ?? layout.state.workbenchAssistantDrawerWidth;
   const dockInlineWidth = resolveDockInlineWidth(drawerWidth);
   const surfaceMode = assistantState.mode;
   const restingBottomTargetMode: AssistantSurfaceMode =
@@ -225,11 +231,13 @@ export function WorkbenchAssistantSurface({
       .then((settings) => {
         if (active) {
           setAllowPersistentTrust(settings.command.allow_persistent_trust);
+          setFileAccessMode(settings.command.file_access_mode);
         }
       })
       .catch(() => {
         if (active) {
           setAllowPersistentTrust(true);
+          setFileAccessMode("workspace_trusted");
         }
       });
     return () => {
@@ -273,6 +281,31 @@ export function WorkbenchAssistantSurface({
   const collapsingComposer = (!composeOpen && keepComposerContentDuringCollapse) || dockOutCollapsingToCapsule;
   const dockLayout = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out" ? "inline" : "overlay";
   const renderDrawerContent = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out";
+  const bottomSessionTitleVisible = sessionTitleVisible && !renderDrawerContent;
+  const previewDrawerWidth = useCallback(
+    (width: number) => {
+      setDrawerWidthPreview(width);
+      onDockTransitionLayoutChange?.({ phase: "resize", reservedWidth: resolveDockInlineWidth(width) });
+    },
+    [onDockTransitionLayoutChange],
+  );
+  const commitDrawerWidth = useCallback(
+    (width: number) => {
+      setDrawerWidthPreview(null);
+      layout.actions.setWorkbenchAssistantDrawerWidth(width);
+      if (renderDrawerContent) {
+        onDockTransitionLayoutChange?.({ phase: "idle", reservedWidth: resolveDockInlineWidth(width) });
+      }
+    },
+    [layout.actions, onDockTransitionLayoutChange, renderDrawerContent],
+  );
+  const drawerResize = useRafPanelResize({
+    disabled: !renderDrawerContent,
+    width: drawerWidth,
+    getWidth: (startWidth, startX, clientX) => clampWorkbenchAssistantDrawerWidth(startWidth + startX - clientX),
+    onPreview: previewDrawerWidth,
+    onCommit: commitDrawerWidth,
+  });
   const renderMorphContent = dockTransitionPhase !== null;
   const renderBottomContent = true;
   const reducedMotion = prefersReducedMotion();
@@ -813,6 +846,8 @@ export function WorkbenchAssistantSurface({
       runtime={runtime}
       sessionId={panelSessionId}
       pendingApproval={pendingApproval}
+      fileAccessMode={fileAccessMode}
+      workspaceRoots={workspaceRootsForWorkbench(workspace)}
       allowPersistentTrust={allowPersistentTrust}
       approvalSubmitting={controller.approvalSubmitting}
       approvalError={controller.approvalError}
@@ -908,9 +943,24 @@ export function WorkbenchAssistantSurface({
       aria-hidden={stablePanelMode === "prewarm" ? "true" : undefined}
       aria-label={stablePanelMode === "drawer" ? "工作台助手" : "工作台助手过渡面板"}
     >
+      <div
+        className={styles.drawerResizeHandle}
+        role="separator"
+        aria-label="调整工作台助手侧栏宽度"
+        aria-orientation="vertical"
+        data-visible={stablePanelMode === "drawer" ? "true" : "false"}
+        data-dragging={drawerResize.dragging ? "true" : "false"}
+        data-testid="workbench-assistant-drawer-resize-handle"
+        onPointerDown={(event) => {
+          if (event.button > 0) {
+            return;
+          }
+          drawerResize.startDrag(event);
+        }}
+      />
       <header className={styles.drawerHeader} data-testid={stablePanelHeaderTestId}>
         <div className={styles.drawerTitle}>
-          <span>助手</span>
+          <span title={currentSessionTitle || undefined}>{currentSessionTitle || "助手"}</span>
           <small>{drawerStatusText(runtimeState, pendingApproval)}</small>
         </div>
         <button
@@ -946,7 +996,7 @@ export function WorkbenchAssistantSurface({
       data-dock-layout={dockLayout}
       data-dock-transition={dockTransitionPhase ?? "idle"}
       data-message-trigger-state={messageTriggerLayoutState}
-      data-session-title-visible={sessionTitleVisible ? "true" : "false"}
+      data-session-title-visible={bottomSessionTitleVisible ? "true" : "false"}
       data-running={runtimeState === "running" ? "true" : "false"}
       data-pending-approval={pendingApproval ? "true" : "false"}
       style={
@@ -1017,17 +1067,17 @@ export function WorkbenchAssistantSurface({
               data-mini-navigator-visible={showMiniTurnNavigator ? "true" : "false"}
               data-new-session-enabled={onRequestNewSession ? "true" : "false"}
               data-pending-approval={pendingApproval ? "true" : "false"}
-              data-session-title-visible={sessionTitleVisible ? "true" : "false"}
+              data-session-title-visible={bottomSessionTitleVisible ? "true" : "false"}
               data-testid={renderDrawerContent ? "workbench-assistant-drawer-composer-frame" : "workbench-assistant-composer-frame"}
             >
               <div className={styles.composerFrameHeader}>
                 <div
                   className={styles.composerFrameTitle}
-                  data-empty={sessionTitleVisible ? "false" : "true"}
+                  data-empty={bottomSessionTitleVisible ? "false" : "true"}
                   data-testid="workbench-assistant-session-title"
-                  title={currentSessionTitle || undefined}
+                  title={bottomSessionTitleVisible ? currentSessionTitle : undefined}
                 >
-                  {currentSessionTitle}
+                  {bottomSessionTitleVisible ? currentSessionTitle : ""}
                 </div>
                 <motion.div
                   className={styles.composerFrameAccessory}
@@ -1934,6 +1984,8 @@ function WorkbenchComposer({
   runtime,
   sessionId,
   pendingApproval,
+  fileAccessMode,
+  workspaceRoots,
   allowPersistentTrust,
   approvalSubmitting,
   approvalError,
@@ -1961,6 +2013,8 @@ function WorkbenchComposer({
   runtime: RuntimeBridge;
   sessionId?: string | null;
   pendingApproval: CommandApprovalRequest | null;
+  fileAccessMode: FileAccessMode;
+  workspaceRoots: string[];
   allowPersistentTrust: boolean;
   approvalSubmitting: boolean;
   approvalError: string | null;
@@ -2007,6 +2061,8 @@ function WorkbenchComposer({
       selectedSkill={selectedSkill}
       runtime={runtime}
       sessionId={sessionId}
+      fileAccessMode={fileAccessMode}
+      workspaceRoots={workspaceRoots}
       autoFocusKey={autoFocusKey}
       className={styles.composer}
       placeholder="要求后续变更"
@@ -2033,6 +2089,10 @@ function workspaceEntriesToSearchResults(entries: WorkspaceEntry[]): WorkspaceSe
     name: entry.name,
     type: entry.type,
   }));
+}
+
+function workspaceRootsForWorkbench(workspace: Workspace | null | undefined): string[] {
+  return workspace?.root_path ? [workspace.root_path] : [];
 }
 
 function drawerStatusText(state: ConversationRuntimeState, pendingApproval: CommandApprovalRequest | null): string {

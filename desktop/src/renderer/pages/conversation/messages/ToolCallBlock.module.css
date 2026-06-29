@@ -8,19 +8,17 @@
 
 .header {
   --ghost-row-height: 20px;
-  --ghost-text-offset-y: -1px;
 
-  display: grid;
+  display: inline-flex;
   width: fit-content;
   max-width: 100%;
-  grid-template-columns: 18px minmax(0, auto) 16px;
-  grid-auto-rows: var(--ghost-row-height);
   align-items: center;
   gap: 6px;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--color-text-tertiary);
+  cursor: pointer;
   padding: 2px 0;
   text-align: left;
   transition: color 150ms ease;
@@ -35,13 +33,30 @@
   outline: none;
 }
 
-.icon {
-  display: inline-grid;
+.leadingIcon,
+.trailingIcon {
+  display: inline-flex;
   width: 18px;
-  height: 18px;
-  align-self: center;
-  place-items: center;
+  height: var(--ghost-row-height);
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.trailingIcon {
+  width: 16px;
+  flex-basis: 16px;
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
   color: currentColor;
+  line-height: 0;
 }
 
 .block[data-status="running"] .icon,
@@ -51,11 +66,10 @@
 
 .titleGroup {
   display: inline-flex;
+  height: var(--ghost-row-height);
   min-width: 0;
-  min-height: var(--ghost-row-height);
   align-items: center;
   gap: 6px;
-  transform: translateY(var(--ghost-text-offset-y));
 }
 
 .title {
@@ -72,9 +86,64 @@
 }
 
 .fileTarget {
+  margin-left: 4px;
   color: var(--color-accent);
   font-family: var(--font-mono);
   font-weight: 560;
+}
+
+.fileTargetButton {
+  display: inline-flex;
+  height: var(--ghost-row-height);
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  margin-left: 4px;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: var(--ui-line-height-compact);
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileTargetButton:hover,
+.fileTargetButton:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fileTargetButton:focus-visible {
+  outline: none;
+}
+
+.inlineTicker {
+  min-height: var(--ghost-row-height);
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.inlineTicker :global([data-kind="added"]),
+.inlineTicker :global([data-kind="removed"]) {
+  padding: 0;
+  background: transparent;
+  text-shadow: none;
+}
+
+.inlineTicker :global(.unit) {
+  display: none;
+}
+
+.inlineTicker :global(.label) {
+  display: none;
 }
 
 .meta {
@@ -94,7 +163,6 @@
 
 .chevron {
   display: block;
-  align-self: center;
   color: currentColor;
   transition: transform 220ms var(--motion-ease-out);
 }

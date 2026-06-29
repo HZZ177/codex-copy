@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { SendBox, selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
+import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import type { RuntimeBridge } from "@/runtime";
 
 describe("SendBox", () => {
@@ -50,7 +51,7 @@ describe("SendBox", () => {
     expect(screen.queryByRole("listbox", { name: "添加内容" })).toBeNull();
   });
 
-  it("adds picked non-image files as regular file context chips", async () => {
+  it("adds picked non-image files as regular file context chips in full access mode", async () => {
     const runtime = imagePickerRuntime(["D:/tmp/notes.txt"]);
     render(
       <SendBox
@@ -59,6 +60,7 @@ describe("SendBox", () => {
         canSend={false}
         canStop={false}
         runtime={runtime}
+        fileAccessMode="full_access"
         onChange={vi.fn()}
         onSend={vi.fn()}
         onStop={vi.fn()}
@@ -70,6 +72,169 @@ describe("SendBox", () => {
 
     expect(await screen.findByRole("button", { name: "移除文件引用 D:/tmp/notes.txt" })).not.toBeNull();
     expect(runtime.attachments.registerImagePath).not.toHaveBeenCalled();
+  });
+
+  it("rejects picked non-image files outside workspace when file access is workspace-scoped", async () => {
+    const runtime = imagePickerRuntime(["D:/outside/notes.txt"]);
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        fileAccessMode="workspace_trusted"
+        workspaceRoots={["D:/workspace"]}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    expect(await screen.findByText(/工作区内信任/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "移除文件引用 D:/outside/notes.txt" })).toBeNull();
+  });
+
+  it("keeps the regular file picker available when file access is disabled and still accepts images", async () => {
+    const runtime = imagePickerRuntime(["D:/tmp/a.png"]);
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        fileAccessMode="no_file_access"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    expect(await screen.findByRole("button", { name: "预览图片 a.png" })).not.toBeNull();
+    expect(runtime.desktopPicker.pickFiles).toHaveBeenCalled();
+    expect(runtime.desktopPicker.pickImageFiles).not.toHaveBeenCalled();
+  });
+
+  it("rejects picked non-image files after selection when file access is disabled", async () => {
+    const runtime = imagePickerRuntime(["D:/tmp/notes.txt"]);
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        fileAccessMode="no_file_access"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    expect(await screen.findByText(/无文件访问权限/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "移除文件引用 D:/tmp/notes.txt" })).toBeNull();
+    expect(runtime.desktopPicker.pickFiles).toHaveBeenCalled();
+  });
+
+  it("shows attachment policy rejections as top notifications when notifications are available", async () => {
+    const runtime = imagePickerRuntime(["D:/tmp/notes.txt"]);
+    const { container } = render(
+      <NotificationProvider>
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          runtime={runtime}
+          fileAccessMode="no_file_access"
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      </NotificationProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    const notification = await screen.findByTestId("notification-item");
+    expect(notification.getAttribute("data-type")).toBe("warning");
+    expect(notification.textContent).toContain("无文件访问权限");
+    expect(container.querySelector("[data-sendbox-file-error]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "移除文件引用 D:/tmp/notes.txt" })).toBeNull();
+  });
+
+  it("keeps the policy warning when a mixed picker selection adds images but rejects files", async () => {
+    const runtime = imagePickerRuntime(["D:/tmp/a.png", "D:/tmp/notes.txt"]);
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        fileAccessMode="no_file_access"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    expect(await screen.findByRole("button", { name: "预览图片 a.png" })).not.toBeNull();
+    expect(screen.getByText(/无文件访问权限/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "移除文件引用 D:/tmp/notes.txt" })).toBeNull();
+  });
+
+  it("does not restrict the hidden file input accept list when file access is disabled", () => {
+    const { container } = render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        fileAccessMode="no_file_access"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput?.hasAttribute("accept")).toBe(false);
+  });
+
+  it("opens the at-file menu with a permission hint when file access is disabled", async () => {
+    const searchWorkspace = vi.fn().mockResolvedValue([]);
+    render(
+      <SendBox
+        value="@"
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        fileAccessMode="no_file_access"
+        onSearchWorkspace={searchWorkspace}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId("at-file-menu")).not.toBeNull();
+    expect(screen.getByText(/无文件访问权限/)).not.toBeNull();
+    expect(searchWorkspace).not.toHaveBeenCalled();
   });
 
   it("copies file input files before clearing and rejects picker files without source paths", async () => {

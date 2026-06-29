@@ -149,9 +149,26 @@ async def test_search_files_finds_by_name_and_path(tmp_path) -> None:
 
     result = await _run("search_files", {"query": "pkg"}, tmp_path)
 
+    assert result.ok is True
+    assert result.result["engine"] == "ripgrep"
     paths = [item["path"] for item in result.result["results"]]
     assert "src/pkg" in paths
     assert "src/pkg/agent.py" in paths
+
+
+async def test_search_files_uses_ripgrep_and_respects_gitignore(tmp_path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("dist/\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "src" / "README.md").write_text("", encoding="utf-8")
+    (tmp_path / "dist" / "README.md").write_text("", encoding="utf-8")
+
+    result = await _run("search_files", {"query": "README"}, tmp_path)
+
+    assert result.ok is True
+    assert result.result["engine"] == "ripgrep"
+    assert [item["path"] for item in result.result["results"]] == ["src/README.md"]
 
 
 async def test_search_files_does_not_search_file_contents(tmp_path) -> None:
@@ -198,11 +215,37 @@ async def test_grep_files_accepts_single_file_path(tmp_path) -> None:
     assert result.result["paths"] == ["src/agent.py"]
 
 
+async def test_grep_files_stops_after_limit(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    for index in range(5):
+        (tmp_path / "src" / f"file_{index}.py").write_text("needle\n", encoding="utf-8")
+
+    result = await _run(
+        "grep_files",
+        {"query": "needle", "regex": False, "limit": 2},
+        tmp_path,
+    )
+
+    assert result.ok is True
+    assert len(result.result["paths"]) == 2
+    assert result.result["truncated"] is True
+
+
 async def test_grep_files_fails_fast_when_ripgrep_is_missing(tmp_path, monkeypatch) -> None:
     (tmp_path / "README.md").write_text("needle\n", encoding="utf-8")
     monkeypatch.setattr("backend.app.tools.search._resolve_ripgrep_binary", lambda: None)
 
     result = await _run("grep_files", {"query": "needle", "regex": False}, tmp_path)
+
+    assert result.ok is False
+    assert result.error["code"] == "search_engine_unavailable"
+
+
+async def test_search_files_fails_fast_when_ripgrep_is_missing(tmp_path, monkeypatch) -> None:
+    (tmp_path / "README.md").write_text("", encoding="utf-8")
+    monkeypatch.setattr("backend.app.tools.search._resolve_ripgrep_binary", lambda: None)
+
+    result = await _run("search_files", {"query": "README"}, tmp_path)
 
     assert result.ok is False
     assert result.error["code"] == "search_engine_unavailable"

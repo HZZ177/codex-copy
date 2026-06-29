@@ -1,9 +1,13 @@
 .titlebar {
+  --titlebar-left-padding: 10px;
+  --titlebar-left-gap: max(8px, calc(var(--sidebar-collapsed-width) - 40px));
+  --titlebar-brand-size: 30px;
+
   height: var(--titlebar-height);
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(160px, auto) minmax(180px, 1fr);
   align-items: center;
-  padding: 0 0 0 10px;
+  padding: 0 0 0 var(--titlebar-left-padding);
   background: var(--sidebar-bg);
   user-select: none;
 }
@@ -11,7 +15,7 @@
 .left {
   display: flex;
   align-items: center;
-  gap: max(8px, calc(var(--sidebar-collapsed-width) - 40px));
+  gap: var(--titlebar-left-gap);
   min-width: 0;
 }
 
@@ -27,15 +31,21 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  width: 176px;
+  width: max(
+    176px,
+    calc(
+      var(--sidebar-width) - var(--titlebar-left-padding) - var(--titlebar-brand-size) -
+        var(--titlebar-left-gap)
+    )
+  );
   height: 30px;
   min-width: 0;
   padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--color-border-2) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-3) 72%, transparent);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--surface-muted) 82%, var(--sidebar-bg));
+  background: color-mix(in srgb, var(--surface-active) 74%, var(--sidebar-bg));
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 52%, transparent),
+    inset 0 1px 1px rgb(15 23 42 / 5%),
     0 1px 2px rgb(15 23 42 / 4%);
 }
 
@@ -46,12 +56,13 @@
   bottom: 3px;
   left: 3px;
   width: calc((100% - 6px) / 2);
-  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text-1) 12%, var(--color-border-subtle));
   border-radius: var(--radius-pill);
   background: var(--color-bg-elevated);
   box-shadow:
-    0 1px 3px rgb(15 23 42 / 8%),
-    inset 0 0 0 1px color-mix(in srgb, #fff 58%, transparent);
+    0 2px 7px rgb(15 23 42 / 13%),
+    0 0 0 1px color-mix(in srgb, var(--color-bg-elevated) 64%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent);
   content: "";
   pointer-events: none;
   transition: transform 180ms var(--motion-ease-standard);

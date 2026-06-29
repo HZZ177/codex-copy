@@ -1593,6 +1593,49 @@
   pointer-events: none;
 }
 
+.drawerResizeHandle {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.drawerResizeHandle::before {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 5px;
+  width: 1px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  content: "";
+  transition:
+    background-color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.drawerResizeHandle:hover::before,
+.drawerResizeHandle:focus-visible::before,
+.drawerResizeHandle[data-dragging="true"]::before {
+  background: color-mix(in srgb, var(--color-text-3) 42%, transparent);
+  transform: scaleX(1.5);
+}
+
+.drawerResizeHandle:focus-visible {
+  outline: none;
+}
+
+.drawerResizeHandle[data-visible="false"] {
+  display: none;
+}
+
 .drawer > .drawerHeader {
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);

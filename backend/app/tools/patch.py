@@ -11,11 +11,11 @@ from backend.app.agent.tool_call_progress import (
     finalize_file_change,
 )
 from backend.app.core.logger import logger
-from backend.app.security.workspace import WorkspacePathError, resolve_workspace_path
 from backend.app.tools.base import FunctionTool, ToolExecutionContext, ToolExecutionError
+from backend.app.tools.file_access import relative_tool_path, resolve_file_access_path
 from backend.app.tools.registry import ToolRegistry
 
-EDIT_FILE_USAGE = """在当前工作区内修改、删除或移动已有 UTF-8 文本文件，并返回文件变更 diff。
+EDIT_FILE_USAGE = """在文件访问权限允许范围内修改、删除或移动已有 UTF-8 文本文件，并返回文件变更 diff。
 
 patch 必须使用以下文件操作头；不接受普通 unified diff 文件头：
 - *** Update File: <path>
@@ -509,24 +509,11 @@ def _move_patch_lines(operation: PatchOperation) -> list[str]:
 
 
 def _resolve(raw_path: str | None, context: ToolExecutionContext) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ToolExecutionError("path 必须是非空字符串", code="invalid_tool_args")
-    try:
-        return resolve_workspace_path(
-            raw_path,
-            cwd=context.workspace_root,
-            workspace_roots=[context.workspace_root],
-        )
-    except WorkspacePathError as exc:
-        raise ToolExecutionError(
-            str(exc),
-            code="workspace_path_forbidden",
-            details={"path": raw_path},
-        ) from exc
+    return resolve_file_access_path(raw_path, context, operation="write")
 
 
 def _relative_missing(path: Path, context: ToolExecutionContext) -> str:
-    return path.resolve().relative_to(context.workspace_root).as_posix()
+    return relative_tool_path(path, context)
 
 
 def _summarize_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -1,8 +1,9 @@
 import { Check, ChevronDown, RefreshCcw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { RuntimeBridge } from "@/runtime";
-import type { CommandApprovalAuditRecord, CommandSettings, TrustedCommandRule } from "@/types/protocol";
+import type { CommandApprovalAuditRecord, CommandSettings, FileAccessMode, TrustedCommandRule } from "@/types/protocol";
 
 import styles from "./ConfigSettingsPage.module.css";
 
@@ -12,6 +13,7 @@ const DEFAULT_COMMAND_SETTINGS: CommandSettings = {
   command_enabled: true,
   require_approval_for_untrusted: true,
   allow_persistent_trust: true,
+  file_access_mode: "workspace_trusted",
   default_timeout_seconds: 120,
   max_timeout_seconds: 600,
   max_output_chars: 65536,
@@ -52,15 +54,49 @@ const APPROVAL_POLICIES: Array<{
   },
 ];
 
+const FILE_ACCESS_POLICIES: Array<{
+  value: FileAccessMode;
+  label: string;
+  preview: string;
+  description: string;
+}> = [
+  {
+    value: "no_file_access",
+    label: "无文件访问权限",
+    preview: "Agent 不能引用、读取或修改本地文件。",
+    description: "输入框禁用 @ 文件和文件附件；后端文件工具会直接拒绝读写和搜索请求。",
+  },
+  {
+    value: "workspace_read_only",
+    label: "工作区内只读",
+    preview: "Agent 只能读取当前工作区内文件。",
+    description: "允许 @ 工作区文件和工作区内附件；读取、目录和搜索工具可用，创建和编辑调用会返回权限错误。",
+  },
+  {
+    value: "workspace_trusted",
+    label: "工作区内信任",
+    preview: "Agent 可以读写当前工作区。",
+    description: "允许 @ 工作区文件和工作区内附件；文件读写、搜索和编辑工具仅限当前工作区。",
+  },
+  {
+    value: "full_access",
+    label: "完全访问",
+    preview: "Agent 可以使用用户显式引入的全局文件真实路径。",
+    description: "允许附件选择工作区外文件并保留真实路径；文件工具可访问绝对路径，命令行仍按命令策略审批。",
+  },
+];
+
 export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
+  const notifications = useNotifications();
   const [command, setCommand] = useState<CommandSettings>(DEFAULT_COMMAND_SETTINGS);
   const [rules, setRules] = useState<TrustedCommandRule[]>([]);
   const [history, setHistory] = useState<ApprovalHistoryPage>(() => emptyApprovalHistoryPage());
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [savingFileAccess, setSavingFileAccess] = useState(false);
   const [policyMenuOpen, setPolicyMenuOpen] = useState(false);
-  const [message, setMessage] = useState("");
+  const [fileAccessMenuOpen, setFileAccessMenuOpen] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async (historyPage = 1) => {
@@ -91,6 +127,10 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
     () => APPROVAL_POLICIES.find((policy) => policy.value === currentPolicy) ?? APPROVAL_POLICIES[0],
     [currentPolicy],
   );
+  const currentFileAccessOption = useMemo(
+    () => FILE_ACCESS_POLICIES.find((policy) => policy.value === command.file_access_mode) ?? FILE_ACCESS_POLICIES[2],
+    [command.file_access_mode],
+  );
 
   const updateApprovalPolicy = async (policy: ApprovalPolicy) => {
     setPolicyMenuOpen(false);
@@ -101,15 +141,34 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
     setCommand(nextCommand);
     setSavingPolicy(true);
     setError("");
-    setMessage("");
     try {
       const response = await runtime.settings.saveCommandSettings(nextCommand);
       setCommand(response.command);
-      setMessage("批准策略已保存");
+      notifications.success("批准策略已保存");
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
       setSavingPolicy(false);
+    }
+  };
+
+  const updateFileAccessMode = async (mode: FileAccessMode) => {
+    setFileAccessMenuOpen(false);
+    if (mode === command.file_access_mode || savingFileAccess) {
+      return;
+    }
+    const nextCommand = { ...command, file_access_mode: mode };
+    setCommand(nextCommand);
+    setSavingFileAccess(true);
+    setError("");
+    try {
+      const response = await runtime.settings.saveCommandSettings(nextCommand);
+      setCommand(response.command);
+      notifications.success("文件访问权限已保存");
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSavingFileAccess(false);
     }
   };
 
@@ -174,63 +233,116 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
       </header>
 
       {error ? <div className={styles.error}>{error}</div> : null}
-      {message ? <div className={styles.success}>{message}</div> : null}
       {loading ? <div className={styles.loading}>正在加载配置</div> : null}
 
       <section className={`${styles.settingsGroup} ${styles.policyGroup}`} aria-labelledby="command-tools-title">
         <h2 id="command-tools-title">命令行工具</h2>
         <div className={styles.settingsPanel}>
           <div className={styles.policyBlock}>
-          <div className={styles.policyText}>
-            <h3>批准策略</h3>
-            <p>{savingPolicy ? "正在保存策略" : currentPolicyOption.preview}</p>
-            <p className={styles.policyHint}>{currentPolicyOption.description}</p>
-          </div>
-          <div
-            className={styles.policyMenu}
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                setPolicyMenuOpen(false);
-              }
-            }}
-          >
-            <button
-              aria-expanded={policyMenuOpen}
-              aria-haspopup="listbox"
-              aria-label={`批准策略：${currentPolicyOption.label}`}
-              className={styles.policyTrigger}
-              disabled={loading || savingPolicy}
-              type="button"
-              onClick={() => setPolicyMenuOpen((open) => !open)}
+            <div className={styles.policyText}>
+              <h3>批准策略</h3>
+              <p>{savingPolicy ? "正在保存策略" : currentPolicyOption.preview}</p>
+              <p className={styles.policyHint}>{currentPolicyOption.description}</p>
+            </div>
+            <div
+              className={styles.policyMenu}
+              data-open={policyMenuOpen ? "true" : "false"}
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setPolicyMenuOpen(false);
+                }
+              }}
             >
-              <span className={styles.policyTriggerText}>
-                <strong>{currentPolicyOption.label}</strong>
-              </span>
-              <ChevronDown aria-hidden="true" data-open={policyMenuOpen ? "true" : "false"} size={16} />
-            </button>
-            {policyMenuOpen ? (
-              <div className={styles.policyDropdown} role="listbox" aria-label="批准策略选项">
-                {APPROVAL_POLICIES.map((policy) => (
-                  <button
-                    aria-selected={policy.value === currentPolicy}
-                    className={styles.policyOption}
-                    data-active={policy.value === currentPolicy ? "true" : "false"}
-                    key={policy.value}
-                    role="option"
-                    type="button"
-                    onClick={() => void updateApprovalPolicy(policy.value)}
-                  >
-                    <span>
-                      <strong>{policy.label}</strong>
-                      <small>{policy.preview}</small>
-                    </span>
-                    {policy.value === currentPolicy ? <Check aria-hidden="true" size={15} /> : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+              <button
+                aria-expanded={policyMenuOpen}
+                aria-haspopup="listbox"
+                aria-label={`批准策略：${currentPolicyOption.label}`}
+                className={styles.policyTrigger}
+                disabled={loading || savingPolicy}
+                type="button"
+                onClick={() => setPolicyMenuOpen((open) => !open)}
+              >
+                <span className={styles.policyTriggerText}>
+                  <strong>{currentPolicyOption.label}</strong>
+                </span>
+                <ChevronDown aria-hidden="true" data-open={policyMenuOpen ? "true" : "false"} size={16} />
+              </button>
+              {policyMenuOpen ? (
+                <div className={styles.policyDropdown} role="listbox" aria-label="批准策略选项">
+                  {APPROVAL_POLICIES.map((policy) => (
+                    <button
+                      aria-selected={policy.value === currentPolicy}
+                      className={styles.policyOption}
+                      data-active={policy.value === currentPolicy ? "true" : "false"}
+                      key={policy.value}
+                      role="option"
+                      type="button"
+                      onClick={() => void updateApprovalPolicy(policy.value)}
+                    >
+                      <span>
+                        <strong>{policy.label}</strong>
+                        <small>{policy.preview}</small>
+                      </span>
+                      {policy.value === currentPolicy ? <Check aria-hidden="true" size={15} /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
+          <div className={styles.policyBlock}>
+            <div className={styles.policyText}>
+              <h3>文件访问权限</h3>
+              <p>{savingFileAccess ? "正在保存权限" : currentFileAccessOption.preview}</p>
+              <p className={styles.policyHint}>{currentFileAccessOption.description}</p>
+            </div>
+            <div
+              className={styles.policyMenu}
+              data-open={fileAccessMenuOpen ? "true" : "false"}
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setFileAccessMenuOpen(false);
+                }
+              }}
+            >
+              <button
+                aria-expanded={fileAccessMenuOpen}
+                aria-haspopup="listbox"
+                aria-label={`文件访问权限：${currentFileAccessOption.label}`}
+                className={styles.policyTrigger}
+                disabled={loading || savingFileAccess}
+                type="button"
+                onClick={() => setFileAccessMenuOpen((open) => !open)}
+              >
+                <span className={styles.policyTriggerText}>
+                  <strong>{currentFileAccessOption.label}</strong>
+                </span>
+                <ChevronDown aria-hidden="true" data-open={fileAccessMenuOpen ? "true" : "false"} size={16} />
+              </button>
+              {fileAccessMenuOpen ? (
+                <div className={styles.policyDropdown} role="listbox" aria-label="文件访问权限选项">
+                  {FILE_ACCESS_POLICIES.map((policy) => (
+                    <button
+                      aria-selected={policy.value === command.file_access_mode}
+                      className={styles.policyOption}
+                      data-active={policy.value === command.file_access_mode ? "true" : "false"}
+                      key={policy.value}
+                      role="option"
+                      type="button"
+                      onClick={() => void updateFileAccessMode(policy.value)}
+                    >
+                      <span>
+                        <strong>{policy.label}</strong>
+                        <small>{policy.preview}</small>
+                      </span>
+                      {policy.value === command.file_access_mode ? <Check aria-hidden="true" size={15} /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>

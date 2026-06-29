@@ -1,4 +1,4 @@
-import { Check, Copy, MoreHorizontal, SendHorizontal } from "lucide-react";
+import { Check, Copy, FolderOpen, MoreHorizontal, SendHorizontal } from "lucide-react";
 import { type PropsWithChildren, type ReactNode, useEffect, useRef, useState } from "react";
 
 import styles from "./ChatLayout.module.css";
@@ -6,6 +6,8 @@ import styles from "./ChatLayout.module.css";
 export interface ChatLayoutProps extends PropsWithChildren {
   title: string;
   subtitle?: string;
+  workspaceLabel?: string;
+  workspaceTitle?: string;
   composer?: ReactNode;
   composerAccessory?: ReactNode;
 }
@@ -13,6 +15,8 @@ export interface ChatLayoutProps extends PropsWithChildren {
 export function ChatLayout({
   title,
   subtitle,
+  workspaceLabel,
+  workspaceTitle,
   children,
   composer,
   composerAccessory,
@@ -61,6 +65,18 @@ export function ChatLayout({
       <div className={styles.topBar}>
         <div className={styles.topBarInner}>
           <div className={styles.titleMenuAnchor} ref={menuRef}>
+            {workspaceLabel ? (
+              <div
+                className={styles.workspaceMeta}
+                title={workspaceTitle || workspaceLabel}
+                aria-label={`当前工作区：${workspaceLabel}`}
+                data-testid="chat-workspace-meta"
+              >
+                <FolderOpen size={14} aria-hidden="true" />
+                <span className={styles.workspaceMetaLabel}>工作区</span>
+                <span className={styles.workspaceMetaName}>{workspaceLabel}</span>
+              </div>
+            ) : null}
             <h1 className={styles.title}>{title}</h1>
             <button
               className={styles.moreButton}

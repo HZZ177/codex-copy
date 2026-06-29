@@ -8,13 +8,10 @@
 
 .header {
   --ghost-row-height: 20px;
-  --ghost-text-offset-y: -1px;
 
-  display: grid;
+  display: inline-flex;
   width: fit-content;
   max-width: 100%;
-  grid-template-columns: 18px minmax(0, auto) 16px;
-  grid-auto-rows: var(--ghost-row-height);
   align-items: center;
   gap: 6px;
   border: 0;
@@ -35,13 +32,30 @@
   outline: none;
 }
 
-.icon {
-  display: inline-grid;
+.leadingIcon,
+.trailingIcon {
+  display: inline-flex;
   width: 18px;
-  height: 18px;
-  align-self: center;
-  place-items: center;
+  height: var(--ghost-row-height);
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.trailingIcon {
+  width: 16px;
+  flex-basis: 16px;
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
   color: currentColor;
+  line-height: 0;
 }
 
 .block[data-status="running"] .icon,
@@ -55,11 +69,10 @@
 
 .titleGroup {
   display: inline-flex;
+  height: var(--ghost-row-height);
   min-width: 0;
-  min-height: var(--ghost-row-height);
   align-items: center;
   gap: 7px;
-  transform: translateY(var(--ghost-text-offset-y));
 }
 
 .meta {
@@ -118,7 +131,6 @@
 
 .chevron {
   display: block;
-  align-self: center;
   color: currentColor;
   transition: transform 220ms var(--motion-ease-out);
 }

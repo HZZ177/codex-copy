@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
 import { ConfigSettingsPage } from "@/renderer/pages/settings/config/ConfigSettingsPage";
+import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import type {
   CommandApprovalAuditRecord,
   CommandSettings,
@@ -14,11 +15,13 @@ describe("ConfigSettingsPage", () => {
   it("loads command settings, trusted rules and approval history", async () => {
     const runtime = fakeRuntime();
 
-    render(<ConfigSettingsPage runtime={runtime} />);
+    renderConfigSettingsPage(runtime);
 
     expect(await screen.findByText("批准策略")).not.toBeNull();
     expect(screen.getByRole("button", { name: "批准策略：按请求" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "文件访问权限：工作区内信任" })).not.toBeNull();
     expect(screen.getByText("未信任命令执行前需要确认，可在审批时保存信任规则。")).not.toBeNull();
+    expect(screen.getByText("Agent 可以读写当前工作区。")).not.toBeNull();
     expect(screen.getByText("已信任命令")).not.toBeNull();
     expect(screen.getByText("审批记录")).not.toBeNull();
     expect(screen.getAllByText("pnpm test")).toHaveLength(2);
@@ -35,7 +38,7 @@ describe("ConfigSettingsPage", () => {
   it("saves command settings from approval policy selection", async () => {
     const runtime = fakeRuntime();
 
-    render(<ConfigSettingsPage runtime={runtime} />);
+    renderConfigSettingsPage(runtime);
 
     await screen.findAllByText("pnpm test");
     fireEvent.click(screen.getByRole("button", { name: "批准策略：按请求" }));
@@ -56,13 +59,43 @@ describe("ConfigSettingsPage", () => {
         }),
       );
     });
-    expect(await screen.findByText("批准策略已保存")).not.toBeNull();
+    await waitFor(() => {
+      expect(screen.getByTestId("notification-viewport").textContent).toContain("批准策略已保存");
+    });
+  });
+
+  it("saves file access mode from policy selection", async () => {
+    const runtime = fakeRuntime();
+
+    renderConfigSettingsPage(runtime);
+
+    await screen.findAllByText("pnpm test");
+    fireEvent.click(screen.getByRole("button", { name: "文件访问权限：工作区内信任" }));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getByRole("option", { name: /无文件访问权限/ })).not.toBeNull();
+    expect(screen.getByRole("option", { name: /工作区内只读/ })).not.toBeNull();
+    expect(screen.getByRole("option", { name: /工作区内信任/ })).not.toBeNull();
+    expect(screen.getByRole("option", { name: /完全访问/ })).not.toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: /工作区内只读/ }));
+
+    await waitFor(() => {
+      expect(runtime.settings.saveCommandSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file_access_mode: "workspace_read_only",
+          command_enabled: true,
+          require_approval_for_untrusted: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("notification-viewport").textContent).toContain("文件访问权限已保存");
+    });
   });
 
   it("updates and deletes trusted command rules", async () => {
     const runtime = fakeRuntime();
 
-    render(<ConfigSettingsPage runtime={runtime} />);
+    renderConfigSettingsPage(runtime);
 
     await screen.findAllByText("pnpm test");
     fireEvent.click(screen.getByRole("button", { name: "禁用 pnpm test" }));
@@ -100,7 +133,7 @@ describe("ConfigSettingsPage", () => {
       }),
     });
 
-    render(<ConfigSettingsPage runtime={runtime} />);
+    renderConfigSettingsPage(runtime);
 
     expect(await screen.findAllByText("pnpm test")).toHaveLength(2);
     expect(screen.getByText("第 1 / 4 页，共 31 条")).not.toBeNull();
@@ -116,6 +149,14 @@ describe("ConfigSettingsPage", () => {
     expect(runtime.settings.listCommandApprovalHistory).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 });
   });
 });
+
+function renderConfigSettingsPage(runtime: RuntimeBridge) {
+  return render(
+    <NotificationProvider>
+      <ConfigSettingsPage runtime={runtime} />
+    </NotificationProvider>,
+  );
+}
 
 function fakeRuntime(options: Partial<RuntimeBridge["settings"]> = {}): RuntimeBridge {
   const command = commandSettings();
@@ -143,6 +184,7 @@ function commandSettings(): CommandSettings {
     command_enabled: true,
     require_approval_for_untrusted: true,
     allow_persistent_trust: true,
+    file_access_mode: "workspace_trusted",
     default_timeout_seconds: 120,
     max_timeout_seconds: 600,
     max_output_chars: 65536,

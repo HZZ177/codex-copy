@@ -232,13 +232,41 @@ describe("WorkbenchAssistantSurface", () => {
     await waitForSurfaceMode("drawer");
 
     const header = await screen.findByTestId("workbench-assistant-drawer-header");
-    expect(header.textContent).toContain("助手");
+    expect(header.textContent).toContain("Workbench");
     expect(header.textContent).toContain("运行中");
+    expect(screen.getByTestId("workbench-assistant-surface").getAttribute("data-session-title-visible")).toBe("false");
+    expect(screen.getByTestId("workbench-assistant-drawer-composer-frame").getAttribute("data-session-title-visible")).toBe(
+      "false",
+    );
+    expect(screen.getByTestId("workbench-assistant-session-title").getAttribute("data-empty")).toBe("true");
     expect(screen.getByRole("button", { name: "关闭工作台助手侧栏" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
     expect(stop).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("chat-layout")).toBeNull();
     expect(screen.queryByRole("button", { name: "更多对话操作" })).toBeNull();
+  });
+
+  it("shows a left-edge resize handle while the workbench assistant drawer is open", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController()}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
+    await waitForSurfaceMode("drawer");
+
+    const surface = screen.getByTestId("workbench-assistant-surface");
+    const handle = screen.getByTestId("workbench-assistant-drawer-resize-handle");
+    expect(surface.style.getPropertyValue("--workbench-assistant-dock-width")).toBe("400px");
+    expect(handle.getAttribute("role")).toBe("separator");
+    expect(handle.getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle.getAttribute("data-visible")).toBe("true");
   });
 
   it("renders the shared approval card in the bottom and drawer composer areas", async () => {
@@ -330,8 +358,11 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
     expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("default");
-    expect(screen.getByTestId("tool-call-block")).not.toBeNull();
-    expect(screen.getByTestId("file-change-block")).not.toBeNull();
+    expect(screen.queryByTestId("tool-call-block")).toBeNull();
+    expect(screen.queryByTestId("file-change-block")).toBeNull();
+    fireEvent.click(within(screen.getByTestId("message-group-block")).getByRole("button"));
+    expect(screen.getAllByTestId("tool-call-block")).toHaveLength(2);
+    expect(screen.queryByTestId("file-change-block")).toBeNull();
   });
 
   it("shows a separate live message carrier while the assistant is running", async () => {
@@ -854,8 +885,11 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
     expect(screen.queryByTestId("workbench-mini-turn-navigator")).toBeNull();
     expect(screen.getByText("覆盖层消息")).not.toBeNull();
-    expect(screen.getByTestId("tool-call-block")).not.toBeNull();
-    expect(screen.getByTestId("file-change-block")).not.toBeNull();
+    expect(screen.queryByTestId("tool-call-block")).toBeNull();
+    expect(screen.queryByTestId("file-change-block")).toBeNull();
+    fireEvent.click(within(screen.getByTestId("message-group-block")).getByRole("button"));
+    expect(screen.getAllByTestId("tool-call-block")).toHaveLength(2);
+    expect(screen.queryByTestId("file-change-block")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-capsule")).not.toBeNull();
     expect(screen.getByRole("button", { name: "收起工作台消息层" })).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();

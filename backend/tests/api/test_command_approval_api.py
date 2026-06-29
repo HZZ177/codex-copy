@@ -12,6 +12,7 @@ def test_settings_api_reads_and_writes_command_settings_without_losing_model(tmp
         response = client.get("/api/settings")
         assert response.status_code == 200
         assert response.json()["command"]["command_enabled"] is True
+        assert response.json()["command"]["file_access_mode"] == "workspace_trusted"
 
         model_response = client.put(
             "/api/settings",
@@ -32,6 +33,7 @@ def test_settings_api_reads_and_writes_command_settings_without_losing_model(tmp
                     "command_enabled": False,
                     "require_approval_for_untrusted": True,
                     "allow_persistent_trust": False,
+                    "file_access_mode": "workspace_read_only",
                     "default_timeout_seconds": 3,
                     "max_timeout_seconds": 9,
                     "max_output_chars": 128,
@@ -43,6 +45,7 @@ def test_settings_api_reads_and_writes_command_settings_without_losing_model(tmp
         payload = command_response.json()
         assert payload["command"]["command_enabled"] is False
         assert payload["command"]["allow_persistent_trust"] is False
+        assert payload["command"]["file_access_mode"] == "workspace_read_only"
         assert payload["model"]["model"] == "qwen3-coder"
 
 
