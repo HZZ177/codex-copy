@@ -358,6 +358,9 @@ describe("WorkbenchAssistantSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
     await waitForSurfaceMode("drawer");
 
+    expect(screen.getByTestId("workbench-drawer-panel-loading")).not.toBeNull();
+    expect(screen.queryByText("解释 README")).toBeNull();
+    expect(screen.queryByTestId("conversation-panel")).toBeNull();
     expect(await screen.findByText("解释 README")).not.toBeNull();
     expect(screen.getByText("我会先读取 README。")).not.toBeNull();
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");

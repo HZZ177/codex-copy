@@ -138,6 +138,7 @@ export function WorkbenchAssistantSurface({
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockTransitionRunIdRef = useRef(0);
   const composeCollapseTimerRef = useRef<number | null>(null);
+  const drawerContentTimerRef = useRef<number | null>(null);
   const expandedContentTimerRef = useRef<number | null>(null);
   const messageTriggerPrimingTimerRef = useRef<number | null>(null);
   const panelMessageCountRef = useRef(0);
@@ -153,6 +154,7 @@ export function WorkbenchAssistantSurface({
   const [dockTransitionPhase, setDockTransitionPhase] = useState<DockTransitionPhase | null>(null);
   const [dockReturnMode, setDockReturnMode] = useState<"capsule" | "composer" | null>(null);
   const [keepComposerContentDuringCollapse, setKeepComposerContentDuringCollapse] = useState(false);
+  const [drawerContentReady, setDrawerContentReady] = useState(false);
   const [expandedContentReady, setExpandedContentReady] = useState(false);
   const [messageTriggerPriming, setMessageTriggerPriming] = useState(false);
   const [unreadAssistantMessageKey, setUnreadAssistantMessageKey] = useState<string | null>(null);
@@ -195,7 +197,8 @@ export function WorkbenchAssistantSurface({
     sessionId: panelSessionId,
     controller,
   });
-  panelMessageCountRef.current = panelModel.messages.length;
+  const panelMessageCount = panelModel.messages.length;
+  panelMessageCountRef.current = panelMessageCount;
   const runtimeState = controller.runtimeState;
   const connectionReady = controller.connectionReady;
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
@@ -451,6 +454,13 @@ export function WorkbenchAssistantSurface({
     setKeepComposerContentDuringCollapse(false);
   }, []);
 
+  const clearDrawerContentTimer = useCallback(() => {
+    if (drawerContentTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(drawerContentTimerRef.current);
+    }
+    drawerContentTimerRef.current = null;
+  }, []);
+
   const clearExpandedContentTimer = useCallback(() => {
     if (expandedContentTimerRef.current !== null && typeof window !== "undefined") {
       window.clearTimeout(expandedContentTimerRef.current);
@@ -585,9 +595,28 @@ export function WorkbenchAssistantSurface({
 
   useEffect(() => () => finishComposeCollapse(), [finishComposeCollapse]);
 
+  useEffect(() => () => clearDrawerContentTimer(), [clearDrawerContentTimer]);
+
   useEffect(() => () => clearExpandedContentTimer(), [clearExpandedContentTimer]);
 
   useEffect(() => () => finishMessageTriggerPriming(), [finishMessageTriggerPriming]);
+
+  useEffect(() => {
+    clearDrawerContentTimer();
+    if (surfaceMode !== "drawer" || dockTransitionPhase !== null) {
+      setDrawerContentReady(false);
+      return;
+    }
+    if (panelMessageCountRef.current <= 0 || reducedMotion || typeof window === "undefined") {
+      setDrawerContentReady(true);
+      return;
+    }
+    setDrawerContentReady(false);
+    drawerContentTimerRef.current = window.setTimeout(() => {
+      drawerContentTimerRef.current = null;
+      setDrawerContentReady(true);
+    }, WORKBENCH_EXPANDED_CONTENT_REVEAL_DELAY_MS);
+  }, [clearDrawerContentTimer, dockTransitionPhase, panelSessionId, reducedMotion, surfaceMode]);
 
   useEffect(() => {
     clearExpandedContentTimer();
@@ -604,7 +633,7 @@ export function WorkbenchAssistantSurface({
       expandedContentTimerRef.current = null;
       setExpandedContentReady(true);
     }, WORKBENCH_EXPANDED_CONTENT_REVEAL_DELAY_MS);
-  }, [clearExpandedContentTimer, dockTransitionPhase, reducedMotion, surfaceMode]);
+  }, [clearExpandedContentTimer, dockTransitionPhase, panelSessionId, reducedMotion, surfaceMode]);
 
   useEffect(() => {
     const previousMode = previousSurfaceModeRef.current;
@@ -881,7 +910,7 @@ export function WorkbenchAssistantSurface({
 
   const stablePanelMode = renderDrawerContent ? "drawer" : renderMorphContent ? "morph" : "prewarm";
   const shouldMountStablePanel = surfaceMode !== "expanded" && (renderMorphContent || renderDrawerContent);
-  const stablePanelContentReady = stablePanelMode === "drawer";
+  const stablePanelContentReady = stablePanelMode === "drawer" && (drawerContentReady || panelMessageCount <= 0);
   const stablePanelTestId =
     stablePanelMode === "drawer"
       ? "workbench-assistant-drawer"
@@ -906,8 +935,20 @@ export function WorkbenchAssistantSurface({
       className={styles.drawerPanel}
     />
   ) : null;
+  const drawerLoadingPanel =
+    shouldMountStablePanel && stablePanelMode === "drawer" && !stablePanelContentReady ? (
+      <LoadingSkeleton
+        aria-label="正在准备侧栏消息历史"
+        className={styles.panelLoading}
+        lineCount={4}
+        testId="workbench-drawer-panel-loading"
+        width="compact"
+      />
+    ) : null;
+  const overlayPanelContentReady =
+    surfaceMode === "expanded" && dockTransitionPhase === null && (expandedContentReady || panelMessageCount <= 0);
   const overlayConversationPanel =
-    surfaceMode === "expanded" && dockTransitionPhase === null && expandedContentReady ? (
+    overlayPanelContentReady ? (
       <ConversationPanel
         model={panelModel}
         workspaceRuntime={runtime}
@@ -922,7 +963,7 @@ export function WorkbenchAssistantSurface({
       />
     ) : null;
   const overlayLoadingPanel =
-    surfaceMode === "expanded" && dockTransitionPhase === null && !expandedContentReady ? (
+    surfaceMode === "expanded" && dockTransitionPhase === null && !overlayPanelContentReady ? (
       <LoadingSkeleton
         aria-label="正在准备消息历史"
         className={styles.panelLoading}
@@ -979,7 +1020,7 @@ export function WorkbenchAssistantSurface({
         data-content-state={stablePanelContentReady ? "ready" : "deferred"}
         data-testid={stablePanelMode === "morph" ? "workbench-assistant-morph-middle" : undefined}
       >
-        {stableConversationPanel}
+        {stableConversationPanel ?? drawerLoadingPanel}
       </div>
     </section>
   ) : null;
