@@ -262,11 +262,13 @@
 
 .actions button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-text-primary) 88%, #fff);
+  color: var(--color-bg-elevated);
   transform: translateY(-1px);
 }
 
 .actions button:focus-visible {
   outline: 0;
+  color: var(--color-bg-elevated);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
 }
 

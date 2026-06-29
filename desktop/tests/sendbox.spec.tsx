@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { SendBox, selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
+import type { RuntimeBridge } from "@/runtime";
 
 describe("SendBox", () => {
   it("renders a Keydex-like floating input shell without unavailable actions", () => {
@@ -24,6 +25,177 @@ describe("SendBox", () => {
     expect(screen.queryByRole("button", { name: "添加附件" })).toBeNull();
     expect(screen.queryByText("按需审批")).toBeNull();
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens attachment actions from a frameless add button", () => {
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+
+    expect(screen.getByRole("listbox", { name: "添加内容" })).not.toBeNull();
+    expect(screen.getByRole("option", { name: "附件" })).not.toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox", { name: "添加内容" })).toBeNull();
+  });
+
+  it("adds picked non-image files as regular file context chips", async () => {
+    const runtime = imagePickerRuntime(["D:/tmp/notes.txt"]);
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    expect(await screen.findByRole("button", { name: "移除文件引用 D:/tmp/notes.txt" })).not.toBeNull();
+    expect(runtime.attachments.registerImagePath).not.toHaveBeenCalled();
+  });
+
+  it("copies file input files before clearing and rejects picker files without source paths", async () => {
+    const runtime = fileInputRuntime();
+    const { container } = render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) {
+      throw new Error("file input not found");
+    }
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    let cleared = false;
+    const liveFiles = {
+      get length() {
+        return cleared ? 0 : 1;
+      },
+      item: (index: number) => (!cleared && index === 0 ? file : null),
+      *[Symbol.iterator]() {
+        if (!cleared) {
+          yield file;
+        }
+      },
+    } as unknown as FileList;
+    Object.defineProperty(fileInput, "files", {
+      configurable: true,
+      get: () => liveFiles,
+    });
+    Object.defineProperty(fileInput, "value", {
+      configurable: true,
+      get: () => (cleared ? "" : "C:\\fakepath\\notes.txt"),
+      set: (value) => {
+        if (value === "") {
+          cleared = true;
+        }
+      },
+    });
+
+    fireEvent.change(fileInput);
+
+    expect(await screen.findByText(/无法获取源文件路径/)).not.toBeNull();
+    expect(runtime.attachments.uploadLocalFile).not.toHaveBeenCalled();
+  });
+
+  it("closes image attachment preview with Escape without invoking composer Escape", async () => {
+    const onEscape = vi.fn();
+    const runtime = imagePickerRuntime();
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onEscape={onEscape}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.mouseDown(screen.getByRole("option", { name: "附件" }));
+
+    const previewButton = await screen.findByRole("button", { name: "预览图片 a.png" });
+    fireEvent.click(previewButton);
+
+    const dialog = screen.getByRole("dialog", { name: "a.png" });
+    expect(dialog).not.toBeNull();
+    expect(dialog.closest("form")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "放大图片" }));
+    expect(screen.getByLabelText("当前缩放 125%")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "顺时针旋转图片" }));
+    expect(screen.getByLabelText("图片预览画布").style.getPropertyValue("--image-rotation")).toBe("90deg");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "a.png" })).toBeNull();
+    expect(onEscape).not.toHaveBeenCalled();
+  });
+
+  it("does not flash unsupported-file errors when pasting an image file", async () => {
+    const restoreObjectUrl = stubObjectUrl();
+    const runtime = imagePickerRuntime();
+    const { unmount } = render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        runtime={runtime}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    try {
+      const input = screen.getByLabelText("继续输入");
+      const file = new File(["image"], "paste.png", { type: "image/png" });
+
+      fireEvent.paste(input, {
+        clipboardData: {
+          files: fileList(file),
+          getData: vi.fn(() => ""),
+        },
+      });
+
+      expect(screen.queryByText("不支持的文件，无法获取路径")).toBeNull();
+      expect(await screen.findByRole("button", { name: "预览图片 paste.png" })).not.toBeNull();
+      expect(screen.queryByText("不支持的文件，无法获取路径")).toBeNull();
+    } finally {
+      unmount();
+      restoreObjectUrl();
+    }
   });
 
   it("tracks focus state and submits when sending is allowed", () => {
@@ -527,7 +699,7 @@ describe("SendBox", () => {
     expect(await screen.findByText("引用片段")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith([], [quote]);
+    expect(onSend).toHaveBeenCalledWith([], [quote], []);
   });
 
   it("hides the quote card when the pointer leaves a top context chip", () => {
@@ -704,6 +876,98 @@ describe("SendBox", () => {
     expect(screen.queryByText("main.ts")).toBeNull();
   });
 });
+
+function imagePickerRuntime(pickedFiles: string[] = ["D:/tmp/a.png"]): RuntimeBridge {
+  return {
+    attachments: {
+      registerImagePath: vi.fn().mockResolvedValue({
+        id: "att-1",
+        attachment_id: "att-1",
+        name: "a.png",
+        path: "D:/tmp/a.png",
+        mime_type: "image/png",
+        size: 12,
+        source: "picker",
+      }),
+      readMedia: vi.fn().mockResolvedValue({
+        data_url: "data:image/png;base64,AA==",
+      }),
+      uploadImage: vi.fn().mockImplementation((file: File) =>
+        Promise.resolve({
+          id: "att-paste",
+          attachment_id: "att-paste",
+          name: file.name,
+          path: "",
+          mime_type: file.type,
+          size: file.size,
+          source: "pasted",
+        }),
+      ),
+      uploadLocalFile: vi.fn().mockImplementation((file: File) =>
+        Promise.resolve({
+          id: "local-file-1",
+          name: file.name || "file",
+          path: `D:/tmp/${file.name || "file"}`,
+          mime_type: file.type || "application/octet-stream",
+          size: file.size,
+          source: "pasted",
+        }),
+      ),
+    },
+    desktopPicker: {
+      isFilePickerAvailable: vi.fn().mockReturnValue(true),
+      pickFiles: vi.fn().mockResolvedValue(pickedFiles),
+      pickImageFiles: vi.fn().mockResolvedValue(["D:/tmp/a.png"]),
+    },
+  } as unknown as RuntimeBridge;
+}
+
+function fileInputRuntime(): RuntimeBridge {
+  return {
+    attachments: {
+      uploadLocalFile: vi.fn().mockResolvedValue({
+        id: "local-file-1",
+        name: "notes.txt",
+        path: "D:/tmp/notes.txt",
+        mime_type: "text/plain",
+        size: 5,
+        source: "picker",
+      }),
+    },
+    desktopPicker: {
+      isFilePickerAvailable: vi.fn().mockReturnValue(false),
+    },
+  } as unknown as RuntimeBridge;
+}
+
+function fileList(...files: File[]): FileList {
+  return Object.assign(files, {
+    item: (index: number) => files[index] ?? null,
+  }) as unknown as FileList;
+}
+
+function stubObjectUrl(): () => void {
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:keydex-test-image"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  return () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: originalCreate,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: originalRevoke,
+    });
+  };
+}
 
 function rect({
   x,

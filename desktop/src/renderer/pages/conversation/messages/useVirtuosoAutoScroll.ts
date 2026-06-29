@@ -31,6 +31,7 @@ export function useVirtuosoAutoScroll(
   const atBottomRef = useRef(true);
   const userPinnedRef = useRef(false);
   const userInputActiveRef = useRef(false);
+  const scrollbarDragActiveRef = useRef(false);
   const scrollAnimationFrameRef = useRef<number | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
@@ -55,6 +56,7 @@ export function useVirtuosoAutoScroll(
     if (atBottom) {
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
     } else if (userInputActiveRef.current) {
       userPinnedRef.current = true;
     }
@@ -82,6 +84,7 @@ export function useVirtuosoAutoScroll(
       cancelScrollAnimation();
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
       atBottomRef.current = true;
       setShowScrollToBottom(false);
 
@@ -115,6 +118,7 @@ export function useVirtuosoAutoScroll(
     if (atBottom) {
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
     }
     setShowScrollToBottom(!atBottom);
   }, []);
@@ -125,6 +129,10 @@ export function useVirtuosoAutoScroll(
       return;
     }
     if (scrollerRef.current && isExpansionScrollLocked(scrollerRef.current)) {
+      updateBottomState();
+      return;
+    }
+    if (scrollbarDragActiveRef.current) {
       updateBottomState();
       return;
     }
@@ -153,18 +161,30 @@ export function useVirtuosoAutoScroll(
     const handleScroll = () => {
       updateBottomState();
     };
-    const handleUserInput = () => {
+    const handleUserInput = (event: Event) => {
       cancelScrollAnimation();
       userInputActiveRef.current = true;
+      if (isScrollbarPointerStart(event, scroller)) {
+        scrollbarDragActiveRef.current = true;
+      }
+    };
+    const clearScrollbarDrag = () => {
+      scrollbarDragActiveRef.current = false;
     };
 
     scroller.addEventListener("scroll", handleScroll, { passive: true });
     scroller.addEventListener("wheel", handleUserInput, { passive: true });
     scroller.addEventListener("pointerdown", handleUserInput);
+    window.addEventListener("pointerup", clearScrollbarDrag);
+    window.addEventListener("pointercancel", clearScrollbarDrag);
+    window.addEventListener("blur", clearScrollbarDrag);
     return () => {
       scroller.removeEventListener("scroll", handleScroll);
       scroller.removeEventListener("wheel", handleUserInput);
       scroller.removeEventListener("pointerdown", handleUserInput);
+      window.removeEventListener("pointerup", clearScrollbarDrag);
+      window.removeEventListener("pointercancel", clearScrollbarDrag);
+      window.removeEventListener("blur", clearScrollbarDrag);
     };
   }, [cancelScrollAnimation, scroller, updateBottomState]);
 
@@ -175,6 +195,7 @@ export function useVirtuosoAutoScroll(
       atBottomRef.current = true;
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
       return;
     }
 
@@ -214,6 +235,23 @@ function toVirtuosoScrollBehavior(behavior: ScrollBehavior): VirtuosoScrollBehav
 
 function isExpansionScrollLocked(element: HTMLElement): boolean {
   return element.hasAttribute(EXPANSION_SCROLL_LOCK_ATTR);
+}
+
+function isScrollbarPointerStart(event: Event, scroller: HTMLElement): boolean {
+  if (event.type !== "pointerdown" && event.type !== "mousedown") {
+    return false;
+  }
+  const pointer = event as MouseEvent;
+  if (!Number.isFinite(pointer.clientX) || !Number.isFinite(pointer.clientY)) {
+    return false;
+  }
+  const scrollbarInlineSize = Math.max(0, scroller.offsetWidth - scroller.clientWidth);
+  if (scrollbarInlineSize <= 0) {
+    return false;
+  }
+  const rect = scroller.getBoundingClientRect();
+  const edgeSize = Math.max(12, Math.min(24, scrollbarInlineSize));
+  return pointer.clientX >= rect.right - edgeSize && pointer.clientX <= rect.right;
 }
 
 function animateScrollToBottom({

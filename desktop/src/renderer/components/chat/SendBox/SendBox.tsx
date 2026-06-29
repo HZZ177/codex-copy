@@ -1,6 +1,7 @@
-import { ArrowUp, LoaderCircle, SendHorizontal, Square, X } from "lucide-react";
+import { ArrowUp, LoaderCircle, Paperclip, Plus, SendHorizontal, Square, X } from "lucide-react";
 import {
   type ClipboardEvent,
+  type ChangeEvent,
   type CompositionEvent,
   type DragEvent,
   type FormEvent,
@@ -18,9 +19,10 @@ import {
   useState,
 } from "react";
 
-import type { WorkspaceSearchResult, WorkspaceSkillSummary } from "@/runtime";
+import { runtimeBridge, type RuntimeBridge, type WorkspaceSearchResult, type WorkspaceSkillSummary } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import { getAtQuery, removeAtQuery } from "@/renderer/components/chat/AtFileMenu/atFiles";
+import popupStyles from "@/renderer/components/chat/ComposerPopupMenu/ComposerPopupMenu.module.css";
 import {
   buildSlashCommands,
   filterSlashCommands,
@@ -34,15 +36,24 @@ import {
 } from "@/renderer/components/chat/SlashCommandMenu";
 import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
 import { useWorkspaceFileSearch, type WorkspaceFileSearchFn } from "@/renderer/hooks/useWorkspaceFileSearch";
+import { ImagePreviewDialog } from "@/renderer/components/workspace/ImagePreviewSurface";
 
 import styles from "./SendBox.module.css";
 import {
   fileSelectionReducer,
   initialFileSelectionState,
   type SelectedFile,
+  type SelectedFileSource,
   selectedFileFromFile,
+  selectedFileFromPath,
   selectedFileFromWorkspace,
 } from "./fileSelection";
+import {
+  isImageFile,
+  isImagePath,
+  selectedImageAttachmentFromRecord,
+  type SelectedImageAttachment,
+} from "./imageAttachments";
 import {
   initialQuoteSelectionState,
   quoteSelectionReducer,
@@ -55,6 +66,9 @@ const LazyAtFileMenu = lazy(() =>
     default: module.AtFileMenu,
   })),
 );
+
+const MISSING_SOURCE_FILE_PATH_MESSAGE =
+  "无法获取源文件路径，已拒绝作为临时副本添加。请在桌面端选择文件，或将文件放入工作区后用 @ 引用。";
 
 export interface SendBoxProps {
   value: string;
@@ -81,8 +95,14 @@ export interface SendBoxProps {
   selectedSkill?: WorkspaceSkillSummary | null;
   onSkillChange?: (skill: WorkspaceSkillSummary | null) => void;
   onChange: (value: string) => void;
-  onSend: (files: SelectedFile[], quotes: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
+  onSend: (
+    files: SelectedFile[],
+    quotes: SelectedQuote[],
+    attachments: SelectedImageAttachment[],
+  ) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
+  runtime?: RuntimeBridge;
+  sessionId?: string | null;
   onEscape?: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
@@ -127,6 +147,8 @@ export function SendBox({
   onChange,
   onSend,
   onStop,
+  runtime = runtimeBridge,
+  sessionId = null,
   onEscape,
   onOpenFileReference,
   onSlashCommand,
@@ -134,6 +156,10 @@ export function SendBox({
   onSearchWorkspace,
 }: SendBoxProps) {
   const inputRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentButtonRef = useRef<HTMLButtonElement | null>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
+  const imagePreviewObjectUrlsRef = useRef<Set<string>>(new Set());
   const handledExternalFileRequestIdRef = useRef<number | null>(null);
   const handledExternalQuoteRequestIdRef = useRef<number | null>(null);
   const [focused, setFocused] = useState(false);
@@ -147,6 +173,10 @@ export function SendBox({
   const [atDirectoryResults, setAtDirectoryResults] = useState<WorkspaceSearchResult[]>([]);
   const [atDirectoryLoading, setAtDirectoryLoading] = useState(false);
   const [atDirectoryError, setAtDirectoryError] = useState<string | null>(null);
+  const [imageAttachments, setImageAttachments] = useState<SelectedImageAttachment[]>([]);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+  const [activeImagePreview, setActiveImagePreview] = useState<SelectedImageAttachment | null>(null);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [uncontrolledSelectedSkill, setUncontrolledSelectedSkill] = useState<WorkspaceSkillSummary | null>(null);
   const [fileSelection, dispatchFileSelection] = useReducer(
     fileSelectionReducer,
@@ -169,18 +199,71 @@ export function SendBox({
     },
     [controlledSelectedSkill, onSkillChange],
   );
-  const canSubmit = !busy && (canSend || fileSelection.files.length > 0 || quoteSelection.quotes.length > 0);
+  const rememberPreviewUrl = useCallback((url: string | null | undefined) => {
+    if (url?.startsWith("blob:")) {
+      imagePreviewObjectUrlsRef.current.add(url);
+    }
+  }, []);
+  const revokePreviewUrl = useCallback((url: string | null | undefined) => {
+    if (!url?.startsWith("blob:")) {
+      return;
+    }
+    URL.revokeObjectURL(url);
+    imagePreviewObjectUrlsRef.current.delete(url);
+  }, []);
+  const addImageAttachment = useCallback(
+    (attachment: SelectedImageAttachment) => {
+      rememberPreviewUrl(attachment.previewUrl);
+      setImageAttachments((current) => {
+        const next = current.filter((item) => item.attachment_id !== attachment.attachment_id);
+        return [...next, attachment];
+      });
+    },
+    [rememberPreviewUrl],
+  );
+  const removeImageAttachment = useCallback(
+    (attachmentId: string) => {
+      setImageAttachments((current) => {
+        const removed = current.find((item) => item.attachment_id === attachmentId);
+        revokePreviewUrl(removed?.previewUrl);
+        if (activeImagePreview?.attachment_id === attachmentId) {
+          setActiveImagePreview(null);
+        }
+        return current.filter((item) => item.attachment_id !== attachmentId);
+      });
+    },
+    [activeImagePreview?.attachment_id, revokePreviewUrl],
+  );
+  const clearImageAttachments = useCallback(() => {
+    setImageAttachments((current) => {
+      current.forEach((item) => revokePreviewUrl(item.previewUrl));
+      return [];
+    });
+    setActiveImagePreview(null);
+  }, [revokePreviewUrl]);
+  const canSubmit =
+    !busy &&
+    !attachmentLoading &&
+    (canSend || fileSelection.files.length > 0 || quoteSelection.quotes.length > 0 || imageAttachments.length > 0);
   const showSendLoading = sendLoading && !busy;
   const requestSend = useCallback(() => {
-    const result = onSend(fileSelection.files, quoteSelection.quotes);
+    const result = onSend(fileSelection.files, quoteSelection.quotes, imageAttachments);
     void Promise.resolve(result).then((sent) => {
       if (sent !== false) {
         dispatchFileSelection({ type: "clear" });
         dispatchQuoteSelection({ type: "clear" });
+        clearImageAttachments();
         setSelectedSkill(null);
       }
     });
-  }, [fileSelection.files, onSend, quoteSelection.quotes, setSelectedSkill]);
+  }, [
+    clearImageAttachments,
+    fileSelection.files,
+    imageAttachments,
+    onSend,
+    quoteSelection.quotes,
+    setSelectedSkill,
+  ]);
   const SendIcon = variant === "keydex" ? ArrowUp : SendHorizontal;
   const slashQuery = getSlashQuery(editorValue);
   const availableSlashCommands = useMemo(
@@ -228,6 +311,46 @@ export function SendBox({
   }, [slashMode, slashQuery]);
 
   useEffect(() => {
+    return () => {
+      imagePreviewObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      imagePreviewObjectUrlsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (attachmentButtonRef.current?.contains(target) || attachmentMenuRef.current?.contains(target)) {
+        return;
+      }
+      setAttachmentMenuOpen(false);
+    };
+    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setAttachmentMenuOpen(false);
+      attachmentButtonRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleDocumentKeyDown, true);
+    };
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
     if (slashQuery === null && dismissedSlashValue !== null) {
       setDismissedSlashValue(null);
     }
@@ -245,6 +368,12 @@ export function SendBox({
       setAtBrowseState(null);
     }
   }, [atOpen]);
+
+  useEffect(() => {
+    if (attachmentMenuOpen && (slashOpen || atOpen)) {
+      setAttachmentMenuOpen(false);
+    }
+  }, [attachmentMenuOpen, atOpen, slashOpen]);
 
   useEffect(() => {
     if (atQuery === null && dismissedAtValue !== null) {
@@ -391,31 +520,194 @@ export function SendBox({
     dispatchFileSelection({ type: "remove", path });
   };
 
-  const addFiles = (files: FileList | null, source: "dropped" | "pasted") => {
-    if (!allowFileSelection) {
-      return;
-    }
-    if (!files?.length) {
-      return;
-    }
-    let added = 0;
-    Array.from(files).forEach((file) => {
-      const selected = selectedFileFromFile(file, source);
+  const addImagePath = useCallback(
+    async (path: string, source: string, previewUrl?: string | null) => {
+      const record = await runtime.attachments.registerImagePath(path, { source, sessionId });
+      let resolvedPreviewUrl = previewUrl ?? null;
+      if (!resolvedPreviewUrl) {
+        try {
+          const media = await runtime.attachments.readMedia(record.attachment_id || record.id);
+          resolvedPreviewUrl = media.data_url;
+        } catch {
+          resolvedPreviewUrl = null;
+        }
+      }
+      addImageAttachment(selectedImageAttachmentFromRecord(record, resolvedPreviewUrl));
+    },
+    [addImageAttachment, runtime, sessionId],
+  );
+
+  const addSelectedFilePath = useCallback(
+    (path: string, source: SelectedFileSource, name?: string | null) => {
+      const selected = selectedFileFromPath(path, source, name, "file");
       if (!selected) {
+        return false;
+      }
+      dispatchFileSelection({ type: "add", file: selected });
+      return true;
+    },
+    [],
+  );
+
+  const addPickedPaths = useCallback(
+    async (paths: string[], source: SelectedFileSource) => {
+      const cleanedPaths = paths.map((path) => path.trim()).filter(Boolean);
+      if (!cleanedPaths.length) {
         return;
       }
-      added += 1;
-      dispatchFileSelection({ type: "add", file: selected });
-    });
-    if (!added) {
-      dispatchFileSelection({ type: "error", error: "不支持的文件，无法获取路径" });
-    }
-  };
+      setAttachmentLoading(true);
+      try {
+        let added = 0;
+        for (const path of cleanedPaths) {
+          if (isImagePath(path)) {
+            await addImagePath(path, source);
+            added += 1;
+            continue;
+          }
+          if (allowFileSelection && addSelectedFilePath(path, source)) {
+            added += 1;
+          }
+        }
+        dispatchFileSelection({
+          type: "error",
+          error: added ? null : "不支持的文件，无法获取路径",
+        });
+      } catch (reason) {
+        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+      } finally {
+        setAttachmentLoading(false);
+      }
+    },
+    [addImagePath, addSelectedFilePath, allowFileSelection],
+  );
 
-  const handleDragOver = (event: DragEvent<HTMLFormElement>) => {
-    if (!allowFileSelection) {
+  const addImageUrl = useCallback(
+    async (url: string) => {
+      setAttachmentLoading(true);
+      try {
+        const record = await runtime.attachments.importImageUrl(url, { source: "url", sessionId });
+        const media = await runtime.attachments.readMedia(record.attachment_id || record.id);
+        addImageAttachment(selectedImageAttachmentFromRecord(record, media.data_url));
+        dispatchFileSelection({ type: "error", error: null });
+      } catch (reason) {
+        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+      } finally {
+        setAttachmentLoading(false);
+      }
+    },
+    [addImageAttachment, runtime, sessionId],
+  );
+
+  const addFiles = useCallback(
+    async (files: FileList | File[] | null, source: Exclude<SelectedFileSource, "workspace">) => {
+      const items = filesArray(files);
+      if (!items.length) {
+        return;
+      }
+      setAttachmentLoading(true);
+      try {
+        let added = 0;
+        let missingSourcePath = false;
+        for (const file of items) {
+          if (isImageFile(file)) {
+            const previewUrl = URL.createObjectURL(file);
+            try {
+              const path = fileSystemPathFromFile(file);
+              if (path) {
+                await addImagePath(path, source, previewUrl);
+              } else {
+                const record = await runtime.attachments.uploadImage(file, {
+                  filename: file.name,
+                  source,
+                  sessionId,
+                });
+                addImageAttachment(selectedImageAttachmentFromRecord(record, previewUrl));
+              }
+              added += 1;
+            } catch (reason) {
+              URL.revokeObjectURL(previewUrl);
+              throw reason;
+            }
+            continue;
+          }
+          if (!allowFileSelection) {
+            continue;
+          }
+          const selected = selectedFileFromFile(file, source);
+          if (selected) {
+            dispatchFileSelection({ type: "add", file: selected });
+            added += 1;
+            continue;
+          }
+          if (source !== "pasted") {
+            missingSourcePath = true;
+            continue;
+          }
+          const stored = await runtime.attachments.uploadLocalFile(file, {
+            filename: file.name,
+            source,
+          });
+          if (addSelectedFilePath(stored.path, source, stored.name)) {
+            added += 1;
+          }
+        }
+        dispatchFileSelection({
+          type: "error",
+          error: added ? null : missingSourcePath ? MISSING_SOURCE_FILE_PATH_MESSAGE : "不支持的文件，无法获取路径",
+        });
+      } catch (reason) {
+        dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+      } finally {
+        setAttachmentLoading(false);
+      }
+    },
+    [addImageAttachment, addImagePath, addSelectedFilePath, allowFileSelection, runtime, sessionId],
+  );
+
+  const handleAttachmentPick = useCallback(() => {
+    if (inputDisabled || attachmentLoading) {
       return;
     }
+    if (runtime.desktopPicker.isFilePickerAvailable()) {
+      void runtime.desktopPicker
+        .pickFiles()
+        .then((paths) => {
+          if (paths.length) {
+            return addPickedPaths(paths, "picker");
+          }
+          return undefined;
+        })
+        .catch((reason) => {
+          dispatchFileSelection({ type: "error", error: errorMessage(reason) });
+        });
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [addPickedPaths, attachmentLoading, inputDisabled, runtime]);
+
+  const handleAttachmentMenuToggle = useCallback(() => {
+    if (inputDisabled || attachmentLoading) {
+      return;
+    }
+    setAttachmentMenuOpen((open) => !open);
+  }, [attachmentLoading, inputDisabled]);
+
+  const handleAttachmentMenuPick = useCallback(() => {
+    setAttachmentMenuOpen(false);
+    handleAttachmentPick();
+  }, [handleAttachmentPick]);
+
+  const handleFileInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.currentTarget;
+      const files = filesArray(input.files);
+      input.value = "";
+      void addFiles(files, "picker");
+    },
+    [addFiles],
+  );
+
+  const handleDragOver = (event: DragEvent<HTMLFormElement>) => {
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -424,21 +716,24 @@ export function SendBox({
   };
 
   const handleDrop = (event: DragEvent<HTMLFormElement>) => {
-    if (!allowFileSelection) {
-      return;
-    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
     event.preventDefault();
     dispatchFileSelection({ type: "dragging", dragging: false });
-    addFiles(event.dataTransfer.files, "dropped");
+    void addFiles(event.dataTransfer.files, "dropped");
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
-    if (allowFileSelection && event.clipboardData.files.length) {
+    if (event.clipboardData.files.length) {
       event.preventDefault();
-      addFiles(event.clipboardData.files, "pasted");
+      void addFiles(event.clipboardData.files, "pasted");
+      return;
+    }
+    const imageUrl = imageUrlFromClipboard(event.clipboardData);
+    if (imageUrl) {
+      event.preventDefault();
+      void addImageUrl(imageUrl);
       return;
     }
     pastePlainText(event);
@@ -561,6 +856,45 @@ export function SendBox({
         }
       }}
     >
+      <input
+        ref={fileInputRef}
+        className={styles.hiddenFileInput}
+        type="file"
+        multiple
+        tabIndex={-1}
+        onChange={handleFileInputChange}
+      />
+
+      {imageAttachments.length ? (
+        <div className={styles.imageAttachments} aria-label="已添加图片">
+          {imageAttachments.map((attachment) => (
+            <div className={styles.imageAttachmentItem} key={attachment.attachment_id}>
+              <button
+                className={styles.imageAttachmentButton}
+                type="button"
+                title={attachment.name}
+                aria-label={`预览图片 ${attachment.name}`}
+                onClick={() => setActiveImagePreview(attachment)}
+              >
+                {attachment.previewUrl ? (
+                  <img className={styles.imageAttachmentThumb} src={attachment.previewUrl} alt="" />
+                ) : (
+                  <span className={styles.imageAttachmentFallback}>{attachment.name}</span>
+                )}
+              </button>
+              <button
+                className={styles.imageAttachmentRemove}
+                type="button"
+                aria-label={`删除图片 ${attachment.name}`}
+                onClick={() => removeImageAttachment(attachment.attachment_id)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {selectedSkill || quoteSelection.quotes.length || fileSelection.files.length ? (
         <div className={styles.fileChips} aria-label="已添加上下文" data-sendbox-context-chips="true">
           {selectedSkill ? (
@@ -634,6 +968,44 @@ export function SendBox({
           />
         </Suspense>
       ) : null}
+      {attachmentMenuOpen ? (
+        <div
+          ref={attachmentMenuRef}
+          className={popupStyles.menu}
+          role="listbox"
+          aria-label="添加内容"
+          data-testid="attachment-action-menu"
+        >
+          <div className={popupStyles.header}>
+            <span className={popupStyles.backSpacer} />
+            <span className={popupStyles.headerTitle}>添加内容</span>
+            <span className={popupStyles.headerMeta}>附件</span>
+          </div>
+          <div className={popupStyles.body}>
+            <button
+              className={popupStyles.item}
+              type="button"
+              role="option"
+              aria-label="附件"
+              aria-selected="true"
+              data-active="true"
+              data-kind="attachment"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                handleAttachmentMenuPick();
+              }}
+            >
+              <span className={popupStyles.icon} aria-hidden="true">
+                <Paperclip size={14} />
+              </span>
+              <span className={popupStyles.text}>
+                <strong>附件</strong>
+                <span>添加图片或文件</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {fileSelection.error ? (
         <div className={styles.fileError} data-sendbox-file-error="true">
@@ -643,6 +1015,25 @@ export function SendBox({
 
       <div className={styles.toolbar} data-sendbox-toolbar="true">
         <div className={styles.leftActions}>
+          <div className={styles.attachmentMenuRoot}>
+            <button
+              ref={attachmentButtonRef}
+              className={styles.attachmentButton}
+              type="button"
+              title="添加"
+              aria-label={attachmentLoading ? "正在添加附件" : "添加"}
+              aria-haspopup="menu"
+              aria-expanded={attachmentMenuOpen ? "true" : "false"}
+              disabled={inputDisabled || attachmentLoading}
+              onClick={handleAttachmentMenuToggle}
+            >
+              {attachmentLoading ? (
+                <LoaderCircle className={styles.attachmentSpinner} size={15} />
+              ) : (
+                <Plus size={17} />
+              )}
+            </button>
+          </div>
           {controls}
           {leftHint}
         </div>
@@ -673,12 +1064,80 @@ export function SendBox({
           {contextBar}
         </div>
       ) : null}
+
+      {activeImagePreview ? (
+        <ImagePreviewDialog
+          src={activeImagePreview.previewUrl}
+          title={activeImagePreview.name}
+          alt={activeImagePreview.name}
+          unavailableText={activeImagePreview.name}
+          onClose={() => setActiveImagePreview(null)}
+        />
+      ) : null}
     </form>
   );
 }
 
 function isBusy(state: ConversationRuntimeState): boolean {
   return state === "starting" || state === "running" || state === "waiting_approval" || state === "cancelling";
+}
+
+function filesArray(files: FileList | File[] | null): File[] {
+  if (!files) {
+    return [];
+  }
+  return Array.isArray(files) ? files : Array.from(files);
+}
+
+function fileSystemPathFromFile(file: File): string | null {
+  const withPath = file as File & { path?: string };
+  const path = withPath.path || file.webkitRelativePath || "";
+  return isLikelyFilesystemPath(path) ? path : null;
+}
+
+function isLikelyFilesystemPath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\");
+}
+
+function imageUrlFromClipboard(data: DataTransfer): string | null {
+  const htmlUrl = imageUrlFromClipboardHtml(data.getData("text/html"));
+  if (htmlUrl) {
+    return htmlUrl;
+  }
+  const text = data.getData("text/plain").trim();
+  return isLikelyImageUrl(text) ? text : null;
+}
+
+function imageUrlFromClipboardHtml(html: string): string | null {
+  if (!html.trim()) {
+    return null;
+  }
+  const match = html.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i);
+  const src = match?.[1]?.trim();
+  if (!src) {
+    return null;
+  }
+  return isHttpUrl(src) ? src.replaceAll("&amp;", "&") : null;
+}
+
+function isLikelyImageUrl(value: string): boolean {
+  if (!isHttpUrl(value)) {
+    return false;
+  }
+  try {
+    return /\.(png|jpe?g|webp|gif)$/i.test(new URL(value).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function nextMenuIndex(index: number, length: number, delta: 1 | -1): number {
@@ -870,7 +1329,7 @@ function FileContextChip({
   onOpen?: (file: SelectedFile) => void;
   onRemove: () => void;
 }) {
-  const fileKindLabel = file.type === "directory" ? "工作区目录" : "工作区文件";
+  const fileKindLabel = selectedFileKindLabel(file);
   const chipLabel = fileName(file.name || file.path);
 
   return (
@@ -918,6 +1377,19 @@ function quoteHoverDescription(quote: SelectedQuote): string {
 
 function fileHoverDescription(file: SelectedFile): string {
   return [file.path, annotationCommentDescription(file.annotationComment)].filter(Boolean).join("\n\n");
+}
+
+function selectedFileKindLabel(file: SelectedFile): string {
+  if (file.source === "workspace") {
+    return file.type === "directory" ? "工作区目录" : "工作区文件";
+  }
+  if (file.source === "pasted") {
+    return "粘贴文件";
+  }
+  if (file.source === "dropped") {
+    return "拖拽文件";
+  }
+  return file.type === "directory" ? "本地目录" : "本地文件";
 }
 
 function annotationCommentDescription(comment?: string | null): string {

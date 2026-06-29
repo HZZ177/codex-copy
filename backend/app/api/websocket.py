@@ -192,6 +192,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                             model=str(payload.get("model") or ""),
                             system_prompt=payload.get("system_prompt"),
                             runtime_params=_runtime_params(payload),
+                            attachments=_attachments(payload),
                         )
                     )
                     continue
@@ -301,6 +302,13 @@ def _runtime_params(payload: dict[str, Any]) -> dict[str, Any] | None:
     if value is None:
         value = payload.get("runtimeParams")
     return value if isinstance(value, dict) else None
+
+
+def _attachments(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+    value = payload.get("attachments")
+    if not isinstance(value, list):
+        return None
+    return [item for item in value if isinstance(item, dict)]
 
 
 async def _register_keydex_watcher(watcher: Any, session: dict[str, Any]) -> None:

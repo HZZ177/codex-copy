@@ -2,20 +2,30 @@ from __future__ import annotations
 
 import pytest
 from langchain.agents.middleware import ToolCallRequest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.app.agent.middleware import (
-    AutoTitleMiddleware,
-    DuplicateToolCallGuardMiddleware,
+from backend.app.agent.checkpoint import SQLiteCheckpointSaver
+from backend.app.agent.middleware.auto_title import AutoTitleMiddleware
+from backend.app.agent.middleware.builder import build_default_middleware
+from backend.app.agent.middleware.common import (
     DuplicateToolForceStopError,
     ToolCallLimitExceededError,
-    ToolCallLimitMiddleware,
-    ToolErrorHandlingMiddleware,
-    build_default_middleware,
 )
-from backend.app.agent.runtime_settings import AgentRuntimeSettings, AutoTitleRuntimeSettings
+from backend.app.agent.middleware.context_compression import ContextCompressionMiddleware
+from backend.app.agent.middleware.duplicate_tool_call_guard import (
+    DuplicateToolCallGuardMiddleware,
+)
+from backend.app.agent.middleware.tool_call_limit import ToolCallLimitMiddleware
+from backend.app.agent.middleware.tool_error_handling import ToolErrorHandlingMiddleware
+from backend.app.agent.runtime_settings import (
+    AgentRuntimeSettings,
+    AutoTitleRuntimeSettings,
+    ContextCompressionRuntimeSettings,
+)
 from backend.app.core.request_context import reset_request_context, set_request_context
 from backend.app.events import DomainEvent, DomainEventType, EventDispatcher
+from backend.app.services.context_compression_service import CompressionGenerationResult
 from backend.app.storage import StorageRepositories, init_database
 
 
@@ -30,6 +40,17 @@ def _request() -> ToolCallRequest:
         state={},
         runtime=None,
     )
+
+
+def _checkpoint(checkpoint_id: str, messages: list) -> dict:
+    return {
+        "v": 1,
+        "id": checkpoint_id,
+        "ts": f"2026-06-28T00:00:00+00:00:{checkpoint_id}",
+        "channel_values": {"messages": messages},
+        "channel_versions": {},
+        "versions_seen": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -127,6 +148,302 @@ def test_build_default_middleware_honors_auto_title_config(tmp_path) -> None:
 
     assert not any(isinstance(item, AutoTitleMiddleware) for item in disabled)
     assert any(isinstance(item, AutoTitleMiddleware) for item in enabled)
+
+
+@pytest.mark.asyncio
+async def test_context_compression_before_model_applies_pending_staging(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_staging",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="源会话",
+    )
+    repositories.compression_staging.create(
+        original_session_id=session.id,
+        active_session_id=session.id,
+        target_session_id=session.id,
+        generation=1,
+        anchor_message_id="h2",
+        l1_content="旧历史摘要",
+    )
+    token = set_request_context(session_id=session.id, active_session_id=session.id)
+    try:
+        middleware = ContextCompressionMiddleware(
+            settings=ContextCompressionRuntimeSettings(
+                enabled=True,
+                context_window_tokens=100000,
+                trigger_fraction=0.5,
+                emergency_fraction=0.9,
+                retain_rounds=1,
+            ),
+            repositories=repositories,
+            dispatcher=EventDispatcher(),
+            checkpointer=object(),
+        )
+        result = await middleware.abefore_model(
+            {
+                "messages": [
+                    HumanMessage(content="旧问题", id="h1"),
+                    AIMessage(content="旧回答", id="a1"),
+                    HumanMessage(content="最近问题", id="h2"),
+                    AIMessage(content="最近回答", id="a2"),
+                ]
+            },
+            runtime=None,
+        )
+    finally:
+        reset_request_context(token)
+
+    assert result is not None
+    messages = result["messages"]
+    assert any("旧历史摘要" in str(getattr(message, "content", "")) for message in messages)
+    assert [getattr(message, "content", "") for message in messages[-2:]] == [
+        "最近问题",
+        "最近回答",
+    ]
+    staging = repositories.compression_staging.get_latest(original_session_id=session.id)
+    assert staging.status == "applied"
+
+
+@pytest.mark.asyncio
+async def test_context_compression_before_model_runs_emergency_compression(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_emergency",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="源会话",
+    )
+    service = FakeCompressionService(l1="紧急摘要")
+    token = set_request_context(
+        session_id=session.id, active_session_id=session.id, trace_id="trace_1"
+    )
+    try:
+        middleware = ContextCompressionMiddleware(
+            settings=ContextCompressionRuntimeSettings(
+                enabled=True,
+                context_window_tokens=1000,
+                trigger_fraction=0.1,
+                emergency_fraction=0.5,
+                retain_rounds=1,
+            ),
+            repositories=repositories,
+            dispatcher=EventDispatcher(),
+            checkpointer=object(),
+            compression_service=service,
+        )
+        result = await middleware.abefore_model(
+            {
+                "messages": [
+                    HumanMessage(content="旧问题", id="h1"),
+                    AIMessage(content="旧回答", id="a1"),
+                    HumanMessage(content="最近问题", id="h2"),
+                    AIMessage(
+                        content="最近回答",
+                        id="a2",
+                        usage_metadata={
+                            "input_tokens": 700,
+                            "output_tokens": 200,
+                            "total_tokens": 900,
+                        },
+                    ),
+                ]
+            },
+            runtime=None,
+        )
+    finally:
+        reset_request_context(token)
+
+    assert result is not None
+    messages = result["messages"]
+    assert service.calls == ["initial"]
+    assert any("紧急摘要" in str(getattr(message, "content", "")) for message in messages)
+    assert [getattr(message, "content", "") for message in messages[-2:]] == [
+        "最近问题",
+        "最近回答",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_compression_wrap_model_emits_context_window_snapshots(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_window_snapshot",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="源会话",
+    )
+    events: list[DomainEvent] = []
+
+    async def collect(event: DomainEvent) -> None:
+        events.append(event)
+
+    token = set_request_context(
+        session_id=session.id,
+        active_session_id=session.id,
+        trace_id="trace_window",
+        user_id=session.user_id,
+    )
+    try:
+        middleware = ContextCompressionMiddleware(
+            settings=ContextCompressionRuntimeSettings(
+                enabled=True,
+                context_window_tokens=1000,
+                trigger_fraction=0.75,
+                emergency_fraction=0.9,
+                retain_rounds=1,
+            ),
+            repositories=repositories,
+            dispatcher=EventDispatcher([collect]),
+            checkpointer=object(),
+        )
+
+        async def handler(_: ModelRequest) -> ModelResponse:
+            return ModelResponse(
+                result=[
+                    AIMessage(
+                        content="回答",
+                        usage_metadata={
+                            "input_tokens": 620,
+                            "output_tokens": 80,
+                            "total_tokens": 700,
+                        },
+                    )
+                ],
+                structured_response=None,
+            )
+
+        result = await middleware.awrap_model_call(
+            ModelRequest(
+                model=object(),
+                messages=[HumanMessage(content="需要分析上下文")],
+                system_message=None,
+                tool_choice=None,
+                tools=[],
+                response_format=None,
+                state={},
+                runtime=None,
+                model_settings={},
+            ),
+            handler,
+        )
+    finally:
+        reset_request_context(token)
+
+    assert isinstance(result, ModelResponse)
+    snapshots = [
+        event.payload
+        for event in events
+        if event.event_type == DomainEventType.MIDDLEWARE_PROGRESS.value
+        and event.payload.get("stage") == "context_window_snapshot"
+    ]
+    assert [snapshot["call_phase"] for snapshot in snapshots] == ["before", "after"]
+    assert snapshots[0]["call_status"] == "running"
+    assert snapshots[0]["token_source"] == "estimated"
+    assert snapshots[1]["call_status"] == "completed"
+    assert snapshots[1]["token_source"] == "usage_metadata"
+    assert snapshots[1]["token_count"] == 700
+    assert snapshots[1]["context_window"] == 1000
+    assert snapshots[1]["threshold_fraction"] == 0.75
+    assert snapshots[1]["threshold_token_count"] == 750
+    assert snapshots[1]["threshold_usage_fraction"] == pytest.approx(700 / 750)
+
+
+@pytest.mark.asyncio
+async def test_context_compression_after_agent_schedules_background_staging(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_background",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="源会话",
+    )
+    saver = SQLiteCheckpointSaver(repositories.db)
+    source_messages = [
+        HumanMessage(content="旧问题", id="h1"),
+        AIMessage(content="旧回答", id="a1"),
+        HumanMessage(content="最近问题", id="h2"),
+        AIMessage(content="最近回答", id="a2"),
+    ]
+    saver.put(
+        {"configurable": {"thread_id": session.id, "checkpoint_ns": ""}},
+        _checkpoint("ckpt_1", source_messages),
+        {},
+        {},
+    )
+    scheduled = []
+
+    def schedule(coro):
+        scheduled.append(coro)
+        return object()
+
+    token = set_request_context(
+        session_id=session.id, active_session_id=session.id, trace_id="trace_bg"
+    )
+    try:
+        middleware = ContextCompressionMiddleware(
+            settings=ContextCompressionRuntimeSettings(
+                enabled=True,
+                context_window_tokens=1000,
+                trigger_fraction=0.1,
+                emergency_fraction=0.9,
+                retain_rounds=1,
+            ),
+            repositories=repositories,
+            dispatcher=EventDispatcher(),
+            checkpointer=saver,
+            compression_service=FakeCompressionService(l1="后台摘要"),
+            schedule_task=schedule,
+        )
+        await middleware.aafter_agent(
+            {
+                "messages": [
+                    HumanMessage(content="旧问题", id="h1"),
+                    AIMessage(content="旧回答", id="a1"),
+                    HumanMessage(content="最近问题", id="h2"),
+                    AIMessage(
+                        content="最近回答",
+                        id="a2",
+                        usage_metadata={
+                            "input_tokens": 700,
+                            "output_tokens": 200,
+                            "total_tokens": 900,
+                        },
+                    ),
+                ]
+            },
+            runtime=None,
+        )
+        assert len(scheduled) == 1
+        await scheduled[0]
+    finally:
+        reset_request_context(token)
+
+    source = repositories.sessions.get(session.id)
+    assert source.active_session_id != session.id
+    target = repositories.sessions.get(source.active_session_id)
+    assert target.status == "active"
+    assert target.parent_session_id == session.id
+    assert target.source_checkpoint_id == "ckpt_1"
+    staging = repositories.compression_staging.get_latest(
+        original_session_id=session.id,
+        status="pending",
+        target_session_id=target.id,
+    )
+    assert staging is not None
+    assert staging.anchor_message_id == "h2"
+    assert staging.l1_content == "后台摘要"
+    cloned = saver.get_tuple(
+        {
+            "configurable": {
+                "thread_id": target.id,
+                "checkpoint_ns": "",
+                "checkpoint_id": "ckpt_1",
+            }
+        }
+    )
+    assert cloned is not None
 
 
 @pytest.mark.asyncio
@@ -260,3 +577,19 @@ class FakeTitleService:
 class FailingTitleService:
     async def generate_and_update_session_title(self, *, session_id, messages, settings):
         raise RuntimeError("title failure")
+
+
+class FakeCompressionService:
+    def __init__(self, *, l1: str, l2: str | None = None) -> None:
+        self.l1 = l1
+        self.l2 = l2
+        self.calls: list[str] = []
+
+    async def generate_compression_result(self, *, material):
+        self.calls.append(material.phase)
+        return CompressionGenerationResult(
+            success=True,
+            phase=material.phase,
+            new_l1_content=self.l1,
+            new_l2_content=self.l2,
+        )

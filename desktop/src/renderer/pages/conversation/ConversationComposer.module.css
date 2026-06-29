@@ -1,0 +1,159 @@
+.contextWindowIndicator {
+  position: relative;
+  display: inline-grid;
+  width: 22px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-text-tertiary);
+  line-height: 0;
+  outline: none;
+}
+
+.contextWindowIndicator:focus-visible {
+  color: var(--color-text-secondary);
+}
+
+.contextWindowIndicator::before {
+  position: absolute;
+  right: -8px;
+  bottom: 100%;
+  z-index: 95;
+  width: min(280px, calc(100vw - 32px));
+  height: 14px;
+  content: "";
+  pointer-events: none;
+}
+
+.contextWindowIndicator:hover::before,
+.contextWindowIndicator:focus-within::before {
+  pointer-events: auto;
+}
+
+.contextWindowRing {
+  display: block;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.contextWindowTrack,
+.contextWindowProgress {
+  fill: none;
+  stroke-width: 2;
+}
+
+.contextWindowTrack {
+  stroke: color-mix(in srgb, var(--color-text-tertiary) 24%, transparent);
+}
+
+.contextWindowProgress {
+  stroke: color-mix(in srgb, var(--color-text-secondary) 82%, var(--color-accent));
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset var(--motion-normal) ease,
+    stroke var(--motion-fast) ease;
+}
+
+.contextWindowIndicator[data-level="warning"] .contextWindowProgress {
+  stroke: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
+}
+
+.contextWindowIndicator[data-level="danger"] .contextWindowProgress {
+  stroke: color-mix(in srgb, var(--color-danger) 88%, var(--color-text-secondary));
+}
+
+.contextWindowIndicator[data-level="idle"] .contextWindowTrack {
+  stroke: color-mix(in srgb, var(--color-text-tertiary) 20%, transparent);
+}
+
+.contextWindowIndicator[data-level="idle"] .contextWindowProgress {
+  stroke: transparent;
+}
+
+.contextWindowTooltip {
+  position: absolute;
+  right: -8px;
+  bottom: calc(100% + 10px);
+  z-index: 96;
+  display: grid;
+  width: max-content;
+  min-width: 204px;
+  max-width: min(280px, calc(100vw - 32px));
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 97%, transparent);
+  box-shadow:
+    0 16px 44px rgb(15 23 42 / 12%),
+    0 2px 8px rgb(15 23 42 / 7%);
+  color: var(--color-text-primary);
+  line-height: var(--ui-line-height-normal);
+  opacity: 0;
+  padding: 10px;
+  pointer-events: none;
+  transform: translateY(4px) scale(0.98);
+  transform-origin: right bottom;
+  transition:
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+  -webkit-user-select: text;
+  user-select: text;
+  backdrop-filter: blur(14px);
+}
+
+.contextWindowTooltip * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.contextWindowTooltip::after {
+  position: absolute;
+  right: 13px;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  background: inherit;
+  content: "";
+  transform: rotate(45deg);
+}
+
+.contextWindowIndicator:hover .contextWindowTooltip,
+.contextWindowIndicator:focus-visible .contextWindowTooltip,
+.contextWindowIndicator:focus-within .contextWindowTooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.contextWindowTooltipTitle {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.contextWindowTooltipSummary {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.contextWindowTooltipMeta {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contextWindowProgress,
+  .contextWindowTooltip {
+    transition: none;
+  }
+}

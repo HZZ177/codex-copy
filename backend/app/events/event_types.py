@@ -92,6 +92,7 @@ CORE_EVENT_TYPES = frozenset(
         DomainEventType.REASONING_FINISHED,
         DomainEventType.REASONING_FAILED,
         DomainEventType.TASK_FINISHED_CHAT,
+        DomainEventType.MIDDLEWARE_PROGRESS,
     }
 )
 

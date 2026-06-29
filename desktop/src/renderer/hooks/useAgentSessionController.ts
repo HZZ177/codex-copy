@@ -8,8 +8,10 @@ import {
   type WsConnectionStatus,
 } from "@/runtime";
 import {
+  agentAttachmentFromSelected,
   selectedQuoteFromText,
   type SelectedFile,
+  type SelectedImageAttachment,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
 import type { RuntimeSelectedModel } from "@/renderer/components/model";
@@ -111,9 +113,15 @@ export interface AgentSessionController {
       clearDraft?: boolean;
       contextItems?: ChatPayload["contextItems"];
       runtimeParams?: ChatPayload["runtime_params"];
+      attachments?: ChatPayload["attachments"];
     },
   ) => Promise<boolean>;
-  send: (files?: SelectedFile[], quotes?: SelectedQuote[], model?: RuntimeSelectedModel | null) => Promise<boolean>;
+  send: (
+    files?: SelectedFile[],
+    quotes?: SelectedQuote[],
+    attachments?: SelectedImageAttachment[],
+    model?: RuntimeSelectedModel | null,
+  ) => Promise<boolean>;
   stop: () => void;
   submitApproval: (decision: CommandApprovalDecisionPayload) => Promise<void>;
   approvalSubmitting: boolean;
@@ -403,13 +411,15 @@ export function useAgentSessionController({
         clearDraft?: boolean;
         contextItems?: ChatPayload["contextItems"];
         runtimeParams?: ChatPayload["runtime_params"];
+        attachments?: ChatPayload["attachments"];
       } = {},
     ) => {
       const trimmedText = text.trim();
       const providerId = model?.providerId.trim() ?? "";
       const trimmedModel = model?.model.trim() ?? "";
       const contextItems = options.contextItems ?? [];
-      if ((!trimmedText && !contextItems.length) || isBusy(runtimeState)) {
+      const attachments = options.attachments ?? [];
+      if ((!trimmedText && !contextItems.length && !attachments.length) || isBusy(runtimeState)) {
         return false;
       }
       if (!providerId || !trimmedModel) {
@@ -448,6 +458,7 @@ export function useAgentSessionController({
           sessionId: targetSessionId,
           content: trimmedText,
           contextItems,
+          attachments,
         });
         dispatch({ type: "runtime/setState", sessionId: targetSessionId, runtimeState: "running" });
         const payload: ChatPayload = {
@@ -455,6 +466,7 @@ export function useAgentSessionController({
           message: trimmedText,
           provider_id: providerId,
           model: trimmedModel,
+          ...(attachments.length ? { attachments } : {}),
           ...(options.runtimeParams ? { runtime_params: options.runtimeParams } : {}),
         };
         if (sharedRuntimeContext) {
@@ -495,15 +507,22 @@ export function useAgentSessionController({
   );
 
   const send = useCallback(
-    async (files: SelectedFile[] = [], quotes: SelectedQuote[] = [], model: RuntimeSelectedModel | null = null) => {
+    async (
+      files: SelectedFile[] = [],
+      quotes: SelectedQuote[] = [],
+      imageAttachments: SelectedImageAttachment[] = [],
+      model: RuntimeSelectedModel | null = null,
+    ) => {
       const prepared = prepareComposerMessage(draft, files, { quotes, selectedSkill });
-      if (!prepared.message && !prepared.contextItems.length) {
+      const attachments = imageAttachments.map(agentAttachmentFromSelected);
+      if (!prepared.message && !prepared.contextItems.length && !attachments.length) {
         return false;
       }
       const sent = await sendText(prepared.message, model, {
         clearDraft: true,
         contextItems: prepared.contextItems,
         runtimeParams: prepared.runtimeParams,
+        attachments,
       });
       if (sent) {
         setSelectedSkill(null);

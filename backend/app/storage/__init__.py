@@ -2,11 +2,13 @@
 
 from backend.app.storage.db import Database, init_database
 from backend.app.storage.repositories import (
+    AttachmentRecord,
     MODEL_DEFAULT_CHAT,
     MODEL_DEFAULT_FAST,
     MODEL_DEFAULT_SCOPES,
     CommandApprovalAuditRecord,
     CommandApprovalRequestRecord,
+    CompressionStagingRecord,
     LLMRequestLogRecord,
     MessageEventRecord,
     ModelDefaultRecord,
@@ -24,8 +26,10 @@ from backend.app.storage.repositories import (
 
 __all__ = [
     "Database",
+    "AttachmentRecord",
     "CommandApprovalAuditRecord",
     "CommandApprovalRequestRecord",
+    "CompressionStagingRecord",
     "LLMRequestLogRecord",
     "MessageEventRecord",
     "MODEL_DEFAULT_CHAT",

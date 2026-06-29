@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage
 
 from backend.app.agent.factory import AgentFactory, agent_factory
 from backend.app.agent.langchain_tools import registry_to_langchain_tools
-from backend.app.agent.middleware import build_default_middleware
+from backend.app.agent.middleware.builder import build_default_middleware
 from backend.app.agent.runtime_settings import (
     AgentRuntimeSettings,
     default_agent_runtime_settings,
@@ -114,6 +114,7 @@ class AgentRunner:
                 runtime_settings,
                 repositories=tool_context.metadata.get("repositories"),
                 dispatcher=tool_context.metadata.get("dispatcher"),
+                checkpointer=self.checkpointer,
                 model_http_transport=model_http_transport,
             ),
             state_schema=KeydexAgentState,

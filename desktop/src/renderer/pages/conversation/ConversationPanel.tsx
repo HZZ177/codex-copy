@@ -3,6 +3,7 @@ import { ConversationComposerAccessory } from "@/renderer/pages/conversation/Com
 
 import {
   MessageList,
+  type MessageListEmptyLayout,
   type MessageListPerformanceProfile,
   type MessageListTurnNavigationRequest,
   type MessageListTurnNavigatorMode,
@@ -18,6 +19,7 @@ export interface ConversationPanelProps {
   workspaceRuntime: RuntimeBridge;
   variant?: ConversationPanelVariant;
   performanceProfile?: MessageListPerformanceProfile;
+  emptyLayout?: MessageListEmptyLayout;
   emptyText?: string;
   emptyTestId?: string;
   scrollButtonMode?: "inline" | "external";
@@ -31,6 +33,7 @@ export function ConversationPanel({
   workspaceRuntime,
   variant = "full",
   performanceProfile = "default",
+  emptyLayout,
   emptyText = "暂无消息",
   emptyTestId = "message-empty",
   scrollButtonMode = "inline",
@@ -66,6 +69,7 @@ export function ConversationPanel({
         turnNavigatorMode={turnNavigatorMode}
         turnNavigationRequest={turnNavigationRequest}
         onScrollControlsChange={model.updateScrollControls}
+        emptyLayout={emptyLayout}
         emptyText={emptyText}
         emptyTestId={emptyTestId}
       />

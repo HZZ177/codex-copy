@@ -174,6 +174,156 @@ describe("ConversationPage", () => {
     expect(await screen.findByText("上下文已压缩，后续对话将从压缩分支继续。")).not.toBeNull();
   });
 
+  it("renders context compression divider notices from history metadata", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("system", "上下文已自动压缩", {
+          messageEventId: "evt-compressed",
+          turnIndex: 2,
+          status: "completed",
+          metadata: {
+            compression: {
+              kind: "context_compression",
+              stage: "staging_applied",
+              mode: "background",
+              notice_id: "context-compression:staging:1",
+            },
+          },
+        }),
+      ],
+    });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    const notice = await screen.findByTestId("context-compression-notice");
+    expect(notice.textContent).toContain("上下文已自动压缩");
+  });
+
+  it("updates emergency compression divider notices in place", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await act(async () => {
+      emit(
+        agentEvent("middleware_progress", {
+          session_id: "ses-1",
+          middleware: "ContextCompressionMiddleware",
+          stage: "emergency_triggered",
+          compression_mode: "emergency",
+          notice_id: "context-compression:emergency:trace-1",
+          trace_id: "trace-1",
+        }),
+      );
+    });
+
+    expect(await screen.findByText("正在自动压缩中")).not.toBeNull();
+
+    await act(async () => {
+      emit(
+        agentEvent("middleware_progress", {
+          session_id: "ses-1",
+          middleware: "ContextCompressionMiddleware",
+          stage: "emergency_completed",
+          compression_mode: "emergency",
+          notice_id: "context-compression:emergency:trace-1",
+          trace_id: "trace-1",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("context-compression-notice").textContent).toContain("自动压缩成功");
+    });
+    expect(screen.queryByText("正在自动压缩中")).toBeNull();
+  });
+
+  it("shows async compression failures as top notifications without adding a divider", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversationWithNotifications(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await act(async () => {
+      emit(
+        agentEvent("middleware_progress", {
+          session_id: "ses-1",
+          middleware: "ContextCompressionMiddleware",
+          stage: "background_failed",
+          compression_mode: "background",
+          reason: "missing_fast_model",
+        }),
+      );
+    });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("后台上下文压缩失败");
+    expect(screen.queryByTestId("context-compression-notice")).toBeNull();
+  });
+
+  it("updates the context window ring from model-call snapshots", async () => {
+    const { runtime, emit } = fakeRuntime();
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    await act(async () => {
+      emit(
+        agentEvent("middleware_progress", {
+          session_id: "ses-1",
+          active_session_id: "ses-1",
+          middleware: "ContextCompressionMiddleware",
+          stage: "context_window_snapshot",
+          compression_mode: "snapshot",
+          call_phase: "before",
+          call_status: "running",
+          token_source: "estimated",
+          token_count: 400,
+          context_window: 1000,
+          window_fraction: 0.4,
+          threshold_fraction: 0.75,
+          threshold_token_count: 750,
+          threshold_usage_fraction: 400 / 750,
+          emergency_fraction: 0.9,
+          remaining_to_threshold_tokens: 350,
+        }),
+      );
+    });
+
+    const initialIndicator = await screen.findByTestId("context-window-indicator");
+    expect(initialIndicator.getAttribute("aria-label")).toContain("当前已使用上下文 400 tokens");
+    expect(initialIndicator.getAttribute("aria-label")).toContain("53.3%");
+
+    await act(async () => {
+      emit(
+        agentEvent("middleware_progress", {
+          session_id: "ses-1",
+          active_session_id: "ses-1",
+          middleware: "ContextCompressionMiddleware",
+          stage: "context_window_snapshot",
+          compression_mode: "snapshot",
+          call_phase: "after",
+          call_status: "completed",
+          token_source: "usage_metadata",
+          token_count: 700,
+          context_window: 1000,
+          window_fraction: 0.7,
+          threshold_fraction: 0.75,
+          threshold_token_count: 750,
+          threshold_usage_fraction: 700 / 750,
+          emergency_fraction: 0.9,
+          remaining_to_threshold_tokens: 50,
+        }),
+      );
+    });
+
+    const indicator = screen.getByTestId("context-window-indicator");
+    expect(indicator.getAttribute("aria-label")).toContain("当前已使用上下文 700 tokens");
+    expect(indicator.getAttribute("aria-label")).toContain("93.3%");
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("当前已使用 700 tokens");
+    expect(tooltip.textContent).toContain("触发压缩进度 93.3%");
+    expect(tooltip.textContent).not.toContain("700 / 1,000 tokens");
+    expect(tooltip.textContent).not.toContain("调用后 · 模型返回");
+  });
+
   it("forks a restored message and navigates to the new branch session", async () => {
     const navigateToConversation = vi.fn();
     const forkSession = vi.fn().mockResolvedValue({
@@ -823,7 +973,7 @@ describe("ConversationPage", () => {
     expect(screen.queryByText("trace-history")).toBeNull();
     expect(screen.queryByText(/^token /)).toBeNull();
     expect(screen.getByText("模型请求失败")).not.toBeNull();
-    expect(screen.getByText("已取消")).not.toBeNull();
+    expect(screen.getByTestId("conversation-cancelled-notice").textContent).toBe("对话已取消");
   });
 
   it("streams assistant text from websocket events", async () => {
@@ -1213,7 +1363,7 @@ describe("ConversationPage", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("发送")).not.toBeNull();
     });
-    expect(screen.getByText("已取消")).not.toBeNull();
+    expect(screen.getByTestId("conversation-cancelled-notice").textContent).toBe("对话已取消");
   });
 
   it("quotes selected assistant text into the composer", async () => {

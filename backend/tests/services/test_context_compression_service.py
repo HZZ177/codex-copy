@@ -5,8 +5,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from backend.app.agent.checkpoint import SQLiteCheckpointSaver
-from backend.app.agent.runtime_settings import ContextCompressionRuntimeSettings
+from backend.app.agent.context_compression_utils import CompressionMaterial
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
 from backend.app.services.context_compression_service import ContextCompressionService
@@ -38,26 +37,7 @@ def _provider() -> ModelProviderRecord:
     )
 
 
-def _checkpoint(checkpoint_id: str) -> dict:
-    return {
-        "v": 1,
-        "id": checkpoint_id,
-        "ts": f"2026-06-28T00:00:00+00:00:{checkpoint_id}",
-        "channel_values": {
-            "messages": [
-                HumanMessage(content="旧问题"),
-                AIMessage(content="旧回答"),
-                HumanMessage(content="最近问题"),
-                AIMessage(content="最近回答"),
-            ]
-        },
-        "channel_versions": {},
-        "versions_seen": {},
-    }
-
-
-def _prepare_source(tmp_path):
-    repositories = _repositories(tmp_path)
+def _prepare_fast_model(repositories: StorageRepositories) -> None:
     provider = _provider()
     repositories.model_providers.upsert(provider)
     repositories.model_providers.set_model_default(
@@ -65,232 +45,105 @@ def _prepare_source(tmp_path):
         provider_id=provider.id,
         model="fast-model",
     )
-    source = repositories.sessions.create(
-        session_id="ses_source",
-        user_id="local-user",
+
+
+def _material(
+    *, phase: str = "initial", existing_l1_content: str | None = None
+) -> CompressionMaterial:
+    return CompressionMaterial(
+        phase=phase,
+        existing_l1_message=None,
+        existing_l2_message=None,
+        existing_l1_content=existing_l1_content,
+        existing_l2_content=None,
+        compression_zone_messages=[
+            HumanMessage(content="旧问题", id="h1"),
+            AIMessage(content="旧回答", id="a1"),
+        ],
+        retain_zone_messages=[HumanMessage(content="最近问题", id="h2")],
+        anchor_message_id="h2",
+        trace_id="trace_1",
+        trace_record_id="trace_1",
+        original_session_id="ses_1",
+        active_session_id="ses_1",
         scene_id="desktop-agent",
-        title="源会话",
+        scene_version_seq=None,
+        side_event_metadata={"mode": "test"},
     )
-    saver = SQLiteCheckpointSaver(repositories.db)
-    saver.put(
-        {"configurable": {"thread_id": source.id, "checkpoint_ns": ""}},
-        _checkpoint("ckpt_1"),
-        {},
-        {},
+
+
+@pytest.mark.asyncio
+async def test_context_compression_service_initial_generates_l1_only(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    _prepare_fast_model(repositories)
+    llm = PromptAwareLLM()
+    service = ContextCompressionService(repositories, factory=FakeFactory(llm))
+
+    result = await service.generate_compression_result(material=_material())
+
+    assert result.success is True
+    assert result.phase == "initial"
+    assert result.new_l1_content == "新的L1摘要"
+    assert result.new_l2_content is None
+    assert llm.calls == ["l1"]
+
+
+@pytest.mark.asyncio
+async def test_context_compression_service_second_generates_l1_and_l2(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    _prepare_fast_model(repositories)
+    llm = PromptAwareLLM()
+    service = ContextCompressionService(repositories, factory=FakeFactory(llm))
+
+    result = await service.generate_compression_result(
+        material=_material(phase="second", existing_l1_content="上一轮L1摘要")
     )
-    repositories.trace_records.create(
-        trace_id="trace_1",
-        session_id=source.id,
-        active_session_id=source.id,
-        scene_id=source.scene_id,
-        user_id=source.user_id,
-        turn_index=2,
-        root_node_id="root_1",
+
+    assert result.success is True
+    assert result.phase == "second"
+    assert result.new_l1_content == "新的L1摘要"
+    assert result.new_l2_content == "新的L2摘要"
+    assert sorted(llm.calls) == ["l1", "l2"]
+
+
+@pytest.mark.asyncio
+async def test_context_compression_service_reports_missing_fast_model_config(tmp_path) -> None:
+    service = ContextCompressionService(
+        _repositories(tmp_path), factory=FakeFactory(PromptAwareLLM())
     )
-    repositories.trace_records.finish(
-        "trace_1",
-        status="completed",
-        output_checkpoint_id="ckpt_1",
-        output_checkpoint_ns="",
-    )
-    for turn_index, question, answer in [
-        (1, "旧问题", "旧回答"),
-        (2, "最近问题", "最近回答"),
-    ]:
-        repositories.message_events.append(
-            event_id=f"evt_user_{turn_index}",
-            session_id=source.id,
-            trace_record_id="trace_1",
-            turn_index=turn_index,
-            action="user_message",
-            data={"session_id": source.id, "content": question},
+
+    result = await service.generate_compression_result(material=_material())
+
+    assert result.success is False
+    assert result.failure_reason.startswith("model_config_error:")
+
+
+class PromptAwareLLM:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def ainvoke(self, messages: list[Any], config: dict[str, Any] | None = None) -> AIMessage:
+        system_text = str(messages[0].content)
+        if "L2区压缩任务" in system_text:
+            self.calls.append("l2")
+            return AIMessage(
+                content="<context_compression:l2>\n新的L2摘要\n</context_compression:l2>",
+                usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+            )
+        self.calls.append("l1")
+        return AIMessage(
+            content="<context_compression:l1>\n新的L1摘要\n</context_compression:l1>",
+            usage_metadata={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
         )
-        repositories.message_events.append(
-            event_id=f"evt_ai_{turn_index}",
-            session_id=source.id,
-            trace_record_id="trace_1",
-            turn_index=turn_index,
-            action="ai_message",
-            data={"session_id": source.id, "content": answer},
-        )
-    return repositories, saver
-
-
-@pytest.mark.asyncio
-async def test_context_compression_skips_below_threshold(tmp_path) -> None:
-    repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(
-        repositories, checkpointer=saver, factory=FakeFactory("摘要")
-    )
-
-    outcome = await service.maybe_compress_after_turn(
-        session_id="ses_source",
-        trace_id="trace_1",
-        turn_index=2,
-        user_id="local-user",
-        settings=ContextCompressionRuntimeSettings(
-            enabled=True,
-            context_window_tokens=100000,
-            trigger_fraction=0.5,
-            emergency_fraction=0.9,
-            retain_rounds=1,
-        ),
-        latest_usage={"total_tokens": 20},
-    )
-
-    assert outcome.status == "skipped"
-    assert outcome.reason == "below_threshold"
-    assert repositories.sessions.get("ses_source").active_session_id == "ses_source"
-
-
-@pytest.mark.asyncio
-async def test_context_compression_skips_when_no_compressible_history(tmp_path) -> None:
-    repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(
-        repositories, checkpointer=saver, factory=FakeFactory("摘要")
-    )
-
-    outcome = await service.maybe_compress_after_turn(
-        session_id="ses_source",
-        trace_id="trace_1",
-        turn_index=2,
-        user_id="local-user",
-        settings=ContextCompressionRuntimeSettings(
-            enabled=True,
-            context_window_tokens=1000,
-            trigger_fraction=0.01,
-            emergency_fraction=0.9,
-            retain_rounds=3,
-        ),
-        latest_usage={"total_tokens": 20},
-    )
-
-    assert outcome.status == "skipped"
-    assert outcome.reason == "no_compressible_history"
-    assert repositories.sessions.get("ses_source").active_session_id == "ses_source"
-    assert [
-        event.action for event in repositories.message_events.list_by_session("ses_source")
-    ] == [
-        "user_message",
-        "ai_message",
-        "user_message",
-        "ai_message",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_context_compression_creates_active_branch_and_rewrites_checkpoint(tmp_path) -> None:
-    repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(
-        repositories, checkpointer=saver, factory=FakeFactory("压缩摘要")
-    )
-
-    outcome = await service.maybe_compress_after_turn(
-        session_id="ses_source",
-        trace_id="trace_1",
-        turn_index=2,
-        user_id="local-user",
-        settings=ContextCompressionRuntimeSettings(
-            enabled=True,
-            context_window_tokens=1000,
-            trigger_fraction=0.01,
-            emergency_fraction=0.9,
-            retain_rounds=1,
-        ),
-        latest_usage={"total_tokens": 20},
-    )
-
-    assert outcome.status == "compressed"
-    assert outcome.target_session_id
-    source = repositories.sessions.get("ses_source")
-    assert source.active_session_id == outcome.target_session_id
-    assert source.child_session_id == outcome.target_session_id
-    target = repositories.sessions.get(outcome.target_session_id)
-    assert target.parent_session_id == "ses_source"
-    assert target.source_checkpoint_id == "ckpt_1"
-
-    checkpoint = saver.get_tuple(
-        {
-            "configurable": {
-                "thread_id": outcome.target_session_id,
-                "checkpoint_ns": "",
-                "checkpoint_id": "ckpt_1",
-            }
-        }
-    )
-    messages = checkpoint.checkpoint["channel_values"]["messages"]
-    assert "压缩摘要" in messages[0].content
-    assert [message.content for message in messages[1:]] == ["最近问题", "最近回答"]
-
-    target_history = repositories.message_events.list_by_session(outcome.target_session_id)
-    assert [event.action for event in target_history] == [
-        "system_message",
-        "user_message",
-        "ai_message",
-    ]
-    assert "压缩摘要" in target_history[0].data["content"]
-    assert target_history[1].data["session_id"] == outcome.target_session_id
-    source_history = repositories.message_events.list_by_session("ses_source")
-    assert source_history[-1].action == "system_message"
-    assert source_history[-1].data["compression"]["target_session_id"] == outcome.target_session_id
-
-
-@pytest.mark.asyncio
-async def test_context_compression_failure_does_not_switch_active_session(tmp_path) -> None:
-    repositories, saver = _prepare_source(tmp_path)
-    service = ContextCompressionService(repositories, checkpointer=saver, factory=FailingFactory())
-
-    outcome = await service.maybe_compress_after_turn(
-        session_id="ses_source",
-        trace_id="trace_1",
-        turn_index=2,
-        user_id="local-user",
-        settings=ContextCompressionRuntimeSettings(
-            enabled=True,
-            context_window_tokens=1000,
-            trigger_fraction=0.01,
-            emergency_fraction=0.9,
-            retain_rounds=1,
-        ),
-        latest_usage={"total_tokens": 20},
-    )
-
-    assert outcome.status == "failed"
-    assert repositories.sessions.get("ses_source").active_session_id == "ses_source"
-    events = repositories.message_events.list_by_session("ses_source")
-    assert events[-1].action == "system_message"
-    assert events[-1].data["compression"]["kind"] == "context_compression_failed"
-
-
-class FakeLLM:
-    def __init__(self, content: str) -> None:
-        self.content = content
-
-    async def ainvoke(self, _messages: list[Any]) -> AIMessage:
-        return AIMessage(content=self.content)
 
 
 class FakeFactory:
-    def __init__(self, content: str) -> None:
-        self.content = content
+    def __init__(self, llm: PromptAwareLLM) -> None:
+        self.llm = llm
 
     def get_or_create_llm(
         self,
         _settings: ModelSettings,
         **_kwargs: Any,
-    ) -> FakeLLM:
-        return FakeLLM(self.content)
-
-
-class FailingLLM:
-    async def ainvoke(self, _messages: list[Any]) -> AIMessage:
-        raise RuntimeError("fast model failed")
-
-
-class FailingFactory:
-    def get_or_create_llm(
-        self,
-        _settings: ModelSettings,
-        **_kwargs: Any,
-    ) -> FailingLLM:
-        return FailingLLM()
+    ) -> PromptAwareLLM:
+        return self.llm

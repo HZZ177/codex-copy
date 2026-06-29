@@ -211,6 +211,58 @@ async def test_system_messages_project_to_realtime_and_history(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_context_compression_progress_projects_to_realtime_and_history(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    chat_adapter = RecordingChatAdapter()
+    events = [
+        _event(
+            DomainEventType.MIDDLEWARE_PROGRESS,
+            {
+                "middleware": "ContextCompressionMiddleware",
+                "stage": "emergency_triggered",
+                "compression_mode": "emergency",
+                "notice_id": "context-compression:emergency:trace_pipeline",
+                "session_id": SESSION_ID,
+                "active_session_id": SESSION_ID,
+                "trace_id": TRACE_ID,
+            },
+            timestamp_ms=101,
+        ),
+        _event(
+            DomainEventType.MIDDLEWARE_PROGRESS,
+            {
+                "middleware": "ContextCompressionMiddleware",
+                "stage": "emergency_completed",
+                "compression_mode": "emergency",
+                "notice_id": "context-compression:emergency:trace_pipeline",
+                "session_id": SESSION_ID,
+                "active_session_id": SESSION_ID,
+                "trace_id": TRACE_ID,
+            },
+            timestamp_ms=102,
+        ),
+    ]
+
+    await _project_events(events, repositories=repositories, chat_adapter=chat_adapter)
+
+    persisted_events = repositories.message_events.list_by_session(SESSION_ID)
+    messages = MessageEventService(repositories.message_events).get_display_messages(SESSION_ID)
+
+    assert [item["action"] for item in chat_adapter.sent] == [
+        "middleware_progress",
+        "middleware_progress",
+    ]
+    assert [event.action for event in persisted_events] == [
+        "middleware_progress",
+        "middleware_progress",
+    ]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "自动压缩成功"
+    assert messages[0]["metadata"]["compression"]["stage"] == "emergency_completed"
+
+
+@pytest.mark.asyncio
 async def test_realtime_persistence_and_history_keep_cancelled_sequence(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     chat_adapter = RecordingChatAdapter()

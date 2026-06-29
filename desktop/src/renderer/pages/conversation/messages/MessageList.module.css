@@ -10,7 +10,7 @@
   --turn-navigator-fluid-room: max(0px, calc(100cqw - var(--conversation-document-min-width, 420px)));
   --turn-navigator-content-right: max(var(--conversation-edge-padding, 18px), calc((100cqw - var(--composer-width)) / 2));
   --turn-navigator-edge: clamp(8px, calc(8px + var(--turn-navigator-fluid-room) / 8), 20px);
-  --turn-navigator-gap: clamp(4px, calc(4px + var(--turn-navigator-fluid-room) / 25), 12px);
+  --turn-navigator-gap: clamp(7px, calc(7px + var(--turn-navigator-fluid-room) / 24), 16px);
   --turn-navigator-list-padding-right: 0px;
   --turn-navigator-min-content-right: calc(
     var(--turn-navigator-edge) + var(--turn-navigator-width) + var(--turn-navigator-gap)
@@ -69,7 +69,7 @@
   --message-assistant-bubble-backdrop-filter: blur(14px) saturate(1.12);
   --turn-navigator-content-right: max(26px, calc((100cqw - 720px) / 2 + 26px));
   --turn-navigator-edge: 12px;
-  --turn-navigator-gap: 10px;
+  --turn-navigator-gap: 13px;
   --turn-navigator-width: 48px;
   background: transparent;
 }
@@ -109,6 +109,11 @@
 .scroller::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--color-text-tertiary) 62%, transparent);
   background-clip: padding-box;
+}
+
+.scroller[data-empty-layout="center"] {
+  display: grid;
+  place-items: center;
 }
 
 .contentSurface {
@@ -166,6 +171,11 @@
   padding-bottom: 10px;
 }
 
+.item[data-kind="context_compression"],
+.item[data-kind="cancelled"] {
+  padding-bottom: 18px;
+}
+
 .item:last-child {
   padding-bottom: 0;
 }
@@ -193,6 +203,76 @@
   max-width: 100%;
   margin-top: 7px;
   padding-left: 1px;
+}
+
+.contextCompressionNotice {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(18px, 1fr) auto minmax(18px, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+}
+
+.contextCompressionNotice::before,
+.contextCompressionNotice::after {
+  display: block;
+  height: 1px;
+  min-width: 0;
+  background: color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  content: "";
+}
+
+.contextCompressionNoticeLabel {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.contextCompressionNoticeIcon {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: currentColor;
+  line-height: 0;
+}
+
+.contextCompressionNoticeIcon svg {
+  display: block;
+}
+
+.contextCompressionNotice[data-state="running"] {
+  color: color-mix(in srgb, var(--color-text-secondary) 86%, var(--color-info-6));
+}
+
+.contextCompressionNotice[data-state="running"] .contextCompressionNoticeIcon {
+  animation: context-compression-spin 920ms linear infinite;
+}
+
+.contextCompressionNotice[data-state="failed"] {
+  color: color-mix(in srgb, var(--color-danger) 82%, var(--color-text-secondary));
+}
+
+.contextCompressionNotice[data-state="completed"] {
+  color: color-mix(in srgb, var(--color-text-tertiary) 72%, var(--color-success-6));
+}
+
+.contextCompressionNotice[data-state="cancelled"] {
+  color: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
+}
+
+@keyframes context-compression-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 .turnGroup:hover .turnActionRow,
@@ -239,6 +319,10 @@
   line-height: 1.7;
   padding-top: 18vh;
   text-align: center;
+}
+
+.scroller[data-empty-layout="center"] .empty {
+  padding-top: 0;
 }
 
 .root[data-message-list-variant="overlay"] .empty {
@@ -350,6 +434,7 @@
 .turnNavigatorRail {
   --turn-marker-line-height: 2px;
   --turn-marker-line-radius: var(--radius-pill);
+  --turn-current-marker-color: color-mix(in srgb, #f59e0b 88%, var(--color-text-primary) 12%);
   position: relative;
   width: 100%;
   height: var(--turn-navigator-rail-height, var(--turn-navigator-height));
@@ -377,9 +462,7 @@
   transform-origin: right center;
   border-radius: var(--turn-marker-line-radius);
   background: color-mix(in srgb, var(--color-text-tertiary) 36%, transparent);
-  transition:
-    background 120ms ease,
-    opacity 120ms ease;
+  transition: opacity 120ms ease;
 }
 
 .turnNavigatorMarker[data-entering="true"] span {
@@ -387,7 +470,8 @@
 }
 
 .turnNavigatorMarker[data-current="true"] span {
-  background: transparent;
+  height: 2.5px;
+  background: var(--turn-current-marker-color);
 }
 
 .turnNavigatorMarker:not([data-current="true"]):hover span,
@@ -401,39 +485,12 @@
   outline-offset: 1px;
 }
 
-.turnNavigatorCurrentIndicator {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 2;
-  display: flex;
-  width: 44px;
-  height: 14px;
-  align-items: center;
-  justify-content: flex-end;
-  transform: translateY(calc(var(--turn-current-marker-top) - 50%));
-  pointer-events: none;
-  padding: 0 8px 0 0;
-  transition: transform 180ms var(--motion-ease-standard);
-}
-
-.turnNavigatorCurrentIndicator span {
-  display: block;
-  width: var(--turn-current-marker-width);
-  height: 2.5px;
-  transform-origin: right center;
-  border-radius: var(--turn-marker-line-radius);
-  background: color-mix(in srgb, #f59e0b 88%, var(--color-text-primary) 12%);
-}
-
-.turnNavigator[data-layout="contained"] .turnNavigatorMarker,
-.turnNavigator[data-layout="contained"] .turnNavigatorCurrentIndicator {
+.turnNavigator[data-layout="contained"] .turnNavigatorMarker {
   justify-content: center;
   padding: 0;
 }
 
-.turnNavigator[data-layout="contained"] .turnNavigatorMarker span,
-.turnNavigator[data-layout="contained"] .turnNavigatorCurrentIndicator span {
+.turnNavigator[data-layout="contained"] .turnNavigatorMarker span {
   transform-origin: center;
 }
 
@@ -446,10 +503,6 @@
   box-shadow: 0 16px 38px rgb(15 23 42 / 12%), 0 2px 10px rgb(15 23 42 / 7%);
   -webkit-backdrop-filter: blur(18px) saturate(1.14);
   backdrop-filter: blur(18px) saturate(1.14);
-}
-
-.turnNavigatorCurrentIndicator[data-entering="true"] span {
-  animation: turnNavigatorMarkerGrow 180ms var(--motion-ease-out) both;
 }
 
 .turnNavigatorCard {
@@ -473,6 +526,10 @@
 
 .root[data-message-list-variant="overlay"] .turnNavigatorMarker span {
   background: color-mix(in srgb, var(--color-text-secondary) 54%, transparent);
+}
+
+.root[data-message-list-variant="overlay"] .turnNavigatorMarker[data-current="true"] span {
+  background: var(--turn-current-marker-color);
 }
 
 .root[data-message-list-variant="overlay"] .turnNavigatorCard {
@@ -533,8 +590,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .turnNavigatorMarker span,
-  .turnNavigatorCurrentIndicator,
-  .turnNavigatorCurrentIndicator span,
   .turnNavigatorCard {
     animation: none;
     transition: none;

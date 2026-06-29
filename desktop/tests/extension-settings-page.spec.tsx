@@ -22,6 +22,7 @@ describe("ExtensionSettingsPage", () => {
     expect(screen.getByText("功能模块")).not.toBeNull();
     expect(screen.getByText("标题生成")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "启用标题生成" })).toHaveProperty("checked", true);
+    expect(screen.queryByRole("switch", { name: "仅默认标题时生成" })).toBeNull();
     expect(screen.getByLabelText("最大标题长度")).toHaveProperty("value", "48");
     expect(screen.queryByText("快速模型未配置，标题生成不可用")).toBeNull();
     expect(screen.getAllByRole("button", { name: "保存" })).toHaveLength(1);
@@ -35,7 +36,6 @@ describe("ExtensionSettingsPage", () => {
 
     await screen.findByText("标题生成");
     fireEvent.click(screen.getByRole("switch", { name: "启用标题生成" }));
-    fireEvent.click(screen.getByRole("switch", { name: "仅默认标题时生成" }));
     fireEvent.change(screen.getByLabelText("最大标题长度"), { target: { value: "64" } });
     fireEvent.change(screen.getByLabelText("单轮最多工具调用"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("连续重复阈值"), { target: { value: "5" } });
@@ -51,7 +51,7 @@ describe("ExtensionSettingsPage", () => {
       expect(saveExtensionSettings).toHaveBeenCalledWith({
         auto_title: {
           enabled: true,
-          only_when_default_title: false,
+          only_when_default_title: true,
           max_title_length: 64,
         },
         tool_call_limit: {
@@ -270,7 +270,7 @@ function defaultExtensionSettings(): AgentRuntimeSettings {
     auto_title: {
       enabled: false,
       only_when_default_title: true,
-      max_title_length: 40,
+      max_title_length: 20,
     },
     tool_call_limit: {
       enabled: true,

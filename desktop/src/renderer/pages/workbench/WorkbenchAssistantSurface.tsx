@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -19,12 +20,17 @@ import {
   type WorkspaceSearchResult,
   type WorkspaceSkillSummary,
 } from "@/runtime";
-import { type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
+import {
+  type SelectedFile,
+  type SelectedImageAttachment,
+  type SelectedQuote,
+} from "@/renderer/components/chat/SendBox";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
+import { ComposerApprovalCard } from "@/renderer/pages/conversation/ComposerApprovalCard";
 import { ConversationComposer } from "@/renderer/pages/conversation/ConversationComposer";
 import { ConversationPanel, ConversationPanelComposerAccessory } from "@/renderer/pages/conversation/ConversationPanel";
 import {
@@ -54,7 +60,7 @@ import {
 
 type DockTransitionPhase = "dock-in" | "dock-out";
 type AssistantVisualMode = AssistantSurfaceMode | "dock-morph" | "dock-out-morph";
-type MessageTriggerState = "idle" | "priming" | "streaming" | "completed" | "failed";
+type MessageTriggerState = "idle" | "priming" | "streaming" | "completed" | "failed" | "approval";
 type MessageTriggerPreviewKind = "assistant" | "tool" | "file-change";
 
 interface MessageTriggerPreview {
@@ -124,6 +130,7 @@ export function WorkbenchAssistantSurface({
 }: WorkbenchAssistantSurfaceProps) {
   const layout = useLayoutState();
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const assistantChromeRef = useRef<HTMLDivElement | null>(null);
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockTransitionRunIdRef = useRef(0);
   const composeCollapseTimerRef = useRef<number | null>(null);
@@ -145,6 +152,8 @@ export function WorkbenchAssistantSurface({
   const [expandedContentReady, setExpandedContentReady] = useState(false);
   const [messageTriggerPriming, setMessageTriggerPriming] = useState(false);
   const [unreadAssistantMessageKey, setUnreadAssistantMessageKey] = useState<string | null>(null);
+  const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
+  const [expandedBottomGap, setExpandedBottomGap] = useState(160);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
     useState<MessageListTurnNavigationRequest | null>(null);
   const modelSelection = useRuntimeModelSelection(runtime, null);
@@ -210,6 +219,25 @@ export function WorkbenchAssistantSurface({
   const composerFocusSeq = assistantState.focusSeq;
 
   useEffect(() => {
+    let active = true;
+    void runtime.settings
+      .getSettings()
+      .then((settings) => {
+        if (active) {
+          setAllowPersistentTrust(settings.command.allow_persistent_trust);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAllowPersistentTrust(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [runtime]);
+
+  useEffect(() => {
     const providerId = controller.session?.current_model_provider_id?.trim() ?? "";
     const model = controller.session?.current_model?.trim() ?? "";
     if (providerId && model) {
@@ -269,6 +297,37 @@ export function WorkbenchAssistantSurface({
     drawerWidth,
     viewportWidth: typeof window === "undefined" ? 1440 : window.innerWidth,
   });
+
+  const updateExpandedBottomGap = useCallback(() => {
+    const chrome = assistantChromeRef.current;
+    if (!chrome || typeof window === "undefined") {
+      return;
+    }
+    const chromeHeight = chrome.getBoundingClientRect().height;
+    const maxGap = Math.max(96, window.innerHeight - 180);
+    const nextGap = Math.round(Math.min(Math.max(96, chromeHeight + 24), maxGap));
+    setExpandedBottomGap((current) => (current === nextGap ? current : nextGap));
+  }, []);
+
+  useLayoutEffect(() => {
+    updateExpandedBottomGap();
+    const chrome = assistantChromeRef.current;
+    if (!chrome || typeof window === "undefined") {
+      return;
+    }
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateExpandedBottomGap);
+      return () => window.removeEventListener("resize", updateExpandedBottomGap);
+    }
+    const observer = new ResizeObserver(updateExpandedBottomGap);
+    observer.observe(chrome);
+    window.addEventListener("resize", updateExpandedBottomGap);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateExpandedBottomGap);
+    };
+  }, [updateExpandedBottomGap]);
+
   const latestAssistantMessage = useMemo(() => latestAssistantMessageFrom(controller.agentMessages), [controller.agentMessages]);
   const latestAssistantMessageKey = latestAssistantMessage
     ? `${latestAssistantMessage.id}:${latestAssistantMessage.content.length}:${latestAssistantMessage.status ?? ""}`
@@ -278,7 +337,9 @@ export function WorkbenchAssistantSurface({
     [controller.agentMessages],
   );
   const rawMessageTriggerState: MessageTriggerState =
-    runtimeState === "running"
+    pendingApproval || runtimeState === "waiting_approval"
+      ? "approval"
+      : runtimeState === "running"
       ? "streaming"
       : runtimeState === "failed"
         ? "failed"
@@ -286,7 +347,10 @@ export function WorkbenchAssistantSurface({
           ? "completed"
           : "idle";
   const messageTriggerState: MessageTriggerState =
-    messageTriggerPriming && rawMessageTriggerState !== "completed" && rawMessageTriggerState !== "failed"
+    messageTriggerPriming &&
+    rawMessageTriggerState !== "completed" &&
+    rawMessageTriggerState !== "failed" &&
+    rawMessageTriggerState !== "approval"
       ? "priming"
       : rawMessageTriggerState;
   const visibleMessageTriggerPreview = useMessageCarrierDisplayPreview(
@@ -301,7 +365,9 @@ export function WorkbenchAssistantSurface({
         ? "回复已完成，点击查看"
         : messageTriggerState === "failed"
           ? "回复失败，点击查看"
-          : "";
+          : messageTriggerState === "approval"
+            ? "等待审批，点击处理"
+            : "";
   const messageTriggerFileDeltas =
     messageTriggerState === "streaming" && visibleMessageTriggerPreview?.kind === "file-change"
       ? {
@@ -469,10 +535,12 @@ export function WorkbenchAssistantSurface({
     if (runtimeState === "running") {
       setUnreadAssistantMessageKey(null);
     } else if (previousRuntimeState === "running" && latestAssistantMessageKey) {
-      setUnreadAssistantMessageKey(latestAssistantMessageKey);
+      setUnreadAssistantMessageKey(
+        surfaceMode === "drawer" || surfaceMode === "expanded" ? null : latestAssistantMessageKey,
+      );
     }
     previousRuntimeStateRef.current = runtimeState;
-  }, [latestAssistantMessageKey, runtimeState]);
+  }, [latestAssistantMessageKey, runtimeState, surfaceMode]);
 
   useEffect(() => {
     if (surfaceMode === "drawer" || surfaceMode === "expanded") {
@@ -553,17 +621,6 @@ export function WorkbenchAssistantSurface({
   }, [controller.fileChipRequest?.requestId, controller.quoteChipRequest?.requestId, surfaceMode]);
 
   useEffect(() => {
-    if (pendingApproval) {
-      if (surfaceMode !== "drawer") {
-        setDockReturnMode(null);
-        beginDockTransition("dock-in", () => {
-          dispatchAssistantState({ type: "approval-pending" });
-        });
-      }
-    }
-  }, [beginDockTransition, pendingApproval, surfaceMode]);
-
-  useEffect(() => {
     if (surfaceMode !== "composer" || controller.draft.trim()) {
       return;
     }
@@ -610,10 +667,14 @@ export function WorkbenchAssistantSurface({
   }, [beginComposeCollapse]);
 
   const send = useCallback(
-    (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) => {
-      const result = controller.send(files, quotes, selectedModel);
+    (
+      files: SelectedFile[] = [],
+      quotes: SelectedQuote[] = [],
+      attachments: SelectedImageAttachment[] = [],
+    ) => {
+      const result = controller.send(files, quotes, attachments, selectedModel);
       void Promise.resolve(result).then((sent) => {
-        if (sent === false || (surfaceMode !== "composer" && surfaceMode !== "expanded")) {
+        if (sent === false || surfaceMode !== "composer") {
           return;
         }
         beginMessageTriggerPriming();
@@ -738,15 +799,6 @@ export function WorkbenchAssistantSurface({
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [closeExpandedLayer, surfaceMode]);
 
-  const submitApproval = useCallback(
-    (approved: boolean) =>
-      controller.submitApproval({
-        decision: approved ? "approved" : "rejected",
-        trust_scope: "once",
-      }),
-    [controller],
-  );
-
   const composer = (
     <WorkbenchComposer
       key={panelSessionId || "empty-session"}
@@ -758,11 +810,18 @@ export function WorkbenchAssistantSurface({
       modelSelection={{ ...modelSelection, setSelectedModel: changeModel }}
       workspaceSkills={workspaceSkills}
       selectedSkill={controller.selectedSkill}
+      runtime={runtime}
+      sessionId={panelSessionId}
+      pendingApproval={pendingApproval}
+      allowPersistentTrust={allowPersistentTrust}
+      approvalSubmitting={controller.approvalSubmitting}
+      approvalError={controller.approvalError}
       fileChipRequest={composerFileChipRequest}
       quoteChipRequest={composerQuoteChipRequest}
       autoFocusKey={surfaceMode === "capsule" ? undefined : `workbench-composer:${composerFocusSeq}`}
       onChange={controller.setDraft}
       onSkillChange={controller.setSelectedSkill}
+      onSubmitApproval={controller.submitApproval}
       onSend={send}
       onStop={controller.stop}
       onEscape={handleComposerEscape}
@@ -805,7 +864,6 @@ export function WorkbenchAssistantSurface({
       model={panelModel}
       workspaceRuntime={runtime}
       variant="compact"
-      performanceProfile="interactivePanel"
       emptyText="当前工作空间还没有助手消息。"
       emptyTestId={`workbench-${stablePanelMode === "drawer" ? "drawer" : "morph"}-message-empty`}
       scrollButtonMode="external"
@@ -819,7 +877,7 @@ export function WorkbenchAssistantSurface({
         model={panelModel}
         workspaceRuntime={runtime}
         variant="overlay"
-        performanceProfile="interactivePanel"
+        emptyLayout="center"
         emptyText="当前工作空间还没有助手消息。"
         emptyTestId="workbench-expanded-message-empty"
         scrollButtonMode="external"
@@ -872,14 +930,6 @@ export function WorkbenchAssistantSurface({
         data-testid={stablePanelMode === "morph" ? "workbench-assistant-morph-middle" : undefined}
       >
         {stableConversationPanel}
-        {stablePanelMode !== "prewarm" && pendingApproval ? (
-          <WorkbenchApprovalPrompt
-            approval={pendingApproval}
-            error={controller.approvalError}
-            submitting={controller.approvalSubmitting}
-            onSubmit={submitApproval}
-          />
-        ) : null}
       </div>
     </section>
   ) : null;
@@ -904,6 +954,7 @@ export function WorkbenchAssistantSurface({
           ...geometryVars,
           "--workbench-assistant-dock-width": `${drawerWidth}px`,
           "--workbench-assistant-dock-inline-size": `${dockInlineWidth}px`,
+          "--workbench-assistant-expanded-bottom-gap": `${expandedBottomGap}px`,
         } as CSSProperties
       }
     >
@@ -932,14 +983,6 @@ export function WorkbenchAssistantSurface({
               onClick={(event) => event.stopPropagation()}
             >
               {overlayConversationPanel ?? overlayLoadingPanel}
-              {pendingApproval ? (
-                <WorkbenchApprovalPrompt
-                  approval={pendingApproval}
-                  error={controller.approvalError}
-                  submitting={controller.approvalSubmitting}
-                  onSubmit={submitApproval}
-                />
-              ) : null}
             </motion.div>
           </motion.div>
         ) : null}
@@ -949,6 +992,7 @@ export function WorkbenchAssistantSurface({
         geometryMode={geometryMode}
         dockOutTargetMode={dockOutTargetMode}
         dockLayout={dockLayout}
+        chromeRef={assistantChromeRef}
         transitionPhase={dockTransitionPhase ?? "idle"}
         reducedMotion={reducedMotion}
       >
@@ -972,6 +1016,7 @@ export function WorkbenchAssistantSurface({
               data-message-trigger-visible={messageButtonVisible ? "true" : "false"}
               data-mini-navigator-visible={showMiniTurnNavigator ? "true" : "false"}
               data-new-session-enabled={onRequestNewSession ? "true" : "false"}
+              data-pending-approval={pendingApproval ? "true" : "false"}
               data-session-title-visible={sessionTitleVisible ? "true" : "false"}
               data-testid={renderDrawerContent ? "workbench-assistant-drawer-composer-frame" : "workbench-assistant-composer-frame"}
             >
@@ -1043,11 +1088,16 @@ export function WorkbenchAssistantSurface({
                 transition={reducedMotion ? { duration: 0 } : assistantMotionTransition}
                 data-compose-open={visualComposeOpen ? "true" : "false"}
                 data-compose-collapsing={collapsingComposer ? "true" : "false"}
+                data-pending-approval={pendingApproval ? "true" : "false"}
                 data-testid={renderDrawerContent ? "workbench-assistant-drawer-input-surface" : "workbench-assistant-input-surface"}
                 onClick={composeOpen ? undefined : openComposer}
               >
                 {showFullComposerContent ? (
-                  <div className={styles.composerShell} data-collapsing={collapsingComposer ? "true" : "false"}>
+                  <div
+                    className={styles.composerShell}
+                    data-collapsing={collapsingComposer ? "true" : "false"}
+                    data-pending-approval={pendingApproval ? "true" : "false"}
+                  >
                     {composer}
                   </div>
                 ) : (
@@ -1114,7 +1164,12 @@ function WorkbenchMiniTurnNavigator({
   const hoveredIndexRef = useRef<number | null>(null);
   const wavePositionRef = useRef<number | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [viewportMetrics, setViewportMetrics] = useState({ clientHeight: 0, scrollHeight: 0, scrollTop: 0 });
+  const [viewportMetrics, setViewportMetrics] = useState({
+    clientHeight: 0,
+    railViewportTop: 0,
+    scrollHeight: 0,
+    scrollTop: 0,
+  });
   const activeIndex = turns.length - 1;
 
   const railHeight = miniTurnRailHeight(turns.length);
@@ -1125,7 +1180,7 @@ function WorkbenchMiniTurnNavigator({
       ? miniTurnMarkerTop(Math.max(0, activeIndex))
       : miniTurnMarkerTop(hoveredIndex);
   const activeTop = clampNumber(
-    activeMarkerTop - viewportMetrics.scrollTop,
+    activeMarkerTop + viewportMetrics.railViewportTop,
     MINI_TURN_MARKER_HIT_HEIGHT / 2,
     Math.max(
       MINI_TURN_MARKER_HIT_HEIGHT / 2,
@@ -1158,13 +1213,18 @@ function WorkbenchMiniTurnNavigator({
     if (!viewport) {
       return;
     }
+    const rail = railRef.current;
+    const viewportRect = viewport.getBoundingClientRect();
+    const railViewportTop = rail ? rail.getBoundingClientRect().top - viewportRect.top : -viewport.scrollTop;
     const nextMetrics = {
       clientHeight: viewport.clientHeight,
+      railViewportTop,
       scrollHeight: viewport.scrollHeight,
       scrollTop: viewport.scrollTop,
     };
     setViewportMetrics((previous) =>
       previous.clientHeight === nextMetrics.clientHeight &&
+      previous.railViewportTop === nextMetrics.railViewportTop &&
       previous.scrollHeight === nextMetrics.scrollHeight &&
       previous.scrollTop === nextMetrics.scrollTop
         ? previous
@@ -1604,6 +1664,7 @@ function useMessageCarrierDisplayPreview(
 
 function WorkbenchAssistantShell({
   children,
+  chromeRef,
   dockLayout,
   dockOutTargetMode,
   geometryMode,
@@ -1612,6 +1673,7 @@ function WorkbenchAssistantShell({
   transitionPhase,
 }: {
   children: ReactNode;
+  chromeRef: RefObject<HTMLDivElement | null>;
   dockLayout: "inline" | "overlay";
   dockOutTargetMode: AssistantSurfaceMode;
   geometryMode: AssistantSurfaceMode;
@@ -1637,6 +1699,7 @@ function WorkbenchAssistantShell({
       data-transition-phase={transitionPhase}
     >
       <motion.div
+        ref={chromeRef}
         className={styles.chrome}
         data-testid="workbench-assistant-chrome"
         data-dock-out-target={dockOutTargetMode}
@@ -1859,34 +1922,6 @@ function valueContainsMarkdownCodeFence(value: unknown, depth = 0): boolean {
   return false;
 }
 
-function WorkbenchApprovalPrompt({
-  approval,
-  error,
-  submitting,
-  onSubmit,
-}: {
-  approval: CommandApprovalRequest;
-  error: string | null;
-  submitting: boolean;
-  onSubmit: (approved: boolean) => void;
-}) {
-  return (
-    <section className={styles.approvalPrompt} data-testid="workbench-approval-prompt" aria-label="工作台审批">
-      <strong>{approval.title || "需要批准"}</strong>
-      <p>{approval.description || approval.tool_name || "Agent 需要你确认后继续。"}</p>
-      {error ? <p className={styles.approvalError} role="alert">{error}</p> : null}
-      <div className={styles.approvalActions}>
-        <button type="button" disabled={submitting} onClick={() => onSubmit(false)}>
-          拒绝
-        </button>
-        <button type="button" disabled={submitting} data-primary="true" onClick={() => onSubmit(true)}>
-          批准
-        </button>
-      </div>
-    </section>
-  );
-}
-
 function WorkbenchComposer({
   value,
   runtimeState,
@@ -1896,11 +1931,18 @@ function WorkbenchComposer({
   modelSelection,
   workspaceSkills,
   selectedSkill,
+  runtime,
+  sessionId,
+  pendingApproval,
+  allowPersistentTrust,
+  approvalSubmitting,
+  approvalError,
   fileChipRequest,
   quoteChipRequest,
   autoFocusKey,
   onChange,
   onSkillChange,
+  onSubmitApproval,
   onSend,
   onStop,
   onEscape,
@@ -1916,18 +1958,43 @@ function WorkbenchComposer({
   modelSelection: ReturnType<typeof useRuntimeModelSelection>;
   workspaceSkills: WorkspaceSkillSummary[];
   selectedSkill: WorkspaceSkillSummary | null;
+  runtime: RuntimeBridge;
+  sessionId?: string | null;
+  pendingApproval: CommandApprovalRequest | null;
+  allowPersistentTrust: boolean;
+  approvalSubmitting: boolean;
+  approvalError: string | null;
   fileChipRequest: AgentSessionController["fileChipRequest"];
   quoteChipRequest: AgentSessionController["quoteChipRequest"];
   autoFocusKey?: string;
   onChange: (value: string) => void;
   onSkillChange: (skill: WorkspaceSkillSummary | null) => void;
-  onSend: (files?: SelectedFile[], quotes?: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
+  onSubmitApproval: AgentSessionController["submitApproval"];
+  onSend: (
+    files?: SelectedFile[],
+    quotes?: SelectedQuote[],
+    attachments?: SelectedImageAttachment[],
+  ) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
   onEscape?: () => void;
   onSearchWorkspace: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenFileReference: (file: SelectedFile) => void;
 }) {
+  if (pendingApproval) {
+    return (
+      <div className={styles.composerApprovalSlot}>
+        <ComposerApprovalCard
+          allowPersistentTrust={allowPersistentTrust}
+          approval={pendingApproval}
+          error={approvalError}
+          submitting={approvalSubmitting}
+          onSubmit={onSubmitApproval}
+        />
+      </div>
+    );
+  }
+
   return (
     <ConversationComposer
       value={value}
@@ -1938,6 +2005,8 @@ function WorkbenchComposer({
       modelSelection={modelSelection}
       workspaceSkills={workspaceSkills}
       selectedSkill={selectedSkill}
+      runtime={runtime}
+      sessionId={sessionId}
       autoFocusKey={autoFocusKey}
       className={styles.composer}
       placeholder="要求后续变更"

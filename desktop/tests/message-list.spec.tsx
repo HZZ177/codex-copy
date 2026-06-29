@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
 import { MessageList } from "@/renderer/pages/conversation/messages";
-import { activeVirtualTurnIndexFromMountedTurns } from "@/renderer/pages/conversation/messages/MessageList";
+import { visibleTurnIndexesFromMountedTurns } from "@/renderer/pages/conversation/messages/MessageList";
 import { MessageGroupBlock } from "@/renderer/pages/conversation/messages/MessageGroupBlock";
 import { useVirtuosoAutoScroll } from "@/renderer/pages/conversation/messages/useVirtuosoAutoScroll";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
@@ -13,10 +13,18 @@ describe("MessageList", () => {
     const { rerender } = render(<MessageList messages={[]} emptyText="还没有消息" />);
 
     expect(screen.getByTestId("message-empty").textContent).toBe("还没有消息");
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-empty-layout")).toBe("default");
 
     rerender(<MessageList messages={[]} loading />);
     expect(screen.getByTestId("message-skeleton")).not.toBeNull();
     expect(screen.getByRole("status", { name: "正在加载消息" })).not.toBeNull();
+  });
+
+  it("exposes centered empty layout on the empty scroll surface", () => {
+    render(<MessageList messages={[]} emptyLayout="center" emptyText="还没有消息" />);
+
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-empty-layout")).toBe("center");
+    expect(screen.getByTestId("message-empty").textContent).toBe("还没有消息");
   });
 
   it("renders messages with the default lightweight renderer", () => {
@@ -91,17 +99,15 @@ describe("MessageList", () => {
 
       expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
       expect(screen.getByTestId("conversation-turn-navigator-viewport")).not.toBeNull();
-      const currentIndicator = screen.getByTestId("conversation-turn-navigator-current-indicator");
-      expect(currentIndicator).not.toBeNull();
       const markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
       expect(markers).toHaveLength(2);
       expect(markers[0].getAttribute("data-current")).toBe("true");
 
       fireEvent.focus(markers[0]);
-      expect(currentIndicator.style.getPropertyValue("--turn-current-marker-width")).toBe("35px");
+      expect(markers[0].style.getPropertyValue("--turn-marker-width")).toBe("35px");
 
       fireEvent.blur(markers[0]);
-      expect(currentIndicator.style.getPropertyValue("--turn-current-marker-width")).toBe("12px");
+      expect(markers[0].style.getPropertyValue("--turn-marker-width")).toBe("12px");
 
       fireEvent.focus(markers[1]);
       expect(screen.getByTestId("conversation-turn-navigator-card").textContent).toContain("第二轮问题");
@@ -165,7 +171,7 @@ describe("MessageList", () => {
     }
   });
 
-  it("keeps the first and last turn highlighted at static scroll boundaries", async () => {
+  it("highlights every static turn intersecting the visible viewport", async () => {
     render(
       <MessageList
         messages={[
@@ -183,25 +189,25 @@ describe("MessageList", () => {
 
     const scroller = screen.getByTestId("message-list-scroll") as HTMLDivElement;
     const turns = screen.getAllByTestId("message-turn") as HTMLElement[];
-    mockElementRect(scroller, { height: 200, top: 0 });
-    turns.forEach((turn, index) => mockElementTop(turn, index * 32));
+    mockElementRect(scroller, { height: 100, top: 0 });
+    [-80, -20, 20, 120].forEach((top, index) => mockElementTop(turns[index], top));
 
-    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 200, scrollTop: 0 });
+    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 100, scrollTop: 180 });
     await act(async () => {
       fireEvent.scroll(scroller);
     });
 
     let markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
-    expect(markers[0].getAttribute("data-current")).toBe("true");
+    expect(markers.map((marker) => marker.getAttribute("data-current"))).toEqual(["false", "true", "true", "false"]);
 
-    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 200, scrollTop: 400 });
-    turns.forEach((turn, index) => mockElementTop(turn, index === turns.length - 1 ? 180 : -160 + index * 36));
+    mockScrollMetrics(scroller, { scrollHeight: 600, clientHeight: 100, scrollTop: 400 });
+    [-160, -120, -20, 80].forEach((top, index) => mockElementTop(turns[index], top));
     await act(async () => {
       fireEvent.scroll(scroller);
     });
 
     markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
-    expect(markers[3].getAttribute("data-current")).toBe("true");
+    expect(markers.map((marker) => marker.getAttribute("data-current"))).toEqual(["false", "false", "true", "true"]);
   });
 
   it("adds and highlights a new user turn before the assistant reply completes", async () => {
@@ -220,9 +226,6 @@ describe("MessageList", () => {
       expect(markers).toHaveLength(3);
       expect(markers[2].getAttribute("data-current")).toBe("true");
       expect(markers[2].getAttribute("data-entering")).toBe("true");
-      expect(screen.getByTestId("conversation-turn-navigator-current-indicator").getAttribute("data-entering")).toBe(
-        "true",
-      );
     });
   });
 
@@ -300,11 +303,11 @@ describe("MessageList", () => {
     }
   });
 
-  it("anchors the virtual turn navigator to the visible viewport instead of the rendered range start", () => {
+  it("returns every mounted virtual turn intersecting the visible viewport", () => {
     const scroller = document.createElement("div");
     mockElementRect(scroller, { top: 0, height: 220 });
     mockScrollMetrics(scroller, { scrollHeight: 3200, clientHeight: 220, scrollTop: 960 });
-    [-360, -120, 40, 220].forEach((top, index) => {
+    [-360, -20, 40, 220].forEach((top, index) => {
       const turn = document.createElement("div");
       turn.dataset.testid = "message-turn";
       turn.setAttribute("data-testid", "message-turn");
@@ -313,7 +316,7 @@ describe("MessageList", () => {
       scroller.appendChild(turn);
     });
 
-    expect(activeVirtualTurnIndexFromMountedTurns(scroller, 72)).toBe(22);
+    expect(Array.from(visibleTurnIndexesFromMountedTurns(scroller, 72))).toEqual([21, 22]);
   });
 
   it("requests older history when the static list is scrolled into the top buffer", async () => {
@@ -644,7 +647,7 @@ describe("MessageList", () => {
           firstTool,
           command,
           {
-            ...message("cancel-1", "assistant", ""),
+            ...message("cancel-1", "cancelled", ""),
             status: "cancelled",
             payload: { cancelled: true },
           },
@@ -655,7 +658,7 @@ describe("MessageList", () => {
     const updatedButton = screen.getByRole("button", { name: "读取了 1 个文件，已运行 1 条命令详情" });
     expect(updatedButton.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId("tool-call-block")).not.toBeNull();
-    expect(screen.getByText("已取消")).not.toBeNull();
+    expect(screen.getByTestId("conversation-cancelled-notice").textContent).toBe("对话已取消");
   });
 
   it("keeps the grouped tool header anchored while details expand near the top", () => {
@@ -1013,6 +1016,50 @@ describe("MessageList", () => {
     expect(scrollToIndex).not.toHaveBeenCalled();
   });
 
+  it("does not pull the virtualized scrollbar while the native thumb is being dragged", () => {
+    const { result } = renderHook(() => useVirtuosoAutoScroll(3));
+    const scroller = document.createElement("div");
+    mockScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 200, scrollTop: 800 });
+    mockElementRect(scroller, { height: 200, top: 0, width: 100 });
+    mockElementInlineSize(scroller, { clientWidth: 88, offsetWidth: 100 });
+
+    act(() => {
+      result.current.setScrollerRef(scroller);
+    });
+    act(() => {
+      scroller.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 96, clientY: 24 }));
+    });
+    mockScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 200, scrollTop: 800 });
+
+    act(() => {
+      result.current.handleTotalListHeightChanged();
+    });
+
+    expect(scroller.scrollTop).toBe(800);
+  });
+
+  it("keeps virtualized auto-follow after ordinary content pointer down", () => {
+    const { result } = renderHook(() => useVirtuosoAutoScroll(3));
+    const scroller = document.createElement("div");
+    mockScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 200, scrollTop: 800 });
+    mockElementRect(scroller, { height: 200, top: 0, width: 100 });
+    mockElementInlineSize(scroller, { clientWidth: 88, offsetWidth: 100 });
+
+    act(() => {
+      result.current.setScrollerRef(scroller);
+    });
+    act(() => {
+      scroller.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 40, clientY: 24 }));
+    });
+    mockScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 200, scrollTop: 800 });
+
+    act(() => {
+      result.current.handleTotalListHeightChanged();
+    });
+
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
   it("starts following automatically when streamed content grows past the viewport", async () => {
     const first = message("m1", "assistant", "短回复");
     const { rerender } = render(<MessageList messages={[first]} isProcessing />);
@@ -1188,6 +1235,11 @@ function mockElementRect(element: HTMLElement, rect: { top: number; height: numb
         toJSON: () => ({}),
       }) as DOMRect,
   });
+}
+
+function mockElementInlineSize(element: HTMLElement, metrics: { clientWidth: number; offsetWidth: number }) {
+  Object.defineProperty(element, "clientWidth", { configurable: true, value: metrics.clientWidth });
+  Object.defineProperty(element, "offsetWidth", { configurable: true, value: metrics.offsetWidth });
 }
 
 function mockElementTopSequence(element: HTMLElement, tops: number[]) {

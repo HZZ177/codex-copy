@@ -1138,6 +1138,12 @@ describe("FilePreview", () => {
     expect(screen.getByLabelText("当前缩放 125%")).not.toBeNull();
     expect(canvas.style.getPropertyValue("--image-scale")).toBe("1.25");
 
+    fireEvent.click(screen.getByRole("button", { name: "顺时针旋转图片" }));
+    expect(canvas.style.getPropertyValue("--image-rotation")).toBe("90deg");
+
+    fireEvent.click(screen.getByRole("button", { name: "逆时针旋转图片" }));
+    expect(canvas.style.getPropertyValue("--image-rotation")).toBe("0deg");
+
     dispatchPointer(canvas, "pointerdown", { button: 0, pointerId: 1, clientX: 20, clientY: 30 });
     dispatchPointer(canvas, "pointermove", { pointerId: 1, clientX: 44, clientY: 42 });
     dispatchPointer(canvas, "pointerup", { pointerId: 1, clientX: 44, clientY: 42 });
@@ -1662,7 +1668,7 @@ describe("FilePreview", () => {
     await waitFor(() => {
       expect(clipboard).toHaveBeenCalledWith("可复制内容");
     });
-    expect(screen.getByText("已复制")).not.toBeNull();
+    expect(await screen.findByText("已复制")).not.toBeNull();
   });
   it("creates edits and deletes file-level annotations", async () => {
     const annotation = fileAnnotation({

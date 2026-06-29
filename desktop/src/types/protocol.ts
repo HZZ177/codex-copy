@@ -421,6 +421,7 @@ export const AGENT_CHAT_ACTIONS = [
   "session_title_updated",
   "task_result",
   "reasoning",
+  "middleware_progress",
   "workspaceSkillsChanged",
 ] as const;
 
@@ -444,6 +445,7 @@ export const AGENT_REPLAY_ACTIONS = [
   "error",
   "scheduled_task_result",
   "reasoning",
+  "middleware_progress",
 ] as const;
 
 export type AgentReplayAction = (typeof AGENT_REPLAY_ACTIONS)[number];
@@ -589,10 +591,13 @@ export interface AgentToolDetailResponse {
 }
 
 export interface AgentFileAttachment {
+  id?: string;
+  attachment_id?: string;
   type?: "image" | "document" | "sandbox" | "file" | (string & {});
   name?: string;
   path?: string;
   url?: string;
+  source?: string;
   sandbox_file_id?: string;
   mime_type?: string;
   size?: number;
@@ -791,6 +796,38 @@ export interface AgentReasoningData {
   done?: boolean;
   trace_id?: string;
   cancel_main?: boolean;
+}
+
+export interface AgentMiddlewareProgressData {
+  session_id?: string;
+  active_session_id?: string;
+  middleware?: string;
+  stage?: string;
+  compression_mode?: "background" | "emergency" | string;
+  notice_id?: string;
+  reason?: string | null;
+  staging_id?: number | string | null;
+  anchor_message_id?: string | null;
+  trace_id?: string | null;
+  timestamp_ms?: number;
+  snapshot_hook?: string;
+  call_phase?: "before" | "after" | string;
+  call_status?: "running" | "completed" | "failed" | string;
+  token_source?: "estimated" | "usage_metadata" | string;
+  token_count?: number;
+  usage_token_count?: number | null;
+  context_window?: number;
+  window_fraction?: number;
+  trigger_fraction?: number;
+  threshold_fraction?: number;
+  emergency_fraction?: number;
+  threshold_token_count?: number;
+  threshold_usage_fraction?: number;
+  remaining_to_threshold_tokens?: number;
+  compression_available?: boolean;
+  total_message_count?: number;
+  compression_message_count?: number;
+  retain_message_count?: number;
 }
 
 export interface AgentCompletedEventItem {

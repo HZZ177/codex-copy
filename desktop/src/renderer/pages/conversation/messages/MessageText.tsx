@@ -14,7 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
+import { runtimeBridge, type RuntimeBridge, type WorkspaceScope } from "@/runtime";
 import { ContextChipIcon } from "@/renderer/components/chat/ContextChipIcon";
 import {
   MarkdownBlockView,
@@ -26,9 +26,10 @@ import {
   type MarkdownBlockRendererRegistry,
   type MarkdownInlineImageProps,
 } from "@/renderer/components/workspace/markdownPreviewEngine";
+import { ImagePreviewDialog } from "@/renderer/components/workspace/ImagePreviewSurface";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import type { AgentContextItem } from "@/types/protocol";
+import type { AgentContextItem, AgentFileAttachment } from "@/types/protocol";
 
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
 import { MessageGhostFooter, type MessageGhostFooterData } from "./MessageGhostFooter";
@@ -91,6 +92,10 @@ export function MessageText({
   const content = isUser ? message.content : assistantContent.content;
   const contextItems = useMemo(
     () => (isUser ? contextItemsFromPayload(message.payload) : []),
+    [isUser, message.payload],
+  );
+  const imageAttachments = useMemo(
+    () => (isUser ? imageAttachmentsFromPayload(message.payload) : []),
     [isUser, message.payload],
   );
   const ghostFooter = useMemo(
@@ -230,6 +235,12 @@ export function MessageText({
           <MessageContextItems items={contextItems} onOpenFile={openContextFile} />
         </div>
       ) : null}
+      {imageAttachments.length ? (
+        <MessageImageAttachments
+          attachments={imageAttachments}
+          runtime={workspaceRuntime ?? runtimeBridge}
+        />
+      ) : null}
       {showBubble ? (
         <div className={styles.bubble} data-testid="message-bubble">
           {!isUser && assistantContent.redacted ? (
@@ -285,6 +296,87 @@ export function StreamingCursor() {
       <span className={styles.streamingDot} />
       <span className={styles.streamingDot} />
     </span>
+  );
+}
+
+function MessageImageAttachments({
+  attachments,
+  runtime,
+}: {
+  attachments: AgentFileAttachment[];
+  runtime: RuntimeBridge;
+}) {
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [activePreview, setActivePreview] = useState<{
+    attachment: AgentFileAttachment;
+    url: string;
+  } | null>(null);
+  const attachmentKey = attachments
+    .map((attachment, index) => imageAttachmentId(attachment) || `${index}:${attachment.path || attachment.name || ""}`)
+    .join("|");
+
+  useEffect(() => {
+    let active = true;
+    attachments.forEach((attachment) => {
+      const id = imageAttachmentId(attachment);
+      if (!id || Object.prototype.hasOwnProperty.call(previews, id) || attachmentPreviewUrl(attachment, previews)) {
+        return;
+      }
+      void runtime.attachments
+        .readMedia(id)
+        .then((media) => {
+          if (active) {
+            setPreviews((current) => ({ ...current, [id]: media.data_url }));
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setPreviews((current) => ({ ...current, [id]: "" }));
+          }
+        });
+    });
+    return () => {
+      active = false;
+    };
+  }, [attachmentKey, attachments, previews, runtime]);
+
+  return (
+    <div className={styles.messageImageAttachments} aria-label="图片附件">
+      {attachments.map((attachment, index) => {
+        const id = imageAttachmentId(attachment) || `image:${index}`;
+        const previewUrl = attachmentPreviewUrl(attachment, previews);
+        const name = attachment.name || attachment.path || "图片";
+        return (
+          <button
+            className={styles.messageImageAttachment}
+            key={id}
+            type="button"
+            title={name}
+            aria-label={`预览图片 ${name}`}
+            disabled={!previewUrl}
+            onClick={() => {
+              if (previewUrl) {
+                setActivePreview({ attachment, url: previewUrl });
+              }
+            }}
+          >
+            {previewUrl ? (
+              <img className={styles.messageImageThumb} src={previewUrl} alt="" />
+            ) : (
+              <span className={styles.messageImageFallback}>{name}</span>
+            )}
+          </button>
+        );
+      })}
+      {activePreview ? (
+        <ImagePreviewDialog
+          src={activePreview.url}
+          title={activePreview.attachment.name || "图片预览"}
+          alt={activePreview.attachment.name || "图片预览"}
+          onClose={() => setActivePreview(null)}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -432,7 +524,17 @@ function MessageFileContextChip({
 }
 
 function fileContextKindLabel(item: AgentContextItem): string {
-  return item.fileType === "directory" ? "工作区目录" : "工作区文件";
+  const source = stringValue(item.metadata?.source) || stringValue(item.source);
+  if (source === "workspace") {
+    return item.fileType === "directory" ? "工作区目录" : "工作区文件";
+  }
+  if (source === "pasted") {
+    return "粘贴文件";
+  }
+  if (source === "dropped") {
+    return "拖拽文件";
+  }
+  return item.fileType === "directory" ? "本地目录" : "本地文件";
 }
 
 function contextFileName(path: string): string {
@@ -705,6 +807,57 @@ function contextItemsFromPayload(payload: Record<string, unknown>): AgentContext
       },
     ];
   });
+}
+
+function imageAttachmentsFromPayload(payload: Record<string, unknown>): AgentFileAttachment[] {
+  const raw = payload.attachments;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    const type = stringValue(record.type);
+    const mimeType = stringValue(record.mime_type) || stringValue(record.mimeType);
+    if (type !== "image" && !mimeType.startsWith("image/")) {
+      return [];
+    }
+    return [
+      {
+        id: stringValue(record.id),
+        attachment_id: stringValue(record.attachment_id) || stringValue(record.attachmentId),
+        type: "image",
+        name: stringValue(record.name),
+        path: stringValue(record.path),
+        url: stringValue(record.url),
+        source: stringValue(record.source),
+        mime_type: mimeType,
+        size: numericMetadataValue(record.size) ?? undefined,
+        data_url: stringValue(record.data_url) || stringValue(record.dataUrl),
+      },
+    ];
+  });
+}
+
+function imageAttachmentId(attachment: AgentFileAttachment): string {
+  return String(attachment.attachment_id || attachment.id || "").trim();
+}
+
+function attachmentPreviewUrl(
+  attachment: AgentFileAttachment,
+  previews: Record<string, string>,
+): string {
+  const inlineDataUrl = stringValue(attachment.data_url) || stringValue(attachment.dataUrl);
+  if (inlineDataUrl) {
+    return inlineDataUrl;
+  }
+  if (attachment.url) {
+    return attachment.url;
+  }
+  const id = imageAttachmentId(attachment);
+  return id ? previews[id] || "" : "";
 }
 
 interface FloatingQuotePosition {

@@ -450,6 +450,7 @@ function HomeRoute({ runtime }: { runtime: RuntimeBridge }) {
             message: initialMessage,
             runtimeParams: options?.runtimeParams,
             contextItems: options?.contextItems,
+            attachments: options?.attachments,
           });
           void navigate(conversationPath(threadId), {
             state: { initialModel, quickSendId: quickSend.id },

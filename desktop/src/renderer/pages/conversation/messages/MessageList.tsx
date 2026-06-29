@@ -1,7 +1,8 @@
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import {
   forwardRef,
   type ReactNode,
+  type PointerEvent,
   type UIEvent,
   useCallback,
   useEffect,
@@ -44,8 +45,6 @@ const INTERACTIVE_PANEL_STATIC_MESSAGE_LIST_ITEM_LIMIT = 48;
 const VIRTUAL_MESSAGE_VIEWPORT_BUFFER = { bottom: 2600, top: 1800 } as const;
 const LOAD_OLDER_TRIGGER_PX = 44;
 const LOAD_OLDER_ARM_PX = 120;
-const ACTIVE_TURN_ANCHOR_RATIO = 0.35;
-const SCROLL_BOUNDARY_EPSILON_PX = 2;
 const TURN_NAVIGATION_RETRY_FRAMES = 8;
 
 export interface MessageListProps {
@@ -56,6 +55,7 @@ export interface MessageListProps {
   performanceProfile?: MessageListPerformanceProfile;
   turnNavigatorMode?: MessageListTurnNavigatorMode;
   turnNavigationRequest?: MessageListTurnNavigationRequest | null;
+  emptyLayout?: MessageListEmptyLayout;
   emptyText?: string;
   emptyTestId?: string;
   runtimeState?: ConversationRuntimeState;
@@ -83,6 +83,7 @@ export interface MessageListScrollControls {
 
 export type MessageListVariant = "full" | "compact" | "overlay";
 export type MessageListPerformanceProfile = "default" | "interactivePanel";
+export type MessageListEmptyLayout = "default" | "center";
 export type MessageListTurnNavigatorMode = "auto" | "hidden";
 export interface MessageListTurnNavigationRequest {
   requestId: number;
@@ -97,6 +98,7 @@ export function MessageList({
   performanceProfile = "default",
   turnNavigatorMode,
   turnNavigationRequest,
+  emptyLayout = "default",
   emptyText = "暂无消息",
   emptyTestId = "message-empty",
   renderMessage,
@@ -117,7 +119,8 @@ export function MessageList({
   const olderLoadAnchorRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const olderLoadRequestedRef = useRef(false);
   const olderLoadArmedRef = useRef(false);
-  const virtualActiveTurnFrameRef = useRef<number | null>(null);
+  const nativeScrollbarDragRef = useRef(false);
+  const virtualVisibleTurnFrameRef = useRef<number | null>(null);
   const virtualScrollerRef = useRef<HTMLElement | null>(null);
   const staticTurnRefsRef = useRef<Array<HTMLDivElement | null>>([]);
   const previousTurnSummaryRef = useRef<{ count: number; lastId: string | null } | null>(null);
@@ -157,7 +160,7 @@ export function MessageList({
     [displayItems, isProcessing, visibleMessages],
   );
   const useStaticList = shouldUseStaticMessageList(displayItems.length, performanceProfile);
-  const [activeTurnIndex, setActiveTurnIndex] = useState(0);
+  const [visibleTurnIndexes, setVisibleTurnIndexes] = useState<Set<number>>(() => new Set([0]));
   const listMode = useStaticList ? "static" : "virtual";
   const externalTurnNavigationIndex =
     turnNavigationRequest && turnNavigationRequest.targetIndex >= 0 && turnNavigationRequest.targetIndex < displayTurns.length
@@ -173,10 +176,14 @@ export function MessageList({
   const scrollControls = useStaticList ? staticAutoScroll : autoScroll;
   const canLoadOlder = Boolean(hasMoreOlder && onLoadOlder);
   const olderLoader = renderOlderLoader({ canLoadOlder, loadingOlder, showTrigger: showOlderTrigger });
-  const activeTurnNavigationIndex = useMemo(
-    () => findActiveTurnNavigationIndex(turnNavigationItems, activeTurnIndex),
-    [activeTurnIndex, turnNavigationItems],
+  const highlightedTurnNavigationIndexes = useMemo(
+    () => findVisibleTurnNavigationIndexes(turnNavigationItems, visibleTurnIndexes),
+    [turnNavigationItems, visibleTurnIndexes],
   );
+
+  const setVisibleTurnIndexesIfChanged = useCallback((nextVisibleIndexes: Set<number>) => {
+    setVisibleTurnIndexes((current) => (areNumberSetsEqual(current, nextVisibleIndexes) ? current : nextVisibleIndexes));
+  }, []);
 
   const requestLoadOlder = useCallback(
     (scroller: HTMLElement | null) => {
@@ -218,78 +225,99 @@ export function MessageList({
     [canLoadOlder, loadingOlder, requestLoadOlder],
   );
 
-  const updateActiveStaticTurn = useCallback((scroller: HTMLElement | null) => {
-    if (!scroller) {
+  const updateVisibleStaticTurns = useCallback((scroller: HTMLElement | null) => {
+    if (!showTurnNavigator || nativeScrollbarDragRef.current) {
       return;
     }
-    const scrollerRect = scroller.getBoundingClientRect();
-    if (scrollerRect.height <= 0) {
+    const nextVisibleIndexes = visibleTurnIndexesFromMountedTurns(scroller, displayTurns.length);
+    if (!nextVisibleIndexes.size) {
       return;
     }
-    if (isAtScrollTop(scroller)) {
-      setActiveTurnIndex((current) => (current === 0 ? current : 0));
-      return;
-    }
-    if (isAtScrollBottom(scroller)) {
-      const lastIndex = Math.max(0, staticTurnRefsRef.current.length - 1);
-      setActiveTurnIndex((current) => (current === lastIndex ? current : lastIndex));
-      return;
-    }
-    const anchorY = scrollerRect.top + scrollerRect.height * ACTIVE_TURN_ANCHOR_RATIO;
-    let nextActiveIndex = 0;
+    setVisibleTurnIndexesIfChanged(nextVisibleIndexes);
+  }, [displayTurns.length, setVisibleTurnIndexesIfChanged, showTurnNavigator]);
 
-    for (let index = 0; index < staticTurnRefsRef.current.length; index += 1) {
-      const turn = staticTurnRefsRef.current[index];
-      if (!turn) {
-        continue;
-      }
-      if (turn.getBoundingClientRect().top > anchorY) {
-        break;
-      }
-      nextActiveIndex = index;
+  const updateVisibleVirtualTurns = useCallback((scroller: HTMLElement | null) => {
+    if (!showTurnNavigator || nativeScrollbarDragRef.current) {
+      return;
     }
+    const nextVisibleIndexes = visibleTurnIndexesFromMountedTurns(scroller, displayTurns.length);
+    if (!nextVisibleIndexes.size) {
+      return;
+    }
+    setVisibleTurnIndexesIfChanged(nextVisibleIndexes);
+  }, [displayTurns.length, setVisibleTurnIndexesIfChanged, showTurnNavigator]);
 
-    setActiveTurnIndex((current) => (current === nextActiveIndex ? current : nextActiveIndex));
+  const markNativeScrollbarDrag = useCallback((event: { clientX: number; clientY: number }, scroller: HTMLElement) => {
+    if (isNativeScrollbarPointerStart(event, scroller)) {
+      nativeScrollbarDragRef.current = true;
+    }
   }, []);
 
-  const updateActiveVirtualTurn = useCallback((scroller: HTMLElement | null) => {
-    const nextActiveIndex = activeVirtualTurnIndexFromMountedTurns(scroller, displayTurns.length);
-    if (nextActiveIndex === null) {
-      return;
-    }
-    setActiveTurnIndex((current) => (current === nextActiveIndex ? current : nextActiveIndex));
-  }, [displayTurns.length]);
+  const handleStaticPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      staticAutoScroll.handlePointerDown();
+      markNativeScrollbarDrag(event, event.currentTarget);
+    },
+    [markNativeScrollbarDrag, staticAutoScroll],
+  );
 
   const handleStaticScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       staticAutoScroll.handleScroll(event);
       updateOlderLoadTrigger(event.currentTarget);
-      updateActiveStaticTurn(event.currentTarget);
+      updateVisibleStaticTurns(event.currentTarget);
     },
-    [staticAutoScroll, updateActiveStaticTurn, updateOlderLoadTrigger],
+    [staticAutoScroll, updateOlderLoadTrigger, updateVisibleStaticTurns],
   );
 
   const handleVirtualScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       updateOlderLoadTrigger(event.currentTarget);
-      updateActiveVirtualTurn(event.currentTarget);
+      updateVisibleVirtualTurns(event.currentTarget);
     },
-    [updateActiveVirtualTurn, updateOlderLoadTrigger],
+    [updateOlderLoadTrigger, updateVisibleVirtualTurns],
   );
 
   const handleVirtualRangeChanged = useCallback(() => {
     if (typeof window === "undefined") {
-      updateActiveVirtualTurn(virtualScrollerRef.current);
+      updateVisibleVirtualTurns(virtualScrollerRef.current);
       return;
     }
-    if (virtualActiveTurnFrameRef.current !== null) {
-      window.cancelAnimationFrame(virtualActiveTurnFrameRef.current);
+    if (virtualVisibleTurnFrameRef.current !== null) {
+      window.cancelAnimationFrame(virtualVisibleTurnFrameRef.current);
     }
-    virtualActiveTurnFrameRef.current = window.requestAnimationFrame(() => {
-      virtualActiveTurnFrameRef.current = null;
-      updateActiveVirtualTurn(virtualScrollerRef.current);
+    virtualVisibleTurnFrameRef.current = window.requestAnimationFrame(() => {
+      virtualVisibleTurnFrameRef.current = null;
+      updateVisibleVirtualTurns(virtualScrollerRef.current);
     });
-  }, [updateActiveVirtualTurn]);
+  }, [updateVisibleVirtualTurns]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const finishNativeScrollbarDrag = () => {
+      if (!nativeScrollbarDragRef.current) {
+        return;
+      }
+      nativeScrollbarDragRef.current = false;
+      window.requestAnimationFrame(() => {
+        if (useStaticList) {
+          updateVisibleStaticTurns(staticAutoScroll.containerRef.current);
+          return;
+        }
+        updateVisibleVirtualTurns(virtualScrollerRef.current);
+      });
+    };
+    window.addEventListener("pointerup", finishNativeScrollbarDrag);
+    window.addEventListener("pointercancel", finishNativeScrollbarDrag);
+    window.addEventListener("blur", finishNativeScrollbarDrag);
+    return () => {
+      window.removeEventListener("pointerup", finishNativeScrollbarDrag);
+      window.removeEventListener("pointercancel", finishNativeScrollbarDrag);
+      window.removeEventListener("blur", finishNativeScrollbarDrag);
+    };
+  }, [staticAutoScroll.containerRef, updateVisibleStaticTurns, updateVisibleVirtualTurns, useStaticList]);
 
   const setVirtualScrollerRef = useCallback(
     (ref: HTMLElement | Window | null) => {
@@ -307,30 +335,29 @@ export function MessageList({
   const handleVirtualAtBottomStateChange = useCallback(
     (atBottom: boolean) => {
       autoScroll.handleAtBottomStateChange(atBottom);
-      if (atBottom) {
-        setActiveTurnIndex((current) => {
-          const lastIndex = Math.max(0, displayTurns.length - 1);
-          return current === lastIndex ? current : lastIndex;
-        });
+      if (atBottom && showTurnNavigator) {
+        setVisibleTurnIndexesIfChanged(new Set([Math.max(0, displayTurns.length - 1)]));
       }
     },
-    [autoScroll.handleAtBottomStateChange, displayTurns.length],
+    [autoScroll.handleAtBottomStateChange, displayTurns.length, setVisibleTurnIndexesIfChanged, showTurnNavigator],
   );
 
   const handleVirtualAtTopStateChange = useCallback(
     (atTop: boolean) => {
       if (atTop) {
-        setActiveTurnIndex((current) => (current === 0 ? current : 0));
+        if (showTurnNavigator) {
+          setVisibleTurnIndexesIfChanged(new Set([0]));
+        }
         updateOlderLoadTrigger(virtualScrollerRef.current);
       }
     },
-    [updateOlderLoadTrigger],
+    [setVisibleTurnIndexesIfChanged, showTurnNavigator, updateOlderLoadTrigger],
   );
 
   useEffect(() => {
     return () => {
-      if (virtualActiveTurnFrameRef.current !== null && typeof window !== "undefined") {
-        window.cancelAnimationFrame(virtualActiveTurnFrameRef.current);
+      if (virtualVisibleTurnFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(virtualVisibleTurnFrameRef.current);
       }
     };
   }, []);
@@ -344,8 +371,8 @@ export function MessageList({
     }
   }, [canLoadOlder, isProcessing, listMode, loading, visibleMessages[0]?.id]);
 
-  useEffect(() => {
-    setActiveTurnIndex((current) => clampTurnIndex(current, displayTurns.length));
+  useLayoutEffect(() => {
+    setVisibleTurnIndexes((current) => normalizeVisibleTurnIndexes(current, displayTurns.length));
   }, [displayTurns.length]);
 
   useLayoutEffect(() => {
@@ -373,8 +400,8 @@ export function MessageList({
     if (!useStaticList) {
       return;
     }
-    updateActiveStaticTurn(staticAutoScroll.containerRef.current);
-  }, [displayTurns.length, staticAutoScroll.containerRef, updateActiveStaticTurn, useStaticList]);
+    updateVisibleStaticTurns(staticAutoScroll.containerRef.current);
+  }, [displayTurns.length, staticAutoScroll.containerRef, updateVisibleStaticTurns, useStaticList]);
 
   useLayoutEffect(() => {
     const previousTurnSummary = previousTurnSummaryRef.current;
@@ -393,8 +420,11 @@ export function MessageList({
     if (!hasNewUserTurn && !isProcessing) {
       return;
     }
-    setActiveTurnIndex(displayTurns.length - 1);
-  }, [displayTurns, isProcessing]);
+    if (!showTurnNavigator) {
+      return;
+    }
+    setVisibleTurnIndexesIfChanged(new Set([displayTurns.length - 1]));
+  }, [displayTurns, isProcessing, setVisibleTurnIndexesIfChanged, showTurnNavigator]);
 
   const virtualComponents = useMemo<Components<MessageTurn>>(
     () => ({
@@ -403,7 +433,8 @@ export function MessageList({
         { children, style, ...props },
         ref,
       ) {
-        const { onScroll, ...scrollerProps } = props as typeof props & {
+        const { onPointerDown, onScroll, ...scrollerProps } = props as typeof props & {
+          onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
           onScroll?: (event: UIEvent<HTMLDivElement>) => void;
         };
         return (
@@ -415,6 +446,10 @@ export function MessageList({
             data-message-list-variant={variant}
             data-testid="message-list-scroll"
             style={style}
+            onPointerDown={(event) => {
+              onPointerDown?.(event);
+              markNativeScrollbarDrag(event, event.currentTarget);
+            }}
             onScroll={(event) => {
               onScroll?.(event);
               handleVirtualScroll(event);
@@ -428,7 +463,7 @@ export function MessageList({
         return olderLoader;
       },
     }),
-    [handleVirtualScroll, olderLoader, variant],
+    [handleVirtualScroll, markNativeScrollbarDrag, olderLoader, variant],
   );
 
   useEffect(() => {
@@ -453,7 +488,7 @@ export function MessageList({
           behavior: prefersReducedMotion() ? "auto" : "smooth",
           index,
         });
-        setActiveTurnIndex((current) => (current === index ? current : index));
+        setVisibleTurnIndexesIfChanged(new Set([index]));
         return true;
       }
 
@@ -463,12 +498,12 @@ export function MessageList({
           block: "center",
           behavior: prefersReducedMotion() ? "auto" : "smooth",
         });
-        setActiveTurnIndex((current) => (current === index ? current : index));
+        setVisibleTurnIndexesIfChanged(new Set([index]));
         return true;
       }
       return false;
     },
-    [autoScroll.virtuosoRef, displayTurns.length, useStaticList],
+    [autoScroll.virtuosoRef, displayTurns.length, setVisibleTurnIndexesIfChanged, useStaticList],
   );
 
   useEffect(() => {
@@ -510,7 +545,7 @@ export function MessageList({
       data-message-list-scroll="true"
       data-message-list-variant={variant}
       data-testid="message-list-scroll"
-      onPointerDown={staticAutoScroll.handlePointerDown}
+      onPointerDown={handleStaticPointerDown}
       onScroll={handleStaticScroll}
       onWheel={staticAutoScroll.handleWheel}
     >
@@ -519,6 +554,7 @@ export function MessageList({
         {displayTurns.map((turn, index) => (
           <div
             className={styles.turnGroup}
+            data-turn-index={index}
             data-testid="message-turn"
             key={turn.id}
             ref={(node) => {
@@ -601,7 +637,12 @@ export function MessageList({
       ) : visibleMessages.length ? (
         messageListContent
       ) : (
-        <div className={styles.scroller} data-message-list-variant={variant} data-testid="message-list-scroll">
+        <div
+          className={styles.scroller}
+          data-empty-layout={emptyLayout}
+          data-message-list-variant={variant}
+          data-testid="message-list-scroll"
+        >
           <div className={styles.empty} data-testid={emptyTestId}>
             {emptyText}
           </div>
@@ -623,7 +664,7 @@ export function MessageList({
       {visibleMessages.length && showTurnNavigator ? (
         <ConversationTurnNavigator
           turns={turnNavigationItems}
-          activeIndex={activeTurnNavigationIndex}
+          highlightedIndexes={highlightedTurnNavigationIndexes}
           onNavigate={navigateToTurn}
         />
       ) : null}
@@ -669,8 +710,9 @@ const messageVirtuosoComponents: Components<MessageTurn> = {
     return <div className={styles.virtualBottomSpacer} aria-hidden="true" />;
   },
   Item: function MessageItem({ children, style, ...props }: ItemProps<MessageTurn>) {
+    const turnIndex = (props as { "data-index"?: number | string })["data-index"];
     return (
-      <div {...props} className={styles.turnGroup} data-testid="message-turn" style={style}>
+      <div {...props} className={styles.turnGroup} data-turn-index={turnIndex} data-testid="message-turn" style={style}>
         {children}
       </div>
     );
@@ -910,6 +952,12 @@ function DefaultMessage({
   if (message.kind === "error") {
     return <ErrorItem message={message} />;
   }
+  if (message.kind === "context_compression") {
+    return <ContextCompressionNotice message={message} />;
+  }
+  if (message.kind === "cancelled") {
+    return <ConversationCancelledNotice />;
+  }
   return (
     <MessageText
       message={message}
@@ -919,6 +967,40 @@ function DefaultMessage({
       workspaceScope={workspaceScope}
       onQuoteSelection={onQuoteSelection}
     />
+  );
+}
+
+function ConversationCancelledNotice() {
+  return (
+    <div
+      className={styles.contextCompressionNotice}
+      data-state="cancelled"
+      data-testid="conversation-cancelled-notice"
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.contextCompressionNoticeLabel}>对话已取消</span>
+    </div>
+  );
+}
+
+function ContextCompressionNotice({ message }: { message: ConversationMessage }) {
+  const state = message.status === "running" ? "running" : message.status === "failed" ? "failed" : "completed";
+  return (
+    <div
+      className={styles.contextCompressionNotice}
+      data-state={state}
+      data-testid="context-compression-notice"
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.contextCompressionNoticeLabel}>
+        <span className={styles.contextCompressionNoticeIcon} aria-hidden="true">
+          {state === "running" ? <Loader2 size={14} /> : state === "failed" ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}
+        </span>
+        <span>{message.content}</span>
+      </span>
+    </div>
   );
 }
 
@@ -941,6 +1023,22 @@ function shouldUseStaticMessageList(itemCount: number, performanceProfile: Messa
   return itemCount <= staticItemLimit;
 }
 
+function isNativeScrollbarPointerStart(
+  event: { clientX: number; clientY: number },
+  scroller: HTMLElement,
+): boolean {
+  if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
+    return false;
+  }
+  const scrollbarInlineSize = Math.max(0, scroller.offsetWidth - scroller.clientWidth);
+  if (scrollbarInlineSize <= 0) {
+    return false;
+  }
+  const rect = scroller.getBoundingClientRect();
+  const edgeSize = Math.max(12, Math.min(24, scrollbarInlineSize));
+  return event.clientX >= rect.right - edgeSize && event.clientX <= rect.right;
+}
+
 function clampTurnIndex(index: number, count: number): number {
   if (count <= 0) {
     return 0;
@@ -948,66 +1046,77 @@ function clampTurnIndex(index: number, count: number): number {
   return Math.min(Math.max(index, 0), count - 1);
 }
 
-function isAtScrollTop(scroller: HTMLElement): boolean {
-  return scroller.scrollTop <= SCROLL_BOUNDARY_EPSILON_PX;
+function normalizeVisibleTurnIndexes(indexes: Set<number>, count: number): Set<number> {
+  if (count <= 0) {
+    return new Set();
+  }
+  const normalized = new Set<number>();
+  indexes.forEach((index) => {
+    if (index >= 0 && index < count) {
+      normalized.add(index);
+    }
+  });
+  if (!normalized.size) {
+    normalized.add(Math.max(0, count - 1));
+  }
+  return areNumberSetsEqual(indexes, normalized) ? indexes : normalized;
 }
 
-function isAtScrollBottom(scroller: HTMLElement): boolean {
-  return scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - SCROLL_BOUNDARY_EPSILON_PX;
+function areNumberSetsEqual(left: Set<number>, right: Set<number>): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-export function activeVirtualTurnIndexFromMountedTurns(scroller: HTMLElement | null, turnCount: number): number | null {
+export function visibleTurnIndexesFromMountedTurns(scroller: HTMLElement | null, turnCount: number): Set<number> {
+  const visibleIndexes = new Set<number>();
   if (!scroller || turnCount <= 0) {
-    return null;
+    return visibleIndexes;
   }
   const scrollerRect = scroller.getBoundingClientRect();
   if (scrollerRect.height <= 0) {
-    return null;
-  }
-  if (isAtScrollTop(scroller)) {
-    return 0;
-  }
-  if (isAtScrollBottom(scroller)) {
-    return Math.max(0, turnCount - 1);
+    return visibleIndexes;
   }
 
-  const anchorY = scrollerRect.top + scrollerRect.height * ACTIVE_TURN_ANCHOR_RATIO;
   const mountedTurns = Array.from(scroller.querySelectorAll<HTMLElement>('[data-testid="message-turn"]'));
-  let nextActiveIndex: number | null = null;
-
   for (const turn of mountedTurns) {
-    const turnIndex = Number(turn.dataset.index);
+    const turnIndex = Number(turn.dataset.turnIndex ?? turn.dataset.index);
     if (!Number.isInteger(turnIndex)) {
       continue;
     }
-    if (nextActiveIndex === null) {
-      nextActiveIndex = turnIndex;
+    const turnRect = turn.getBoundingClientRect();
+    if (turnRect.bottom > scrollerRect.top && turnRect.top < scrollerRect.bottom) {
+      visibleIndexes.add(clampTurnIndex(turnIndex, turnCount));
     }
-    if (turn.getBoundingClientRect().top > anchorY) {
-      break;
-    }
-    nextActiveIndex = turnIndex;
   }
 
-  return nextActiveIndex === null ? null : clampTurnIndex(nextActiveIndex, turnCount);
+  return visibleIndexes;
 }
 
 export function buildTurnNavigationItemsFromMessages(messages: ConversationMessage[]): ConversationTurnNavigationItem[] {
   return buildTurnNavigationItems(groupDisplayItemsByTurn(processMessages(messages)));
 }
 
-function findActiveTurnNavigationIndex(items: ConversationTurnNavigationItem[], activeTurnIndex: number): number | null {
-  if (!items.length) {
-    return null;
+function findVisibleTurnNavigationIndexes(
+  items: ConversationTurnNavigationItem[],
+  visibleTurnIndexes: Set<number>,
+): number[] {
+  if (!items.length || !visibleTurnIndexes.size) {
+    return [];
   }
-  let activeNavigationIndex = 0;
-  for (let index = 0; index < items.length; index += 1) {
-    if (items[index].targetIndex > activeTurnIndex) {
-      break;
+  const visibleNavigationIndexes: number[] = [];
+  items.forEach((item, index) => {
+    if (visibleTurnIndexes.has(item.targetIndex)) {
+      visibleNavigationIndexes.push(index);
     }
-    activeNavigationIndex = index;
-  }
-  return activeNavigationIndex;
+  });
+  return visibleNavigationIndexes;
 }
 
 interface MessageTurn {

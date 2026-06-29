@@ -40,6 +40,7 @@ class PersistenceProjection:
         DomainEventType.TURN_FAILED: ReplayAction.ERROR,
         DomainEventType.TURN_COMPLETED: ReplayAction.COMPLETED,
         DomainEventType.REASONING_FINISHED: ReplayAction.REASONING,
+        DomainEventType.MIDDLEWARE_PROGRESS: ReplayAction.MIDDLEWARE_PROGRESS,
     }
 
     def __init__(

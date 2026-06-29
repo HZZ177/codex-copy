@@ -115,6 +115,7 @@ import {
   type MarkdownDocumentModel,
   type VirtualMarkdownPreviewHandle,
 } from "./markdownPreviewEngine";
+import { ImagePreviewSurface } from "./ImagePreviewSurface";
 import styles from "./FilePreview.module.css";
 
 export type FilePreviewRequest = PreviewRequest;
@@ -5616,23 +5617,6 @@ function lineNumbersText(lineCount: number): string {
   return Array.from({ length: Math.max(1, lineCount) }, (_, index) => String(index + 1)).join("\n");
 }
 
-const IMAGE_MIN_SCALE = 0.25;
-const IMAGE_MAX_SCALE = 5;
-const IMAGE_SCALE_STEP = 0.25;
-
-interface ImagePanOffset {
-  x: number;
-  y: number;
-}
-
-interface ImageDragState {
-  offsetX: number;
-  offsetY: number;
-  pointerId: number;
-  startX: number;
-  startY: number;
-}
-
 function ImagePreview({
   media,
   title,
@@ -5642,155 +5626,17 @@ function ImagePreview({
   title: string;
   sourceLabel: string;
 }) {
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState<ImagePanOffset>({ x: 0, y: 0 });
-  const dragRef = useRef<ImageDragState | null>(null);
-
-  if (!media) {
-    return <div className={styles.imageStatus}>图片未加载</div>;
-  }
-
-  const setClampedScale = (value: number | ((current: number) => number)) => {
-    setScale((current) => {
-      const next = clampImageScale(typeof value === "function" ? value(current) : value);
-      if (next <= 1) {
-        setOffset({ x: 0, y: 0 });
-      }
-      return next;
-    });
-  };
-
-  const zoomBy = (delta: number) => {
-    setClampedScale((current) => current + delta);
-  };
-
-  const resetView = () => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  };
-
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (Math.abs(event.deltaY) === 0) {
-      return;
-    }
-    event.preventDefault();
-    zoomBy(event.deltaY < 0 ? IMAGE_SCALE_STEP : -IMAGE_SCALE_STEP);
-  };
-
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button > 0 || scale <= 1) {
-      return;
-    }
-    dragRef.current = {
-      pointerId: pointerIdValue(event),
-      startX: pointerCoordinate(event.clientX),
-      startY: pointerCoordinate(event.clientY),
-      offsetX: offset.x,
-      offsetY: offset.y,
-    };
-    event.currentTarget.dataset.dragging = "true";
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  };
-
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== pointerIdValue(event)) {
-      return;
-    }
-    setOffset({
-      x: drag.offsetX + pointerCoordinate(event.clientX) - drag.startX,
-      y: drag.offsetY + pointerCoordinate(event.clientY) - drag.startY,
-    });
-  };
-
-  const clearDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId !== pointerIdValue(event)) {
-      return;
-    }
-    dragRef.current = null;
-    delete event.currentTarget.dataset.dragging;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-  };
-
-  const scaleLabel = formatImageScale(scale);
-  const imageStyle = {
-    "--image-scale": scale,
-    "--image-offset-x": `${offset.x}px`,
-    "--image-offset-y": `${offset.y}px`,
-  } as CSSProperties;
-
   return (
-    <figure className={styles.imagePane}>
-      <div
-        className={styles.imageControls}
-        aria-label="图片视图控制"
-        data-file-preview-selection-excluded="true"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          aria-label="缩小图片"
-          title="缩小图片"
-          disabled={scale <= IMAGE_MIN_SCALE}
-          onClick={() => zoomBy(-IMAGE_SCALE_STEP)}
-        >
-          <ZoomOut size={15} />
-        </button>
-        <span className={styles.imageScaleValue} aria-label={`当前缩放 ${scaleLabel}`}>
-          {scaleLabel}
-        </span>
-        <button
-          type="button"
-          aria-label="放大图片"
-          title="放大图片"
-          disabled={scale >= IMAGE_MAX_SCALE}
-          onClick={() => zoomBy(IMAGE_SCALE_STEP)}
-        >
-          <ZoomIn size={15} />
-        </button>
-        <button type="button" aria-label="重置图片视图" title="重置图片视图" onClick={resetView}>
-          <RotateCcw size={15} />
-        </button>
-      </div>
-      <div
-        className={styles.imageCanvas}
-        aria-label="图片预览画布"
-        data-draggable={scale > 1 ? "true" : "false"}
-        style={imageStyle}
-        onPointerCancel={clearDrag}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={clearDrag}
-        onWheel={handleWheel}
-      >
-        <img className={styles.imageFrame} src={media.data_url} alt={title || sourceLabel} draggable={false} />
-      </div>
-      <figcaption className={styles.imageMeta}>
-        <span>{media.media_type}</span>
-        <span>{formatBytes(media.size)}</span>
-      </figcaption>
-    </figure>
+    <ImagePreviewSurface
+      src={media?.data_url}
+      alt={title || sourceLabel}
+      title={title}
+      sourceLabel={sourceLabel}
+      mediaType={media?.media_type}
+      size={media?.size}
+      unavailableText="图片未加载"
+    />
   );
-}
-
-function clampImageScale(value: number): number {
-  return Math.min(IMAGE_MAX_SCALE, Math.max(IMAGE_MIN_SCALE, Math.round(value * 100) / 100));
-}
-
-function formatImageScale(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function previewTitle(request: FilePreviewRequest): string {

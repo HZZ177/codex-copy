@@ -25,6 +25,7 @@ class ChatRequest:
     model: str = ""
     system_prompt: str | None = None
     runtime_params: dict[str, Any] | None = None
+    attachments: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)

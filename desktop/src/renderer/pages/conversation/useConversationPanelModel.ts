@@ -14,7 +14,7 @@ import {
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import type { AgentActionEnvelope, AgentErrorData } from "@/types/protocol";
+import type { AgentActionEnvelope, AgentErrorData, AgentMiddlewareProgressData } from "@/types/protocol";
 
 import { agentMessageToConversationMessage } from "./conversationMessageAdapter";
 import {
@@ -32,6 +32,21 @@ export interface UseConversationPanelModelOptions {
   onBranchSessionCreated?: (sessionId: string) => void;
 }
 
+export interface ContextWindowUsageStatus {
+  tokenCount: number;
+  contextWindow: number;
+  windowFraction: number;
+  thresholdFraction: number;
+  thresholdTokenCount: number;
+  thresholdUsageFraction: number;
+  emergencyFraction: number | null;
+  remainingToThresholdTokens: number;
+  callPhase: string;
+  callStatus: string;
+  tokenSource: string;
+  updatedAtMs: number;
+}
+
 export type ConversationPanelModel = ReturnType<typeof useConversationPanelModel>;
 
 export function useConversationPanelModel({
@@ -42,6 +57,7 @@ export function useConversationPanelModel({
   onBranchSessionCreated,
 }: UseConversationPanelModelOptions) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [contextWindowUsage, setContextWindowUsage] = useState<ContextWindowUsageStatus | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null);
   const toolDetailCacheRef = useRef(
@@ -145,8 +161,19 @@ export function useConversationPanelModel({
       if (event.action === "error") {
         handleRuntimeError(event.data as AgentErrorData);
       }
+      if (event.action === "middleware_progress") {
+        const data = event.data as AgentMiddlewareProgressData;
+        const contextStatus = contextWindowUsageFromProgress(data, sessionId);
+        if (contextStatus) {
+          setContextWindowUsage(contextStatus);
+        }
+        const message = backgroundCompressionFailureMessage(data);
+        if (message) {
+          notifications.error(message);
+        }
+      }
     },
-    [handleRuntimeError, refreshWorkspaceSkills],
+    [handleRuntimeError, notifications, refreshWorkspaceSkills, sessionId],
   );
 
   useEffect(() => {
@@ -230,6 +257,10 @@ export function useConversationPanelModel({
   useEffect(() => {
     toolDetailCacheRef.current.clear();
   }, [runtime, sessionId]);
+
+  useEffect(() => {
+    setContextWindowUsage(null);
+  }, [sessionId]);
 
   const loadToolDetails = useCallback<ToolDetailsLoader>(
     async (message) => {
@@ -324,6 +355,7 @@ export function useConversationPanelModel({
     openFileReference,
     openFileChangePreview,
     loadToolDetails,
+    contextWindowUsage,
     forkFromMessage,
     reverseFromMessage,
   };
@@ -366,6 +398,69 @@ function runtimeErrorCode(reason: unknown): string | null {
   return null;
 }
 
+function backgroundCompressionFailureMessage(data: AgentMiddlewareProgressData): string {
+  if (data.middleware !== "ContextCompressionMiddleware") {
+    return "";
+  }
+  const stage = typeof data.stage === "string" ? data.stage : "";
+  if (stage === "background_failed") {
+    return "后台上下文压缩失败，当前对话将继续使用未压缩上下文。";
+  }
+  if (stage === "background_fork_failed") {
+    return "后台上下文压缩未能切换到压缩分支，当前对话将继续使用原上下文。";
+  }
+  if (stage === "staging_failed") {
+    return "上下文压缩结果应用失败，当前对话将继续使用原上下文。";
+  }
+  return "";
+}
+
+function contextWindowUsageFromProgress(
+  data: AgentMiddlewareProgressData,
+  currentSessionId: string,
+): ContextWindowUsageStatus | null {
+  if (data.middleware !== "ContextCompressionMiddleware" || data.stage !== "context_window_snapshot") {
+    return null;
+  }
+  const payloadSessionId = stringValue(data.session_id);
+  const payloadActiveSessionId = stringValue(data.active_session_id);
+  if (
+    currentSessionId &&
+    (payloadSessionId || payloadActiveSessionId) &&
+    payloadSessionId !== currentSessionId &&
+    payloadActiveSessionId !== currentSessionId
+  ) {
+    return null;
+  }
+  const tokenCount = nonNegativeNumber(data.token_count);
+  const contextWindow = positiveNumber(data.context_window);
+  if (tokenCount === null || contextWindow === null) {
+    return null;
+  }
+  const thresholdFraction =
+    positiveNumber(data.threshold_fraction) ?? positiveNumber(data.trigger_fraction) ?? 0.75;
+  const thresholdTokenCount =
+    positiveNumber(data.threshold_token_count) ?? Math.max(1, Math.round(contextWindow * thresholdFraction));
+  const thresholdUsageFraction =
+    nonNegativeNumber(data.threshold_usage_fraction) ?? tokenCount / thresholdTokenCount;
+
+  return {
+    tokenCount,
+    contextWindow,
+    windowFraction: nonNegativeNumber(data.window_fraction) ?? tokenCount / contextWindow,
+    thresholdFraction,
+    thresholdTokenCount,
+    thresholdUsageFraction,
+    emergencyFraction: positiveNumber(data.emergency_fraction),
+    remainingToThresholdTokens:
+      numberValue(data.remaining_to_threshold_tokens) ?? thresholdTokenCount - tokenCount,
+    callPhase: stringValue(data.call_phase) || "after",
+    callStatus: stringValue(data.call_status) || "completed",
+    tokenSource: stringValue(data.token_source) || "estimated",
+    updatedAtMs: Date.now(),
+  };
+}
+
 function errorMessage(reason: unknown): string {
   if (reason instanceof Error && reason.message) {
     return reason.message;
@@ -383,4 +478,28 @@ function errorMessage(reason: unknown): string {
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  const number = numberValue(value);
+  if (number === null || number < 0) {
+    return null;
+  }
+  return number;
+}
+
+function positiveNumber(value: unknown): number | null {
+  const number = numberValue(value);
+  if (number === null || number <= 0) {
+    return null;
+  }
+  return number;
 }

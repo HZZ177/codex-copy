@@ -13,8 +13,7 @@ export type WorkbenchAssistantAction =
   | { type: "toggle-expanded"; hasDraft: boolean }
   | { type: "close-expanded"; returnMode: "capsule" | "composer" }
   | { type: "dock-to-drawer" }
-  | { type: "close-drawer"; hasDraft: boolean }
-  | { type: "approval-pending" };
+  | { type: "close-drawer"; hasDraft: boolean };
 
 export function createWorkbenchAssistantState(): WorkbenchAssistantState {
   return {
@@ -64,7 +63,6 @@ export function workbenchAssistantReducer(
         focusSeq: state.focusSeq + (action.returnMode === "composer" ? 1 : 0),
       };
     case "dock-to-drawer":
-    case "approval-pending":
       return {
         mode: "drawer",
         focusSeq: state.focusSeq + 1,

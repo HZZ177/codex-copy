@@ -26,6 +26,7 @@ class ChatAction(StrEnum):
     SESSION_TITLE_UPDATED = "session_title_updated"
     TASK_RESULT = "task_result"
     REASONING = "reasoning"
+    MIDDLEWARE_PROGRESS = "middleware_progress"
 
 
 class ReplayAction(StrEnum):
@@ -46,6 +47,7 @@ class ReplayAction(StrEnum):
     ERROR = "error"
     SCHEDULED_TASK_RESULT = "scheduled_task_result"
     REASONING = "reasoning"
+    MIDDLEWARE_PROGRESS = "middleware_progress"
 
 
 class CompletedEventItemAction(StrEnum):

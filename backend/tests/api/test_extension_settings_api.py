@@ -13,6 +13,7 @@ def test_extension_settings_api_returns_defaults_from_app_hard_default(tmp_path)
     assert response.status_code == 200
     body = response.json()
     assert body["auto_title"]["enabled"] is False
+    assert body["auto_title"]["max_title_length"] == 20
     assert body["context_compression"]["enabled"] is False
     assert body["context_compression"]["context_window_tokens"] == 128000
     assert body["tool_call_limit"]["enabled"] is True
@@ -98,7 +99,7 @@ def test_extension_settings_api_fails_loudly_for_corrupt_persisted_config(tmp_pa
             "auto_title": {
                 "enabled": False,
                 "only_when_default_title": True,
-                "max_title_length": 40,
+                "max_title_length": 20,
             },
             "tool_call_limit": {"enabled": True, "max_tool_calls": 8, "exit_behavior": "error"},
             "duplicate_tool_call_guard": {"enabled": True, "max_repeats": 3},
@@ -124,7 +125,7 @@ def _valid_payload() -> dict:
         "auto_title": {
             "enabled": False,
             "only_when_default_title": True,
-            "max_title_length": 40,
+            "max_title_length": 20,
         },
         "tool_call_limit": {
             "enabled": True,

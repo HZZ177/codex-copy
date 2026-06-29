@@ -102,6 +102,29 @@ create index if not exists idx_sessions_parent_session_id on sessions(parent_ses
 create index if not exists idx_sessions_child_session_id on sessions(child_session_id);
 create index if not exists idx_sessions_updated_at on sessions(updated_at desc);
 
+create table if not exists attachments (
+  id text primary key,
+  session_id text,
+  user_id text not null,
+  type text not null,
+  source text not null,
+  name text not null,
+  path text not null,
+  mime_type text not null,
+  size integer not null default 0,
+  created_at text not null,
+  updated_at text not null,
+  is_deleted integer not null default 0,
+  foreign key(session_id) references sessions(id) on delete cascade
+);
+
+create index if not exists idx_attachments_session_id
+  on attachments(session_id, is_deleted, created_at desc);
+create index if not exists idx_attachments_user_id
+  on attachments(user_id, is_deleted, created_at desc);
+create index if not exists idx_attachments_path
+  on attachments(path);
+
 create table if not exists workspace_file_annotations (
   id text primary key,
   scope_type text not null,
@@ -146,6 +169,30 @@ create index if not exists idx_message_events_session_id on message_events(sessi
 create index if not exists idx_message_events_session_seq on message_events(session_id, seq);
 create unique index if not exists idx_message_events_session_seq_unique
   on message_events(session_id, seq);
+
+create table if not exists compression_staging (
+  id integer primary key autoincrement,
+  original_session_id text not null,
+  active_session_id text not null,
+  target_session_id text not null,
+  generation integer not null,
+  status text not null default 'pending',
+  anchor_message_id text,
+  l1_content text,
+  l2_content text,
+  failure_reason text,
+  applied_at text,
+  created_at text not null,
+  updated_at text not null,
+  is_deleted integer not null default 0,
+  foreign key(original_session_id) references sessions(id) on delete cascade,
+  foreign key(target_session_id) references sessions(id) on delete cascade
+);
+
+create index if not exists idx_compression_staging_original_status_target
+  on compression_staging(original_session_id, status, target_session_id, generation desc, id desc);
+create index if not exists idx_compression_staging_original_generation
+  on compression_staging(original_session_id, generation desc, id desc);
 
 create table if not exists command_approval_requests (
   id text primary key,
@@ -393,6 +440,10 @@ create index if not exists idx_command_approval_audit_created
   on command_approval_audit(created_at desc);
 create index if not exists idx_command_approval_audit_session_created
   on command_approval_audit(session_id, created_at desc);
+create index if not exists idx_compression_staging_original_status_target
+  on compression_staging(original_session_id, status, target_session_id, generation desc, id desc);
+create index if not exists idx_compression_staging_original_generation
+  on compression_staging(original_session_id, generation desc, id desc);
 """
 
 

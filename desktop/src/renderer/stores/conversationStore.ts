@@ -29,6 +29,8 @@ export type ConversationMessageKind =
   | "file_change"
   | "approval"
   | "error"
+  | "cancelled"
+  | "context_compression"
   | "status";
 
 export interface ConversationMessage {

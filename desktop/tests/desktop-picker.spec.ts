@@ -40,6 +40,20 @@ describe("DesktopPickerRuntime", () => {
     await expect(runtime.pickDirectory()).resolves.toBe("D:\\lazy-repo");
   });
 
+  it("picks multiple files without image filtering", async () => {
+    const open = vi.fn().mockResolvedValue(["D:\\tmp\\a.png", "D:\\tmp\\notes.txt"]);
+    const runtime = createDesktopPickerRuntime({
+      getTauriGlobal: () => ({ dialog: { open } }),
+    });
+
+    await expect(runtime.pickFiles()).resolves.toEqual(["D:\\tmp\\a.png", "D:\\tmp\\notes.txt"]);
+    expect(open).toHaveBeenCalledWith({
+      directory: false,
+      multiple: true,
+      title: "选择文件",
+    });
+  });
+
   it("reports a broken Tauri dialog API instead of silently doing nothing", async () => {
     const runtime = createDesktopPickerRuntime({
       getTauriGlobal: () => ({}),

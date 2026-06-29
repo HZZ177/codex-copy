@@ -131,6 +131,22 @@ class SessionRecord:
 
 
 @dataclass(frozen=True)
+class AttachmentRecord:
+    id: str
+    session_id: str | None
+    user_id: str
+    type: str
+    source: str
+    name: str
+    path: str
+    mime_type: str
+    size: int
+    created_at: str
+    updated_at: str
+    is_deleted: bool = False
+
+
+@dataclass(frozen=True)
 class MessageEventRecord:
     id: str
     session_id: str
@@ -141,6 +157,24 @@ class MessageEventRecord:
     created_at: str
     updated_at: str
     trace_record_id: str | None = None
+    is_deleted: bool = False
+
+
+@dataclass(frozen=True)
+class CompressionStagingRecord:
+    id: int
+    original_session_id: str
+    active_session_id: str
+    target_session_id: str
+    generation: int
+    status: str
+    created_at: str
+    updated_at: str
+    anchor_message_id: str | None = None
+    l1_content: str | None = None
+    l2_content: str | None = None
+    failure_reason: str | None = None
+    applied_at: str | None = None
     is_deleted: bool = False
 
 
@@ -998,6 +1032,147 @@ class SessionsRepository:
         )
 
 
+class AttachmentsRepository:
+    VALID_TYPES = {"image", "document", "file"}
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def create(
+        self,
+        *,
+        attachment_id: str | None = None,
+        session_id: str | None = None,
+        user_id: str,
+        type: str,
+        source: str,
+        name: str,
+        path: str,
+        mime_type: str,
+        size: int,
+    ) -> AttachmentRecord:
+        cleaned_type = type.strip() or "file"
+        if cleaned_type not in self.VALID_TYPES:
+            raise ValueError(f"unsupported attachment type: {cleaned_type}")
+        if not user_id.strip():
+            raise ValueError("attachment user_id must not be empty")
+        if not name.strip():
+            raise ValueError("attachment name must not be empty")
+        if not path.strip():
+            raise ValueError("attachment path must not be empty")
+        now = to_iso_z(utc_now())
+        record_id = attachment_id or new_id()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                insert into attachments (
+                  id, session_id, user_id, type, source, name, path, mime_type,
+                  size, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_id,
+                    session_id,
+                    user_id,
+                    cleaned_type,
+                    source.strip() or "unknown",
+                    name.strip(),
+                    path,
+                    mime_type.strip() or "application/octet-stream",
+                    max(0, int(size)),
+                    now,
+                    now,
+                ),
+            )
+        record = self.get(record_id)
+        if record is None:
+            raise RuntimeError(f"创建 attachment 后无法读取: {record_id}")
+        return record
+
+    def get(self, attachment_id: str, *, include_deleted: bool = False) -> AttachmentRecord | None:
+        query = "select * from attachments where id = ?"
+        params: list[Any] = [attachment_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._from_row(row) if row else None
+
+    def list_by_ids(
+        self,
+        attachment_ids: list[str],
+        *,
+        include_deleted: bool = False,
+    ) -> list[AttachmentRecord]:
+        ordered_ids = [item for item in dict.fromkeys(attachment_ids) if item]
+        if not ordered_ids:
+            return []
+        placeholders = ",".join("?" for _ in ordered_ids)
+        query = f"select * from attachments where id in ({placeholders})"
+        params: list[Any] = list(ordered_ids)
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        records = {row["id"]: self._from_row(row) for row in rows}
+        return [records[item] for item in ordered_ids if item in records]
+
+    def claim_for_session(
+        self,
+        attachment_ids: list[str],
+        *,
+        session_id: str,
+        user_id: str,
+    ) -> None:
+        ordered_ids = [item for item in dict.fromkeys(attachment_ids) if item]
+        if not ordered_ids:
+            return
+        now = to_iso_z(utc_now())
+        placeholders = ",".join("?" for _ in ordered_ids)
+        with self.db.transaction() as conn:
+            conn.execute(
+                f"""
+                update attachments
+                set session_id = ?, updated_at = ?
+                where id in ({placeholders})
+                  and user_id = ?
+                  and is_deleted = 0
+                  and (session_id is null or session_id = ?)
+                """,
+                [session_id, now, *ordered_ids, user_id, session_id],
+            )
+
+    def soft_delete(self, attachment_id: str) -> bool:
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                update attachments
+                set is_deleted = 1, updated_at = ?
+                where id = ? and is_deleted = 0
+                """,
+                (now, attachment_id),
+            )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> AttachmentRecord:
+        return AttachmentRecord(
+            id=row["id"],
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            type=row["type"],
+            source=row["source"],
+            name=row["name"],
+            path=row["path"],
+            mime_type=row["mime_type"],
+            size=int(row["size"] or 0),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            is_deleted=bool(row["is_deleted"]),
+        )
+
+
 class WorkspaceFileAnnotationsRepository:
     VALID_SCOPE_TYPES = {"session", "workspace"}
     VALID_ANCHOR_TYPES = {"file", "selection"}
@@ -1638,6 +1813,193 @@ class MessageEventsRepository:
             turn_index=int(row["turn_index"]),
             action=row["action"],
             data=_json_loads(row["data_json"], {}),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            is_deleted=bool(row["is_deleted"]),
+        )
+
+
+class CompressionStagingRepository:
+    """压缩暂存记录仓储。
+
+    后台压缩先把 L1/L2 和锚点写入 pending 记录，再切换活动会话；
+    下一次模型调用前由中间件按 target_session_id 消费并标记 applied。
+    """
+
+    VALID_STATUSES = {"pending", "applied", "superseded", "failed"}
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def create(
+        self,
+        *,
+        original_session_id: str,
+        active_session_id: str,
+        target_session_id: str,
+        generation: int,
+        anchor_message_id: str | None = None,
+        l1_content: str | None = None,
+        l2_content: str | None = None,
+    ) -> CompressionStagingRecord:
+        if generation < 1:
+            raise ValueError("压缩暂存 generation 必须大于等于 1")
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                insert into compression_staging (
+                  original_session_id, active_session_id, target_session_id,
+                  generation, status, anchor_message_id, l1_content, l2_content,
+                  created_at, updated_at
+                ) values (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+                """,
+                (
+                    original_session_id,
+                    active_session_id,
+                    target_session_id,
+                    generation,
+                    anchor_message_id,
+                    l1_content,
+                    l2_content,
+                    now,
+                    now,
+                ),
+            )
+            row_id = int(cursor.lastrowid)
+        record = self.get(row_id)
+        if record is None:
+            raise RuntimeError(f"创建压缩暂存记录后无法读取: {row_id}")
+        return record
+
+    def create_with_latest_priority(
+        self,
+        *,
+        original_session_id: str,
+        active_session_id: str,
+        target_session_id: str,
+        generation: int,
+        anchor_message_id: str | None = None,
+        l1_content: str | None = None,
+        l2_content: str | None = None,
+    ) -> CompressionStagingRecord:
+        if generation < 1:
+            raise ValueError("压缩暂存 generation 必须大于等于 1")
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                update compression_staging
+                set status = 'superseded',
+                    failure_reason = 'superseded_by_newer_generation',
+                    updated_at = ?
+                where original_session_id = ?
+                  and generation < ?
+                  and status in ('pending', 'applied')
+                  and is_deleted = 0
+                """,
+                (now, original_session_id, generation),
+            )
+        return self.create(
+            original_session_id=original_session_id,
+            active_session_id=active_session_id,
+            target_session_id=target_session_id,
+            generation=generation,
+            anchor_message_id=anchor_message_id,
+            l1_content=l1_content,
+            l2_content=l2_content,
+        )
+
+    def get(
+        self, staging_id: int, *, include_deleted: bool = False
+    ) -> CompressionStagingRecord | None:
+        query = "select * from compression_staging where id = ?"
+        params: list[Any] = [staging_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._from_row(row) if row else None
+
+    def get_latest(
+        self,
+        *,
+        original_session_id: str,
+        status: str | None = None,
+        target_session_id: str | None = None,
+        include_deleted: bool = False,
+    ) -> CompressionStagingRecord | None:
+        filters = ["original_session_id = ?"]
+        params: list[Any] = [original_session_id]
+        if status is not None:
+            self._validate_status(status)
+            filters.append("status = ?")
+            params.append(status)
+        if target_session_id is not None:
+            filters.append("target_session_id = ?")
+            params.append(target_session_id)
+        if not include_deleted:
+            filters.append("is_deleted = 0")
+        where = " and ".join(filters)
+        with self.db.connect() as conn:
+            row = conn.execute(
+                f"""
+                select * from compression_staging
+                where {where}
+                order by generation desc, id desc
+                limit 1
+                """,
+                params,
+            ).fetchone()
+        return self._from_row(row) if row else None
+
+    def next_generation(self, original_session_id: str) -> int:
+        latest = self.get_latest(original_session_id=original_session_id, include_deleted=True)
+        return (latest.generation + 1) if latest is not None else 1
+
+    def mark_status(
+        self,
+        staging_id: int,
+        *,
+        status: str,
+        failure_reason: str | None = None,
+    ) -> CompressionStagingRecord | None:
+        self._validate_status(status)
+        now = to_iso_z(utc_now())
+        applied_at = now if status == "applied" else None
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                update compression_staging
+                set status = ?,
+                    failure_reason = ?,
+                    applied_at = coalesce(?, applied_at),
+                    updated_at = ?
+                where id = ? and is_deleted = 0
+                """,
+                (status, failure_reason, applied_at, now, staging_id),
+            )
+        return self.get(staging_id)
+
+    @classmethod
+    def _validate_status(cls, status: str) -> None:
+        if status not in cls.VALID_STATUSES:
+            raise ValueError(f"不支持的压缩暂存状态: {status}")
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> CompressionStagingRecord:
+        return CompressionStagingRecord(
+            id=int(row["id"]),
+            original_session_id=row["original_session_id"],
+            active_session_id=row["active_session_id"],
+            target_session_id=row["target_session_id"],
+            generation=int(row["generation"]),
+            status=row["status"],
+            anchor_message_id=row["anchor_message_id"],
+            l1_content=row["l1_content"],
+            l2_content=row["l2_content"],
+            failure_reason=row["failure_reason"],
+            applied_at=row["applied_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_deleted=bool(row["is_deleted"]),
@@ -2916,8 +3278,10 @@ class StorageRepositories:
         self.model_providers = ModelProvidersRepository(db)
         self.workspaces = WorkspacesRepository(db)
         self.sessions = SessionsRepository(db)
+        self.attachments = AttachmentsRepository(db)
         self.workspace_file_annotations = WorkspaceFileAnnotationsRepository(db)
         self.message_events = MessageEventsRepository(db)
+        self.compression_staging = CompressionStagingRepository(db)
         self.command_approvals = CommandApprovalRequestsRepository(db)
         self.trusted_command_rules = TrustedCommandRulesRepository(db)
         self.command_approval_audit = CommandApprovalAuditRepository(db)

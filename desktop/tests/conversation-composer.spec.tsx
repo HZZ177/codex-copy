@@ -40,6 +40,7 @@ describe("ConversationComposer", () => {
     expect(form.className).toContain("compact-composer");
     expect(screen.getByRole("textbox", { name: "工作台助手输入" }).getAttribute("data-placeholder")).toBe("工作台输入");
     expect(screen.getByRole("button", { name: "展开消息" })).not.toBeNull();
+    expect(screen.getByTestId("context-window-indicator").getAttribute("aria-label")).toContain("等待下一次模型调用");
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -73,7 +74,7 @@ describe("ConversationComposer", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "发送" }));
     });
-    expect(onSend).toHaveBeenCalledWith([], []);
+    expect(onSend).toHaveBeenCalledWith([], [], []);
   });
 
   it("does not render Workbench dock controls unless the surface supplies them", () => {
@@ -141,12 +142,13 @@ describe("ConversationComposer", () => {
     expect(screen.getByLabelText("已添加上下文").textContent).toContain("guide.md · L4");
   });
 
-  it("keeps status and busy semantics shared between Agent and Workbench surfaces", () => {
+  it("keeps busy semantics shared while suppressing toolbar status copy", () => {
     expect(isConversationBusy("running")).toBe(true);
     expect(isConversationBusy("cancelling")).toBe(true);
     expect(isConversationBusy("idle")).toBe(false);
-    expect(conversationComposerStatusText("idle", false)).toBe("正在连接后端");
-    expect(conversationComposerStatusText("failed", true)).toBe("可以修改后重新发送");
+    expect(conversationComposerStatusText("idle", false)).toBe("");
+    expect(conversationComposerStatusText("failed", true)).toBe("");
+    expect(conversationComposerStatusText("waiting_approval", true)).toBe("");
     expect(conversationComposerStatusText("running", true)).toBe("");
   });
 });

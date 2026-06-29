@@ -155,11 +155,12 @@ function fileContextItem(file: SelectedFile, index: number): AgentContextItem {
   const id = `file:${index}:${hashText(file.path)}`;
   const annotationComment = normalizedOptionalText(file.annotationComment);
   const description = [file.path, annotationComment ? `批注：${annotationComment}` : ""].filter(Boolean).join("\n\n");
+  const kindLabel = selectedFileKindLabel(file);
   return {
     id,
     type: "file",
     label: file.name || file.path,
-    content: file.type === "directory" ? `工作区目录：${file.path}` : `工作区文件：${file.path}`,
+    content: `${kindLabel}：${file.path}`,
     description,
     role: "HumanMessage",
     source: "follow",
@@ -199,10 +200,10 @@ function contextItemToFollowInjection(item: AgentContextItem): RuntimeMessageInj
 
 function injectionContent(item: AgentContextItem): string {
   if (item.type === "file") {
-    const target = item.fileType === "directory" ? "目录" : "文件";
+    const target = contextFileKindLabel(item);
     const annotationComment = normalizedOptionalText(item.metadata?.annotation_comment);
     const annotationBlock = annotationComment ? `\n批注内容：\n${annotationComment}` : "";
-    return `用户通过 @ 引用了工作区${target}：${item.path || item.label}${annotationBlock}\n请在需要时使用文件工具读取或查看该路径，不要把路径当作用户普通文本。`;
+    return `用户通过 @ 引用了${target}：${item.path || item.label}${annotationBlock}\n请在需要时使用可用工具读取或查看该路径，不要把路径当作用户普通文本。`;
   }
   if (item.type === "source_quote") {
     const lineRange = metadataLineRange(item.metadata);
@@ -217,6 +218,22 @@ function injectionContent(item: AgentContextItem): string {
     return `用户添加了以下引用片段作为上下文：\n${item.content}`;
   }
   return item.content;
+}
+
+function selectedFileKindLabel(file: SelectedFile): string {
+  if (file.source === "workspace") {
+    return file.type === "directory" ? "工作区目录" : "工作区文件";
+  }
+  return file.type === "directory" ? "本地目录" : "本地文件";
+}
+
+function contextFileKindLabel(item: AgentContextItem): string {
+  const metadataSource = normalizedOptionalText(item.metadata?.source);
+  const source = metadataSource || normalizedOptionalText(item.source);
+  if (source === "workspace") {
+    return item.fileType === "directory" ? "工作区目录" : "工作区文件";
+  }
+  return item.fileType === "directory" ? "本地目录" : "本地文件";
 }
 
 function sourceQuoteLabel(quote: SelectedQuote): string {

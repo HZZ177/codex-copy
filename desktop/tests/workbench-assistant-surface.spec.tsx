@@ -241,7 +241,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.queryByRole("button", { name: "更多对话操作" })).toBeNull();
   });
 
-  it("opens a visible approval surface and submits the explicit approval decision", async () => {
+  it("renders the shared approval card in the bottom and drawer composer areas", async () => {
     const submitApproval = vi.fn().mockResolvedValue(undefined);
     render(
       <WorkbenchSurfaceTestProviders>
@@ -259,11 +259,32 @@ describe("WorkbenchAssistantSurface", () => {
     );
 
     const surface = screen.getByTestId("workbench-assistant-surface");
-    await waitForSurfaceMode("drawer");
-    expect(await screen.findByTestId("workbench-approval-prompt")).not.toBeNull();
-    expect(screen.getByTestId("workbench-assistant-drawer-header").textContent).toContain("等待审批");
+    expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    expect(surface.getAttribute("data-message-trigger-state")).toBe("approval");
+    const carrier = screen.getByTestId("workbench-message-carrier");
+    expect(carrier.getAttribute("data-state")).toBe("approval");
+    expect(carrier.textContent).toContain("等待审批，点击处理");
+    expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+    expect(screen.queryByTestId("workbench-approval-prompt")).toBeNull();
+    expect(screen.queryByTestId("composer-approval-card")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    });
+    const bottomInputSurface = screen.getByTestId("workbench-assistant-input-surface");
+    expect(within(bottomInputSurface).getByTestId("composer-approval-card")).not.toBeNull();
+    expect(screen.queryByRole("textbox", { name: "工作台助手输入" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
+    await waitForSurfaceMode("drawer", 8000);
+
+    const drawerInputSurface = screen.getByTestId("workbench-assistant-drawer-input-surface");
+    expect(within(drawerInputSurface).getByTestId("composer-approval-card")).not.toBeNull();
+    expect(screen.queryByTestId("workbench-approval-prompt")).toBeNull();
+
+    fireEvent.click(within(drawerInputSurface).getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       expect(submitApproval).toHaveBeenCalledWith({ decision: "approved", trust_scope: "once" });
@@ -308,7 +329,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByText("我会先读取 README。")).not.toBeNull();
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
-    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("default");
     expect(screen.getByTestId("tool-call-block")).not.toBeNull();
     expect(screen.getByTestId("file-change-block")).not.toBeNull();
   });
@@ -576,6 +597,35 @@ describe("WorkbenchAssistantSurface", () => {
     });
   });
 
+  it("keeps the expanded message panel open after sending from it", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchSendHarness onSend={onSend} />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    const surface = screen.getByTestId("workbench-assistant-surface");
+    expect(await screen.findByRole("textbox", { name: "工作台助手输入" })).not.toBeNull();
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("composer");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+    expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+    expect(screen.getByTestId("workbench-expanded-layer")).not.toBeNull();
+    expect(screen.queryByText("正在等待回复")).toBeNull();
+  });
+
   it("keeps a completed unread message trigger until the user opens messages", async () => {
     render(
       <WorkbenchSurfaceTestProviders>
@@ -604,6 +654,33 @@ describe("WorkbenchAssistantSurface", () => {
       expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
     });
     expect(screen.getByTestId("workbench-message-trigger").getAttribute("data-state")).toBe("idle");
+    expect(screen.queryByText("回复已完成，点击查看")).toBeNull();
+  });
+
+  it("does not show a completed carrier after closing a panel that saw the reply finish", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchRuntimeHarness />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    const surface = screen.getByTestId("workbench-assistant-surface");
+    fireEvent.click(screen.getByTestId("workbench-message-carrier"));
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("expanded");
+    });
+
+    fireEvent.click(screen.getByTestId("complete-agent-reply"));
+    await waitFor(() => {
+      expect(screen.getByText("回答已经生成完成，可以展开消息查看完整内容。")).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByTestId("workbench-expanded-layer"));
+
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    });
+    expect(screen.queryByTestId("workbench-message-carrier")).toBeNull();
     expect(screen.queryByText("回复已完成，点击查看")).toBeNull();
   });
 
@@ -772,7 +849,7 @@ describe("WorkbenchAssistantSurface", () => {
     await screen.findByTestId("conversation-panel");
     expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("overlay");
     expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("overlay");
-    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
+    expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("default");
     expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("true");
     expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
     expect(screen.queryByTestId("workbench-mini-turn-navigator")).toBeNull();
@@ -782,6 +859,27 @@ describe("WorkbenchAssistantSurface", () => {
     expect(screen.getByTestId("workbench-assistant-capsule")).not.toBeNull();
     expect(screen.getByRole("button", { name: "收起工作台消息层" })).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+  });
+
+  it("centers the expanded overlay empty message in the panel", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController()}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台消息层" }));
+    await screen.findByTestId("conversation-panel");
+
+    expect(screen.getByTestId("workbench-expanded-message-empty").textContent).toBe(
+      "当前工作空间还没有助手消息。",
+    );
+    expect(screen.getByTestId("message-list-scroll").getAttribute("data-empty-layout")).toBe("center");
   });
 
   it("closes the expanded overlay from backdrop and Escape without collapsing a draft composer", async () => {

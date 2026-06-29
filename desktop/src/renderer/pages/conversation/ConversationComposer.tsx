@@ -1,9 +1,17 @@
 import type { ReactNode } from "react";
 
-import { SendBox, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
+import {
+  SendBox,
+  type SelectedFile,
+  type SelectedImageAttachment,
+  type SelectedQuote,
+} from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, type RuntimeModelSelection } from "@/renderer/components/model";
-import type { WorkspaceSearchResult, WorkspaceSkillSummary } from "@/runtime";
+import { runtimeBridge, type RuntimeBridge, type WorkspaceSearchResult, type WorkspaceSkillSummary } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import type { ContextWindowUsageStatus } from "./useConversationPanelModel";
+
+import styles from "./ConversationComposer.module.css";
 
 export interface ConversationComposerProps {
   value: string;
@@ -14,12 +22,18 @@ export interface ConversationComposerProps {
   modelSelection: RuntimeModelSelection;
   workspaceSkills: WorkspaceSkillSummary[];
   selectedSkill: WorkspaceSkillSummary | null;
+  runtime?: RuntimeBridge;
+  sessionId?: string | null;
   onSearchWorkspace?: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenModelSettings?: () => void;
   onChange: (value: string) => void;
   onSkillChange: (skill: WorkspaceSkillSummary | null) => void;
-  onSend: (files?: SelectedFile[], quotes?: SelectedQuote[]) => boolean | void | Promise<boolean | void>;
+  onSend: (
+    files?: SelectedFile[],
+    quotes?: SelectedQuote[],
+    attachments?: SelectedImageAttachment[],
+  ) => boolean | void | Promise<boolean | void>;
   onStop: () => void;
   onEscape?: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
@@ -32,6 +46,7 @@ export interface ConversationComposerProps {
   inputLabel?: string;
   autoFocusKey?: string;
   modelSelectorPlacement?: "top" | "bottom";
+  contextWindowUsage?: ContextWindowUsageStatus | null;
 }
 
 export function ConversationComposer({
@@ -43,6 +58,8 @@ export function ConversationComposer({
   modelSelection,
   workspaceSkills,
   selectedSkill,
+  runtime = runtimeBridge,
+  sessionId,
   onSearchWorkspace,
   onListWorkspaceDirectory,
   onOpenModelSettings,
@@ -61,6 +78,7 @@ export function ConversationComposer({
   inputLabel,
   autoFocusKey,
   modelSelectorPlacement = "top",
+  contextWindowUsage = null,
 }: ConversationComposerProps) {
   return (
     <SendBox
@@ -77,16 +95,19 @@ export function ConversationComposer({
       autoFocusKey={autoFocusKey}
       controls={controls}
       rightControls={
-        <RuntimeModelSelector
-          model={modelSelection.selectedModel}
-          modelOptions={modelSelection.modelOptions}
-          modelLoadState={modelSelection.modelLoadState}
-          modelError={modelSelection.modelError}
-          disabled={isConversationBusy(runtimeState)}
-          placement={modelSelectorPlacement}
-          onModelChange={modelSelection.setSelectedModel}
-          onOpenModelSettings={onOpenModelSettings}
-        />
+        <>
+          <ContextWindowIndicator usage={contextWindowUsage} />
+          <RuntimeModelSelector
+            model={modelSelection.selectedModel}
+            modelOptions={modelSelection.modelOptions}
+            modelLoadState={modelSelection.modelLoadState}
+            modelError={modelSelection.modelError}
+            disabled={isConversationBusy(runtimeState)}
+            placement={modelSelectorPlacement}
+            onModelChange={modelSelection.setSelectedModel}
+            onOpenModelSettings={onOpenModelSettings}
+          />
+        </>
       }
       onChange={onChange}
       workspaceSkills={workspaceSkills}
@@ -94,6 +115,8 @@ export function ConversationComposer({
       onSkillChange={onSkillChange}
       onSend={onSend}
       onStop={onStop}
+      runtime={runtime}
+      sessionId={sessionId}
       onEscape={onEscape}
       onOpenFileReference={onOpenFileReference}
       externalFileRequest={externalFileRequest}
@@ -109,29 +132,75 @@ export function isConversationBusy(state: ConversationRuntimeState): boolean {
   return state === "starting" || state === "running" || state === "waiting_approval" || state === "cancelling";
 }
 
-export function conversationComposerStatusText(state: ConversationRuntimeState, connectionReady: boolean): string {
-  if (!connectionReady) {
-    return "正在连接后端";
-  }
-  if (state === "idle" || state === "running") {
-    return "";
-  }
-  return composerHint(state);
+export function conversationComposerStatusText(_state: ConversationRuntimeState, _connectionReady: boolean): string {
+  return "";
 }
 
-function composerHint(state: ConversationRuntimeState): string {
-  switch (state) {
-    case "starting":
-      return "正在发起对话";
-    case "running":
-      return "智能体正在处理";
-    case "waiting_approval":
-      return "等待审批确认";
-    case "cancelling":
-      return "正在停止";
-    case "failed":
-      return "可以修改后重新发送";
-    case "idle":
-      return "回车发送";
-  }
+function ContextWindowIndicator({ usage }: { usage: ContextWindowUsageStatus | null }) {
+  const thresholdProgress = usage ? clampNonNegative(usage.thresholdUsageFraction) : 0;
+  const ringProgress = clamp01(thresholdProgress);
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - ringProgress);
+  const level = usage ? (thresholdProgress >= 1 ? "danger" : thresholdProgress >= 0.85 ? "warning" : "normal") : "idle";
+  const ariaLabel = usage
+    ? `当前已使用上下文 ${formatTokens(usage.tokenCount)} tokens，触发压缩进度 ${formatPercent(thresholdProgress)}`
+    : "上下文窗口占用等待下一次模型调用";
+
+  return (
+    <span
+      className={styles.contextWindowIndicator}
+      role="img"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      data-level={level}
+      data-testid="context-window-indicator"
+    >
+      <svg className={styles.contextWindowRing} viewBox="0 0 16 16" aria-hidden="true">
+        <circle className={styles.contextWindowTrack} cx="8" cy="8" r={radius} />
+        <circle
+          className={styles.contextWindowProgress}
+          cx="8"
+          cy="8"
+          r={radius}
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+        />
+      </svg>
+      <span className={styles.contextWindowTooltip} role="tooltip">
+        <span className={styles.contextWindowTooltipTitle}>上下文窗口</span>
+        {usage ? (
+          <>
+            <span className={styles.contextWindowTooltipSummary}>
+              当前已使用 {formatTokens(usage.tokenCount)} tokens
+            </span>
+            <span className={styles.contextWindowTooltipMeta}>
+              触发压缩进度 {formatPercent(thresholdProgress)}
+            </span>
+          </>
+        ) : (
+          <span className={styles.contextWindowTooltipMeta}>
+            等待下一次模型调用后更新上下文占用和压缩阈值进度。
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(Math.max(0, Math.round(value)));
+}
+
+function formatPercent(value: number): string {
+  const percent = clampNonNegative(value) * 100;
+  return `${percent >= 10 ? percent.toFixed(1) : percent.toFixed(2)}%`;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, clampNonNegative(value));
+}
+
+function clampNonNegative(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }

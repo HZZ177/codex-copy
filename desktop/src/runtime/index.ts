@@ -16,6 +16,7 @@ export { createUsageRuntime } from "./usage";
 export { createWorkspaceRuntime } from "./workspace";
 export { createWorkspacesRuntime } from "./workspaces";
 export { createDesktopPickerRuntime } from "./desktopPicker";
+export { createAttachmentsRuntime } from "./attachments";
 export type { HttpClientOptions, RequestOptions } from "./httpClient";
 export type { WebSocketConstructor, WebSocketLike, WsClientOptions, WsConnectionStatus } from "./wsClient";
 export type { RuntimeErrorEnvelope, RuntimeHttpErrorParams } from "./errors";
@@ -83,6 +84,16 @@ export type {
   WorkspaceResponse,
   WorkspacesRuntime,
 } from "./workspaces";
+export type {
+  AttachmentMediaResponse,
+  AttachmentRecord,
+  AttachmentsRuntime,
+  ImportImageUrlOptions,
+  RegisterImagePathOptions,
+  StoredLocalFileResponse,
+  UploadImageOptions,
+  UploadLocalFileOptions,
+} from "./attachments";
 export type {
   DesktopPickerRuntime,
   DesktopPickerRuntimeOptions,

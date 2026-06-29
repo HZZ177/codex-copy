@@ -32,6 +32,7 @@ class ChatProjection:
         DomainEventType.REASONING_STREAM: ChatAction.REASONING,
         DomainEventType.REASONING_FINISHED: ChatAction.REASONING,
         DomainEventType.SESSION_TITLE_UPDATED: ChatAction.SESSION_TITLE_UPDATED,
+        DomainEventType.MIDDLEWARE_PROGRESS: ChatAction.MIDDLEWARE_PROGRESS,
     }
     _REASONING_EVENT_TYPES = {
         DomainEventType.REASONING_STREAM,

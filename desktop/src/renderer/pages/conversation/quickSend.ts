@@ -9,6 +9,7 @@ export interface QueuedQuickChatSend {
   message: string;
   runtimeParams?: ChatPayload["runtime_params"];
   contextItems?: AgentContextItem[];
+  attachments?: ChatPayload["attachments"];
 }
 
 const quickChatSends = new Map<string, QueuedQuickChatSend>();

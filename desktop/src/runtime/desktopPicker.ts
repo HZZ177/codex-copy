@@ -1,10 +1,18 @@
 type OptionalDialogApi = {
-  open?: (options: { directory?: boolean; multiple?: boolean; title?: string }) => Promise<string | string[] | null>;
+  open?: (options: {
+    directory?: boolean;
+    filters?: Array<{ name: string; extensions: string[] }>;
+    multiple?: boolean;
+    title?: string;
+  }) => Promise<string | string[] | null>;
 };
 
 export interface DesktopPickerRuntime {
   isDirectoryPickerAvailable(): boolean;
+  isFilePickerAvailable(): boolean;
   pickDirectory(): Promise<string | null>;
+  pickFiles(): Promise<string[]>;
+  pickImageFiles(): Promise<string[]>;
 }
 
 export interface DesktopPickerRuntimeOptions {
@@ -17,11 +25,10 @@ export interface DesktopPickerRuntimeOptions {
 export function createDesktopPickerRuntime(options: DesktopPickerRuntimeOptions = {}): DesktopPickerRuntime {
   return {
     isDirectoryPickerAvailable() {
-      return Boolean(
-        options.dialogApi?.open ||
-          resolveGlobalDialogApi(options.getTauriGlobal)?.open ||
-          isLikelyTauriRuntime(options),
-      );
+      return isDialogOpenAvailable(options);
+    },
+    isFilePickerAvailable() {
+      return isDialogOpenAvailable(options);
     },
     async pickDirectory() {
       const dialogApi =
@@ -39,7 +46,60 @@ export function createDesktopPickerRuntime(options: DesktopPickerRuntimeOptions 
       });
       return typeof result === "string" ? result : null;
     },
+    async pickFiles() {
+      const dialogApi =
+        options.dialogApi ?? resolveGlobalDialogApi(options.getTauriGlobal) ?? (await loadDialogApi(options));
+      if (!dialogApi?.open) {
+        if (isLikelyTauriRuntime(options)) {
+          throw new Error("文件选择器不可用：Tauri dialog API 未加载");
+        }
+        return [];
+      }
+      const result = await dialogApi.open({
+        directory: false,
+        multiple: true,
+        title: "选择文件",
+      });
+      return normalizeFilePickerResult(result);
+    },
+    async pickImageFiles() {
+      const dialogApi =
+        options.dialogApi ?? resolveGlobalDialogApi(options.getTauriGlobal) ?? (await loadDialogApi(options));
+      if (!dialogApi?.open) {
+        if (isLikelyTauriRuntime(options)) {
+          throw new Error("文件选择器不可用：Tauri dialog API 未加载");
+        }
+        return [];
+      }
+      const result = await dialogApi.open({
+        directory: false,
+        multiple: true,
+        title: "选择图片",
+        filters: [
+          {
+            name: "Images",
+            extensions: ["png", "jpg", "jpeg", "webp", "gif"],
+          },
+        ],
+      });
+      return normalizeFilePickerResult(result);
+    },
   };
+}
+
+function normalizeFilePickerResult(result: string | string[] | null): string[] {
+  if (Array.isArray(result)) {
+    return result.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+  }
+  return typeof result === "string" && result.trim() ? [result] : [];
+}
+
+function isDialogOpenAvailable(options: DesktopPickerRuntimeOptions): boolean {
+  return Boolean(
+    options.dialogApi?.open ||
+      resolveGlobalDialogApi(options.getTauriGlobal)?.open ||
+      isLikelyTauriRuntime(options),
+  );
 }
 
 async function loadDialogApi(options: DesktopPickerRuntimeOptions): Promise<OptionalDialogApi | null> {

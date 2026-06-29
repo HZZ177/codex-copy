@@ -7,6 +7,7 @@ import type {
   CommandApprovalRequest,
   AgentGhostStats,
   AgentHistoryResponse,
+  AgentMiddlewareProgressData,
   AgentReasoningData,
   AgentReasoningKind,
   AgentSession,
@@ -134,6 +135,9 @@ export function reduceAgentWsEvent(
       break;
     case "reasoning":
       next = handleReasoning(state, event.data as unknown as AgentReasoningData);
+      break;
+    case "middleware_progress":
+      next = handleMiddlewareProgress(state, event.data as unknown as AgentMiddlewareProgressData);
       break;
     case "tool_start":
       next = handleToolStart(state, event.data as unknown as AgentToolEventData);
@@ -522,6 +526,67 @@ function handleSystemMessage(state: AgentConversationState, data: Record<string,
     metadata: compression ? { compression } : undefined,
     streaming: false,
   });
+  view.isStreaming = hasStreamingMessage(view);
+  return next;
+}
+
+function handleMiddlewareProgress(
+  state: AgentConversationState,
+  data: AgentMiddlewareProgressData,
+): AgentConversationState {
+  if (data.middleware !== "ContextCompressionMiddleware") {
+    return state;
+  }
+  const stage = stringValue(data.stage);
+  if (!isVisibleCompressionProgressStage(stage)) {
+    return state;
+  }
+  const sessionId = stringValue(data.session_id) || stringValue(data.active_session_id) || state.selectedSessionId || "";
+  if (!sessionId) {
+    return state;
+  }
+
+  const noticeId = contextCompressionNoticeId(data, stage, sessionId);
+  const metadata = {
+    compression: {
+      kind: "context_compression",
+      stage,
+      mode: contextCompressionMode(data, stage),
+      notice_id: noticeId,
+      reason: data.reason ?? null,
+      staging_id: data.staging_id ?? null,
+      anchor_message_id: data.anchor_message_id ?? null,
+    },
+  };
+  const patch: Partial<AgentChatMessage> = {
+    role: "system",
+    content: contextCompressionContent(stage),
+    timestamp: timestampFromData(data),
+    metadata,
+    streaming: false,
+    status: contextCompressionStatus(stage),
+  };
+
+  const next = cloneState(state);
+  const view = ensureSessionState(next, sessionId);
+  const existing = view.messages.find((message) => {
+    const compression = asRecord(message.metadata?.compression);
+    return stringValue(compression?.notice_id) === noticeId;
+  });
+  if (existing) {
+    Object.assign(existing, patch);
+  } else {
+    view.messages.push({
+      id: `compression:${sessionId}:${noticeId}`,
+      sessionId,
+      role: "system",
+      content: patch.content ?? "",
+      timestamp: patch.timestamp ?? Date.now(),
+      metadata,
+      streaming: false,
+      status: patch.status,
+    });
+  }
   view.isStreaming = hasStreamingMessage(view);
   return next;
 }
@@ -1813,6 +1878,63 @@ function cloneMessage(message: AgentChatMessage): AgentChatMessage {
     subagentToolCalls: message.subagentToolCalls?.map((tool) => ({ ...tool })),
     subagentItems: message.subagentItems?.map((item) => ({ ...item })),
   };
+}
+
+function isVisibleCompressionProgressStage(stage: string): boolean {
+  return [
+    "staging_applied",
+    "emergency_triggered",
+    "emergency_failed",
+    "emergency_replacement_failed",
+    "emergency_completed",
+  ].includes(stage);
+}
+
+function contextCompressionContent(stage: string): string {
+  if (stage === "emergency_triggered") {
+    return "正在自动压缩中";
+  }
+  if (stage === "emergency_failed" || stage === "emergency_replacement_failed") {
+    return "自动压缩失败";
+  }
+  if (stage === "emergency_completed") {
+    return "自动压缩成功";
+  }
+  return "上下文已自动压缩";
+}
+
+function contextCompressionStatus(stage: string): AgentChatMessage["status"] {
+  if (stage === "emergency_triggered") {
+    return "running";
+  }
+  if (stage === "emergency_failed" || stage === "emergency_replacement_failed") {
+    return "failed";
+  }
+  return "completed";
+}
+
+function contextCompressionMode(data: AgentMiddlewareProgressData, stage: string): string {
+  const mode = stringValue(data.compression_mode);
+  if (mode) {
+    return mode;
+  }
+  return stage.startsWith("emergency_") ? "emergency" : "background";
+}
+
+function contextCompressionNoticeId(
+  data: AgentMiddlewareProgressData,
+  stage: string,
+  sessionId: string,
+): string {
+  const noticeId = stringValue(data.notice_id);
+  if (noticeId) {
+    return noticeId;
+  }
+  if (stage.startsWith("emergency_")) {
+    return `context-compression:emergency:${stringValue(data.trace_id) || sessionId}`;
+  }
+  const stagingFallback = stringValue(data.active_session_id) || sessionId;
+  return `context-compression:staging:${String(data.staging_id ?? stagingFallback)}`;
 }
 
 function nextMessageId(state: AgentConversationState, prefix: string, sessionId: string): string {

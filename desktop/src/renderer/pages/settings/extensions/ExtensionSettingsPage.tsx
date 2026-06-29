@@ -173,17 +173,6 @@ export function ExtensionSettingsPage({
               <DependencyWarning message="快速模型未配置，标题生成不可用" onOpenModelConfig={onOpenModelConfig} />
             ) : null}
             <SettingRow
-              title="仅默认标题时生成"
-              description="手动改过标题后不再自动覆盖"
-              control={
-                <ToggleSwitch
-                  checked={titleDraft.only_when_default_title}
-                  label="仅默认标题时生成"
-                  onChange={(only_when_default_title) => updateTitleDraft({ only_when_default_title })}
-                />
-              }
-            />
-            <SettingRow
               title="最大标题长度"
               description="生成标题的最大字符数"
               control={
@@ -456,7 +445,7 @@ function DependencyWarning({
 
 function draftsFromSettings(settings: AgentRuntimeSettings): ExtensionDrafts {
   return {
-    autoTitle: settings.auto_title,
+    autoTitle: { ...settings.auto_title, only_when_default_title: true },
     toolLimit: settings.tool_call_limit,
     duplicateGuard: settings.duplicate_tool_call_guard,
     compression: settings.context_compression,
@@ -465,7 +454,7 @@ function draftsFromSettings(settings: AgentRuntimeSettings): ExtensionDrafts {
 
 function settingsFromDrafts(drafts: ExtensionDrafts): AgentRuntimeSettings {
   return {
-    auto_title: drafts.autoTitle,
+    auto_title: { ...drafts.autoTitle, only_when_default_title: true },
     tool_call_limit: drafts.toolLimit,
     duplicate_tool_call_guard: drafts.duplicateGuard,
     context_compression: drafts.compression,

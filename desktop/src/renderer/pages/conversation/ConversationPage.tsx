@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WsConnectionStatus } from "@/runtime";
-import type { SelectedFile, SelectedQuote } from "@/renderer/components/chat/SendBox";
+import type { SelectedFile, SelectedImageAttachment, SelectedQuote } from "@/renderer/components/chat/SendBox";
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
@@ -146,8 +146,8 @@ export function ConversationPage({
   }, [runtime]);
 
   const send = useCallback(
-    (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) =>
-      controller.send(files, quotes, modelSelection.selectedModel),
+    (files: SelectedFile[] = [], quotes: SelectedQuote[] = [], attachments: SelectedImageAttachment[] = []) =>
+      controller.send(files, quotes, attachments, modelSelection.selectedModel),
     [controller, modelSelection.selectedModel],
   );
 
@@ -174,6 +174,7 @@ export function ConversationPage({
     void controller.sendText(pending.message, pending.model || modelSelection.selectedModel, {
       contextItems: pending.contextItems,
       runtimeParams: pending.runtimeParams,
+      attachments: pending.attachments,
     }).then((sent) => {
       if (!sent) {
         setDraft((current) => (current.trim() ? current : pending.message));
@@ -217,6 +218,8 @@ export function ConversationPage({
             modelSelection={{ ...modelSelection, setSelectedModel: changeModel }}
             workspaceSkills={panelModel.workspaceSkills}
             selectedSkill={selectedSkill}
+            runtime={runtime}
+            sessionId={threadId}
             onListWorkspaceDirectory={panelModel.listWorkspaceDirectory}
             onSearchWorkspace={panelModel.searchWorkspace}
             onOpenModelSettings={onOpenModelSettings}
@@ -227,6 +230,7 @@ export function ConversationPage({
             onOpenFileReference={panelModel.openFileReference}
             externalFileRequest={fileChipRequest}
             externalQuoteRequest={quoteChipRequest}
+            contextWindowUsage={panelModel.contextWindowUsage}
           />
         )
       }

@@ -5,18 +5,21 @@ from typing import Any
 
 from backend.app.agent import AgentRunner
 from backend.app.agent.factory import AgentFactory
-from backend.app.agent.middleware import (
+from backend.app.agent.middleware.builder import build_default_middleware
+from backend.app.agent.middleware.context_compression import ContextCompressionMiddleware
+from backend.app.agent.middleware.duplicate_tool_call_guard import (
     DuplicateToolCallGuardMiddleware,
-    ToolCallLimitMiddleware,
-    ToolErrorHandlingMiddleware,
-    build_default_middleware,
 )
+from backend.app.agent.middleware.tool_call_limit import ToolCallLimitMiddleware
+from backend.app.agent.middleware.tool_error_handling import ToolErrorHandlingMiddleware
 from backend.app.agent.runtime_settings import AgentRuntimeSettings
 from backend.app.agent.skill_activation_middleware import SkillActivationInjectionMiddleware
 from backend.app.agent.state import KeydexAgentState
 from backend.app.agent.tool_call_preset_middleware import ToolCallPresetMiddleware
+from backend.app.events import EventDispatcher
 from backend.app.keydex import KeydexWorkspaceRuntimeCache
 from backend.app.model import ModelSettings
+from backend.app.storage import StorageRepositories, init_database
 from backend.app.tools import FunctionTool, ToolExecutionContext, ToolRegistry
 
 
@@ -149,6 +152,24 @@ def test_default_middleware_order_matches_skill_design() -> None:
     assert [type(item) for item in middleware] == [
         ToolCallPresetMiddleware,
         SkillActivationInjectionMiddleware,
+        ToolCallLimitMiddleware,
+        ToolErrorHandlingMiddleware,
+        DuplicateToolCallGuardMiddleware,
+    ]
+
+
+def test_default_middleware_includes_context_compression_when_enabled(tmp_path) -> None:
+    middleware = build_default_middleware(
+        AgentRuntimeSettings(context_compression={"enabled": True}),
+        repositories=StorageRepositories(init_database(tmp_path / "app.db")),
+        dispatcher=EventDispatcher(),
+        checkpointer=object(),
+    )
+
+    assert [type(item) for item in middleware] == [
+        ToolCallPresetMiddleware,
+        SkillActivationInjectionMiddleware,
+        ContextCompressionMiddleware,
         ToolCallLimitMiddleware,
         ToolErrorHandlingMiddleware,
         DuplicateToolCallGuardMiddleware,

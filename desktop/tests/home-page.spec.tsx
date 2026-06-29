@@ -51,6 +51,7 @@ describe("HomePage", () => {
     expect(screen.queryByLabelText("工作目录")).toBeNull();
     expect(screen.getByLabelText("选择工作区").textContent).toContain("keydex");
     expect(screen.queryByLabelText("快速对话上下文")).toBeNull();
+    expect(screen.queryByTestId("context-window-indicator")).toBeNull();
     expect(screen.queryByLabelText("自定义模型配置")).toBeNull();
     expect(screen.queryByRole("group", { name: "权限模式" })).toBeNull();
     expect(screen.queryByText("按需审批")).toBeNull();

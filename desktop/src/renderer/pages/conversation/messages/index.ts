@@ -10,6 +10,7 @@ export type { FileChangeBlockProps, FileChangePreview } from "./FileChangeBlock"
 export { buildTurnNavigationItemsFromMessages, MessageList } from "./MessageList";
 export type {
   MessageListProps,
+  MessageListEmptyLayout,
   MessageListPerformanceProfile,
   MessageListScrollControls,
   MessageListTurnNavigationRequest,

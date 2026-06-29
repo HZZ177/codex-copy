@@ -8,6 +8,7 @@ import {
   initialFileSelectionState,
   selectedFileFromFile,
 } from "@/renderer/components/chat/SendBox/fileSelection";
+import type { RuntimeBridge } from "@/runtime";
 
 describe("SendBox file selection", () => {
   it("adds and removes file chips through the reducer", () => {
@@ -45,6 +46,12 @@ describe("SendBox file selection", () => {
     });
   });
 
+  it("does not use a bare browser filename as a file path", () => {
+    const file = new File(["secret content"], "main.ts");
+
+    expect(selectedFileFromFile(file, "pasted")).toBeNull();
+  });
+
   it("adds dropped files as removable chips", () => {
     render(<FileSendBox />);
     const form = screen.getByRole("form", { name: "继续对话输入" });
@@ -60,19 +67,24 @@ describe("SendBox file selection", () => {
     expect(screen.queryByLabelText("移除文件引用 src/main.ts")).toBeNull();
   });
 
-  it("shows an error for pasted files without a usable path", () => {
-    render(<FileSendBox />);
-    const file = new File(["content is not read"], "");
+  it("stores pasted files without a native path before adding them as file chips", async () => {
+    const runtime = fileRuntime();
+    render(<FileSendBox runtime={runtime} />);
+    const file = new File(["content is not read"], "notes.txt", { type: "text/plain" });
 
     fireEvent.paste(screen.getByLabelText("继续输入"), {
       clipboardData: { files: [file] },
     });
 
-    expect(screen.getByText("不支持的文件，无法获取路径")).not.toBeNull();
+    expect(await screen.findByLabelText("移除文件引用 D:/keydex/local-files/notes.txt")).not.toBeNull();
+    expect(runtime.attachments.uploadLocalFile).toHaveBeenCalledWith(file, {
+      filename: "notes.txt",
+      source: "pasted",
+    });
   });
 });
 
-function FileSendBox() {
+function FileSendBox({ runtime }: { runtime?: RuntimeBridge }) {
   return (
     <SendBox
       value=""
@@ -82,6 +94,25 @@ function FileSendBox() {
       onChange={vi.fn()}
       onSend={vi.fn()}
       onStop={vi.fn()}
+      runtime={runtime}
     />
   );
+}
+
+function fileRuntime(): RuntimeBridge {
+  return {
+    attachments: {
+      uploadLocalFile: vi.fn().mockResolvedValue({
+        id: "local-file-1",
+        source: "pasted",
+        name: "notes.txt",
+        path: "D:/keydex/local-files/notes.txt",
+        mime_type: "text/plain",
+        size: 19,
+      }),
+    },
+    desktopPicker: {
+      isFilePickerAvailable: vi.fn().mockReturnValue(false),
+    },
+  } as unknown as RuntimeBridge;
 }

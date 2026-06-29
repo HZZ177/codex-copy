@@ -21,6 +21,12 @@ export function agentMessageToConversationMessage(message: AgentChatMessage, ind
 }
 
 export function conversationKindFromAgent(message: AgentChatMessage): ConversationMessage["kind"] {
+  if (message.role === "system" && isContextCompressionMessage(message)) {
+    return "context_compression";
+  }
+  if (message.cancelled || message.status === "cancelled") {
+    return "cancelled";
+  }
   if (message.role === "user") {
     return "user";
   }
@@ -67,6 +73,9 @@ export function conversationStatusFromAgent(message: AgentChatMessage): Conversa
   if (message.role === "approval") {
     return message.status === "pending" ? "pending" : "completed";
   }
+  if (message.role === "system" && isContextCompressionMessage(message)) {
+    return "completed";
+  }
   if (message.role === "tool" || message.role === "assistant" || message.role === "reasoning" || message.role === "subagent") {
     return "completed";
   }
@@ -83,9 +92,11 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
     traceQueryContext: message.traceQueryContext,
     cancelled: message.cancelled,
     contextItems: message.contextItems,
+    attachments: message.attachments,
     toolDetailRef: message.toolDetailRef,
     toolDetailsDeferred: message.toolDetailsDeferred,
     toolSummary: message.toolSummary,
+    metadata: message.metadata,
   };
 
   if (message.role === "tool") {
@@ -159,6 +170,20 @@ function isEditToolName(toolName: string | undefined): boolean {
 
 function hasFileChanges(message: AgentChatMessage): boolean {
   return Boolean(message.fileChanges?.length || fileChangesFromUiPayload(message.uiPayload).length);
+}
+
+function isContextCompressionMessage(message: AgentChatMessage): boolean {
+  const compression = objectValue(message.metadata?.compression);
+  const kind = stringValue(compression?.kind);
+  return kind === "context_compression" || kind === "context_compressed";
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): unknown[] {

@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
-from backend.app.agent.middleware import ToolCallLimitExceededError
+from backend.app.agent.middleware.common import ToolCallLimitExceededError
 from backend.app.core.config import AppSettings
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings

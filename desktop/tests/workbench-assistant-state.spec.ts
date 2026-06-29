@@ -51,13 +51,6 @@ describe("workbenchAssistantReducer", () => {
     });
   });
 
-  it("opens the drawer when approval arrives regardless of current non-drawer mode", () => {
-    expect(workbenchAssistantReducer({ mode: "expanded", focusSeq: 1 }, { type: "approval-pending" })).toEqual({
-      mode: "drawer",
-      focusSeq: 2,
-    });
-  });
-
   it("keeps rapid drawer and expanded transitions deterministic", () => {
     let state = createWorkbenchAssistantState();
     state = workbenchAssistantReducer(state, { type: "open-composer" });

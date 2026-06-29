@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import mimetypes
 import time
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import RemoveMessage, SystemMessage
@@ -11,11 +14,10 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from backend.app.agent import AgentRunner
 from backend.app.agent.event_processor import AgentEventResult, process_agent_events
-from backend.app.agent.middleware import (
+from backend.app.agent.middleware.common import (
     DuplicateToolForceStopError,
     ToolCallLimitExceededError,
 )
-from backend.app.agent.runtime_settings import load_agent_runtime_settings
 from backend.app.agent.tool_call_preset import ToolCallPreset, ToolCallPresetItem
 from backend.app.command_approval import ApprovalService
 from backend.app.core.config import AppSettings
@@ -35,10 +37,9 @@ from backend.app.keydex.runtime import KeydexWorkspaceRuntimeSnapshot
 from backend.app.keydex.skills import SkillCatalog
 from backend.app.model import ModelSelectionError, ResolvedModelSelection, resolve_model_selection
 from backend.app.services.chat_types import ChatCancellationToken, ChatRequest, ChatTurnResult
-from backend.app.services.context_compression_service import ContextCompressionService
 from backend.app.services.message_event_service import MessageEventService
 from backend.app.services.workspace_service import WorkspaceService
-from backend.app.storage import SessionRecord, StorageRepositories
+from backend.app.storage import AttachmentRecord, SessionRecord, StorageRepositories
 from backend.app.tools import ToolExecutionContext
 
 
@@ -95,6 +96,9 @@ class AgentLoopOutcome:
 
 
 _SLOT_MESSAGE_ID = "keydex_slot_system_fixed"
+MAX_IMAGE_ATTACHMENTS_PER_TURN = 8
+MAX_IMAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024
+SUPPORTED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
 
 def _build_message_injection_items(runtime_params: dict[str, Any] | None) -> list[InjectedMessage]:
@@ -267,6 +271,84 @@ def _message_created_event_type_for_role(role: str) -> DomainEventType:
     return DomainEventType.MESSAGE_USER_CREATED
 
 
+def _attachment_ids_from_request(raw_attachments: list[dict[str, Any]]) -> list[str]:
+    attachment_ids: list[str] = []
+    for index, raw in enumerate(raw_attachments):
+        attachment_id = str(raw.get("attachment_id") or raw.get("id") or "").strip()
+        if not attachment_id:
+            raise ValueError(f"attachments[{index}].attachment_id 不能为空")
+        if attachment_id not in attachment_ids:
+            attachment_ids.append(attachment_id)
+    return attachment_ids
+
+
+def _attachment_payload(record: AttachmentRecord) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "attachment_id": record.id,
+        "type": record.type,
+        "source": record.source,
+        "name": record.name,
+        "path": record.path,
+        "mime_type": record.mime_type,
+        "size": record.size,
+    }
+
+
+def _validate_image_attachment_record(record: AttachmentRecord) -> None:
+    target = Path(record.path)
+    if not target.exists() or not target.is_file():
+        raise ValueError(f"图片附件文件不存在: {record.name}")
+    size = target.stat().st_size
+    if size <= 0:
+        raise ValueError(f"图片附件为空: {record.name}")
+    if size > MAX_IMAGE_ATTACHMENT_BYTES:
+        raise ValueError(f"图片附件过大: {record.name}")
+    _image_mime_from_record(record, target)
+
+
+def _image_mime_from_record(record: AttachmentRecord, target: Path) -> str:
+    declared = (record.mime_type or "").split(";", 1)[0].strip().lower()
+    guessed = (mimetypes.guess_type(record.name or target.name)[0] or "").lower()
+    mime_type = declared if declared.startswith("image/") else guessed
+    if mime_type == "image/jpg":
+        mime_type = "image/jpeg"
+    if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        raise ValueError(f"不支持的图片格式: {record.name}")
+    return mime_type
+
+
+def _build_user_runtime_message(
+    text: str,
+    image_attachments: list[AttachmentRecord],
+) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if not image_attachments:
+        if not stripped:
+            return None
+        return {"role": "user", "content": text}
+
+    content: list[dict[str, Any]] = []
+    if stripped:
+        content.append({"type": "text", "text": text})
+    for record in image_attachments:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": _attachment_data_url(record)},
+            }
+        )
+    return {"role": "user", "content": content}
+
+
+def _attachment_data_url(record: AttachmentRecord) -> str:
+    target = Path(record.path)
+    _validate_image_attachment_record(record)
+    mime_type = _image_mime_from_record(record, target)
+    encoded = base64.b64encode(target.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: str) -> bool:
     if not content.strip():
         return False
@@ -331,7 +413,8 @@ class ChatService:
     ) -> ChatTurnResult:
         message_injection_items = _build_message_injection_items(request.runtime_params)
         skill_activation = _build_skill_activation_request(request.runtime_params)
-        if not request.message.strip() and not message_injection_items:
+        has_request_attachments = bool(request.attachments)
+        if not request.message.strip() and not message_injection_items and not has_request_attachments:
             if skill_activation is not None:
                 raise ValueError("请输入要使用该 Skill 处理的内容")
             raise ValueError("用户消息不能为空")
@@ -358,7 +441,7 @@ class ChatService:
         logger.info(
             f"[ChatTurn] 开始处理对话 | session_id={session.id} | turn_index={turn_index} | "
             f"trace_id={trace_id} | model={request.model or '-'} | "
-            f"message_len={len(request.message)}"
+            f"message_len={len(request.message)} | attachments={len(request.attachments or [])}"
         )
 
         self.repositories.sessions.update(session.id, status="running")
@@ -384,6 +467,10 @@ class ChatService:
         )
 
         try:
+            image_attachments, attachment_payloads = self._resolve_image_attachments(
+                request,
+                session=session,
+            )
             request, model_selection = self._resolve_turn_model(request)
             self.repositories.sessions.update(
                 session.id,
@@ -425,6 +512,7 @@ class ChatService:
                 session=session,
                 trace_id=trace_id,
                 turn_index=turn_index,
+                attachments=attachment_payloads,
             )
 
             outcome = await self._run_agent_loop(
@@ -436,6 +524,7 @@ class ChatService:
                 dispatcher=dispatcher,
                 cancellation=token,
                 injected_runtime_messages=injected_runtime_messages,
+                image_attachments=image_attachments,
                 skill_activation=skill_activation,
                 keydex_snapshot=skill_activation_snapshot,
             )
@@ -525,14 +614,6 @@ class ChatService:
                 f"input_tokens={usage.get('input_tokens', 0) or 0} | "
                 f"output_tokens={usage.get('output_tokens', 0) or 0} | "
                 f"final_content_len={len(completed_payload.get('final_content', ''))}"
-            )
-            await self._maybe_compress_context(
-                session=session,
-                trace_id=trace_id,
-                turn_index=turn_index,
-                user_id=request.user_id or session.user_id,
-                latest_usage=outcome.event_result.latest_llm_token_usage,
-                dispatcher=dispatcher,
             )
             return ChatTurnResult(
                 session_id=session.id,
@@ -643,49 +724,41 @@ class ChatService:
         )
         return replace(request, provider_id=resolved.provider_id, model=resolved_model), resolved
 
-    async def _maybe_compress_context(
+    def _resolve_image_attachments(
         self,
+        request: ChatRequest,
         *,
         session: SessionRecord,
-        trace_id: str,
-        turn_index: int,
-        user_id: str,
-        latest_usage: dict[str, Any],
-        dispatcher: EventDispatcher,
-    ) -> None:
-        try:
-            runtime_settings = load_agent_runtime_settings(
-                self.repositories,
-                default_max_tool_calls=self.settings.max_tool_calls,
-            )
-            compression_settings = runtime_settings.context_compression
-            if not compression_settings.enabled:
-                return
-            service = ContextCompressionService(
-                self.repositories,
-                checkpointer=self.agent_runner.checkpointer,
-                http_transport=self.agent_runner.model_http_transport(),
-            )
-            outcome = await service.maybe_compress_after_turn(
-                session_id=session.id,
-                trace_id=trace_id,
-                turn_index=turn_index,
-                user_id=user_id,
-                settings=compression_settings,
-                latest_usage=latest_usage,
-                dispatcher=dispatcher,
-            )
-            logger.debug(
-                "[ChatTurn] 上下文压缩检查完成 | "
-                f"session_id={session.id} | status={outcome.status} | "
-                f"reason={outcome.reason or '-'} | "
-                f"target_session_id={outcome.target_session_id or '-'}"
-            )
-        except Exception as exc:
-            logger.opt(exception=True).warning(
-                "[ChatTurn] 上下文压缩检查异常，主对话结果保持 completed | "
-                f"session_id={session.id} | trace_id={trace_id} | error={exc}"
-            )
+    ) -> tuple[list[AttachmentRecord], list[dict[str, Any]]]:
+        raw_attachments = request.attachments or []
+        if not raw_attachments:
+            return [], []
+        attachment_ids = _attachment_ids_from_request(raw_attachments)
+        if len(attachment_ids) > MAX_IMAGE_ATTACHMENTS_PER_TURN:
+            raise ValueError(f"单次最多发送 {MAX_IMAGE_ATTACHMENTS_PER_TURN} 张图片")
+
+        user_id = request.user_id or session.user_id
+        self.repositories.attachments.claim_for_session(
+            attachment_ids,
+            session_id=session.id,
+            user_id=user_id,
+        )
+        records = self.repositories.attachments.list_by_ids(attachment_ids)
+        records_by_id = {record.id: record for record in records}
+        ordered_records: list[AttachmentRecord] = []
+        for attachment_id in attachment_ids:
+            record = records_by_id.get(attachment_id)
+            if record is None:
+                raise ValueError("图片附件不存在或已删除")
+            if record.user_id != user_id:
+                raise ValueError("图片附件不属于当前用户")
+            if record.session_id and record.session_id != session.id:
+                raise ValueError("图片附件不属于当前会话")
+            if record.type != "image":
+                raise ValueError("仅支持图片附件发送给模型")
+            _validate_image_attachment_record(record)
+            ordered_records.append(record)
+        return ordered_records, [_attachment_payload(record) for record in ordered_records]
 
     async def _run_agent_loop(
         self,
@@ -698,6 +771,7 @@ class ChatService:
         dispatcher: EventDispatcher,
         cancellation: ChatCancellationToken,
         injected_runtime_messages: list[dict[str, Any]] | None = None,
+        image_attachments: list[AttachmentRecord] | None = None,
         skill_activation: SkillActivationRequest | None = None,
         keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None,
     ) -> AgentLoopOutcome:
@@ -749,8 +823,12 @@ class ChatService:
                     slot_items[0].content,
                 )
             messages_to_send = list(injected_runtime_messages or [])
-            if request.message.strip():
-                messages_to_send.append({"role": "user", "content": request.message})
+            user_message = _build_user_runtime_message(
+                request.message,
+                image_attachments or [],
+            )
+            if user_message is not None:
+                messages_to_send.append(user_message)
             if not messages_to_send:
                 messages_to_send.append(
                     {"role": "user", "content": "请根据已附加的上下文继续处理。"}
@@ -1094,12 +1172,14 @@ class ChatService:
         session: SessionRecord,
         trace_id: str,
         turn_index: int,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         await dispatcher.emit_event(
             event_type=DomainEventType.MESSAGE_USER_CREATED.value,
             source="chat_service",
             payload={
                 "content": request.message,
+                "attachments": attachments or [],
                 "session_id": session.id,
                 "trace_id": trace_id,
                 "trace_record_id": trace_id,

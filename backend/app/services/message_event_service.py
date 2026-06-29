@@ -73,6 +73,7 @@ class MessageEventService:
         active_subagents: dict[str, int] = {}
         tool_run_map: dict[str, tuple[int, int | None]] = {}
         approval_message_map: dict[str, int] = {}
+        compression_message_map: dict[str, int] = {}
         pending_context_items: list[dict[str, Any]] = []
 
         for event in events:
@@ -227,6 +228,27 @@ class MessageEventService:
                         "turnIndex": event.turn_index,
                     }
                 )
+                continue
+
+            if action == ReplayAction.MIDDLEWARE_PROGRESS.value:
+                if _is_visible_context_compression_progress(data):
+                    notice_id = _context_compression_notice_id_from_data(data)
+                    message = {
+                        "role": "system",
+                        "content": _context_compression_progress_content(data),
+                        "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
+                        "metadata": {
+                            "compression": _context_compression_metadata(data),
+                        },
+                        "status": _context_compression_status(data),
+                    }
+                    if notice_id in compression_message_map:
+                        messages[compression_message_map[notice_id]].update(message)
+                    else:
+                        compression_message_map[notice_id] = len(messages)
+                        messages.append(message)
                 continue
 
             if action == ReplayAction.COMPLETED.value:
@@ -1093,6 +1115,72 @@ def _role_from_replay_action(action: str) -> str:
     if action == ReplayAction.AI_MESSAGE.value:
         return "AIMessage"
     return "HumanMessage"
+
+
+def _is_visible_context_compression_progress(data: dict[str, Any]) -> bool:
+    if data.get("middleware") != "ContextCompressionMiddleware":
+        return False
+    stage = str(data.get("stage") or "")
+    return stage in {
+        "staging_applied",
+        "emergency_triggered",
+        "emergency_failed",
+        "emergency_replacement_failed",
+        "emergency_completed",
+    }
+
+
+def _context_compression_progress_content(data: dict[str, Any]) -> str:
+    stage = str(data.get("stage") or "")
+    if stage == "emergency_triggered":
+        return "正在自动压缩上下文"
+    if stage in {"emergency_failed", "emergency_replacement_failed"}:
+        return "自动压缩失败"
+    if stage == "emergency_completed":
+        return "自动压缩成功"
+    return "上下文已自动压缩"
+
+
+def _context_compression_status(data: dict[str, Any]) -> str:
+    stage = str(data.get("stage") or "")
+    if stage == "emergency_triggered":
+        return "running"
+    if stage in {"emergency_failed", "emergency_replacement_failed"}:
+        return "failed"
+    return "completed"
+
+
+def _context_compression_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    stage = str(data.get("stage") or "")
+    mode = str(data.get("compression_mode") or "")
+    if mode not in {"emergency", "background"}:
+        mode = "emergency" if stage.startswith("emergency_") else "background"
+    return {
+        "kind": "context_compression",
+        "stage": stage,
+        "mode": mode,
+        "notice_id": _context_compression_notice_id_from_data(data),
+        "reason": data.get("reason"),
+        "staging_id": data.get("staging_id"),
+        "anchor_message_id": data.get("anchor_message_id"),
+    }
+
+
+def _context_compression_notice_id_from_data(data: dict[str, Any]) -> str:
+    notice_id = str(data.get("notice_id") or "").strip()
+    if notice_id:
+        return notice_id
+    stage = str(data.get("stage") or "")
+    if stage.startswith("emergency_"):
+        notice_key = (
+            data.get("trace_id")
+            or data.get("session_id")
+            or data.get("active_session_id")
+            or ""
+        )
+        return f"context-compression:emergency:{notice_key}"
+    notice_key = data.get("staging_id") or data.get("active_session_id") or ""
+    return f"context-compression:staging:{notice_key}"
 
 
 def _default_context_label(item_type: str, content: str) -> str:

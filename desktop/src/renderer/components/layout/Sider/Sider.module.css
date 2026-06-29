@@ -1046,7 +1046,7 @@ button.sectionTitle[data-kind="workspace"]:focus-visible,
 .collapsedSessionCard {
   position: fixed;
   top: var(--session-card-top);
-  left: calc(var(--sidebar-collapsed-width) + 10px);
+  left: var(--session-card-left, calc(var(--sidebar-collapsed-width) + 10px));
   z-index: 96;
   display: grid;
   width: 224px;

@@ -35,6 +35,7 @@
   --workbench-assistant-input-open-max-height: 172px;
   --workbench-assistant-input-closed-height: 34px;
   --workbench-assistant-bottom-left: 50%;
+  --workbench-assistant-expanded-bottom-gap: 160px;
   --workbench-assistant-dock-out-target-width: min(420px, calc(100% - 56px));
   --workbench-assistant-dock-out-target-height: calc(
     var(--workbench-assistant-title-height) + var(--workbench-assistant-accessory-height) +
@@ -57,6 +58,7 @@
 .surface[data-message-trigger-state="streaming"],
 .surface[data-message-trigger-state="completed"],
 .surface[data-message-trigger-state="failed"],
+.surface[data-message-trigger-state="approval"],
 .surface[data-message-trigger-state="priming"] {
   --workbench-assistant-dock-out-target-height: calc(
     var(--workbench-assistant-title-height) + var(--workbench-assistant-accessory-height) +
@@ -434,6 +436,14 @@
     );
 }
 
+.composerFrame[data-compose-open="true"][data-pending-approval="true"] {
+  grid-template-rows:
+    var(--workbench-assistant-title-height)
+    var(--workbench-assistant-accessory-height)
+    0
+    minmax(var(--workbench-assistant-input-open-height), auto);
+}
+
 .composerFrame[data-compose-open="false"] {
   width: min(420px, calc(100vw - 56px));
   grid-template-areas:
@@ -464,6 +474,7 @@
 .composerFrame[data-compose-open="false"][data-message-trigger-state="streaming"],
 .composerFrame[data-compose-open="false"][data-message-trigger-state="completed"],
 .composerFrame[data-compose-open="false"][data-message-trigger-state="failed"],
+.composerFrame[data-compose-open="false"][data-message-trigger-state="approval"],
 .composerFrame[data-compose-open="false"][data-message-trigger-state="priming"] {
   grid-template-rows:
     var(--workbench-assistant-title-height)
@@ -504,6 +515,7 @@
 .composerFrame[data-compose-open="false"][data-new-session-enabled="true"][data-message-trigger-state="streaming"],
 .composerFrame[data-compose-open="false"][data-new-session-enabled="true"][data-message-trigger-state="completed"],
 .composerFrame[data-compose-open="false"][data-new-session-enabled="true"][data-message-trigger-state="failed"],
+.composerFrame[data-compose-open="false"][data-new-session-enabled="true"][data-message-trigger-state="approval"],
 .composerFrame[data-compose-open="false"][data-new-session-enabled="true"][data-message-trigger-state="priming"] {
   grid-template-rows:
     var(--workbench-assistant-title-height)
@@ -660,6 +672,12 @@
   min-height: var(--workbench-assistant-input-open-height);
   max-height: var(--workbench-assistant-input-open-max-height);
   overflow: visible;
+}
+
+.inputSurface[data-compose-open="true"][data-pending-approval="true"] {
+  height: auto;
+  min-height: var(--workbench-assistant-input-open-height);
+  max-height: min(420px, calc(100vh - 180px));
 }
 
 .inputSurface[data-compose-open="false"] {
@@ -840,11 +858,16 @@
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
 }
 
+.miniTurnNavigatorViewport[data-scrollable="false"] {
+  display: flex;
+  align-items: center;
+}
+
 .miniTurnNavigatorRail {
   position: relative;
   width: 44px;
-  min-height: 100%;
-  height: max(100%, var(--mini-turn-rail-height));
+  height: var(--mini-turn-rail-height);
+  flex: 0 0 auto;
 }
 
 .miniTurnNavigatorMarker {
@@ -1047,6 +1070,11 @@
   --workbench-message-signal-soft: rgb(239 68 68 / 30%);
 }
 
+.messageCarrier[data-state="approval"] {
+  --workbench-message-signal: rgb(245 158 11);
+  --workbench-message-signal-soft: rgb(245 158 11 / 30%);
+}
+
 .messageCarrier:hover,
 .messageCarrier:focus-visible {
   background: var(--workbench-assistant-control-glass-bg);
@@ -1065,6 +1093,8 @@
 .messageCarrier[data-state="completed"]:focus-visible,
 .messageCarrier[data-state="failed"]:hover,
 .messageCarrier[data-state="failed"]:focus-visible,
+.messageCarrier[data-state="approval"]:hover,
+.messageCarrier[data-state="approval"]:focus-visible,
 .messageCarrier[data-state="priming"]:hover,
 .messageCarrier[data-state="priming"]:focus-visible {
   transform: translateY(-1px);
@@ -1126,12 +1156,14 @@
 }
 
 .messageCarrier[data-state="streaming"] .messageCarrierDot,
-.messageCarrier[data-state="priming"] .messageCarrierDot {
+.messageCarrier[data-state="priming"] .messageCarrierDot,
+.messageCarrier[data-state="approval"] .messageCarrierDot {
   animation: workbenchMessageTriggerPulse 1.6s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
 }
 
 .messageCarrier[data-state="completed"],
-.messageCarrier[data-state="failed"] {
+.messageCarrier[data-state="failed"],
+.messageCarrier[data-state="approval"] {
   border-color: color-mix(in srgb, var(--workbench-message-signal) 42%, var(--color-border-subtle));
   box-shadow:
     var(--workbench-assistant-control-glass-shadow),
@@ -1234,6 +1266,10 @@
   pointer-events: none;
 }
 
+.composerShell[data-pending-approval="true"] {
+  height: auto;
+}
+
 .composerShell[data-collapsing="true"] :global([data-sendbox-root="true"]) {
   min-height: 82px;
 }
@@ -1296,6 +1332,27 @@
   max-width: none;
 }
 
+.composerApprovalSlot {
+  width: 100%;
+  min-width: 0;
+  --composer-width: 100%;
+  --composer-bg: transparent;
+  --composer-border: transparent;
+  --sendbox-keydex-min-height: var(--workbench-assistant-input-open-height);
+  --sendbox-keydex-radius: 18px;
+  --sendbox-keydex-shadow: none;
+}
+
+.composerApprovalSlot :global([data-testid="composer-approval-card"]) {
+  width: 100%;
+  min-height: var(--workbench-assistant-input-open-height);
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 10px 12px 8px;
+}
+
 .expandedLayer {
   position: absolute;
   inset: 0;
@@ -1305,12 +1362,13 @@
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  padding: 0 0 160px;
+  padding: 0 0 var(--workbench-assistant-expanded-bottom-gap);
   pointer-events: auto;
   isolation: isolate;
   background: rgb(255 255 255 / 2.5%);
   backdrop-filter: blur(10px) saturate(1.08);
   -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  transition: padding-bottom var(--workbench-assistant-compose-duration) var(--workbench-assistant-compose-ease);
 }
 
 .expandedLayer::before {
@@ -1552,60 +1610,6 @@
   background: transparent;
   box-shadow: none;
   backdrop-filter: blur(16px);
-}
-
-.approvalPrompt {
-  display: grid;
-  gap: 8px;
-  margin: 0 14px 12px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--color-border-default));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--color-warning));
-  color: var(--color-text-1);
-}
-
-.approvalPrompt strong {
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.approvalPrompt p {
-  margin: 0;
-  color: var(--color-text-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.approvalError {
-  color: var(--color-danger) !important;
-}
-
-.approvalActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.approvalActions button {
-  min-width: 58px;
-  height: 30px;
-  border: 1px solid var(--color-border-2);
-  border-radius: 999px;
-  background: var(--surface-bg);
-  color: var(--color-text-2);
-  cursor: pointer;
-}
-
-.approvalActions button[data-primary="true"] {
-  border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border-2));
-  background: var(--color-accent);
-  color: #fff;
-}
-
-.approvalActions button:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 @media (max-width: 900px) {

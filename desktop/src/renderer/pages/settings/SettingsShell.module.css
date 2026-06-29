@@ -262,7 +262,6 @@
 
 .content :global(:where(button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [aria-haspopup="listbox"]:not(:disabled)):hover) {
   background-color: color-mix(in srgb, var(--surface-hover) 72%, transparent);
-  color: var(--color-text-primary);
 }
 
 .content :global(:where(button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [aria-haspopup="listbox"]:not(:disabled)):focus-visible) {

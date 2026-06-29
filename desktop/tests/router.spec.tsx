@@ -426,7 +426,7 @@ describe("AppRouter", () => {
     expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
   }, 20000);
 
-  it("surfaces pending approval in the workbench assistant drawer", async () => {
+  it("surfaces pending approval in the workbench assistant runtime carrier", async () => {
     const { runtime } = renderRouter(["/workbench/workspace%20A/session/session%201"]);
 
     const surface = await screen.findByTestId("workbench-assistant-surface", undefined, { timeout: 10000 });
@@ -446,27 +446,25 @@ describe("AppRouter", () => {
     await waitFor(
       () => {
         expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
-        expect(surface.getAttribute("data-visual-mode")).toBe("dock-morph");
-        expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
-        expect(surface.getAttribute("data-dock-transition")).toBe("dock-in");
+        expect(surface.getAttribute("data-message-trigger-state")).toBe("approval");
       },
       { timeout: 2000 },
     );
-    expect(screen.getByTestId("workbench-assistant-morph-panel")).not.toBeNull();
-    expect(screen.getByTestId("workbench-approval-prompt")).not.toBeNull();
-    expect(await screen.findByTestId("workbench-approval-prompt", undefined, { timeout: 10000 })).not.toBeNull();
-    await waitFor(
-      () => {
-        expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
-      },
-      { timeout: 2000 },
-    );
-    expect(surface.getAttribute("data-surface-mode")).toBe("drawer");
-    expect(surface.getAttribute("data-dock-layout")).toBe("inline");
+    expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("idle");
+    const carrier = screen.getByTestId("workbench-message-carrier");
+    expect(carrier.getAttribute("data-state")).toBe("approval");
+    expect(carrier.textContent).toContain("等待审批，点击处理");
+    expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
+    expect(screen.queryByTestId("workbench-approval-prompt")).toBeNull();
+    expect(screen.queryByTestId("composer-approval-card")).toBeNull();
+
+    fireEvent.click(carrier);
+
+    expect(await screen.findByTestId("composer-approval-card", undefined, { timeout: 10000 })).not.toBeNull();
     expect(screen.getByText("是否允许执行命令？")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       expect(runtime.settings.resolveApproval).toHaveBeenCalledWith("approval-1", {
@@ -721,7 +719,7 @@ function defaultExtensionSettings() {
     auto_title: {
       enabled: false,
       only_when_default_title: true,
-      max_title_length: 40,
+      max_title_length: 20,
     },
     tool_call_limit: {
       enabled: true,

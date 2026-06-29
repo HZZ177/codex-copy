@@ -16,7 +16,7 @@ class AutoTitleRuntimeSettings(BaseModel):
 
     enabled: bool = False
     only_when_default_title: bool = True
-    max_title_length: int = Field(default=40, ge=4, le=120)
+    max_title_length: int = Field(default=20, ge=4, le=120)
 
 
 class ToolCallLimitRuntimeSettings(BaseModel):

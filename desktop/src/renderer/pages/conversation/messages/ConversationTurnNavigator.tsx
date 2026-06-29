@@ -11,7 +11,7 @@ export interface ConversationTurnNavigationItem {
 
 export interface ConversationTurnNavigatorProps {
   turns: ConversationTurnNavigationItem[];
-  activeIndex?: number | null;
+  highlightedIndexes?: number[];
   layout?: "floating" | "contained";
   onNavigate: (index: number) => void;
 }
@@ -26,16 +26,14 @@ const SCROLL_EDGE_PX = 24;
 
 export function ConversationTurnNavigator({
   turns,
-  activeIndex,
+  highlightedIndexes = [],
   layout = "floating",
   onNavigate,
 }: ConversationTurnNavigatorProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
-  const currentIndicatorRef = useRef<HTMLDivElement>(null);
   const markerRefsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const hoveredIndexRef = useRef<number | null>(null);
-  const wavePositionRef = useRef<number | null>(null);
   const knownTurnIdsRef = useRef<Set<string> | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [enteringTurnIds, setEnteringTurnIds] = useState<Set<string>>(() => new Set());
@@ -50,14 +48,9 @@ export function ConversationTurnNavigator({
   };
 
   const setWavePosition = (wavePosition: number | null) => {
-    wavePositionRef.current = wavePosition;
     markerRefsRef.current.forEach((marker, index) => {
       marker?.style.setProperty("--turn-marker-width", `${markerWidth(index, wavePosition)}px`);
     });
-    currentIndicatorRef.current?.style.setProperty(
-      "--turn-current-marker-width",
-      `${currentIndicatorWidth(currentIndex, wavePosition)}px`,
-    );
   };
 
   const updateViewportMetrics = useCallback(() => {
@@ -80,11 +73,13 @@ export function ConversationTurnNavigator({
   }, []);
 
   const railHeight = markerRailHeight(turns.length);
-  const currentIndex = normalizeActiveIndex(activeIndex, turns.length);
+  const highlightedIndexSet = normalizeHighlightedIndexes(highlightedIndexes, turns.length);
+  const highlightedRange = highlightedIndexRange(highlightedIndexSet);
   const activeTurn = hoveredIndex === null ? null : turns[hoveredIndex] ?? null;
-  const currentIndicatorTop = currentIndex === null ? null : markerTopPx(currentIndex);
   const activeMarkerTop =
-    hoveredIndex === null ? markerTopPx(currentIndex ?? Math.max(0, Math.floor(turns.length / 2))) : markerTopPx(hoveredIndex);
+    hoveredIndex === null
+      ? markerTopPx(highlightedRange?.first ?? Math.max(0, Math.floor(turns.length / 2)))
+      : markerTopPx(hoveredIndex);
   const activeTop = clamp(
     activeMarkerTop - viewportMetrics.scrollTop,
     MARKER_HIT_HEIGHT_PX / 2,
@@ -115,13 +110,6 @@ export function ConversationTurnNavigator({
   }, [railHeight, updateViewportMetrics]);
 
   useLayoutEffect(() => {
-    currentIndicatorRef.current?.style.setProperty(
-      "--turn-current-marker-width",
-      `${currentIndicatorWidth(currentIndex, wavePositionRef.current)}px`,
-    );
-  }, [currentIndex]);
-
-  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
@@ -147,15 +135,15 @@ export function ConversationTurnNavigator({
   }, [updateViewportMetrics]);
 
   useEffect(() => {
-    if (hoveredIndex !== null || currentIndex === null) {
+    if (hoveredIndex !== null || highlightedRange === null) {
       return;
     }
     const viewport = viewportRef.current;
     if (!viewport || viewport.clientHeight <= 0) {
       return;
     }
-    const markerTop = markerTopPx(currentIndex) - MARKER_HIT_HEIGHT_PX / 2;
-    const markerBottom = markerTop + MARKER_HIT_HEIGHT_PX;
+    const markerTop = markerTopPx(highlightedRange.first) - MARKER_HIT_HEIGHT_PX / 2;
+    const markerBottom = markerTopPx(highlightedRange.last) + MARKER_HIT_HEIGHT_PX / 2;
     const visibleTop = viewport.scrollTop;
     const visibleBottom = visibleTop + viewport.clientHeight;
     let nextScrollTop: number | null = null;
@@ -171,7 +159,7 @@ export function ConversationTurnNavigator({
     }
     viewport.scrollTop = clamp(nextScrollTop, 0, Math.max(0, viewport.scrollHeight - viewport.clientHeight));
     updateViewportMetrics();
-  }, [currentIndex, hoveredIndex, updateViewportMetrics]);
+  }, [highlightedIndexes, highlightedRange, hoveredIndex, updateViewportMetrics]);
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const rail = railRef.current;
@@ -248,23 +236,6 @@ export function ConversationTurnNavigator({
         onScroll={handleViewportScroll}
       >
         <div className={styles.turnNavigatorRail} ref={railRef}>
-          {currentIndicatorTop !== null ? (
-            <div
-              className={styles.turnNavigatorCurrentIndicator}
-              aria-hidden="true"
-              data-entering={enteringTurnIds.has(turns[currentIndex ?? -1]?.id ?? "") ? "true" : "false"}
-              data-testid="conversation-turn-navigator-current-indicator"
-              ref={currentIndicatorRef}
-              style={
-                {
-                  "--turn-current-marker-top": `${currentIndicatorTop}px`,
-                  "--turn-current-marker-width": `${currentIndicatorWidth(currentIndex, wavePositionRef.current)}px`,
-                } as CSSProperties
-              }
-            >
-              <span />
-            </div>
-          ) : null}
           {turns.map((turn, index) => (
             <button
               className={styles.turnNavigatorMarker}
@@ -272,7 +243,7 @@ export function ConversationTurnNavigator({
               type="button"
               aria-label={`跳转到第 ${index + 1} 轮：${turn.userPreview}`}
               data-active={index === hoveredIndex ? "true" : "false"}
-              data-current={index === currentIndex ? "true" : "false"}
+              data-current={highlightedIndexSet.has(index) ? "true" : "false"}
               data-entering={enteringTurnIds.has(turn.id) ? "true" : "false"}
               ref={(node) => {
                 markerRefsRef.current[index] = node;
@@ -322,15 +293,30 @@ function markerTopPx(index: number): number {
   return MARKER_HIT_HEIGHT_PX / 2 + index * MARKER_STEP_PX;
 }
 
-function normalizeActiveIndex(index: number | null | undefined, count: number): number | null {
-  if (index === null || index === undefined || count <= 0) {
-    return null;
+function normalizeHighlightedIndexes(indexes: number[], count: number): Set<number> {
+  const normalized = new Set<number>();
+  if (count <= 0) {
+    return normalized;
   }
-  return Math.round(clamp(index, 0, count - 1));
+  indexes.forEach((index) => {
+    if (Number.isFinite(index)) {
+      normalized.add(Math.round(clamp(index, 0, count - 1)));
+    }
+  });
+  return normalized;
 }
 
-function currentIndicatorWidth(index: number | null, waveIndex: number | null): number {
-  return index === null ? BASE_MARKER_WIDTH : markerWidth(index, waveIndex);
+function highlightedIndexRange(indexes: Set<number>): { first: number; last: number } | null {
+  if (!indexes.size) {
+    return null;
+  }
+  let first = Number.POSITIVE_INFINITY;
+  let last = Number.NEGATIVE_INFINITY;
+  indexes.forEach((index) => {
+    first = Math.min(first, index);
+    last = Math.max(last, index);
+  });
+  return { first, last };
 }
 
 function markerWidth(index: number, waveIndex: number | null): number {

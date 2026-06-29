@@ -41,6 +41,7 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
   const scrollElementRef = useRef<HTMLElement | null>(null);
   const userPinnedRef = useRef(false);
   const userInputActiveRef = useRef(false);
+  const scrollbarDragActiveRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const lastProgrammaticScrollAtRef = useRef(0);
   const initialScrollDoneRef = useRef(false);
@@ -78,6 +79,7 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
     if (atFollowBottom) {
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
     }
 
     setUserPinnedScroll(userPinnedRef.current);
@@ -96,6 +98,7 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
       markProgrammaticScroll();
       userPinnedRef.current = false;
       userInputActiveRef.current = false;
+      scrollbarDragActiveRef.current = false;
       setUserPinnedScroll(false);
       setShowScrollToBottom(false);
 
@@ -130,7 +133,7 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
       return;
     }
     const scrollElement = getScrollElement();
-    if (!scrollElement || userPinnedRef.current || isExpansionScrollLocked(scrollElement)) {
+    if (!scrollElement || userPinnedRef.current || scrollbarDragActiveRef.current || isExpansionScrollLocked(scrollElement)) {
       return;
     }
     if (scrollAnimationFrameRef.current !== null) {
@@ -144,7 +147,12 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
       const nextScrollElement = getScrollElement();
-      if (!nextScrollElement || userPinnedRef.current || isExpansionScrollLocked(nextScrollElement)) {
+      if (
+        !nextScrollElement ||
+        userPinnedRef.current ||
+        scrollbarDragActiveRef.current ||
+        isExpansionScrollLocked(nextScrollElement)
+      ) {
         return;
       }
       if (scrollAnimationFrameRef.current !== null) {
@@ -246,18 +254,30 @@ export function useAutoScroll({ deps, itemCount = 0, autoFollow = true }: UseAut
     }
 
     const onScroll = () => handleTargetScroll(scrollElement);
-    const onUserInput = () => {
+    const onUserInput = (event: Event) => {
       cancelScrollAnimation();
       userInputActiveRef.current = true;
+      if (isScrollbarPointerStart(event, scrollElement)) {
+        scrollbarDragActiveRef.current = true;
+      }
+    };
+    const clearScrollbarDrag = () => {
+      scrollbarDragActiveRef.current = false;
     };
     scrollElement.addEventListener("scroll", onScroll, { passive: true });
     scrollElement.addEventListener("wheel", onUserInput, { passive: true });
     scrollElement.addEventListener("pointerdown", onUserInput);
+    window.addEventListener("pointerup", clearScrollbarDrag);
+    window.addEventListener("pointercancel", clearScrollbarDrag);
+    window.addEventListener("blur", clearScrollbarDrag);
     updateBottomState(scrollElement);
     return () => {
       scrollElement.removeEventListener("scroll", onScroll);
       scrollElement.removeEventListener("wheel", onUserInput);
       scrollElement.removeEventListener("pointerdown", onUserInput);
+      window.removeEventListener("pointerup", clearScrollbarDrag);
+      window.removeEventListener("pointercancel", clearScrollbarDrag);
+      window.removeEventListener("blur", clearScrollbarDrag);
     };
   }, [cancelScrollAnimation, handleTargetScroll, resolveScrollElement, updateBottomState]);
 
@@ -335,6 +355,23 @@ function findScrollParent(element: HTMLElement): HTMLElement | null {
 
 function isExpansionScrollLocked(element: HTMLElement): boolean {
   return element.hasAttribute(EXPANSION_SCROLL_LOCK_ATTR);
+}
+
+function isScrollbarPointerStart(event: Event, scrollElement: HTMLElement): boolean {
+  if (event.type !== "pointerdown" && event.type !== "mousedown") {
+    return false;
+  }
+  const pointer = event as MouseEvent;
+  if (!Number.isFinite(pointer.clientX) || !Number.isFinite(pointer.clientY)) {
+    return false;
+  }
+  const scrollbarInlineSize = Math.max(0, scrollElement.offsetWidth - scrollElement.clientWidth);
+  if (scrollbarInlineSize <= 0) {
+    return false;
+  }
+  const rect = scrollElement.getBoundingClientRect();
+  const edgeSize = Math.max(12, Math.min(24, scrollbarInlineSize));
+  return pointer.clientX >= rect.right - edgeSize && pointer.clientX <= rect.right;
 }
 
 function animateScrollToBottom({

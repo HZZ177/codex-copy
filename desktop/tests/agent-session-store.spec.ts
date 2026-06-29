@@ -42,6 +42,7 @@ describe("agentSessionStore reducer", () => {
       "session_title_updated",
       "task_result",
       "reasoning",
+      "middleware_progress",
       "workspaceSkillsChanged",
       "approval_requested",
       "approval_resolved",
@@ -520,6 +521,80 @@ describe("agentSessionStore reducer", () => {
         streaming: false,
       },
     ]);
+  });
+
+  it("appends context compression notices when staging is applied", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "middleware_progress",
+      data: {
+        session_id: "ses-1",
+        middleware: "ContextCompressionMiddleware",
+        stage: "staging_applied",
+        compression_mode: "background",
+        notice_id: "context-compression:staging:1",
+        staging_id: 1,
+        timestamp_ms: 1_782_600_000_000,
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      {
+        role: "system",
+        content: "上下文已自动压缩",
+        status: "completed",
+        metadata: {
+          compression: {
+            kind: "context_compression",
+            stage: "staging_applied",
+            mode: "background",
+            notice_id: "context-compression:staging:1",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("updates one emergency compression notice through running and terminal states", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "middleware_progress",
+      data: {
+        session_id: "ses-1",
+        middleware: "ContextCompressionMiddleware",
+        stage: "emergency_triggered",
+        compression_mode: "emergency",
+        notice_id: "context-compression:emergency:trace-1",
+        trace_id: "trace-1",
+      },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "middleware_progress",
+      data: {
+        session_id: "ses-1",
+        middleware: "ContextCompressionMiddleware",
+        stage: "emergency_completed",
+        compression_mode: "emergency",
+        notice_id: "context-compression:emergency:trace-1",
+        trace_id: "trace-1",
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      {
+        role: "system",
+        content: "自动压缩成功",
+        status: "completed",
+        metadata: {
+          compression: {
+            stage: "emergency_completed",
+            mode: "emergency",
+            notice_id: "context-compression:emergency:trace-1",
+          },
+        },
+      },
+    ]);
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(1);
   });
 
   it("keeps tool lifecycle idempotent by run id", () => {

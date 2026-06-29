@@ -9,7 +9,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
 from backend.app.agent.factory import AgentFactory
-from backend.app.agent.middleware import ToolCallLimitMiddleware
+from backend.app.agent.middleware.tool_call_limit import ToolCallLimitMiddleware
 from backend.app.agent.runtime_settings import AgentRuntimeSettings
 from backend.app.model import ModelSettings
 from backend.app.storage import init_database

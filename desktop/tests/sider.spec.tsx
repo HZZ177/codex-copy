@@ -214,6 +214,24 @@ describe("Sider", () => {
     expect(onNavigate).toHaveBeenCalledWith("/conversation/thread-1");
   });
 
+  it("shows the same session hover card for expanded history rows", () => {
+    renderSider(
+      <Sider
+        activePath="/conversation/thread-1"
+        conversations={[{ id: "thread-1", title: "研读文档", updatedAt: "2026-06-17T10:00:00Z" }]}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "研读文档" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseEnter(button.parentElement as HTMLElement);
+
+    const card = screen.getByRole("tooltip");
+    expect(card.textContent).toContain("研读文档");
+    expect(card.textContent).toContain("当前会话");
+  });
+
   it("opens a session search dialog from the top search action", async () => {
     const runtime = fakeRuntime([
       thread({ id: "thread-a", title: "研读源码" }),

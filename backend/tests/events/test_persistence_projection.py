@@ -118,6 +118,33 @@ async def test_persistence_projection_writes_tool_end_and_completed_payload(tmp_
 
 
 @pytest.mark.asyncio
+async def test_persistence_projection_writes_middleware_progress(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    projection = PersistenceProjection(
+        repository=repositories.message_events,
+        session_id="ses_persist",
+        turn_index=1,
+    )
+
+    await projection.handle(
+        _event(
+            DomainEventType.MIDDLEWARE_PROGRESS,
+            {
+                "middleware": "ContextCompressionMiddleware",
+                "stage": "staging_applied",
+                "notice_id": "context-compression:staging:1",
+            },
+        )
+    )
+
+    events = repositories.message_events.list_by_session("ses_persist")
+
+    assert [event.action for event in events] == ["middleware_progress"]
+    assert events[0].data["stage"] == "staging_applied"
+    assert events[0].data["_canonical"]["action"] == "middleware_progress"
+
+
+@pytest.mark.asyncio
 async def test_persistence_projection_ignores_tool_progress_but_persists_final_files(
     tmp_path,
 ) -> None:

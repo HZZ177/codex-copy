@@ -12,6 +12,7 @@ import type {
   AgentSessionType,
   AgentSessionListResponse,
   AgentSessionResponse,
+  AgentFileAttachment,
 } from "@/types/protocol";
 
 import type { HttpClient } from "./httpClient";
@@ -90,6 +91,7 @@ export interface ChatPayload {
   runtime_params?: Record<string, unknown> | null;
   runtimeParams?: Record<string, unknown> | null;
   contextItems?: AgentContextItem[];
+  attachments?: AgentFileAttachment[];
   files?: unknown[];
   [key: string]: unknown;
 }

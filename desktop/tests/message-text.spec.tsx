@@ -550,6 +550,40 @@ describe("MessageText", () => {
     expect(image.getAttribute("referrerpolicy")).toBe("no-referrer");
   });
 
+  it("opens restored image attachments in a body portal and closes with Escape", () => {
+    render(
+      <MessageText
+        message={message("user", "请看图片", "completed", {
+          attachments: [
+            {
+              id: "att-1",
+              attachment_id: "att-1",
+              type: "image",
+              name: "chart.png",
+              mime_type: "image/png",
+              data_url: "data:image/png;base64,AA==",
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "预览图片 chart.png" }));
+
+    const dialog = screen.getByRole("dialog", { name: "chart.png" });
+    expect(dialog.closest('[data-testid="message-text"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "放大图片" }));
+    expect(screen.getByLabelText("当前缩放 125%")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "顺时针旋转图片" }));
+    expect(screen.getByLabelText("图片预览画布").style.getPropertyValue("--image-rotation")).toBe("90deg");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "chart.png" })).toBeNull();
+  });
+
   it("copies the whole message after completion", async () => {
     const clipboard = navigator.clipboard.writeText as unknown as ReturnType<typeof vi.fn>;
     render(<MessageText message={message("assistant", "可以复制", "completed")} />);

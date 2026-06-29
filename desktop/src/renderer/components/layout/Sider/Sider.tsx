@@ -786,8 +786,8 @@ function SiderSection({
   onStartRename,
   onUpdateRename,
 }: SiderSectionProps) {
-  const [hoveredSession, setHoveredSession] = useState<CollapsedSessionCard | null>(null);
-  const [hoveredProject, setHoveredProject] = useState<CollapsedProjectCard | null>(null);
+  const [hoveredSession, setHoveredSession] = useState<SessionHoverCard | null>(null);
+  const [hoveredProject, setHoveredProject] = useState<ProjectHoverCard | null>(null);
   const [sectionExpanded, setSectionExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [localHistoryExpansionLoading, setLocalHistoryExpansionLoading] = useState(false);
@@ -835,7 +835,7 @@ function SiderSection({
     }
   }
 
-  const showCollapsedCard = (item: SiderEntry, active: boolean, target: HTMLElement) => {
+  const showSessionCard = (item: SiderEntry, active: boolean, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
     setHoveredProject(null);
     setHoveredSession({
@@ -845,10 +845,11 @@ function SiderSection({
       groupTitle: item.groupTitle,
       active,
       top: Math.round(rect.top + rect.height / 2),
+      left: collapsed ? undefined : Math.round(rect.right + 10),
     });
   };
 
-  const showCollapsedProjectCard = (active: boolean, target: HTMLElement) => {
+  const showProjectCard = (active: boolean, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
     setHoveredSession(null);
     setHoveredProject({
@@ -867,8 +868,29 @@ function SiderSection({
       item.updatedAt && !indicator.isStreaming && !indicator.hasUnread && !indicator.waitingApproval,
     );
     const hasMeta = Boolean(showUpdatedTime || indicator.isStreaming || indicator.hasUnread || indicator.waitingApproval);
+    const canShowHoverCard = editing?.id !== item.id && confirmDeleteId !== item.id;
     return (
-      <div className={styles.historyRow} key={item.id}>
+      <div
+        className={styles.historyRow}
+        key={item.id}
+        onBlurCapture={
+          canShowHoverCard
+            ? (event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  return;
+                }
+                setHoveredSession(null);
+              }
+            : undefined
+        }
+        onFocusCapture={
+          canShowHoverCard ? (event) => showSessionCard(item, active, event.currentTarget) : undefined
+        }
+        onMouseEnter={
+          canShowHoverCard ? (event) => showSessionCard(item, active, event.currentTarget) : undefined
+        }
+        onMouseLeave={canShowHoverCard ? () => setHoveredSession(null) : undefined}
+      >
         {editing?.id === item.id ? (
           <form
             className={styles.renameForm}
@@ -921,10 +943,24 @@ function SiderSection({
             </button>
             {canMutate ? (
               <div className={styles.historyActions}>
-                <button aria-label={`重命名 ${item.title}`} onClick={() => onStartRename?.(item)} type="button">
+                <button
+                  aria-label={`重命名 ${item.title}`}
+                  onClick={() => {
+                    setHoveredSession(null);
+                    onStartRename?.(item);
+                  }}
+                  type="button"
+                >
                   <Pencil size={13} />
                 </button>
-                <button aria-label={`删除 ${item.title}`} onClick={() => onConfirmDelete?.(item.id)} type="button">
+                <button
+                  aria-label={`删除 ${item.title}`}
+                  onClick={() => {
+                    setHoveredSession(null);
+                    onConfirmDelete?.(item.id);
+                  }}
+                  type="button"
+                >
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -950,8 +986,8 @@ function SiderSection({
             data-active={collapsedProjectActive ? "true" : "false"}
             onBlur={() => setHoveredProject(null)}
             onClick={() => setSectionExpanded((expanded) => !expanded)}
-            onFocus={(event) => showCollapsedProjectCard(collapsedProjectActive, event.currentTarget)}
-            onMouseEnter={(event) => showCollapsedProjectCard(collapsedProjectActive, event.currentTarget)}
+            onFocus={(event) => showProjectCard(collapsedProjectActive, event.currentTarget)}
+            onMouseEnter={(event) => showProjectCard(collapsedProjectActive, event.currentTarget)}
             onMouseLeave={() => setHoveredProject(null)}
           >
             {sectionExpanded ? (
@@ -982,8 +1018,8 @@ function SiderSection({
                   key={item.id}
                   onBlur={() => setHoveredSession(null)}
                   onClick={() => onNavigate?.(path)}
-                  onFocus={(event) => showCollapsedCard(item, active, event.currentTarget)}
-                  onMouseEnter={(event) => showCollapsedCard(item, active, event.currentTarget)}
+                  onFocus={(event) => showSessionCard(item, active, event.currentTarget)}
+                  onMouseEnter={(event) => showSessionCard(item, active, event.currentTarget)}
                   onMouseLeave={() => setHoveredSession(null)}
                   type="button"
                 >
@@ -1006,8 +1042,8 @@ function SiderSection({
             })}
           </div>
         </div>
-        {hoveredProject ? <CollapsedProjectCardView project={hoveredProject} /> : null}
-        {hoveredSession ? <CollapsedSessionCardView session={hoveredSession} /> : null}
+        {hoveredProject ? <ProjectHoverCardView project={hoveredProject} /> : null}
+        {hoveredSession ? <SessionHoverCardView session={hoveredSession} /> : null}
       </section>
     );
   }
@@ -1100,6 +1136,7 @@ function SiderSection({
           )}
         </div>
       </div>
+      {hoveredSession ? <SessionHoverCardView session={hoveredSession} /> : null}
     </section>
   );
 }
@@ -1140,28 +1177,29 @@ function SessionStatusIndicators({
   );
 }
 
-interface CollapsedSessionCard {
+interface SessionHoverCard {
   id: string;
   title: string;
   updatedAt?: string;
   groupTitle?: string;
   active: boolean;
   top: number;
+  left?: number;
 }
 
-interface CollapsedProjectCard {
+interface ProjectHoverCard {
   title: string;
   active: boolean;
   expanded: boolean;
   top: number;
 }
 
-function CollapsedProjectCardView({ project }: { project: CollapsedProjectCard }) {
+function ProjectHoverCardView({ project }: { project: ProjectHoverCard }) {
   return (
     <div
       className={styles.collapsedSessionCard}
       role="tooltip"
-      style={{ "--session-card-top": `${project.top}px` } as CSSProperties}
+      style={hoverCardStyle(project.top)}
     >
       <div className={styles.collapsedSessionCardTitle}>{project.title}</div>
       <div className={styles.collapsedSessionCardMeta}>
@@ -1173,12 +1211,12 @@ function CollapsedProjectCardView({ project }: { project: CollapsedProjectCard }
   );
 }
 
-function CollapsedSessionCardView({ session }: { session: CollapsedSessionCard }) {
+function SessionHoverCardView({ session }: { session: SessionHoverCard }) {
   return (
     <div
       className={styles.collapsedSessionCard}
       role="tooltip"
-      style={{ "--session-card-top": `${session.top}px` } as CSSProperties}
+      style={hoverCardStyle(session.top, session.left)}
     >
       <div className={styles.collapsedSessionCardTitle}>{session.title}</div>
       <div className={styles.collapsedSessionCardMeta}>
@@ -1198,6 +1236,13 @@ function CollapsedSessionCardView({ session }: { session: CollapsedSessionCard }
       </div>
     </div>
   );
+}
+
+function hoverCardStyle(top: number, left?: number): CSSProperties {
+  return {
+    "--session-card-top": `${top}px`,
+    ...(left === undefined ? {} : { "--session-card-left": `${left}px` }),
+  } as CSSProperties;
 }
 
 function sessionToEntry(session: AgentSession, groupTitle: string): SiderEntry {

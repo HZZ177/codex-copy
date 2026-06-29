@@ -118,6 +118,28 @@ async def test_chat_projection_maps_session_title_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_projection_maps_middleware_progress() -> None:
+    adapter = RecordingChatAdapter()
+    projection = ChatProjection(adapter)
+
+    await projection.handle(
+        _event(
+            DomainEventType.MIDDLEWARE_PROGRESS,
+            {
+                "middleware": "ContextCompressionMiddleware",
+                "stage": "emergency_triggered",
+                "notice_id": "context-compression:emergency:trace_1",
+            },
+        )
+    )
+
+    assert adapter.sent[0]["session_id"] == "ses_original"
+    assert adapter.sent[0]["action"] == "middleware_progress"
+    assert adapter.sent[0]["data"]["stage"] == "emergency_triggered"
+    assert adapter.sent[0]["data"]["notice_id"] == "context-compression:emergency:trace_1"
+
+
+@pytest.mark.asyncio
 async def test_chat_projection_maps_subagent_events() -> None:
     adapter = RecordingChatAdapter()
     projection = ChatProjection(adapter)

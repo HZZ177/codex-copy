@@ -1,10 +1,12 @@
 import type { WorkspaceSearchResult } from "@/runtime";
 
+export type SelectedFileSource = "workspace" | "dropped" | "pasted" | "picker";
+
 export interface SelectedFile {
   path: string;
   name: string;
   type: "file" | "directory";
-  source: "workspace" | "dropped" | "pasted";
+  source: SelectedFileSource;
   selectedText?: string | null;
   annotationComment?: string | null;
   lineStart?: number | null;
@@ -65,20 +67,37 @@ export function selectedFileFromWorkspace(result: WorkspaceSearchResult): Select
   };
 }
 
-export function selectedFileFromFile(file: File, source: "dropped" | "pasted"): SelectedFile | null {
-  const withPath = file as File & { path?: string };
-  const path = withPath.path || file.webkitRelativePath || file.name;
-  if (!path) {
+export function selectedFileFromPath(
+  path: string,
+  source: SelectedFileSource,
+  name?: string | null,
+  type: "file" | "directory" = "file",
+): SelectedFile | null {
+  const cleanedPath = path.trim();
+  if (!cleanedPath) {
     return null;
   }
   return {
-    path,
-    name: file.name || path,
-    type: "file",
+    path: cleanedPath,
+    name: name?.trim() || fileName(cleanedPath),
+    type,
     source,
   };
 }
 
+export function selectedFileFromFile(file: File, source: Exclude<SelectedFileSource, "workspace">): SelectedFile | null {
+  const withPath = file as File & { path?: string };
+  const path = withPath.path || "";
+  if (!path) {
+    return null;
+  }
+  return selectedFileFromPath(path, source, file.name, "file");
+}
+
 export function composeMessageWithSelectedFiles(message: string, files: SelectedFile[]): string {
   return message.trim();
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }

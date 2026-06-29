@@ -30,6 +30,7 @@ def test_init_database_creates_core_tables_idempotently(tmp_path) -> None:
         "workspaces",
         "sessions",
         "message_events",
+        "compression_staging",
         "trace_record",
         "llm_request_logs",
         "trace_event_log",
@@ -282,6 +283,41 @@ def test_init_database_creates_llm_request_log_columns_and_indexes(tmp_path) -> 
         "idx_llm_request_logs_status_time",
         "idx_llm_request_logs_gateway_trace",
         "idx_llm_request_logs_gateway_thread_time",
+    }.issubset(indexes)
+
+
+def test_init_database_creates_compression_staging_schema(tmp_path) -> None:
+    db = init_database(tmp_path / "app.db")
+
+    with db.connect() as conn:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("pragma table_info(compression_staging)").fetchall()
+        }
+        indexes = {
+            str(row["name"])
+            for row in conn.execute("pragma index_list(compression_staging)").fetchall()
+        }
+
+    assert {
+        "id",
+        "original_session_id",
+        "active_session_id",
+        "target_session_id",
+        "generation",
+        "status",
+        "anchor_message_id",
+        "l1_content",
+        "l2_content",
+        "failure_reason",
+        "applied_at",
+        "created_at",
+        "updated_at",
+        "is_deleted",
+    }.issubset(columns)
+    assert {
+        "idx_compression_staging_original_status_target",
+        "idx_compression_staging_original_generation",
     }.issubset(indexes)
 
 

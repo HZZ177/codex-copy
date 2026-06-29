@@ -9,8 +9,10 @@ import {
 } from "@/runtime";
 import {
   SendBox,
+  agentAttachmentFromSelected,
   selectedQuoteFromText,
   type SelectedFile,
+  type SelectedImageAttachment,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
 import { RuntimeModelSelector, useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
@@ -25,7 +27,7 @@ import {
 } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { prepareComposerMessage, type RuntimeParamsWithInjection } from "@/renderer/utils/messageInjection";
-import type { AgentContextItem, Workspace } from "@/types/protocol";
+import type { AgentContextItem, AgentFileAttachment, Workspace } from "@/types/protocol";
 import styles from "./HomePage.module.css";
 
 export interface HomePageProps {
@@ -37,7 +39,11 @@ export interface HomePageProps {
     sessionId: string,
     initialModel: RuntimeSelectedModel,
     initialMessage: string,
-    options?: { runtimeParams?: RuntimeParamsWithInjection; contextItems?: AgentContextItem[] },
+    options?: {
+      runtimeParams?: RuntimeParamsWithInjection;
+      contextItems?: AgentContextItem[];
+      attachments?: AgentFileAttachment[];
+    },
   ) => void;
   onOpenModelSettings: () => void;
 }
@@ -294,10 +300,15 @@ export function HomePage({
         }
       : undefined;
 
-  const submit = async (files: SelectedFile[] = [], quotes: SelectedQuote[] = []) => {
+  const submit = async (
+    files: SelectedFile[] = [],
+    quotes: SelectedQuote[] = [],
+    imageAttachments: SelectedImageAttachment[] = [],
+  ) => {
     const prepared = prepareComposerMessage(draft, files, { quotes, selectedSkill });
+    const attachments = imageAttachments.map(agentAttachmentFromSelected);
     const text = prepared.message;
-    if ((!text && !prepared.contextItems.length) || submitting) {
+    if ((!text && !prepared.contextItems.length && !attachments.length) || submitting) {
       return false;
     }
 
@@ -347,10 +358,11 @@ export function HomePage({
       emitSessionCreated(session);
       setDraft("");
       setSelectedSkill(null);
-      const injectionOptions = prepared.runtimeParams || prepared.contextItems.length
+      const injectionOptions = prepared.runtimeParams || prepared.contextItems.length || attachments.length
         ? {
             runtimeParams: prepared.runtimeParams,
             contextItems: prepared.contextItems,
+            attachments,
           }
         : undefined;
       if (injectionOptions) {
@@ -439,6 +451,7 @@ export function HomePage({
           onSkillChange={setSelectedSkill}
           onSend={submit}
           onStop={() => undefined}
+          runtime={runtime}
           onOpenFileReference={openFileReference}
           externalQuoteRequest={quoteChipRequest}
         />
