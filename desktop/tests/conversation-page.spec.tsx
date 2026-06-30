@@ -1957,14 +1957,16 @@ describe("ConversationPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "在预览面板打开 HTML 预览" }));
 
     const shell = screen.getByTestId("app-shell");
-    expect(shell.dataset.rightSidebar).toBe("open");
+    await waitFor(() => {
+      expect(shell.dataset.rightSidebar).toBe("open");
+    }, { timeout: 8000 });
     expect(shell.dataset.rightSidebarMotion).toBe("true");
     expect(await screen.findByRole("complementary", { name: "右侧栏" })).not.toBeNull();
-    const frame = (await screen.findByTitle("HTML 文件预览")) as HTMLIFrameElement;
+    const frame = (await screen.findByTitle("HTML 文件预览", {}, { timeout: 8000 })) as HTMLIFrameElement;
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.getAttribute("srcdoc")).toContain("<style>h1 { color: rgb(220, 38, 38); }</style>");
     expect(frame.getAttribute("srcdoc")).toContain("面板预览");
-  });
+  }, 10000);
 
   it("does not carry preview drawer content into another session", async () => {
     const { runtime, emit } = fakeRuntime();

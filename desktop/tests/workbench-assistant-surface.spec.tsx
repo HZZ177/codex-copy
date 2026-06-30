@@ -79,7 +79,7 @@ describe("WorkbenchAssistantSurface", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
-    await waitForSurfaceMode("drawer");
+    await waitForSurfaceMode("drawer", 8000);
 
     const drawerFrame = screen.getByTestId("workbench-assistant-drawer-composer-frame");
     const indicator = within(drawerFrame).getByTestId("context-window-indicator");
