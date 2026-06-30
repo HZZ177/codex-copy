@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Titlebar } from "@/renderer/components/layout/Titlebar";
@@ -14,7 +14,7 @@ describe("Titlebar", () => {
     expect(screen.getByLabelText("Keydex")).not.toBeNull();
     expect(screen.queryByLabelText("更多")).toBeNull();
     expect(screen.getByLabelText("最小化")).not.toBeNull();
-    expect(screen.getByLabelText("最大化或还原")).not.toBeNull();
+    expect(screen.getByLabelText("最大化窗口")).not.toBeNull();
     expect(screen.getByLabelText("关闭")).not.toBeNull();
     expect(screen.queryByLabelText("折叠侧边栏")).toBeNull();
     expect(screen.queryByLabelText("展开侧边栏")).toBeNull();
@@ -42,12 +42,7 @@ describe("Titlebar", () => {
 
   it("turns the brand mark into a titlebar-safe action when a click handler is provided", async () => {
     const onBrandClick = vi.fn();
-    const appWindow = {
-      minimize: vi.fn().mockResolvedValue(undefined),
-      toggleMaximize: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      startDragging: vi.fn().mockResolvedValue(undefined),
-    };
+    const appWindow = makeAppWindow();
     const controls = createWindowControls(async () => appWindow);
 
     render(<Titlebar title="测试标题" windowControls={controls} onBrandClick={onBrandClick} />);
@@ -106,12 +101,7 @@ describe("Titlebar", () => {
   });
 
   it("delegates titlebar gestures to injected Tauri controls", async () => {
-    const appWindow = {
-      minimize: vi.fn().mockResolvedValue(undefined),
-      toggleMaximize: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      startDragging: vi.fn().mockResolvedValue(undefined),
-    };
+    const appWindow = makeAppWindow();
     const controls = createWindowControls(async () => appWindow);
 
     render(
@@ -122,9 +112,10 @@ describe("Titlebar", () => {
       />,
     );
 
-    fireEvent.mouseDown(screen.getByLabelText("Keydex"), { button: 0 });
-    fireEvent.mouseDown(screen.getByText("测试标题"), { button: 0 });
-    fireEvent.mouseDown(screen.getByTestId("titlebar-right-drag-region"), { button: 0 });
+    expect(screen.getByText("测试标题").closest("[data-tauri-drag-region]")).not.toBeNull();
+    expect(screen.getByTestId("titlebar-right-drag-region").getAttribute("data-tauri-drag-region")).toBe("true");
+
+    fireEvent.mouseDown(screen.getByTestId("titlebar"), { button: 0 });
     fireEvent.doubleClick(screen.getByText("测试标题"));
 
     const minimizeIcon = screen.getByLabelText("最小化").querySelector("svg");
@@ -132,15 +123,57 @@ describe("Titlebar", () => {
     fireEvent.mouseDown(screen.getByRole("button", { name: "工作台模式" }), { button: 0 });
     fireEvent.mouseDown(minimizeIcon as SVGElement, { button: 0 });
     fireEvent.click(minimizeIcon as SVGElement);
-    fireEvent.click(screen.getByLabelText("最大化或还原"));
+    fireEvent.click(screen.getByLabelText("最大化窗口"));
     fireEvent.click(screen.getByLabelText("关闭"));
 
     await vi.waitFor(() => {
       expect(appWindow.minimize).toHaveBeenCalledTimes(1);
       expect(appWindow.toggleMaximize).toHaveBeenCalledTimes(2);
       expect(appWindow.close).toHaveBeenCalledTimes(1);
-      expect(appWindow.startDragging).toHaveBeenCalledTimes(3);
+      expect(appWindow.startDragging).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("switches the maximize control between maximize and restore states", async () => {
+    let maximized = false;
+    let emitResize: (() => void) | null = null;
+    const appWindow = makeAppWindow({
+      isMaximized: vi.fn(async () => maximized),
+      onResized: vi.fn((handler: (event: unknown) => void) => {
+        emitResize = () => handler({ payload: { width: 1280, height: 820 } });
+        return Promise.resolve(vi.fn());
+      }),
+    });
+    const triggerResize = () => {
+      const currentEmitResize = emitResize as (() => void) | null;
+      currentEmitResize?.();
+    };
+    const controls = createWindowControls(async () => appWindow);
+
+    render(<Titlebar title="测试标题" windowControls={controls} />);
+
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText("最大化窗口").getAttribute("data-icon")).toBe("maximize");
+    });
+
+    maximized = true;
+    await act(async () => {
+      triggerResize();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText("还原窗口").getAttribute("data-icon")).toBe("restore");
+    });
+
+    maximized = false;
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("还原窗口"));
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText("最大化窗口").getAttribute("data-icon")).toBe("maximize");
+    });
+    expect(appWindow.toggleMaximize).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -155,5 +188,17 @@ function makeWorkspace(id: string, name: string): Workspace {
     updated_at: "2026-06-25T10:00:00Z",
     last_opened_at: null,
     is_deleted: false,
+  };
+}
+
+function makeAppWindow(overrides: Record<string, unknown> = {}) {
+  return {
+    minimize: vi.fn().mockResolvedValue(undefined),
+    toggleMaximize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    startDragging: vi.fn().mockResolvedValue(undefined),
+    isMaximized: vi.fn().mockResolvedValue(false),
+    onResized: vi.fn().mockResolvedValue(vi.fn()),
+    ...overrides,
   };
 }

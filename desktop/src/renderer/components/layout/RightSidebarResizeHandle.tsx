@@ -18,6 +18,7 @@ interface RightSidebarResizeHandleProps {
   disabled?: boolean;
   ratio: number;
   maxRatio?: number;
+  getMaxRatio?: () => number;
   placement: RightSidebarPlacement;
   getAvailableWidth: () => number;
   onResizePreview?: (ratio: number) => void;
@@ -60,6 +61,7 @@ export function RightSidebarResizeHandle({
   disabled = false,
   ratio,
   maxRatio = MAX_RIGHT_SIDEBAR_RATIO,
+  getMaxRatio,
   placement,
   getAvailableWidth,
   onResizePreview,
@@ -67,18 +69,23 @@ export function RightSidebarResizeHandle({
   onResizeDragChange,
   onSwapPlacement,
 }: RightSidebarResizeHandleProps) {
-  const boundedMaxRatio = Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.min(MAX_RIGHT_SIDEBAR_RATIO, maxRatio));
+  const getBoundedMaxRatio = useCallback(
+    () => Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.min(MAX_RIGHT_SIDEBAR_RATIO, getMaxRatio?.() ?? maxRatio)),
+    [getMaxRatio, maxRatio],
+  );
+  const boundedMaxRatio = getBoundedMaxRatio();
   const clampRatio = useCallback(
     (nextRatio: number) => {
+      const liveMaxRatio = getBoundedMaxRatio();
       if (!Number.isFinite(nextRatio)) {
-        return Math.min(DEFAULT_RIGHT_SIDEBAR_RATIO, boundedMaxRatio);
+        return Math.min(DEFAULT_RIGHT_SIDEBAR_RATIO, liveMaxRatio);
       }
       return Math.min(
-        boundedMaxRatio,
+        liveMaxRatio,
         Math.max(MIN_RIGHT_SIDEBAR_RATIO, Math.round(nextRatio * 1000) / 1000),
       );
     },
-    [boundedMaxRatio],
+    [getBoundedMaxRatio],
   );
   const getDragRatio = useCallback(
     (startRatio: number, startX: number, clientX: number) => {

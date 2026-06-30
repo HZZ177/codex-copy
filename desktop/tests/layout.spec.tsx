@@ -153,6 +153,41 @@ describe("Layout", () => {
     expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
   });
 
+  it("updates right sidebar geometry during window resize without rerendering content", async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    let renderCount = 0;
+    function RenderProbe() {
+      renderCount += 1;
+      return <div>内容区</div>;
+    }
+
+    try {
+      setWindowInnerWidth(1024);
+      renderLayout(
+        <Layout>
+          <RenderProbe />
+        </Layout>,
+      );
+
+      const shell = screen.getByTestId("app-shell");
+      fireEvent.click(screen.getByLabelText("展开右侧栏"));
+
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 332px");
+      const renderCountAfterOpen = renderCount;
+
+      setWindowInnerWidth(900);
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+        await nextAnimationFrame();
+      });
+
+      expect(shell.getAttribute("style")).toContain("--right-sidebar-width: 276px");
+      expect(renderCount).toBe(renderCountAfterOpen);
+    } finally {
+      restoreWindowInnerWidth(originalInnerWidth);
+    }
+  });
+
   it("keeps the shared right sidebar unavailable in workbench mode", () => {
     renderLayout(
       <Layout appMode="workbench" contentMode="full">
@@ -746,6 +781,27 @@ async function settleEffects() {
     await new Promise<void>((resolve) => {
       window.setTimeout(resolve, 0);
     });
+  });
+}
+
+function setWindowInnerWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+  });
+}
+
+function restoreWindowInnerWidth(descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(window, "innerWidth", descriptor);
+    return;
+  }
+  delete (window as { innerWidth?: number }).innerWidth;
+}
+
+async function nextAnimationFrame() {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
   });
 }
 

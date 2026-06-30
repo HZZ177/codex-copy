@@ -1,6 +1,6 @@
-import { Minus, Square, X } from "lucide-react";
+import { Copy, Minus, Square, X } from "lucide-react";
 import type { MouseEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppMode } from "@/renderer/components/layout/appMode";
 import type { WorkbenchWorkspaceSelectorProps } from "@/renderer/components/layout/workbenchWorkspaceSelector";
@@ -31,22 +31,61 @@ export function Titlebar({
   onBrandClick,
 }: TitlebarProps) {
   const controls = useMemo(() => windowControls ?? createWindowControls(), [windowControls]);
+  const [isMaximized, setIsMaximized] = useState(false);
   const titlebarWorkspaceSelector =
     modeSwitch?.currentMode === "workbench" ? workbenchWorkspaceSelector : undefined;
 
+  const syncMaximizedState = useCallback(async () => {
+    const result = await controls.isMaximized();
+    if (result.ok && typeof result.value === "boolean") {
+      setIsMaximized(result.value);
+    }
+  }, [controls]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    void (async () => {
+      const result = await controls.isMaximized();
+      if (!disposed && result.ok && typeof result.value === "boolean") {
+        setIsMaximized(result.value);
+      }
+    })();
+
+    const subscription = controls.onMaximizedChange((maximized) => {
+      if (!disposed) {
+        setIsMaximized(maximized);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      void subscription.then((result) => result.unlisten?.());
+    };
+  }, [controls]);
+
   const handleDrag = (event: MouseEvent<HTMLElement>) => {
-    if (event.button !== 0 || isInteractiveTitlebarTarget(event.target)) {
+    if (event.button !== 0 || isInteractiveTitlebarTarget(event.target) || isNativeDragRegionTarget(event.target)) {
       return;
     }
     void controls.startDragging();
+  };
+
+  const handleToggleMaximize = async () => {
+    const result = await controls.toggleMaximize();
+    if (result.ok) {
+      await syncMaximizedState();
+    }
   };
 
   const handleDoubleClick = (event: MouseEvent<HTMLElement>) => {
     if (isInteractiveTitlebarTarget(event.target)) {
       return;
     }
-    void controls.toggleMaximize();
+    void handleToggleMaximize();
   };
+
+  const maximizeLabel = isMaximized ? "还原窗口" : "最大化窗口";
 
   return (
     <header
@@ -93,7 +132,12 @@ export function Titlebar({
         <div className={styles.title}>{title}</div>
       </div>
 
-      <div className={styles.right} data-testid="titlebar-right-drag-region">
+      <div className={styles.right}>
+        <div
+          className={styles.rightDragRegion}
+          data-testid="titlebar-right-drag-region"
+          data-tauri-drag-region
+        />
         <div className={styles.windowControls} role="group" aria-label="窗口控制" data-titlebar-interactive="true">
           <button
             className={styles.windowControl}
@@ -107,13 +151,13 @@ export function Titlebar({
           </button>
           <button
             className={styles.windowControl}
-            data-icon="maximize"
+            data-icon={isMaximized ? "restore" : "maximize"}
             type="button"
-            aria-label="最大化或还原"
-            title="最大化或还原"
-            onClick={() => void controls.toggleMaximize()}
+            aria-label={maximizeLabel}
+            title={maximizeLabel}
+            onClick={() => void handleToggleMaximize()}
           >
-            <Square size={14} strokeWidth={1.8} />
+            {isMaximized ? <Copy size={14} strokeWidth={1.8} /> : <Square size={14} strokeWidth={1.8} />}
           </button>
           <button
             className={`${styles.windowControl} ${styles.closeControl}`}
@@ -179,4 +223,8 @@ function isInteractiveTitlebarTarget(target: EventTarget | null) {
     target instanceof Element &&
     Boolean(target.closest("button, a, input, textarea, select, [role='button'], [data-titlebar-interactive='true']"))
   );
+}
+
+function isNativeDragRegionTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("[data-tauri-drag-region]"));
 }

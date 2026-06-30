@@ -15,6 +15,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -115,6 +116,32 @@ function clampRightSidebarRatioForLayout(ratio: number, maxRatio: number) {
   return Math.min(maxRatio, clampRightSidebarRatio(ratio));
 }
 
+function initialShellWidth() {
+  return typeof window === "undefined" ? 0 : Math.round(window.innerWidth);
+}
+
+function measureShellWidth(shell: HTMLElement | null) {
+  const rectWidth = shell?.getBoundingClientRect().width ?? 0;
+  return Math.round(rectWidth > 0 ? rectWidth : initialShellWidth());
+}
+
+function rightSidebarGeometryForShellWidth(
+  shellWidth: number,
+  activeSidebarWidth: number,
+  ratio: number,
+  guardContentMinWidth: boolean,
+) {
+  const availableWidth = Math.max(0, shellWidth - activeSidebarWidth);
+  const maxRatio = maxRightSidebarRatioWithContentGuard(availableWidth, guardContentMinWidth);
+  const effectiveRatio = clampRightSidebarRatioForLayout(ratio, maxRatio);
+  return {
+    availableWidth,
+    maxRatio,
+    ratio: effectiveRatio,
+    width: Math.round(availableWidth * effectiveRatio),
+  };
+}
+
 export interface LayoutProps extends PropsWithChildren {
   title?: string;
   appMode?: AppMode;
@@ -161,9 +188,10 @@ export function Layout({
   const lastPreviewScopeKeyRef = useRef<string | null>(previewContext?.activeScopeKey ?? null);
   const lastRightSidebarResetKeyRef = useRef<string | null>(null);
   const appModeNavigationTimerRef = useRef<number | null>(null);
+  const shellWidthRef = useRef(initialShellWidth());
+  const shellMeasureFrameRef = useRef<number | null>(null);
   const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
   const [productShowcasePhase, setProductShowcasePhase] = useState<ProductShowcaseOverlayPhase | null>(null);
-  const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   const { state, actions } = useLayoutState();
   const runtimeConnection = useOptionalRuntimeConnection();
   const collapsed = state.sidebarCollapsed;
@@ -177,22 +205,30 @@ export function Layout({
     shellRef.current?.style.setProperty(property, `${width}px`);
   }, []);
   const activeSidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : state.sidebarWidth;
-  const getRightSidebarAvailableWidth = useCallback(() => {
-    const rectWidth = shellRef.current?.getBoundingClientRect().width ?? 0;
-    const liveShellWidth = rectWidth > 0 ? rectWidth : typeof window === "undefined" ? shellWidth : window.innerWidth;
-    return Math.max(0, Math.round(liveShellWidth - activeSidebarWidth));
-  }, [activeSidebarWidth, shellWidth]);
-  const rightSidebarAvailableWidth = Math.max(0, shellWidth - activeSidebarWidth);
   const guardContentMinWidth = contentMode === "full";
-  const rightSidebarMaxRatio = maxRightSidebarRatioWithContentGuard(
-    rightSidebarAvailableWidth,
+  const activeSidebarWidthRef = useRef(activeSidebarWidth);
+  const rightSidebarRatioRef = useRef(state.rightSidebarRatio);
+  const guardContentMinWidthRef = useRef(guardContentMinWidth);
+  activeSidebarWidthRef.current = activeSidebarWidth;
+  rightSidebarRatioRef.current = state.rightSidebarRatio;
+  guardContentMinWidthRef.current = guardContentMinWidth;
+  const getRightSidebarAvailableWidth = useCallback(() => {
+    const liveShellWidth = measureShellWidth(shellRef.current);
+    shellWidthRef.current = liveShellWidth;
+    return Math.max(0, liveShellWidth - activeSidebarWidthRef.current);
+  }, []);
+  const rightSidebarGeometry = rightSidebarGeometryForShellWidth(
+    shellWidthRef.current,
+    activeSidebarWidth,
+    state.rightSidebarRatio,
     guardContentMinWidth,
   );
-  const rightSidebarRatio = clampRightSidebarRatioForLayout(state.rightSidebarRatio, rightSidebarMaxRatio);
-  const rightSidebarWidth = Math.round(rightSidebarAvailableWidth * rightSidebarRatio);
+  const rightSidebarMaxRatio = rightSidebarGeometry.maxRatio;
+  const rightSidebarRatio = rightSidebarGeometry.ratio;
+  const rightSidebarWidth = rightSidebarGeometry.width;
   const getRightSidebarMaxRatio = useCallback(
-    (availableWidth: number) => maxRightSidebarRatioWithContentGuard(availableWidth, guardContentMinWidth),
-    [guardContentMinWidth],
+    (availableWidth: number) => maxRightSidebarRatioWithContentGuard(availableWidth, guardContentMinWidthRef.current),
+    [],
   );
   const previewSidebarWidth = useCallback(
     (width: number) => setLivePanelWidth("--sidebar-width", width),
@@ -211,6 +247,39 @@ export function Layout({
     },
     [getRightSidebarAvailableWidth, getRightSidebarMaxRatio],
   );
+  const getLiveRightSidebarMaxRatio = useCallback(
+    () => getRightSidebarMaxRatio(getRightSidebarAvailableWidth()),
+    [getRightSidebarAvailableWidth, getRightSidebarMaxRatio],
+  );
+  const applyRightSidebarGeometry = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+    const measuredWidth = measureShellWidth(shell);
+    shellWidthRef.current = measuredWidth;
+    const geometry = rightSidebarGeometryForShellWidth(
+      measuredWidth,
+      activeSidebarWidthRef.current,
+      rightSidebarRatioRef.current,
+      guardContentMinWidthRef.current,
+    );
+    shell.style.setProperty("--right-sidebar-ratio", String(geometry.ratio));
+    shell.style.setProperty("--right-sidebar-width", `${geometry.width}px`);
+  }, []);
+  const scheduleRightSidebarGeometry = useCallback(() => {
+    if (typeof window === "undefined") {
+      applyRightSidebarGeometry();
+      return;
+    }
+    if (shellMeasureFrameRef.current !== null) {
+      return;
+    }
+    shellMeasureFrameRef.current = window.requestAnimationFrame(() => {
+      shellMeasureFrameRef.current = null;
+      applyRightSidebarGeometry();
+    });
+  }, [applyRightSidebarGeometry]);
   const setRightSidebarResizing = useCallback((resizing: boolean) => {
     const shell = shellRef.current;
     if (!shell) {
@@ -228,24 +297,27 @@ export function Layout({
     if (!shell) {
       return;
     }
-    const measureShellWidth = () => {
-      const rectWidth = shell.getBoundingClientRect().width;
-      const measuredWidth = rectWidth > 0 ? rectWidth : typeof window === "undefined" ? 0 : window.innerWidth;
-      setShellWidth(Math.round(measuredWidth));
-    };
-    measureShellWidth();
+    scheduleRightSidebarGeometry();
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", measureShellWidth);
-      return () => window.removeEventListener("resize", measureShellWidth);
+      window.addEventListener("resize", scheduleRightSidebarGeometry);
+      return () => window.removeEventListener("resize", scheduleRightSidebarGeometry);
     }
-    const observer = new ResizeObserver(measureShellWidth);
+    const observer = new ResizeObserver(scheduleRightSidebarGeometry);
     observer.observe(shell);
-    window.addEventListener("resize", measureShellWidth);
+    window.addEventListener("resize", scheduleRightSidebarGeometry);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", measureShellWidth);
+      window.removeEventListener("resize", scheduleRightSidebarGeometry);
+      if (shellMeasureFrameRef.current !== null) {
+        window.cancelAnimationFrame(shellMeasureFrameRef.current);
+        shellMeasureFrameRef.current = null;
+      }
     };
-  }, []);
+  }, [scheduleRightSidebarGeometry]);
+
+  useLayoutEffect(() => {
+    applyRightSidebarGeometry();
+  }, [activeSidebarWidth, applyRightSidebarGeometry, guardContentMinWidth, state.rightSidebarRatio]);
 
   useEffect(() => {
     const activeScopeKey = previewContext?.activeScopeKey ?? null;
@@ -572,6 +644,7 @@ export function Layout({
               disabled={!rightSidebarOpen || rightSidebarMaximized}
               ratio={rightSidebarRatio}
               maxRatio={rightSidebarMaxRatio}
+              getMaxRatio={getLiveRightSidebarMaxRatio}
               placement={state.rightSidebarPlacement}
               getAvailableWidth={getRightSidebarAvailableWidth}
               onResizePreview={previewRightSidebarRatio}
