@@ -1,6 +1,8 @@
 import { Check, ChevronDown, Search } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 
+import { FloatingLayer } from "@/renderer/components/floating";
+
 import styles from "./SearchableModelDropdown.module.css";
 
 export interface SearchableModelDropdownValue {
@@ -57,6 +59,7 @@ export function SearchableModelDropdown({
 }: SearchableModelDropdownProps) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const menuCloseTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
@@ -119,7 +122,11 @@ export function SearchableModelDropdown({
       return;
     }
     const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) {
         closeMenu();
       }
     };
@@ -266,7 +273,7 @@ export function SearchableModelDropdown({
           aria-label={ariaLabel}
           aria-haspopup="listbox"
           aria-expanded={open ? "true" : "false"}
-          aria-controls={open ? menuId : undefined}
+          aria-controls={menuVisible ? menuId : undefined}
           title={title ?? ariaLabel}
           disabled={disabledButton}
           onClick={toggleMenu}
@@ -275,90 +282,94 @@ export function SearchableModelDropdown({
           <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
         </button>
 
-        {menuVisible ? (
-          <div
-            className={styles.menu}
-            data-placement={placement}
-            data-state={menuClosing ? "closing" : "open"}
-            data-variant={variant}
-            aria-hidden={menuClosing ? "true" : undefined}
-          >
-            <div className={styles.menuLabel}>{menuLabel}</div>
-            <label className={styles.searchBox}>
-              <Search size={13} strokeWidth={1.9} aria-hidden="true" />
-              <input
-                aria-label="筛选模型"
-                aria-activedescendant={activeOptionId}
-                aria-controls={menuId}
-                autoFocus
-                placeholder={searchPlaceholder}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-              />
-            </label>
-            <div className={styles.optionList} id={menuId} role="listbox" aria-label={menuLabel}>
-              {rows.length ? (
-                rows.map((row) => {
-                  if (row.kind === "clear") {
-                    const active = activeChoiceIndex === 0;
-                    return (
-                      <button
-                        className={styles.option}
-                        data-clear="true"
-                        data-active={active ? "true" : undefined}
-                        key="clear"
-                        id={`${menuId}-option-0`}
-                        type="button"
-                        role="option"
-                        aria-selected={!value ? "true" : "false"}
-                        ref={(element) => setOptionRef(optionIdForClear(), element, optionRefs.current)}
-                        onClick={clearValue}
-                      >
-                        <span>{clearLabel}</span>
-                        {!value ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
-                      </button>
-                    );
-                  }
-                  if (row.kind === "provider") {
-                    return (
-                      <div className={styles.providerHeader} key={`provider:${row.providerId}`}>
-                        {row.providerName}
-                      </div>
-                    );
-                  }
-                  const key = optionKey(row.option.providerId, row.option.model);
-                  const selected = key === selectedKey;
-                  const active = row.choiceIndex === activeChoiceIndex;
+      </div>
+      {menuVisible ? (
+        <FloatingLayer
+          alignment={variant === "field" ? "end" : "start"}
+          anchorRef={rootRef}
+          className={styles.menu}
+          floatingRef={menuRef}
+          matchAnchorWidth={variant === "field"}
+          placement={placement}
+          data-state={menuClosing ? "closing" : "open"}
+          data-variant={variant}
+          aria-hidden={menuClosing ? "true" : undefined}
+        >
+          <div className={styles.menuLabel}>{menuLabel}</div>
+          <label className={styles.searchBox}>
+            <Search size={13} strokeWidth={1.9} aria-hidden="true" />
+            <input
+              aria-label="筛选模型"
+              aria-activedescendant={activeOptionId}
+              aria-controls={menuId}
+              autoFocus
+              placeholder={searchPlaceholder}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+            />
+          </label>
+          <div className={styles.optionList} id={menuId} role="listbox" aria-label={menuLabel}>
+            {rows.length ? (
+              rows.map((row) => {
+                if (row.kind === "clear") {
+                  const active = activeChoiceIndex === 0;
                   return (
                     <button
                       className={styles.option}
-                      key={key}
-                      id={`${menuId}-option-${row.choiceIndex}`}
+                      data-clear="true"
+                      data-active={active ? "true" : undefined}
+                      key="clear"
+                      id={`${menuId}-option-0`}
                       type="button"
                       role="option"
-                      aria-selected={selected ? "true" : "false"}
-                      data-active={active ? "true" : undefined}
-                      ref={(element) => setOptionRef(key, element, optionRefs.current)}
-                      onClick={() => chooseModel(row.option)}
+                      aria-selected={!value ? "true" : "false"}
+                      ref={(element) => setOptionRef(optionIdForClear(), element, optionRefs.current)}
+                      onClick={clearValue}
                     >
-                      <span>{row.option.model}</span>
-                      {selected ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
+                      <span>{clearLabel}</span>
+                      {!value ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
                     </button>
                   );
-                })
-              ) : (
-                <EmptyState
-                  actionLabel={emptyActionLabel}
-                  actionSuffix={emptyActionSuffix}
-                  onAction={onEmptyAction ? handleEmptyAction : undefined}
-                  text={emptyText}
-                />
-              )}
-            </div>
+                }
+                if (row.kind === "provider") {
+                  return (
+                    <div className={styles.providerHeader} key={`provider:${row.providerId}`}>
+                      {row.providerName}
+                    </div>
+                  );
+                }
+                const key = optionKey(row.option.providerId, row.option.model);
+                const selected = key === selectedKey;
+                const active = row.choiceIndex === activeChoiceIndex;
+                return (
+                  <button
+                    className={styles.option}
+                    key={key}
+                    id={`${menuId}-option-${row.choiceIndex}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected ? "true" : "false"}
+                    data-active={active ? "true" : undefined}
+                    ref={(element) => setOptionRef(key, element, optionRefs.current)}
+                    onClick={() => chooseModel(row.option)}
+                  >
+                    <span>{row.option.model}</span>
+                    {selected ? <Check size={14} strokeWidth={1.9} aria-hidden="true" /> : null}
+                  </button>
+                );
+              })
+            ) : (
+              <EmptyState
+                actionLabel={emptyActionLabel}
+                actionSuffix={emptyActionSuffix}
+                onAction={onEmptyAction ? handleEmptyAction : undefined}
+                text={emptyText}
+              />
+            )}
           </div>
-        ) : null}
-      </div>
+        </FloatingLayer>
+      ) : null}
     </div>
   );
 }

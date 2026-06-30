@@ -102,11 +102,6 @@
 }
 
 .menu {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  bottom: auto;
-  z-index: 90;
   display: grid;
   width: max(100%, 300px);
   max-width: min(360px, calc(100vw - 28px));
@@ -130,8 +125,8 @@
 }
 
 .menu[data-variant="field"] {
-  right: 0;
-  left: auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .menu[data-state="closing"] {
@@ -143,10 +138,6 @@
 }
 
 .menu[data-placement="top"] {
-  right: 0;
-  left: auto;
-  top: auto;
-  bottom: calc(100% + 8px);
   transform-origin: right bottom;
   animation-name: menuEnterFromBottom;
 }
@@ -305,9 +296,7 @@
     max-width: min(100%, 280px);
   }
 
-  .menu,
   .menu[data-variant="pill"] {
-    left: 0;
     width: min(292px, calc(100vw - 28px));
     min-width: 0;
   }

@@ -1,0 +1,4 @@
+.layer {
+  box-sizing: border-box;
+  z-index: var(--floating-layer-z-index, 240);
+}

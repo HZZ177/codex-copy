@@ -1,10 +1,11 @@
-import { Check, ChevronDown, Download, Laptop, Power, Type } from "lucide-react";
+import { Check, Download, Laptop, Power, Type } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { useFontPreference, type AppFontFamily, type FontDownloadProgress } from "@/renderer/providers/FontProvider";
 import type { CloseWindowBehavior, GeneralSettings } from "@/types/protocol";
+import { SettingsSelect } from "@/renderer/pages/settings/components";
 
 import styles from "./GeneralSettingsPage.module.css";
 
@@ -61,12 +62,9 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
   const [general, setGeneral] = useState<GeneralSettings>(DEFAULT_GENERAL_SETTINGS);
   const [generalLoading, setGeneralLoading] = useState(true);
   const [generalSaving, setGeneralSaving] = useState(false);
-  const [closeBehaviorMenuOpen, setCloseBehaviorMenuOpen] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const downloading = font.status === "downloading";
   const showProgress = downloading && font.downloadingFamily !== null;
-  const currentCloseBehaviorOption =
-    closeBehaviorOptions.find((option) => option.value === general.close_window_behavior) ?? null;
 
   useEffect(() => {
     let active = true;
@@ -96,7 +94,6 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
   }, [runtime]);
 
   const chooseCloseBehavior = (behavior: CloseWindowBehavior) => {
-    setCloseBehaviorMenuOpen(false);
     if (generalSaving || general.close_window_behavior === behavior) {
       return;
     }
@@ -135,11 +132,7 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
         </div>
       </header>
 
-      <section
-        className={styles.section}
-        data-layer={closeBehaviorMenuOpen ? "raised" : undefined}
-        aria-labelledby="behavior-settings-title"
-      >
+      <section className={styles.section} aria-labelledby="behavior-settings-title">
         <h2 className={styles.groupTitle} id="behavior-settings-title">应用行为</h2>
         <div className={styles.settingsPanel}>
           <div className={styles.settingRow}>
@@ -153,55 +146,14 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
               </div>
             </header>
 
-            <div
-              className={styles.policyMenu}
-              data-open={closeBehaviorMenuOpen ? "true" : "false"}
-              onBlur={(event) => {
-                const nextTarget = event.relatedTarget;
-                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                  setCloseBehaviorMenuOpen(false);
-                }
-              }}
-            >
-              <button
-                aria-expanded={closeBehaviorMenuOpen}
-                aria-haspopup="listbox"
-                aria-label={`关闭窗口后行为：${currentCloseBehaviorOption?.label ?? "选择默认策略"}`}
-                className={styles.policyTrigger}
-                disabled={generalLoading || generalSaving}
-                type="button"
-                onClick={() => setCloseBehaviorMenuOpen((open) => !open)}
-              >
-                <span className={styles.policyTriggerText}>
-                  <strong>{currentCloseBehaviorOption?.label ?? "选择默认策略"}</strong>
-                </span>
-                <ChevronDown aria-hidden="true" data-open={closeBehaviorMenuOpen ? "true" : "false"} size={16} />
-              </button>
-              {closeBehaviorMenuOpen ? (
-                <div className={styles.policyDropdown} role="listbox" aria-label="关闭窗口后行为选项">
-                  {closeBehaviorOptions.map((option) => {
-                    const active = option.value === general.close_window_behavior;
-                    return (
-                      <button
-                        aria-selected={active}
-                        className={styles.policyOption}
-                        data-active={active ? "true" : "false"}
-                        key={option.value}
-                        role="option"
-                        type="button"
-                        onClick={() => chooseCloseBehavior(option.value)}
-                      >
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                        {active ? <Check aria-hidden="true" size={15} /> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
+            <SettingsSelect
+              ariaLabel="关闭窗口后行为"
+              disabled={generalLoading || generalSaving}
+              onChange={chooseCloseBehavior}
+              options={closeBehaviorOptions}
+              placeholder="选择默认策略"
+              value={general.close_window_behavior}
+            />
           </div>
 
           {generalError ? (
