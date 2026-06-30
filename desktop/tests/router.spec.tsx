@@ -245,7 +245,7 @@ describe("AppRouter", () => {
     });
 
     expect(await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 })).not.toBeNull();
-    const shell = screen.getByTestId("app-shell");
+    const shell = await screen.findByTestId("app-shell", undefined, { timeout: 10000 });
     expect(shell.dataset.rightSidebarEnabled).toBe("false");
     expect(shell.dataset.rightSidebar).toBe("closed");
 
@@ -294,7 +294,7 @@ describe("AppRouter", () => {
   it("switches the workbench assistant between capsule, expanded layer and drawer", async () => {
     renderRouter(["/workbench/workspace%20A/session/session%201"]);
 
-    const shell = screen.getByTestId("app-shell");
+    const shell = await screen.findByTestId("app-shell", undefined, { timeout: 10000 });
     const workspaceShell = await screen.findByTestId("workbench-workspace-shell", undefined, { timeout: 10000 });
     const canvasContent = screen.getByTestId("workbench-canvas-content");
     expect(shell.dataset.rightSidebarEnabled).toBe("false");
@@ -384,12 +384,42 @@ describe("AppRouter", () => {
     expect(screen.getByTestId("workbench-assistant-drawer")).not.toBeNull();
     expect(surface.getAttribute("data-dock-layout")).toBe("inline");
     expect(surface.getAttribute("data-dock-transition")).toBe("idle");
+    expect(workspaceShell.getAttribute("data-assistant-drawer-inline")).toBe("true");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("false");
     expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
+    expect(workspaceShell.style.getPropertyValue("--workbench-assistant-dock-inline-size")).toBe("360px");
     expect(canvasContent.getAttribute("data-render-paused")).toBeNull();
     expect(screen.queryByTestId("workbench-dock-transition-loading")).toBeNull();
     expect(screen.getByTestId("workbench-assistant-shell")).toBe(assistantShell);
     expect(assistantShell.getAttribute("data-transition-phase")).toBe("idle");
+
+    const drawerResizeHandle = screen.getByTestId("workbench-assistant-drawer-resize-handle");
+    act(() => {
+      dispatchPointer(drawerResizeHandle, "pointerdown", { button: 0, pointerId: 12, clientX: 400 });
+    });
+    await waitFor(() => {
+      expect(drawerResizeHandle.getAttribute("data-dragging")).toBe("true");
+    });
+    expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
+    expect(surface.getAttribute("data-drawer-resizing")).toBe("true");
+    act(() => {
+      dispatchPointer(window, "pointermove", { pointerId: 12, clientX: 340 });
+    });
+    await waitFor(() => {
+      expect(workspaceShell.style.getPropertyValue("--workbench-assistant-dock-inline-size")).toBe("420px");
+      expect(surface.style.getPropertyValue("--workbench-assistant-dock-inline-size")).toBe("420px");
+      expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("idle");
+    });
+    act(() => {
+      dispatchPointer(window, "pointerup", { pointerId: 12, clientX: 340 });
+    });
+    await waitFor(() => {
+      expect(surface.getAttribute("data-drawer-resizing")).toBe("false");
+    });
+    fireEvent.doubleClick(drawerResizeHandle);
+    await waitFor(() => {
+      expect(workspaceShell.style.getPropertyValue("--workbench-assistant-dock-inline-size")).toBe("360px");
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "关闭工作台助手侧栏" }));
     expect(screen.queryByTestId("workbench-assistant-drawer")).toBeNull();
@@ -401,6 +431,7 @@ describe("AppRouter", () => {
     expect(surface.getAttribute("data-geometry-mode")).toBe("composer");
     expect(surface.getAttribute("data-dock-layout")).toBe("overlay");
     expect(surface.getAttribute("data-dock-transition")).toBe("dock-out");
+    expect(workspaceShell.getAttribute("data-assistant-drawer-inline")).toBe("false");
     expect(workspaceShell.getAttribute("data-dock-transitioning")).toBe("true");
     expect(workspaceShell.getAttribute("data-dock-transition-phase")).toBe("dock-out");
     expect(canvasContent.isConnected).toBe(true);
@@ -747,6 +778,14 @@ function WorkbenchFileOpenProbe() {
       测试打开工作台文件
     </button>
   );
+}
+
+function dispatchPointer(target: EventTarget, type: string, props: Record<string, number>) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [key, value] of Object.entries(props)) {
+    Object.defineProperty(event, key, { configurable: true, value });
+  }
+  target.dispatchEvent(event);
 }
 
 function fakeChannel(onStatus?: (status: WsConnectionStatus) => void, chat: ReturnType<typeof vi.fn> = vi.fn()): ChatChannel {

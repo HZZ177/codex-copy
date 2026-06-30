@@ -15,6 +15,7 @@ const APP_ICON_SRC = "/favicon-32.png";
 export interface TitlebarProps {
   title: string;
   windowControls?: WindowControls;
+  onBrandClick?: () => void;
   modeSwitch?: {
     currentMode: AppMode;
     onModeChange: (mode: AppMode) => void;
@@ -27,6 +28,7 @@ export function Titlebar({
   modeSwitch,
   workbenchWorkspaceSelector,
   windowControls,
+  onBrandClick,
 }: TitlebarProps) {
   const controls = useMemo(() => windowControls ?? createWindowControls(), [windowControls]);
   const titlebarWorkspaceSelector =
@@ -54,9 +56,22 @@ export function Titlebar({
       onDoubleClick={handleDoubleClick}
     >
       <div className={styles.left}>
-        <div className={styles.brandMark} role="img" aria-label="Keydex">
-          <img alt="" draggable={false} src={APP_ICON_SRC} />
-        </div>
+        {onBrandClick ? (
+          <button
+            className={styles.brandMark}
+            type="button"
+            aria-label="Keydex"
+            title="Keydex"
+            data-titlebar-interactive="true"
+            onClick={onBrandClick}
+          >
+            <img alt="" draggable={false} src={APP_ICON_SRC} />
+          </button>
+        ) : (
+          <div className={styles.brandMark} role="img" aria-label="Keydex">
+            <img alt="" draggable={false} src={APP_ICON_SRC} />
+          </div>
+        )}
         {modeSwitch ? <ModeSwitch modeSwitch={modeSwitch} /> : null}
         {titlebarWorkspaceSelector ? (
           <div

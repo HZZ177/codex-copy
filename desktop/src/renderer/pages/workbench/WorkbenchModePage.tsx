@@ -3,11 +3,14 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import type { RuntimeBridge } from "@/runtime";
 import { WorkspaceFileBrowser, WorkspaceSelector, type WorkspaceSelection } from "@/renderer/components/workspace";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
+import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
+import { clampWorkbenchAssistantDrawerWidth } from "@/renderer/hooks/layout/layoutStore";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { useOptionalPreview, type PreviewFileRevealTarget } from "@/renderer/providers/PreviewProvider";
 import type { AgentSession, Workspace } from "@/types/protocol";
 
 import {
+  resolveWorkbenchAssistantDockInlineWidth,
   WorkbenchAssistantSurface,
   type WorkbenchAssistantDockTransitionState,
 } from "./WorkbenchAssistantSurface";
@@ -51,6 +54,8 @@ export function WorkbenchModePage({
   onRequestNewSession,
 }: WorkbenchModePageProps) {
   const previewContext = useOptionalPreview();
+  const layout = useLayoutState();
+  const workspaceShellRef = useRef<HTMLElement | null>(null);
   const handledFilePanelRequestIdRef = useRef(previewContext?.filePanelRequest?.requestId ?? 0);
   const [creatingSession, setCreatingSession] = useState(false);
   const [dockTransitioning, setDockTransitioning] = useState(false);
@@ -69,6 +74,34 @@ export function WorkbenchModePage({
   const workspaceLabel = selectedWorkspace?.root_path ?? selectedWorkspace?.name ?? workspaceId;
   const showPicker = !workspaceId;
   const showWorkspaceUnavailable = Boolean(workspaceId && workspaceError && !selectedWorkspace);
+  const drawerWidth = layout.state.workbenchAssistantDrawerWidth;
+  const drawerInlineWidth = resolveWorkbenchAssistantDockInlineWidth(
+    drawerWidth,
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+  const assistantDrawerInline =
+    dockTransitionLayout.reservedWidth > 0 &&
+    (dockTransitionLayout.phase === "idle" || dockTransitionLayout.phase === "resize");
+  const applyDrawerInlineWidth = useCallback((width: number) => {
+    const nextInlineWidth = resolveWorkbenchAssistantDockInlineWidth(
+      clampWorkbenchAssistantDrawerWidth(width),
+      typeof window === "undefined" ? 1280 : window.innerWidth,
+    );
+    workspaceShellRef.current?.style.setProperty("--workbench-assistant-dock-inline-size", `${nextInlineWidth}px`);
+  }, []);
+  const previewDrawerWidth = useCallback((width: number) => {
+    applyDrawerInlineWidth(width);
+  }, [applyDrawerInlineWidth]);
+  const commitDrawerWidth = useCallback(
+    (width: number) => {
+      applyDrawerInlineWidth(width);
+      layout.actions.setWorkbenchAssistantDrawerWidth(width);
+    },
+    [applyDrawerInlineWidth, layout.actions],
+  );
+  const updateDockTransitionLayout = useCallback((state: WorkbenchAssistantDockTransitionState) => {
+    setDockTransitionLayout(state);
+  }, []);
   const ensureWorkbenchSession = useCallback(
     async ({ title, model }: { title: string; model?: { providerId: string; model: string } | null }) => {
       if (!workspaceId) {
@@ -186,12 +219,15 @@ export function WorkbenchModePage({
         </main>
       ) : (
         <main
+          ref={workspaceShellRef}
           className={styles.workspace}
           data-testid="workbench-workspace-shell"
+          data-assistant-drawer-inline={assistantDrawerInline ? "true" : "false"}
           data-dock-transitioning={dockTransitioning ? "true" : "false"}
           data-dock-transition-phase={dockTransitionLayout.phase}
           style={
             {
+              "--workbench-assistant-dock-inline-size": `${drawerInlineWidth}px`,
               "--workbench-dock-reserved-width": `${dockTransitionLayout.reservedWidth}px`,
             } as CSSProperties
           }
@@ -220,9 +256,13 @@ export function WorkbenchModePage({
             workspace={selectedWorkspace}
             controller={assistantController}
             creatingSession={creatingSession}
+            drawerInlineWidth={drawerInlineWidth}
+            drawerWidth={drawerWidth}
             onRequestNewSession={onRequestNewSession ? requestNewWorkbenchSession : undefined}
+            onDrawerWidthCommit={commitDrawerWidth}
+            onDrawerWidthPreview={previewDrawerWidth}
             onDockTransitionChange={setDockTransitioning}
-            onDockTransitionLayoutChange={setDockTransitionLayout}
+            onDockTransitionLayoutChange={updateDockTransitionLayout}
           />
         </main>
       )}

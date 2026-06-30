@@ -46,6 +46,7 @@ import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Sider } from "./Sider";
 import { Titlebar } from "./Titlebar";
+import { ProductShowcaseOverlay, type ProductShowcaseOverlayPhase } from "./ProductShowcaseOverlay";
 import styles from "./Layout.module.css";
 import type { SiderEntry } from "./Sider";
 import type { WorkbenchWorkspaceSelectorProps } from "./workbenchWorkspaceSelector";
@@ -161,6 +162,7 @@ export function Layout({
   const lastRightSidebarResetKeyRef = useRef<string | null>(null);
   const appModeNavigationTimerRef = useRef<number | null>(null);
   const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
+  const [productShowcasePhase, setProductShowcasePhase] = useState<ProductShowcaseOverlayPhase | null>(null);
   const [shellWidth, setShellWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   const { state, actions } = useLayoutState();
   const runtimeConnection = useOptionalRuntimeConnection();
@@ -451,6 +453,18 @@ export function Layout({
     [activePath, appMode, clearAppModeNavigationTimer, modeSwitchTargets, onNavigate],
   );
 
+  const openProductShowcase = useCallback(() => {
+    setProductShowcasePhase("open");
+  }, []);
+
+  const closeProductShowcase = useCallback(() => {
+    setProductShowcasePhase((phase) => (phase ? "exiting" : phase));
+  }, []);
+
+  const handleProductShowcaseExited = useCallback(() => {
+    setProductShowcasePhase(null);
+  }, []);
+
   useEffect(() => () => clearAppModeNavigationTimer(), [clearAppModeNavigationTimer]);
 
   useEffect(() => {
@@ -495,6 +509,7 @@ export function Layout({
     >
       <Titlebar
         title={title}
+        onBrandClick={openProductShowcase}
         modeSwitch={{
           currentMode: appMode,
           onModeChange: switchAppMode,
@@ -575,6 +590,13 @@ export function Layout({
           </>
         ) : null}
       </div>
+      {productShowcasePhase ? (
+        <ProductShowcaseOverlay
+          phase={productShowcasePhase}
+          onRequestClose={closeProductShowcase}
+          onExited={handleProductShowcaseExited}
+        />
+      ) : null}
     </div>
   );
 }

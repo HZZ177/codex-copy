@@ -123,7 +123,11 @@ export interface WorkbenchAssistantSurfaceProps {
   workspace?: Workspace | null;
   controller: AgentSessionController;
   creatingSession?: boolean;
+  drawerWidth?: number;
+  drawerInlineWidth?: number;
   onRequestNewSession?: () => Promise<void> | void;
+  onDrawerWidthPreview?: (width: number) => void;
+  onDrawerWidthCommit?: (width: number) => void;
   onDockTransitionChange?: (transitioning: boolean) => void;
   onDockTransitionLayoutChange?: (state: WorkbenchAssistantDockTransitionState) => void;
 }
@@ -134,7 +138,11 @@ export function WorkbenchAssistantSurface({
   workspace = null,
   controller,
   creatingSession = false,
+  drawerWidth: controlledDrawerWidth,
+  drawerInlineWidth: controlledDrawerInlineWidth,
   onRequestNewSession,
+  onDrawerWidthPreview,
+  onDrawerWidthCommit,
   onDockTransitionChange,
   onDockTransitionLayoutChange,
 }: WorkbenchAssistantSurfaceProps) {
@@ -167,7 +175,7 @@ export function WorkbenchAssistantSurface({
   const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
   const [fileAccessMode, setFileAccessMode] = useState<FileAccessMode>("workspace_trusted");
   const [expandedBottomGap, setExpandedBottomGap] = useState(160);
-  const [drawerWidthPreview, setDrawerWidthPreview] = useState<number | null>(null);
+  const [uncontrolledDrawerWidthPreview, setUncontrolledDrawerWidthPreview] = useState<number | null>(null);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
     useState<MessageListTurnNavigationRequest | null>(null);
   const modelSelection = useRuntimeModelSelection(runtime, null);
@@ -210,8 +218,11 @@ export function WorkbenchAssistantSurface({
   const canSend = controller.canSend && !creatingSession && Boolean(workspaceId);
   const canStop = controller.canStop;
   const selectedModel = modelSelection.selectedModel;
-  const drawerWidth = drawerWidthPreview ?? layout.state.workbenchAssistantDrawerWidth;
-  const dockInlineWidth = resolveDockInlineWidth(drawerWidth);
+  const drawerWidth =
+    controlledDrawerWidth ?? uncontrolledDrawerWidthPreview ?? layout.state.workbenchAssistantDrawerWidth;
+  const dockInlineWidth =
+    controlledDrawerInlineWidth ??
+    resolveWorkbenchAssistantDockInlineWidth(drawerWidth, typeof window === "undefined" ? 1280 : window.innerWidth);
   const surfaceMode = assistantState.mode;
   const restingBottomTargetMode: AssistantSurfaceMode =
     surfaceMode === "composer" || surfaceMode === "expanded" ? "composer" : "capsule";
@@ -291,22 +302,54 @@ export function WorkbenchAssistantSurface({
   const dockLayout = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out" ? "inline" : "overlay";
   const renderDrawerContent = surfaceMode === "drawer" && dockTransitionPhase !== "dock-out";
   const bottomSessionTitleVisible = sessionTitleVisible && !renderDrawerContent && dockTransitionPhase !== "dock-in";
+  const applyDrawerInlineWidth = useCallback((width: number) => {
+    const nextWidth = clampWorkbenchAssistantDrawerWidth(width);
+    const nextInlineWidth = resolveWorkbenchAssistantDockInlineWidth(
+      nextWidth,
+      typeof window === "undefined" ? 1280 : window.innerWidth,
+    );
+    const surface = surfaceRef.current;
+    surface?.style.setProperty("--workbench-assistant-dock-width", `${nextWidth}px`);
+    surface?.style.setProperty("--workbench-assistant-dock-inline-size", `${nextInlineWidth}px`);
+  }, []);
   const previewDrawerWidth = useCallback(
     (width: number) => {
-      setDrawerWidthPreview(width);
-      onDockTransitionLayoutChange?.({ phase: "resize", reservedWidth: resolveDockInlineWidth(width) });
+      applyDrawerInlineWidth(width);
+      if (onDrawerWidthPreview) {
+        onDrawerWidthPreview(width);
+      } else {
+        setUncontrolledDrawerWidthPreview(width);
+        onDockTransitionLayoutChange?.({
+          phase: "resize",
+          reservedWidth: resolveWorkbenchAssistantDockInlineWidth(
+            width,
+            typeof window === "undefined" ? 1280 : window.innerWidth,
+          ),
+        });
+      }
     },
-    [onDockTransitionLayoutChange],
+    [applyDrawerInlineWidth, onDockTransitionLayoutChange, onDrawerWidthPreview],
   );
   const commitDrawerWidth = useCallback(
     (width: number) => {
-      setDrawerWidthPreview(null);
-      layout.actions.setWorkbenchAssistantDrawerWidth(width);
+      applyDrawerInlineWidth(width);
+      if (onDrawerWidthCommit) {
+        onDrawerWidthCommit(width);
+      } else {
+        setUncontrolledDrawerWidthPreview(null);
+        layout.actions.setWorkbenchAssistantDrawerWidth(width);
+      }
       if (renderDrawerContent) {
-        onDockTransitionLayoutChange?.({ phase: "idle", reservedWidth: resolveDockInlineWidth(width) });
+        onDockTransitionLayoutChange?.({
+          phase: "idle",
+          reservedWidth: resolveWorkbenchAssistantDockInlineWidth(
+            width,
+            typeof window === "undefined" ? 1280 : window.innerWidth,
+          ),
+        });
       }
     },
-    [layout.actions, onDockTransitionLayoutChange, renderDrawerContent],
+    [applyDrawerInlineWidth, layout.actions, onDockTransitionLayoutChange, onDrawerWidthCommit, renderDrawerContent],
   );
   const drawerResize = useRafPanelResize({
     disabled: !renderDrawerContent,
@@ -314,6 +357,7 @@ export function WorkbenchAssistantSurface({
     getWidth: (startWidth, startX, clientX) => clampWorkbenchAssistantDrawerWidth(startWidth + startX - clientX),
     onPreview: previewDrawerWidth,
     onCommit: commitDrawerWidth,
+    previewMode: onDrawerWidthPreview ? "sync" : "raf",
   });
   const resetDrawerWidth = () => {
     if (!renderDrawerContent) {
@@ -333,7 +377,7 @@ export function WorkbenchAssistantSurface({
       ? WORKBENCH_ASSISTANT_DOCK_OUT_MOTION_TRANSITION
       : WORKBENCH_ASSISTANT_MOTION_TRANSITION;
   const visualComposeOpen = composeOpen || dockOutCollapsingToCapsule;
-  const enableDockChildLayout = !reducedMotion && dockTransitionPhase === null;
+  const enableDockChildLayout = !reducedMotion && dockTransitionPhase === null && !drawerResize.dragging;
   const geometryMode: AssistantSurfaceMode =
     dockTransitionPhase === "dock-in"
       ? "drawer"
@@ -1055,6 +1099,7 @@ export function WorkbenchAssistantSurface({
       data-dock-out-target={dockOutTargetMode}
       data-dock-layout={dockLayout}
       data-dock-transition={dockTransitionPhase ?? "idle"}
+      data-drawer-resizing={drawerResize.dragging ? "true" : "false"}
       data-message-trigger-state={messageTriggerLayoutState}
       data-session-title-visible={bottomSessionTitleVisible ? "true" : "false"}
       data-running={runtimeState === "running" ? "true" : "false"}
@@ -1105,6 +1150,7 @@ export function WorkbenchAssistantSurface({
         chromeRef={assistantChromeRef}
         transitionPhase={dockTransitionPhase ?? "idle"}
         reducedMotion={reducedMotion}
+        resizing={drawerResize.dragging}
       >
         {drawerResizeHandle}
         {stableAssistantPanel}
@@ -1781,6 +1827,7 @@ function WorkbenchAssistantShell({
   geometryMode,
   mode,
   reducedMotion,
+  resizing,
   transitionPhase,
 }: {
   children: ReactNode;
@@ -1790,10 +1837,11 @@ function WorkbenchAssistantShell({
   geometryMode: AssistantSurfaceMode;
   mode: AssistantVisualMode;
   reducedMotion: boolean;
+  resizing: boolean;
   transitionPhase: DockTransitionPhase | "idle";
 }) {
   const chromeLayout =
-    reducedMotion || transitionPhase !== "idle" ? false : "position";
+    reducedMotion || resizing || transitionPhase !== "idle" ? false : "position";
   const chromeMotionTransition =
     transitionPhase === "dock-out"
       ? WORKBENCH_ASSISTANT_DOCK_OUT_MOTION_TRANSITION
@@ -1808,6 +1856,7 @@ function WorkbenchAssistantShell({
       data-geometry-mode={geometryMode}
       data-shell-mode={mode}
       data-transition-phase={transitionPhase}
+      data-resizing={resizing ? "true" : "false"}
     >
       <motion.div
         ref={chromeRef}
@@ -1816,6 +1865,7 @@ function WorkbenchAssistantShell({
         data-dock-out-target={dockOutTargetMode}
         data-geometry-mode={geometryMode}
         data-shell-mode={mode}
+        data-resizing={resizing ? "true" : "false"}
         layout={chromeLayout}
         transition={reducedMotion ? { duration: 0 } : chromeMotionTransition}
       >
@@ -1825,8 +1875,7 @@ function WorkbenchAssistantShell({
   );
 }
 
-function resolveDockInlineWidth(drawerWidth: number): number {
-  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
+export function resolveWorkbenchAssistantDockInlineWidth(drawerWidth: number, viewportWidth: number): number {
   if (viewportWidth <= 900) {
     return Math.min(380, Math.max(300, viewportWidth * 0.48));
   }

@@ -1,0 +1,482 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #ffffff;
+  color: #111111;
+  font-family: var(--font-sans);
+  isolation: isolate;
+  user-select: none;
+  animation: showcaseSheetEnter 680ms cubic-bezier(0.16, 0.94, 0.2, 1) both;
+  transform-origin: top center;
+}
+
+.overlay[data-phase="exiting"] {
+  animation: showcaseSheetExit 520ms cubic-bezier(0.74, 0, 0.22, 1) both;
+}
+
+.motionStage {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.gridLayer {
+  position: absolute;
+  inset: -12%;
+  background-image:
+    linear-gradient(rgb(17 24 39 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(17 24 39 / 5%) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at center, #000000 0 36%, transparent 72%);
+  opacity: 0.72;
+  animation: showcaseGridDrift 9s linear infinite;
+}
+
+.topRail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  background:
+    linear-gradient(90deg, transparent 0 12%, rgb(22 119 255 / 36%) 30%, rgb(17 17 17 / 22%) 50%, transparent 74%),
+    #f7f7f7;
+  animation: showcaseRailSweep 2.8s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
+}
+
+.scanBeam {
+  position: absolute;
+  top: -28%;
+  left: -10%;
+  width: 120%;
+  height: 34%;
+  background: linear-gradient(180deg, transparent, rgb(22 119 255 / 8%) 44%, transparent);
+  transform: skewY(-8deg);
+  animation: showcaseScan 4.6s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
+}
+
+.crosshair {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 520px;
+  height: 520px;
+  border: 1px solid rgb(17 24 39 / 8%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.crosshair::before,
+.crosshair::after {
+  position: absolute;
+  background: rgb(17 24 39 / 8%);
+  content: "";
+}
+
+.crosshair::before {
+  top: 50%;
+  left: -18%;
+  width: 136%;
+  height: 1px;
+}
+
+.crosshair::after {
+  top: -18%;
+  left: 50%;
+  width: 1px;
+  height: 136%;
+}
+
+.signalFrame {
+  position: absolute;
+  inset: 54px;
+  border: 1px solid rgb(17 24 39 / 7%);
+  clip-path: polygon(0 0, 31% 0, 31% 1px, 1px 1px, 1px 31%, 0 31%, 0 0, 100% 0, 100% 31%, calc(100% - 1px) 31%, calc(100% - 1px) 1px, 69% 1px, 69% 0, 100% 0, 100% 100%, 69% 100%, 69% calc(100% - 1px), calc(100% - 1px) calc(100% - 1px), calc(100% - 1px) 69%, 100% 69%, 100% 100%, 0 100%, 0 69%, 1px 69%, 1px calc(100% - 1px), 31% calc(100% - 1px), 31% 100%, 0 100%);
+  opacity: 0.72;
+  animation: showcaseFramePulse 2.4s ease-in-out infinite;
+}
+
+.streams {
+  position: absolute;
+  inset: 0;
+}
+
+.stream {
+  --stream-left: calc(11% + (var(--stream-index) * 10%));
+
+  position: absolute;
+  top: 11%;
+  left: var(--stream-left);
+  width: 1px;
+  height: 78%;
+  background: linear-gradient(180deg, transparent 0, rgb(22 119 255 / 18%) 38%, transparent 78%);
+  opacity: 0;
+  transform: translateY(-18%);
+  animation: showcaseStreamFall 3.2s ease-in-out infinite;
+  animation-delay: calc(var(--stream-index) * 140ms);
+}
+
+.brandLockup {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-width: 260px;
+  min-height: 260px;
+  transform: translateY(-10px);
+  animation: showcaseBrandFloat 3.6s ease-in-out infinite;
+}
+
+.logoSystem {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 284px;
+  height: 284px;
+  transform: translate(-50%, -50%);
+}
+
+.logoRing {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgb(17 24 39 / 10%);
+  border-radius: 50%;
+  animation: showcaseOrbitSpin 15s linear infinite;
+}
+
+.logoRing[data-ring="inner"] {
+  inset: 44px;
+  border-color: rgb(22 119 255 / 16%);
+  animation-duration: 10s;
+  animation-direction: reverse;
+}
+
+.orbitNode {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(17 24 39 / 36%);
+  box-shadow: 0 0 0 4px rgb(22 119 255 / 5%);
+  transform:
+    translate(-50%, -50%)
+    rotate(calc(var(--orbit-index) * 30deg))
+    translateY(-142px);
+  animation: showcaseNodeBlink 2.4s ease-in-out infinite;
+  animation-delay: calc(var(--orbit-index) * 110ms);
+}
+
+.logoTile {
+  position: relative;
+  display: grid;
+  width: 96px;
+  height: 96px;
+  place-items: center;
+  border: 1px solid rgb(17 24 39 / 8%);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow:
+    0 22px 70px rgb(17 24 39 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 88%);
+}
+
+.logoTile::before {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgb(22 119 255 / 22%), transparent 32%, rgb(17 24 39 / 12%) 68%, transparent);
+  content: "";
+  mask: linear-gradient(#000000 0 0) content-box, linear-gradient(#000000 0 0);
+  mask-composite: exclude;
+  padding: 1px;
+  animation: showcaseTileTrace 3s linear infinite;
+}
+
+.logoTile img {
+  display: block;
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.wordmark {
+  margin: 18px 0 0;
+  color: #111111;
+  font-size: 42px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.returnButton {
+  position: absolute;
+  left: 50%;
+  bottom: 42px;
+  display: inline-flex;
+  min-width: 132px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(17 24 39 / 12%);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 92%);
+  color: #111111;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: var(--ui-line-height-compact);
+  box-shadow:
+    0 12px 34px rgb(17 24 39 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+  transform: translateX(-50%);
+  transition:
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease-standard);
+}
+
+.returnButton:hover,
+.returnButton:focus-visible {
+  border-color: rgb(17 24 39 / 18%);
+  background: #ffffff;
+  box-shadow:
+    0 16px 44px rgb(17 24 39 / 13%),
+    0 0 0 3px rgb(17 24 39 / 6%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.returnButton:focus-visible {
+  outline: none;
+}
+
+.returnButton:active {
+  transform: translateX(-50%) translateY(-2px) scale(0.98);
+}
+
+@keyframes showcaseSheetEnter {
+  0% {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-100%) scaleY(0.96);
+  }
+
+  62% {
+    clip-path: inset(0 0 0 0);
+    transform: translateY(1.8%) scaleY(1.015);
+  }
+
+  100% {
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes showcaseSheetExit {
+  0% {
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0) scaleY(1);
+  }
+
+  100% {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-100%) scaleY(0.96);
+  }
+}
+
+@keyframes showcaseGridDrift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  100% {
+    transform: translate3d(64px, 64px, 0);
+  }
+}
+
+@keyframes showcaseRailSweep {
+  0%,
+  100% {
+    background-position: -50vw 0, 0 0;
+  }
+
+  50% {
+    background-position: 50vw 0, 0 0;
+  }
+}
+
+@keyframes showcaseScan {
+  0% {
+    transform: translateY(-18%) skewY(-8deg);
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  82% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(390%) skewY(-8deg);
+    opacity: 0;
+  }
+}
+
+@keyframes showcaseFramePulse {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes showcaseStreamFall {
+  0% {
+    opacity: 0;
+    transform: translateY(-20%);
+  }
+
+  22% {
+    opacity: 0.75;
+  }
+
+  74% {
+    opacity: 0.32;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(22%);
+  }
+}
+
+@keyframes showcaseBrandFloat {
+  0%,
+  100% {
+    transform: translateY(-10px);
+  }
+
+  50% {
+    transform: translateY(-18px);
+  }
+}
+
+@keyframes showcaseOrbitSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes showcaseNodeBlink {
+  0%,
+  100% {
+    opacity: 0.26;
+  }
+
+  45% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes showcaseTileTrace {
+  0% {
+    opacity: 0.38;
+    transform: rotate(0deg);
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+
+  100% {
+    opacity: 0.38;
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .signalFrame {
+    inset: 26px;
+  }
+
+  .crosshair {
+    width: 360px;
+    height: 360px;
+  }
+
+  .logoSystem {
+    width: 228px;
+    height: 228px;
+  }
+
+  .orbitNode {
+    transform:
+      translate(-50%, -50%)
+      rotate(calc(var(--orbit-index) * 30deg))
+      translateY(-114px);
+  }
+
+  .logoTile {
+    width: 84px;
+    height: 84px;
+    border-radius: 20px;
+  }
+
+  .logoTile img {
+    width: 50px;
+    height: 50px;
+  }
+
+  .wordmark {
+    font-size: 34px;
+  }
+
+  .returnButton {
+    bottom: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .overlay[data-phase="exiting"],
+  .gridLayer,
+  .topRail,
+  .scanBeam,
+  .signalFrame,
+  .stream,
+  .brandLockup,
+  .logoRing,
+  .orbitNode,
+  .logoTile::before {
+    animation: none;
+  }
+
+  .overlay[data-phase="exiting"] {
+    opacity: 0;
+  }
+
+  .returnButton {
+    transition: none;
+  }
+
+  .returnButton:active {
+    transform: translateX(-50%);
+  }
+}

@@ -47,6 +47,28 @@ describe("Layout", () => {
     expect(screen.queryByText("自动化")).toBeNull();
   });
 
+  it("opens the product motion page from the brand mark and returns to the app", () => {
+    renderLayout(
+      <Layout title="测试会话">
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Keydex" }));
+
+    const overlay = screen.getByTestId("product-showcase-overlay");
+    expect(overlay.getAttribute("data-phase")).toBe("open");
+    expect(screen.getByRole("dialog", { name: "keydex" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "回到应用" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "回到应用" }));
+
+    expect(overlay.getAttribute("data-phase")).toBe("exiting");
+    fireEvent.animationEnd(overlay);
+    expect(screen.queryByTestId("product-showcase-overlay")).toBeNull();
+    expect(screen.getByText("内容区")).not.toBeNull();
+  });
+
   it("toggles sidebar collapse state", () => {
     renderLayout(
       <Layout>

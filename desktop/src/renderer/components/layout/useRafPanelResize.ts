@@ -16,6 +16,7 @@ interface UseRafPanelResizeOptions {
   getWidth(startWidth: number, startX: number, clientX: number): number;
   onPreview?: (width: number) => void;
   onCommit: (width: number) => void;
+  previewMode?: "raf" | "sync";
 }
 
 export function useRafPanelResize({
@@ -24,14 +25,15 @@ export function useRafPanelResize({
   getWidth,
   onPreview,
   onCommit,
+  previewMode = "raf",
 }: UseRafPanelResizeOptions) {
   const dragRef = useRef<ResizeDragState | null>(null);
-  const optionsRef = useRef({ getWidth, onPreview, onCommit });
+  const optionsRef = useRef({ getWidth, onPreview, onCommit, previewMode });
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    optionsRef.current = { getWidth, onPreview, onCommit };
-  }, [getWidth, onPreview, onCommit]);
+    optionsRef.current = { getWidth, onPreview, onCommit, previewMode };
+  }, [getWidth, onPreview, onCommit, previewMode]);
 
   const flushPreview = useCallback((drag: ResizeDragState) => {
     if (drag.frameId !== null) {
@@ -71,6 +73,15 @@ export function useRafPanelResize({
       return;
     }
     drag.pendingWidth = nextWidth;
+    if (optionsRef.current.previewMode === "sync") {
+      if (drag.frameId !== null) {
+        cancelAnimationFrame(drag.frameId);
+        drag.frameId = null;
+      }
+      drag.lastWidth = nextWidth;
+      optionsRef.current.onPreview?.(nextWidth);
+      return;
+    }
     if (drag.frameId !== null) {
       return;
     }

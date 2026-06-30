@@ -138,7 +138,32 @@ describe("workbench assistant geometry", () => {
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-out"\]\s*\{[\s\S]*--workbench-dock-layout-duration: var\(--workbench-dock-layout-out-duration\)/);
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-in"\] \.canvas\s*\{[\s\S]*animation: workbenchCanvasDockIn var\(--workbench-dock-layout-duration\)/);
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="dock-out"\] \.canvas\s*\{[\s\S]*animation: workbenchCanvasDockOut var\(--workbench-dock-layout-duration\)/);
+    expect(css).toMatch(/\.workspace\[data-assistant-drawer-inline="true"\] \.canvas\s*\{[\s\S]*margin-right: 0/);
     expect(css).toMatch(/\.workspace\[data-dock-transition-phase="resize"\] \.canvas\s*\{[\s\S]*transition: none/);
+    expect(css).toMatch(/\.workspace\[data-dock-transition-phase="resize"\] \.canvas\s*\{[\s\S]*will-change: auto/);
+  });
+
+  it("keeps the settled drawer as a real flex column instead of an overlay reservation", () => {
+    const css = readFileSync(
+      resolve(process.cwd(), "src/renderer/pages/workbench/WorkbenchAssistantSurface.module.css"),
+      "utf8",
+    );
+
+    const inlineSurfaceRule = css.match(/\.surface\[data-dock-layout="inline"\]\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+    expect(inlineSurfaceRule).toContain("position: relative");
+    expect(inlineSurfaceRule).toContain("width: var(--workbench-assistant-dock-inline-size)");
+    expect(inlineSurfaceRule).toContain("flex: 0 0 var(--workbench-assistant-dock-inline-size)");
+    expect(inlineSurfaceRule).not.toContain("position: absolute");
+    expect(inlineSurfaceRule).not.toContain("inset: 0");
+  });
+
+  it("disables drawer chrome transitions while the user is resizing", () => {
+    const css = readFileSync(
+      resolve(process.cwd(), "src/renderer/pages/workbench/WorkbenchAssistantSurface.module.css"),
+      "utf8",
+    );
+
+    expect(css).toMatch(/\.surface\[data-drawer-resizing="true"\] \.chrome,\s*\.surface\[data-drawer-resizing="true"\] \.chrome::before,\s*\.surface\[data-drawer-resizing="true"\] \.capsule,\s*\.surface\[data-drawer-resizing="true"\] \.composerFrame,\s*\.surface\[data-drawer-resizing="true"\] \.inputSurface\s*\{[\s\S]*transition: none/);
   });
 
   it("keeps the base chrome as the single morphing shell for bottom and drawer states", () => {
@@ -262,11 +287,12 @@ describe("workbench assistant geometry", () => {
       resolve(process.cwd(), "src/renderer/pages/workbench/WorkbenchAssistantSurface.module.css"),
       "utf8",
     );
+    const inlineSurfaceRule = css.match(/\.surface\[data-dock-layout="inline"\]\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
 
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*background: transparent/);
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*border-left: 0/);
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*overflow: visible/);
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*position: absolute/);
-    expect(css).toMatch(/\.surface\[data-dock-layout="inline"\]\s*\{[\s\S]*padding: 0/);
+    expect(inlineSurfaceRule).toContain("background: transparent");
+    expect(inlineSurfaceRule).toContain("border-left: 0");
+    expect(inlineSurfaceRule).toContain("overflow: visible");
+    expect(inlineSurfaceRule).toContain("position: relative");
+    expect(inlineSurfaceRule).toContain("padding: 0");
   });
 });

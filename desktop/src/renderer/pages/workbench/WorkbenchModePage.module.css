@@ -50,6 +50,7 @@
   --workbench-dock-layout-duration: 420ms;
   --workbench-dock-layout-out-duration: 650ms;
   --workbench-dock-layout-ease: cubic-bezier(0.2, 0.82, 0.22, 1);
+  --workbench-assistant-dock-inline-size: 0px;
   --workbench-dock-reserved-width: 0px;
   position: relative;
   height: 100%;
@@ -77,6 +78,10 @@
   will-change: flex-basis, margin-right, width;
 }
 
+.workspace[data-assistant-drawer-inline="true"] .canvas {
+  margin-right: 0;
+}
+
 .workspace[data-dock-transition-phase="dock-in"] .canvas {
   animation: workbenchCanvasDockIn var(--workbench-dock-layout-duration) var(--workbench-dock-layout-ease) both;
 }
@@ -91,7 +96,7 @@
 
 .workspace[data-dock-transition-phase="resize"] .canvas {
   transition: none;
-  will-change: margin-right;
+  will-change: auto;
 }
 
 .canvasContent {

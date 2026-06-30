@@ -40,6 +40,30 @@ describe("Titlebar", () => {
     expect(onModeChange).toHaveBeenCalledWith("workbench");
   });
 
+  it("turns the brand mark into a titlebar-safe action when a click handler is provided", async () => {
+    const onBrandClick = vi.fn();
+    const appWindow = {
+      minimize: vi.fn().mockResolvedValue(undefined),
+      toggleMaximize: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      startDragging: vi.fn().mockResolvedValue(undefined),
+    };
+    const controls = createWindowControls(async () => appWindow);
+
+    render(<Titlebar title="测试标题" windowControls={controls} onBrandClick={onBrandClick} />);
+
+    const brandButton = screen.getByRole("button", { name: "Keydex" });
+    fireEvent.mouseDown(brandButton, { button: 0 });
+    fireEvent.doubleClick(brandButton);
+    fireEvent.click(brandButton);
+
+    expect(onBrandClick).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(appWindow.startDragging).not.toHaveBeenCalled();
+      expect(appWindow.toggleMaximize).not.toHaveBeenCalled();
+    });
+  });
+
   it("shows the workbench workspace selector next to the mode switch only in workbench mode", () => {
     const workspace = makeWorkspace("ws-1", "keydex");
     const onSelectWorkspace = vi.fn();

@@ -75,15 +75,16 @@
 }
 
 .surface[data-dock-layout="inline"] {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  inset: auto;
   z-index: 50;
   box-sizing: border-box;
-  width: auto;
-  height: auto;
+  width: var(--workbench-assistant-dock-inline-size);
+  height: 100%;
+  flex: 0 0 var(--workbench-assistant-dock-inline-size);
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
-  flex: none;
   overflow: visible;
   border-left: 0;
   background: transparent;
@@ -210,6 +211,14 @@
 .chrome[data-shell-mode="composer"]::before {
   inset: -12px -18px -10px;
   border-radius: 32px;
+}
+
+.surface[data-drawer-resizing="true"] .chrome,
+.surface[data-drawer-resizing="true"] .chrome::before,
+.surface[data-drawer-resizing="true"] .capsule,
+.surface[data-drawer-resizing="true"] .composerFrame,
+.surface[data-drawer-resizing="true"] .inputSurface {
+  transition: none;
 }
 
 .chrome[data-shell-mode="capsule"]::before,

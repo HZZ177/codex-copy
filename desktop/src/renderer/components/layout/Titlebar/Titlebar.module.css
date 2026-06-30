@@ -126,7 +126,34 @@
   height: 30px;
   display: inline-grid;
   place-items: center;
+  border: 0;
   border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  padding: 0;
+  transition:
+    background var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease-standard);
+}
+
+button.brandMark {
+  cursor: pointer;
+}
+
+button.brandMark:hover,
+button.brandMark:focus-visible {
+  background: var(--surface-hover);
+}
+
+button.brandMark:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-text-1) 12%, transparent);
+}
+
+button.brandMark:active {
+  transform: scale(0.94);
 }
 
 .brandMark img {
@@ -183,5 +210,13 @@
 
   .modeSwitch::before {
     transition: none;
+  }
+
+  .brandMark {
+    transition: none;
+  }
+
+  button.brandMark:active {
+    transform: none;
   }
 }
