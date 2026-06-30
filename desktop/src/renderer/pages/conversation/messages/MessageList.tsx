@@ -56,6 +56,7 @@ export interface MessageListProps {
   performanceProfile?: MessageListPerformanceProfile;
   turnNavigatorMode?: MessageListTurnNavigatorMode;
   turnNavigationRequest?: MessageListTurnNavigationRequest | null;
+  topNotice?: MessageListTopNotice | null;
   emptyLayout?: MessageListEmptyLayout;
   emptyText?: string;
   emptyTestId?: string;
@@ -70,6 +71,7 @@ export interface MessageListProps {
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
+  showForkSourceMarkers?: boolean;
   onReverseFromMessage?: (message: ConversationMessage) => void;
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
@@ -81,6 +83,13 @@ export interface MessageListProps {
 export interface MessageListScrollControls {
   showScrollToBottom: boolean;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
+}
+
+export interface MessageListTopNotice {
+  content: ReactNode;
+  tone?: "default" | "success";
+  testId?: string;
+  title?: string;
 }
 
 export type MessageListVariant = "full" | "compact" | "overlay";
@@ -100,6 +109,7 @@ export function MessageList({
   performanceProfile = "default",
   turnNavigatorMode,
   turnNavigationRequest,
+  topNotice = null,
   emptyLayout = "default",
   emptyText = "暂无消息",
   emptyTestId = "message-empty",
@@ -112,6 +122,7 @@ export function MessageList({
   onQuoteSelection,
   onForkFromMessage,
   onNavigateToForkSource,
+  showForkSourceMarkers = true,
   onReverseFromMessage,
   hasMoreOlder = false,
   loadingOlder = false,
@@ -179,6 +190,7 @@ export function MessageList({
   const scrollControls = useStaticList ? staticAutoScroll : autoScroll;
   const canLoadOlder = Boolean(hasMoreOlder && onLoadOlder);
   const olderLoader = renderOlderLoader({ canLoadOlder, loadingOlder, showTrigger: showOlderTrigger });
+  const renderedTopNotice = useMemo(() => renderTopNotice(topNotice), [topNotice]);
   const highlightedTurnNavigationIndexes = useMemo(
     () => findVisibleTurnNavigationIndexes(turnNavigationItems, visibleTurnIndexes),
     [turnNavigationItems, visibleTurnIndexes],
@@ -462,11 +474,16 @@ export function MessageList({
           </div>
         );
       }),
-      Header: function MessageListTopLoader() {
-        return olderLoader;
+      Header: function MessageListHeader() {
+        return (
+          <>
+            {olderLoader}
+            {renderedTopNotice}
+          </>
+        );
       },
     }),
-    [handleVirtualScroll, markNativeScrollbarDrag, olderLoader, variant],
+    [handleVirtualScroll, markNativeScrollbarDrag, olderLoader, renderedTopNotice, variant],
   );
 
   useEffect(() => {
@@ -554,6 +571,7 @@ export function MessageList({
     >
       <div ref={staticAutoScroll.contentRef} className={styles.list} role="list" aria-label="Messages">
         {olderLoader}
+        {renderedTopNotice}
         {displayTurns.map((turn, index) => (
           <div
             className={styles.turnGroup}
@@ -577,6 +595,7 @@ export function MessageList({
               onQuoteSelection,
               onForkFromMessage,
               onNavigateToForkSource,
+              showForkSourceMarkers,
               onReverseFromMessage,
             })}
           </div>
@@ -620,6 +639,7 @@ export function MessageList({
           onQuoteSelection,
           onForkFromMessage,
           onNavigateToForkSource,
+          showForkSourceMarkers,
           onReverseFromMessage,
         })
       }
@@ -644,13 +664,22 @@ export function MessageList({
       ) : (
         <div
           className={styles.scroller}
-          data-empty-layout={emptyLayout}
+          data-empty-layout={renderedTopNotice ? undefined : emptyLayout}
           data-message-list-variant={variant}
           data-testid="message-list-scroll"
         >
-          <div className={styles.empty} data-testid={emptyTestId}>
-            {emptyText}
-          </div>
+          {renderedTopNotice ? (
+            <div className={styles.list} role="list" aria-label="Messages">
+              {renderedTopNotice}
+              <div className={styles.empty} data-testid={emptyTestId}>
+                {emptyText}
+              </div>
+            </div>
+          ) : (
+            <div className={styles.empty} data-testid={emptyTestId}>
+              {emptyText}
+            </div>
+          )}
         </div>
       )}
 
@@ -747,6 +776,30 @@ function renderOlderLoader({
   );
 }
 
+function renderTopNotice(notice: MessageListTopNotice | null): ReactNode {
+  if (!notice) {
+    return null;
+  }
+  const state = notice.tone === "success" ? "success" : "completed";
+  return (
+    <div
+      className={`${styles.contextCompressionNotice} ${styles.topNotice}`}
+      data-state={state}
+      data-testid={notice.testId ?? "message-list-top-notice"}
+      role="status"
+      aria-live="polite"
+      title={notice.title}
+    >
+      <span className={styles.contextCompressionNoticeLabel}>
+        <span className={styles.contextCompressionNoticeIcon} aria-hidden="true">
+          <CheckCircle2 size={14} />
+        </span>
+        <span>{notice.content}</span>
+      </span>
+    </div>
+  );
+}
+
 function renderMessageTurn({
   turn,
   renderMessage,
@@ -760,6 +813,7 @@ function renderMessageTurn({
   onQuoteSelection,
   onForkFromMessage,
   onNavigateToForkSource,
+  showForkSourceMarkers,
   onReverseFromMessage,
 }: {
   turn: MessageTurn;
@@ -774,6 +828,7 @@ function renderMessageTurn({
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
+  showForkSourceMarkers: boolean;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   return turn.items.map((item) => (
@@ -792,6 +847,7 @@ function renderMessageTurn({
         onQuoteSelection,
         onForkFromMessage,
         onNavigateToForkSource,
+        showForkSourceMarkers,
         onReverseFromMessage,
       })}
     </div>
@@ -812,6 +868,7 @@ function renderMessageItem({
   onQuoteSelection,
   onForkFromMessage,
   onNavigateToForkSource,
+  showForkSourceMarkers,
   onReverseFromMessage,
 }: {
   item: ProcessedMessageItem;
@@ -827,6 +884,7 @@ function renderMessageItem({
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
+  showForkSourceMarkers: boolean;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   if (item.type === "message") {
@@ -846,7 +904,14 @@ function renderMessageItem({
       />
     );
     return withTurnEndStreamingCursor(
-      withTurnActionFooter(renderedMessage, footerMessage, onForkFromMessage, onReverseFromMessage, onNavigateToForkSource),
+      withTurnActionFooter(
+        renderedMessage,
+        footerMessage,
+        onForkFromMessage,
+        onReverseFromMessage,
+        onNavigateToForkSource,
+        showForkSourceMarkers,
+      ),
       showTurnEndStreamingCursor,
     );
   }
@@ -874,7 +939,14 @@ function renderMessageItem({
     </MessageGroupBlock>
   );
   return withTurnEndStreamingCursor(
-    withTurnActionFooter(renderedGroup, footerMessage, onForkFromMessage, onReverseFromMessage, onNavigateToForkSource),
+    withTurnActionFooter(
+      renderedGroup,
+      footerMessage,
+      onForkFromMessage,
+      onReverseFromMessage,
+      onNavigateToForkSource,
+      showForkSourceMarkers,
+    ),
     showTurnEndStreamingCursor,
   );
 }
@@ -885,6 +957,7 @@ function withTurnActionFooter(
   onForkFromMessage?: (message: ConversationMessage) => void,
   onReverseFromMessage?: (message: ConversationMessage) => void,
   onNavigateToForkSource?: (fork: AgentSessionFork) => void,
+  showForkSourceMarkers = true,
 ) {
   if (!footerMessage) {
     return content;
@@ -901,7 +974,9 @@ function withTurnActionFooter(
           onReverseFromMessage={onReverseFromMessage}
         />
       </div>
-      {forkSource ? <ForkMarker fork={forkSource} onNavigateToForkSource={onNavigateToForkSource} /> : null}
+      {forkSource && showForkSourceMarkers ? (
+        <ForkMarker fork={forkSource} onNavigateToForkSource={onNavigateToForkSource} />
+      ) : null}
     </>
   );
 }

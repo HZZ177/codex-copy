@@ -2,6 +2,7 @@ import {
   FileText,
   Folder,
   Maximize2,
+  MessageSquare,
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,13 +17,17 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type Dispatch,
   type PropsWithChildren,
+  type SetStateAction,
 } from "react";
 import { flushSync } from "react-dom";
 
+import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import {
   MAX_RIGHT_SIDEBAR_RATIO,
@@ -38,12 +43,26 @@ import {
   type PreviewQuoteSelectionRequest,
 } from "@/renderer/providers/PreviewProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
+import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { ConnectionStatus } from "@/renderer/components/runtime";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { AppMode } from "@/renderer/components/layout/appMode";
+import {
+  BTW_CONVERSATION_TITLE,
+  BTW_FORK_HISTORY_PAGE_SIZE,
+  BTW_SESSION_TAG,
+  latestCompleteForkSource,
+} from "@/renderer/pages/conversation/conversationForkSource";
+import type { AgentSession } from "@/types/protocol";
 
 import { RightSidebarResizeHandle } from "./RightSidebarResizeHandle";
 import { RightSidebarInitialPage } from "./RightSidebarInitialPage";
+import {
+  RightSidebarConversationContext,
+  useOptionalRightSidebarConversation,
+  type OpenBtwConversationRequest,
+  type OpenRightSidebarConversationRequest,
+} from "./RightSidebarConversationContext";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Sider } from "./Sider";
 import { Titlebar } from "./Titlebar";
@@ -60,10 +79,16 @@ const LazyWorkspaceFileBrowser = lazy(() =>
 const LazyFilePreview = lazy(() =>
   import("@/renderer/components/workspace/FilePreview").then((module) => ({ default: module.FilePreview })),
 );
+const LazyConversationSessionSurface = lazy(() =>
+  import("@/renderer/pages/conversation/ConversationSessionSurface").then((module) => ({
+    default: module.ConversationSessionSurface,
+  })),
+);
 
 const LEGACY_FILES_PANEL_ID = "right-sidebar:files";
 const FILES_PANEL_ID_PREFIX = "right-sidebar:files:";
 const INITIAL_PANEL_ID_PREFIX = "right-sidebar:initial:";
+const CONVERSATION_PANEL_ID_PREFIX = "right-sidebar:conversation:";
 const GLOBAL_RIGHT_SIDEBAR_SCOPE = "global";
 const APP_MODE_SWITCH_NAVIGATION_DELAY_MS = 180;
 const FULL_CONTENT_MIN_WIDTH = 420;
@@ -76,11 +101,20 @@ interface RightSidebarFilePanelState {
   filePreviewRevealTarget: PreviewFileRevealTarget | null;
 }
 
+interface RightSidebarConversationPanelState {
+  id: string;
+  sessionId: string;
+  title: string;
+  sourceSessionId: string | null;
+}
+
 interface RightSidebarScopePanelState {
   activePanelId: string | null;
   panelOrder: string[];
   filePanelIds: string[];
   filePanels: Record<string, RightSidebarFilePanelState>;
+  conversationPanelIds: string[];
+  conversationPanels: Record<string, RightSidebarConversationPanelState>;
   initialPanelIds: string[];
   nextPanelSeq: number;
 }
@@ -90,6 +124,8 @@ const EMPTY_RIGHT_SIDEBAR_SCOPE_STATE: RightSidebarScopePanelState = {
   panelOrder: [],
   filePanelIds: [],
   filePanels: {},
+  conversationPanelIds: [],
+  conversationPanels: {},
   initialPanelIds: [],
   nextPanelSeq: 0,
 };
@@ -143,6 +179,7 @@ function rightSidebarGeometryForShellWidth(
 }
 
 export interface LayoutProps extends PropsWithChildren {
+  runtime?: RuntimeBridge;
   title?: string;
   appMode?: AppMode;
   modeSwitchTargets?: Partial<Record<AppMode, string>>;
@@ -162,6 +199,7 @@ export interface LayoutProps extends PropsWithChildren {
 
 export function Layout({
   children,
+  runtime = runtimeBridge,
   title = "Keydex",
   appMode = "agent",
   modeSwitchTargets,
@@ -191,9 +229,11 @@ export function Layout({
   const shellWidthRef = useRef(initialShellWidth());
   const shellMeasureFrameRef = useRef<number | null>(null);
   const [rightSidebarMode, setRightSidebarMode] = useState<"split" | "maximized">("split");
+  const [rightSidebarPanelStateByScope, setRightSidebarPanelStateByScope] = useState<Record<string, RightSidebarScopePanelState>>({});
   const [productShowcasePhase, setProductShowcasePhase] = useState<ProductShowcaseOverlayPhase | null>(null);
   const { state, actions } = useLayoutState();
   const runtimeConnection = useOptionalRuntimeConnection();
+  const notifications = useNotifications();
   const collapsed = state.sidebarCollapsed;
   const globalRightSidebarEnabled = appMode !== "workbench";
   const { sidebarMotion, toggleSidebar } = useSidebarCollapseMotion(actions.toggleSidebar);
@@ -441,6 +481,74 @@ export function Layout({
     actions.setRightSidebarOpen(true);
   }, [actions, globalRightSidebarEnabled, startRightSidebarMotion, state.rightSidebarOpen]);
 
+  const openConversationPanel = useCallback(
+    (request: OpenRightSidebarConversationRequest) => {
+      const session = request.session;
+      if (!session?.id) {
+        return;
+      }
+      const scopeKey = previewContext?.activeScopeKey ?? GLOBAL_RIGHT_SIDEBAR_SCOPE;
+      setRightSidebarPanelStateByScope((current) => {
+        const previous = normalizeRightSidebarScopePanelState(current[scopeKey]);
+        const next = activateOrCreateConversationPanel(previous, {
+          session,
+          title: request.title,
+          sourceSessionId: request.sourceSessionId,
+        });
+        if (sameRightSidebarScopePanelState(previous, next)) {
+          return current;
+        }
+        return { ...current, [scopeKey]: next };
+      });
+      openRightSidebar();
+    },
+    [openRightSidebar, previewContext?.activeScopeKey],
+  );
+
+  const openBtwConversationFromSession = useCallback(
+    async ({ sessionId, runtime: requestRuntime }: OpenBtwConversationRequest) => {
+      const cleanedSessionId = sessionId.trim();
+      if (!cleanedSessionId) {
+        notifications.warning("当前会话无法开启旁路对话");
+        return null;
+      }
+      try {
+        const history = await requestRuntime.conversation.loadHistory(cleanedSessionId, {
+          pageSize: BTW_FORK_HISTORY_PAGE_SIZE,
+        });
+        const source = latestCompleteForkSource(history.list);
+        if (!source) {
+          notifications.warning("没有可派生的完整轮次");
+          return null;
+        }
+        const response = await requestRuntime.conversation.forkSession(cleanedSessionId, {
+          ...source,
+          sessionTag: BTW_SESSION_TAG,
+          title: BTW_CONVERSATION_TITLE,
+        });
+        openConversationPanel({
+          session: response.session,
+          sourceSessionId: cleanedSessionId,
+          title: response.session.title || BTW_CONVERSATION_TITLE,
+        });
+        notifications.success("已打开旁路对话");
+        return response.session;
+      } catch (reason) {
+        notifications.error(`旁路对话创建失败：${errorMessage(reason)}`);
+        return null;
+      }
+    },
+    [notifications, openConversationPanel],
+  );
+
+  const rightSidebarConversationValue = useMemo(
+    () => ({
+      openConversationPanel,
+      openBtwConversationFromSession,
+    }),
+    [openBtwConversationFromSession, openConversationPanel],
+  );
+
   const maximizeRightSidebar = useCallback(() => {
     if (!globalRightSidebarEnabled) {
       return;
@@ -555,6 +663,7 @@ export function Layout({
   const showRuntimeStatus = Boolean(runtimeConnection?.error);
 
   return (
+    <RightSidebarConversationContext.Provider value={rightSidebarConversationValue}>
     <div
       ref={shellRef}
       className={styles.shell}
@@ -601,6 +710,7 @@ export function Layout({
       <div className={styles.body}>
         <Sider
           appMode={appMode}
+          runtime={runtime}
           activePath={activePath}
           collapsed={collapsed}
           projects={projects}
@@ -656,6 +766,11 @@ export function Layout({
               open={rightSidebarOpen}
               maximized={rightSidebarMaximized}
               placement={state.rightSidebarPlacement}
+              runtime={runtime}
+              panelStateByScope={rightSidebarPanelStateByScope}
+              setPanelStateByScope={setRightSidebarPanelStateByScope}
+              onNavigateToConversation={(sessionId) => onNavigate?.(resolveSessionPath(sessionId, getSessionPath))}
+              onOpenModelSettings={() => onNavigate?.("/settings/model-defaults")}
               onClose={closeRightSidebar}
               onMaximize={maximizeRightSidebar}
               onRestore={restoreRightSidebar}
@@ -671,6 +786,7 @@ export function Layout({
         />
       ) : null}
     </div>
+    </RightSidebarConversationContext.Provider>
   );
 }
 
@@ -678,6 +794,11 @@ function RightSidebarPanel({
   open,
   maximized,
   placement,
+  runtime,
+  panelStateByScope,
+  setPanelStateByScope,
+  onNavigateToConversation,
+  onOpenModelSettings,
   onClose,
   onMaximize,
   onRestore,
@@ -685,11 +806,17 @@ function RightSidebarPanel({
   open: boolean;
   maximized: boolean;
   placement: RightSidebarPlacement;
+  runtime: RuntimeBridge;
+  panelStateByScope: Record<string, RightSidebarScopePanelState>;
+  setPanelStateByScope: Dispatch<SetStateAction<Record<string, RightSidebarScopePanelState>>>;
+  onNavigateToConversation?: (sessionId: string) => void;
+  onOpenModelSettings?: () => void;
   onClose: () => void;
   onMaximize: () => void;
   onRestore: () => void;
 }) {
   const previewContext = useOptionalPreview();
+  const rightSidebarConversation = useOptionalRightSidebarConversation();
   const activeScopeKey = previewContext?.activeScopeKey ?? GLOBAL_RIGHT_SIDEBAR_SCOPE;
   const syncedPreviewOpenStampsRef = useRef<Set<string>>(new Set());
   const previousFilePanelScopeRef = useRef(activeScopeKey);
@@ -704,11 +831,13 @@ function RightSidebarPanel({
   const filePanelRenderContext = filePanelRequest?.renderContext ?? renderContext;
   const entries = previewContext?.entries ?? [];
   const activeEntryId = previewContext?.activeEntryId ?? null;
-  const [panelStateByScope, setPanelStateByScope] = useState<Record<string, RightSidebarScopePanelState>>({});
+  const hostContext = previewContext?.hostContext ?? null;
   const scopedPanelState = normalizeRightSidebarScopePanelState(panelStateByScope[activeScopeKey]);
   const activePanelId = scopedPanelState.activePanelId;
   const filePanelIds = scopedPanelState.filePanelIds;
   const filePanels = scopedPanelState.filePanels;
+  const conversationPanelIds = scopedPanelState.conversationPanelIds;
+  const conversationPanels = scopedPanelState.conversationPanels;
   const initialPanelIds = scopedPanelState.initialPanelIds;
   const entryIds = entries.map((entry) => entry.id);
   const orderedPanelIds = orderedRightSidebarPanelIds(scopedPanelState, entryIds);
@@ -717,10 +846,12 @@ function RightSidebarPanel({
       filePanelRenderContext?.runtime &&
       (filePanelRenderContext?.sessionId || filePanelRenderContext?.workspaceId),
   );
+  const canOpenBtwConversation = Boolean(hostContext?.sessionId && hostContext.runtime);
   const resolvedActivePanelId = activePanelId ?? activeEntryId ?? orderedPanelIds[0] ?? null;
   const activeFilePanel = resolvedActivePanelId ? (filePanels[resolvedActivePanelId] ?? null) : null;
+  const activeConversationPanel = resolvedActivePanelId ? (conversationPanels[resolvedActivePanelId] ?? null) : null;
   const activePreviewEntry =
-    resolvedActivePanelId && !activeFilePanel && !initialPanelIds.includes(resolvedActivePanelId)
+    resolvedActivePanelId && !activeFilePanel && !activeConversationPanel && !initialPanelIds.includes(resolvedActivePanelId)
       ? entries.find((entry) => entry.id === resolvedActivePanelId) ?? null
       : null;
   const activeRequest = activePreviewEntry?.request ?? (resolvedActivePanelId === activeEntryId ? request : null);
@@ -744,8 +875,9 @@ function RightSidebarPanel({
     [activeRenderContext?.onQuoteSelection, maximized, onRestore],
   );
   const showFilesPanel = Boolean(activeFilePanel);
+  const showConversationPanel = Boolean(activeConversationPanel);
   const panelActivePreviewEntryId =
-    open && resolvedActivePanelId && !activeFilePanel && !initialPanelIds.includes(resolvedActivePanelId)
+    open && resolvedActivePanelId && !activeFilePanel && !activeConversationPanel && !initialPanelIds.includes(resolvedActivePanelId)
       ? activePreviewEntry?.id ?? (resolvedActivePanelId === activeEntryId ? activeEntryId : null)
       : null;
 
@@ -844,12 +976,25 @@ function RightSidebarPanel({
     updateActiveScopePanelState((current) => activateOrCreateFilePanel(current));
   }, [canOpenFiles, updateActiveScopePanelState]);
 
+  const openBtwConversationFromHost = useCallback(() => {
+    const sessionId = hostContext?.sessionId?.trim() ?? "";
+    const hostRuntime = hostContext?.runtime;
+    if (!sessionId || !hostRuntime) {
+      return;
+    }
+    void rightSidebarConversation?.openBtwConversationFromSession({
+      sessionId,
+      runtime: hostRuntime,
+    });
+  }, [hostContext?.runtime, hostContext?.sessionId, rightSidebarConversation]);
+
   const closeFilesPanel = useCallback(
     (panelId: string) => {
       const remainingFilePanelIds = filePanelIds.filter((id) => id !== panelId);
       const shouldCloseSidebar =
         entries.length === 0 &&
         initialPanelIds.length === 0 &&
+        conversationPanelIds.length === 0 &&
         remainingFilePanelIds.length === 0 &&
         resolvedActivePanelId === panelId;
       updateActiveScopePanelState((current) => {
@@ -867,7 +1012,7 @@ function RightSidebarPanel({
         const nextPanelId = nextPanelIdAfterRemoval(current.panelOrder, panelId);
         return {
           ...current,
-          activePanelId: nextPanelId ?? activeEntryId ?? entries[0]?.id ?? null,
+          activePanelId: nextPanelId ?? activeEntryId ?? entries[0]?.id ?? current.conversationPanelIds[0] ?? null,
           panelOrder: current.panelOrder.filter((id) => id !== panelId),
           filePanelIds: nextFilePanelIds,
           filePanels: nextFilePanels,
@@ -880,6 +1025,7 @@ function RightSidebarPanel({
     [
       activeEntryId,
       entries,
+      conversationPanelIds.length,
       filePanelIds,
       initialPanelIds.length,
       onClose,
@@ -896,6 +1042,7 @@ function RightSidebarPanel({
       const shouldCloseSidebar =
         remainingEntries.length === 0 &&
         filePanelIds.length === 0 &&
+        conversationPanelIds.length === 0 &&
         initialPanelIds.length === 0 &&
         resolvedActivePanelId === entryId;
       previewContext?.closePreviewEntry(entryId);
@@ -908,7 +1055,11 @@ function RightSidebarPanel({
         return {
           ...current,
           activePanelId:
-            nextEntry?.id ?? nextPanelIdAfterRemoval(current.panelOrder, entryId) ?? current.filePanelIds[0] ?? null,
+            nextEntry?.id ??
+            nextPanelIdAfterRemoval(current.panelOrder, entryId) ??
+            current.filePanelIds[0] ??
+            current.conversationPanelIds[0] ??
+            null,
           panelOrder: current.panelOrder.filter((id) => id !== entryId),
         };
       });
@@ -918,6 +1069,7 @@ function RightSidebarPanel({
     },
     [
       entries,
+      conversationPanelIds.length,
       filePanelIds.length,
       initialPanelIds.length,
       onClose,
@@ -948,6 +1100,61 @@ function RightSidebarPanel({
     [updateActiveScopePanelState],
   );
 
+  const activateConversationPanel = useCallback(
+    (panelId: string) => {
+      updateActiveScopePanelState((current) =>
+        current.conversationPanels[panelId] ? { ...current, activePanelId: panelId } : current,
+      );
+    },
+    [updateActiveScopePanelState],
+  );
+
+  const closeConversationPanel = useCallback(
+    (panelId: string) => {
+      const remainingConversationPanelIds = conversationPanelIds.filter((id) => id !== panelId);
+      const shouldCloseSidebar =
+        resolvedActivePanelId === panelId &&
+        remainingConversationPanelIds.length === 0 &&
+        filePanelIds.length === 0 &&
+        initialPanelIds.length === 0 &&
+        entries.length === 0;
+      updateActiveScopePanelState((current) => {
+        const nextConversationPanelIds = current.conversationPanelIds.filter((id) => id !== panelId);
+        const nextConversationPanels = { ...current.conversationPanels };
+        delete nextConversationPanels[panelId];
+        if (current.activePanelId !== panelId) {
+          return {
+            ...current,
+            panelOrder: current.panelOrder.filter((id) => id !== panelId),
+            conversationPanelIds: nextConversationPanelIds,
+            conversationPanels: nextConversationPanels,
+          };
+        }
+        const nextPanelId = nextPanelIdAfterRemoval(current.panelOrder, panelId);
+        return {
+          ...current,
+          activePanelId: nextPanelId ?? activeEntryId ?? entries[0]?.id ?? current.filePanelIds[0] ?? null,
+          panelOrder: current.panelOrder.filter((id) => id !== panelId),
+          conversationPanelIds: nextConversationPanelIds,
+          conversationPanels: nextConversationPanels,
+        };
+      });
+      if (shouldCloseSidebar) {
+        onClose();
+      }
+    },
+    [
+      activeEntryId,
+      conversationPanelIds,
+      entries,
+      filePanelIds.length,
+      initialPanelIds.length,
+      onClose,
+      resolvedActivePanelId,
+      updateActiveScopePanelState,
+    ],
+  );
+
   const openInitialPanel = useCallback(() => {
     updateActiveScopePanelState((current) => {
       const nextPanelSeq = current.nextPanelSeq + 1;
@@ -976,6 +1183,7 @@ function RightSidebarPanel({
         resolvedActivePanelId === panelId &&
         remainingInitialPanels.length === 0 &&
         filePanelIds.length === 0 &&
+        conversationPanelIds.length === 0 &&
         entries.length === 0;
       updateActiveScopePanelState((current) => {
         const nextInitialPanelIds = current.initialPanelIds.filter((id) => id !== panelId);
@@ -989,7 +1197,7 @@ function RightSidebarPanel({
         const nextPanelId = nextPanelIdAfterRemoval(current.panelOrder, panelId);
         return {
           ...current,
-          activePanelId: nextPanelId ?? activeEntryId ?? entries[0]?.id ?? null,
+          activePanelId: nextPanelId ?? activeEntryId ?? entries[0]?.id ?? current.filePanelIds[0] ?? current.conversationPanelIds[0] ?? null,
           panelOrder: current.panelOrder.filter((id) => id !== panelId),
           initialPanelIds: nextInitialPanelIds,
         };
@@ -1001,6 +1209,7 @@ function RightSidebarPanel({
     [
       activeEntryId,
       entries,
+      conversationPanelIds.length,
       filePanelIds.length,
       initialPanelIds,
       onClose,
@@ -1087,6 +1296,38 @@ function RightSidebarPanel({
                       </div>
                     );
                   }
+                  const conversationPanel = conversationPanels[panelId];
+                  if (conversationPanel) {
+                    const active = resolvedActivePanelId === panelId;
+                    const title = conversationPanel.title || "旁路对话";
+                    return (
+                      <div className={styles.rightSidebarTab} data-active={active ? "true" : "false"} key={panelId}>
+                        <button
+                          className={styles.rightSidebarTabMain}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          title={title}
+                          onClick={() => activateConversationPanel(panelId)}
+                        >
+                          <MessageSquare size={12} />
+                          <span>{title}</span>
+                        </button>
+                        <button
+                          className={styles.rightSidebarTabClose}
+                          type="button"
+                          aria-label={`关闭侧边栏窗口 ${title}`}
+                          title={`关闭侧边栏窗口 ${title}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            closeConversationPanel(panelId);
+                          }}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    );
+                  }
                   if (initialPanelIds.includes(panelId)) {
                     const title = initialPanelTitle(panelId);
                     const active = resolvedActivePanelId === panelId;
@@ -1166,50 +1407,82 @@ function RightSidebarPanel({
               {controls}
             </div>
           </div>
-          {showFilesPanel &&
-          filePanelRenderContext?.runtime &&
-          (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
-            <div className={styles.rightSidebarBody} data-content="files">
-              <Suspense fallback={<RightSidebarLoading label="正在加载文件" />}>
-                <LazyWorkspaceFileBrowser
-                  key={`${activeScopeKey}:${activeFilePanel?.id ?? "files"}`}
-                  label={filePanelRenderContext.workspaceLabel}
-                  runtime={filePanelRenderContext.runtime}
-                  workspaceId={filePanelRenderContext.workspaceId}
-                  sessionId={filePanelRenderContext.sessionId}
-                  previewPath={activeFilePanel?.filePreviewPath ?? null}
-                  previewRequestId={activeFilePanel?.filePreviewRequestId ?? 0}
-                  previewRevealTarget={activeFilePanel?.filePreviewRevealTarget ?? null}
-                  onQuoteSelection={filePanelRenderContext.onQuoteSelection ? filePanelQuoteSelection : undefined}
-                  onStartChatFromAnnotation={filePanelRenderContext.onStartChatFromAnnotation}
-                  onPreviewPathChange={updateFilePanelPreviewPath}
+          {conversationPanelIds.map((panelId) => {
+            const conversationPanel = conversationPanels[panelId];
+            if (!conversationPanel) {
+              return null;
+            }
+            return (
+              <div
+                className={styles.rightSidebarBody}
+                data-content="conversation"
+                hidden={resolvedActivePanelId !== panelId}
+                key={panelId}
+              >
+                <Suspense fallback={<RightSidebarLoading label="正在加载旁路对话" />}>
+                  <LazyConversationSessionSurface
+                    threadId={conversationPanel.sessionId}
+                    runtime={runtime}
+                    mode="sidecar"
+                    previewPanelScopeKey={activeScopeKey}
+                    onNavigateToConversation={onNavigateToConversation}
+                    onOpenModelSettings={onOpenModelSettings}
+                  />
+                </Suspense>
+              </div>
+            );
+          })}
+          {!showConversationPanel ? (
+            showFilesPanel &&
+            filePanelRenderContext?.runtime &&
+            (filePanelRenderContext.sessionId || filePanelRenderContext.workspaceId) ? (
+              <div className={styles.rightSidebarBody} data-content="files">
+                <Suspense fallback={<RightSidebarLoading label="正在加载文件" />}>
+                  <LazyWorkspaceFileBrowser
+                    key={`${activeScopeKey}:${activeFilePanel?.id ?? "files"}`}
+                    label={filePanelRenderContext.workspaceLabel}
+                    runtime={filePanelRenderContext.runtime}
+                    workspaceId={filePanelRenderContext.workspaceId}
+                    sessionId={filePanelRenderContext.sessionId}
+                    previewPath={activeFilePanel?.filePreviewPath ?? null}
+                    previewRequestId={activeFilePanel?.filePreviewRequestId ?? 0}
+                    previewRevealTarget={activeFilePanel?.filePreviewRevealTarget ?? null}
+                    onQuoteSelection={filePanelRenderContext.onQuoteSelection ? filePanelQuoteSelection : undefined}
+                    onStartChatFromAnnotation={filePanelRenderContext.onStartChatFromAnnotation}
+                    onPreviewPathChange={updateFilePanelPreviewPath}
+                  />
+                </Suspense>
+              </div>
+            ) : activeRequest ? (
+              <div className={styles.rightSidebarBody} data-content="preview">
+                <Suspense fallback={<RightSidebarLoading label="正在加载预览" />}>
+                  <LazyFilePreview
+                    breadcrumbRootLabel={
+                      activeRequest.type === "content" && !activeRequest.sourcePath
+                        ? undefined
+                        : activeRenderContext?.workspaceLabel
+                    }
+                    workspaceId={activeRenderContext?.workspaceId}
+                    sessionId={activeRenderContext?.sessionId}
+                    request={activeRequest}
+                    runtime={activeRenderContext?.runtime}
+                    onQuoteSelection={activeRenderContext?.onQuoteSelection ? activePreviewQuoteSelection : undefined}
+                    onStartChatFromAnnotation={activeRenderContext?.onStartChatFromAnnotation}
+                    chrome="panel"
+                  />
+                </Suspense>
+              </div>
+            ) : (
+              <div className={styles.rightSidebarBody} data-content="empty">
+                <RightSidebarInitialPage
+                  canOpenFiles={canOpenFiles}
+                  canOpenBtwConversation={canOpenBtwConversation}
+                  onOpenFiles={openFilesPanel}
+                  onOpenBtwConversation={openBtwConversationFromHost}
                 />
-              </Suspense>
-            </div>
-          ) : activeRequest ? (
-            <div className={styles.rightSidebarBody} data-content="preview">
-              <Suspense fallback={<RightSidebarLoading label="正在加载预览" />}>
-                <LazyFilePreview
-                  breadcrumbRootLabel={
-                    activeRequest.type === "content" && !activeRequest.sourcePath
-                      ? undefined
-                      : activeRenderContext?.workspaceLabel
-                  }
-                  workspaceId={activeRenderContext?.workspaceId}
-                  sessionId={activeRenderContext?.sessionId}
-                  request={activeRequest}
-                  runtime={activeRenderContext?.runtime}
-                  onQuoteSelection={activeRenderContext?.onQuoteSelection ? activePreviewQuoteSelection : undefined}
-                  onStartChatFromAnnotation={activeRenderContext?.onStartChatFromAnnotation}
-                  chrome="panel"
-                />
-              </Suspense>
-            </div>
-          ) : (
-            <div className={styles.rightSidebarBody} data-content="empty">
-              <RightSidebarInitialPage canOpenFiles={canOpenFiles} onOpenFiles={openFilesPanel} />
-            </div>
-          )}
+              </div>
+            )
+          ) : null}
         </>
       ) : null}
     </aside>
@@ -1241,7 +1514,9 @@ function sameRightSidebarScopePanelState(
     left.nextPanelSeq === right.nextPanelSeq &&
     sameStringArray(left.panelOrder, right.panelOrder) &&
     sameStringArray(left.filePanelIds, right.filePanelIds) &&
+    sameStringArray(left.conversationPanelIds, right.conversationPanelIds) &&
     sameFilePanels(left, right) &&
+    sameConversationPanels(left, right) &&
     sameStringArray(left.initialPanelIds, right.initialPanelIds)
   );
 }
@@ -1267,13 +1542,16 @@ function normalizeRightSidebarScopePanelState(
       filePreviewRevealTarget: null,
     };
   }
+  const conversationPanelIds = state?.conversationPanelIds ?? [];
+  const conversationPanels = { ...(state?.conversationPanels ?? {}) };
   const initialPanelIds = state?.initialPanelIds ?? [];
   const nextPanelSeq = Math.max(
     state?.nextPanelSeq ?? state?.initialPanelSeq ?? 0,
-    maxPanelSeq([...filePanelIds, ...initialPanelIds]),
+    maxPanelSeq([...filePanelIds, ...conversationPanelIds, ...initialPanelIds]),
   );
   const panelOrder = orderedUniquePanelIds(state?.panelOrder ?? [], [
     ...filePanelIds,
+    ...conversationPanelIds,
     ...initialPanelIds,
   ]);
 
@@ -1283,6 +1561,8 @@ function normalizeRightSidebarScopePanelState(
     panelOrder,
     filePanelIds,
     filePanels,
+    conversationPanelIds,
+    conversationPanels,
     initialPanelIds,
     nextPanelSeq,
   };
@@ -1366,8 +1646,97 @@ function activeInitialPanelIdForState(state: RightSidebarScopePanelState): strin
   return state.activePanelId && state.initialPanelIds.includes(state.activePanelId) ? state.activePanelId : null;
 }
 
+function activateOrCreateConversationPanel(
+  state: RightSidebarScopePanelState,
+  options: {
+    session: AgentSession;
+    title?: string | null;
+    sourceSessionId?: string | null;
+  },
+): RightSidebarScopePanelState {
+  const sessionId = options.session.id.trim();
+  if (!sessionId) {
+    return state;
+  }
+  const existingPanelId =
+    state.conversationPanelIds.find((panelId) => state.conversationPanels[panelId]?.sessionId === sessionId) ?? null;
+  if (existingPanelId) {
+    return activateExistingConversationPanel(state, existingPanelId, options);
+  }
+
+  const activeInitialPanelId = activeInitialPanelIdForState(state);
+  const nextPanelSeq = activeInitialPanelId ? state.nextPanelSeq : state.nextPanelSeq + 1;
+  const panelId = activeInitialPanelId ?? `${CONVERSATION_PANEL_ID_PREFIX}${nextPanelSeq}`;
+  return {
+    ...state,
+    activePanelId: panelId,
+    panelOrder: activeInitialPanelId ? state.panelOrder : [...state.panelOrder, panelId],
+    conversationPanelIds: [...state.conversationPanelIds, panelId],
+    conversationPanels: {
+      ...state.conversationPanels,
+      [panelId]: conversationPanelState(panelId, options),
+    },
+    initialPanelIds: activeInitialPanelId
+      ? state.initialPanelIds.filter((id) => id !== activeInitialPanelId)
+      : state.initialPanelIds,
+    nextPanelSeq,
+  };
+}
+
+function activateExistingConversationPanel(
+  state: RightSidebarScopePanelState,
+  panelId: string,
+  options: {
+    session: AgentSession;
+    title?: string | null;
+    sourceSessionId?: string | null;
+  },
+): RightSidebarScopePanelState {
+  const panel = state.conversationPanels[panelId];
+  if (!panel) {
+    return state;
+  }
+  return {
+    ...state,
+    activePanelId: panelId,
+    conversationPanels: {
+      ...state.conversationPanels,
+      [panelId]: {
+        ...panel,
+        title: conversationPanelTitle(options),
+        sourceSessionId: options.sourceSessionId ?? panel.sourceSessionId,
+      },
+    },
+  };
+}
+
+function conversationPanelState(
+  panelId: string,
+  options: {
+    session: AgentSession;
+    title?: string | null;
+    sourceSessionId?: string | null;
+  },
+): RightSidebarConversationPanelState {
+  return {
+    id: panelId,
+    sessionId: options.session.id,
+    title: conversationPanelTitle(options),
+    sourceSessionId: options.sourceSessionId ?? null,
+  };
+}
+
+function conversationPanelTitle(options: { session: AgentSession; title?: string | null }): string {
+  return options.title?.trim() || options.session.title?.trim() || BTW_CONVERSATION_TITLE;
+}
+
 function orderedRightSidebarPanelIds(state: RightSidebarScopePanelState, entryIds: string[]): string[] {
-  return orderedUniquePanelIds(state.panelOrder, [...state.filePanelIds, ...state.initialPanelIds, ...entryIds]);
+  return orderedUniquePanelIds(state.panelOrder, [
+    ...state.filePanelIds,
+    ...state.conversationPanelIds,
+    ...state.initialPanelIds,
+    ...entryIds,
+  ]);
 }
 
 function orderedUniquePanelIds(preferredOrder: string[], panelIds: string[]): string[] {
@@ -1398,13 +1767,23 @@ function hasPanelPathOption(options: { path?: string | null }): boolean {
 
 function maxPanelSeq(panelIds: string[]): number {
   return panelIds.reduce((maxSeq, panelId) => {
-    const prefix = panelId.startsWith(INITIAL_PANEL_ID_PREFIX) ? INITIAL_PANEL_ID_PREFIX : FILES_PANEL_ID_PREFIX;
+    const prefix = panelSeqPrefix(panelId);
     if (!panelId.startsWith(prefix)) {
       return maxSeq;
     }
     const seq = Number(panelId.slice(prefix.length));
     return Number.isFinite(seq) ? Math.max(maxSeq, seq) : maxSeq;
   }, 0);
+}
+
+function panelSeqPrefix(panelId: string): string {
+  if (panelId.startsWith(INITIAL_PANEL_ID_PREFIX)) {
+    return INITIAL_PANEL_ID_PREFIX;
+  }
+  if (panelId.startsWith(CONVERSATION_PANEL_ID_PREFIX)) {
+    return CONVERSATION_PANEL_ID_PREFIX;
+  }
+  return FILES_PANEL_ID_PREFIX;
 }
 
 function sameStringArray(left: string[], right: string[]): boolean {
@@ -1425,6 +1804,20 @@ function sameFilePanels(left: RightSidebarScopePanelState, right: RightSidebarSc
   });
 }
 
+function sameConversationPanels(left: RightSidebarScopePanelState, right: RightSidebarScopePanelState): boolean {
+  return left.conversationPanelIds.every((panelId) => {
+    const leftPanel = left.conversationPanels[panelId];
+    const rightPanel = right.conversationPanels[panelId];
+    return (
+      Boolean(leftPanel) &&
+      Boolean(rightPanel) &&
+      leftPanel.sessionId === rightPanel.sessionId &&
+      leftPanel.title === rightPanel.title &&
+      leftPanel.sourceSessionId === rightPanel.sourceSessionId
+    );
+  });
+}
+
 function samePreviewFileRevealTarget(
   left: PreviewFileRevealTarget | null | undefined,
   right: PreviewFileRevealTarget | null | undefined,
@@ -1440,6 +1833,20 @@ function samePreviewFileRevealTarget(
 
 function initialPanelTitle(panelId: string): string {
   return "新tab";
+}
+
+function resolveSessionPath(sessionId: string, getSessionPath?: (sessionId: string) => string): string {
+  return getSessionPath?.(sessionId) ?? `/guid/${encodeURIComponent(sessionId)}`;
+}
+
+function errorMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message) {
+    return reason.message;
+  }
+  if (reason && typeof reason === "object" && typeof (reason as { message?: unknown }).message === "string") {
+    return (reason as { message: string }).message;
+  }
+  return "操作失败";
 }
 
 function RightSidebarControls({

@@ -97,6 +97,7 @@ export interface SendBoxProps {
   externalFileRequest?: SendBoxExternalFileRequest | null;
   externalQuoteRequest?: SendBoxExternalQuoteRequest | null;
   leftHint?: ReactNode;
+  allowBypassConversationSlashCommand?: boolean;
   workspaceSkills?: WorkspaceSkillSummary[];
   selectedSkill?: WorkspaceSkillSummary | null;
   onSkillChange?: (skill: WorkspaceSkillSummary | null) => void;
@@ -149,6 +150,7 @@ export function SendBox({
   externalFileRequest = null,
   externalQuoteRequest = null,
   leftHint = null,
+  allowBypassConversationSlashCommand = true,
   workspaceSkills = [],
   selectedSkill: controlledSelectedSkill,
   onSkillChange,
@@ -279,8 +281,11 @@ export function SendBox({
   const SendIcon = variant === "keydex" ? ArrowUp : SendHorizontal;
   const slashQuery = getSlashQuery(editorValue);
   const availableSlashCommands = useMemo(
-    () => buildSlashCommands(workspaceSkills),
-    [workspaceSkills],
+    () =>
+      buildSlashCommands(workspaceSkills, {
+        includeBypassConversation: allowBypassConversationSlashCommand,
+      }),
+    [allowBypassConversationSlashCommand, workspaceSkills],
   );
   const slashCommands = useMemo(
     () => (slashQuery === null ? [] : filterSlashCommands(availableSlashCommands, slashQuery)),
@@ -490,6 +495,13 @@ export function SendBox({
       return;
     }
     onSlashCommand?.(command);
+    if (command.kind === "builtin") {
+      setSlashMode("root");
+      const nextValue = removeSlashQuery(editorValue);
+      setDismissedSlashValue(nextValue);
+      onChange(nextValue);
+      return;
+    }
     if (command.kind === "skill" && command.skill) {
       selectSlashSkill(command.skill);
       return;

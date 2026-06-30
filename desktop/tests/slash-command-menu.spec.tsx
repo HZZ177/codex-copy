@@ -17,9 +17,11 @@ describe("SlashCommandMenu", () => {
 
     expect(getSlashQuery("/")).toBe("");
     expect(getSlashQuery("请 /mod")).toBe("mod");
+    expect(getSlashQuery("请 /旁路")).toBe("旁路");
     expect(getSlashQuery("没有命令")).toBeNull();
     expect(filterSlashCommands(rootCommands, "model")).toEqual([]);
     expect(replaceSlashQuery("请 /dev", "")).toBe("请 ");
+    expect(replaceSlashQuery("请 /旁路", "")).toBe("请 ");
     expect(removeSlashQuery("请 /dev")).toBe("请");
   });
 
@@ -36,11 +38,17 @@ describe("SlashCommandMenu", () => {
     const commands = buildSlashCommands(skills);
     const emptyCommands = buildSlashCommands();
 
-    expect(commands.map((command) => command.id)).toEqual(["skill"]);
-    expect(emptyCommands.map((command) => command.id)).toEqual(["skill"]);
-    expect(emptyCommands[0]?.childCount).toBe(0);
+    expect(commands.map((command) => command.id)).toEqual(["bypass-conversation", "skill"]);
+    expect(emptyCommands.map((command) => command.id)).toEqual(["bypass-conversation", "skill"]);
+    expect(commands[0]).toMatchObject({ id: "bypass-conversation", label: "旁路对话" });
+    expect(emptyCommands[1]?.childCount).toBe(0);
+    expect(filterSlashCommands(commands, "旁路").map((command) => command.id)).toEqual(["bypass-conversation"]);
     expect(filterSlashCommands(commands, "plan").map((command) => command.id)).toEqual(["skill"]);
     expect(filterSlashSkills(skills, "plan").map((skill) => skill.name)).toEqual(["dev-plan"]);
+  });
+
+  it("can hide the bypass conversation command for nested sidecar composers", () => {
+    expect(buildSlashCommands([], { includeBypassConversation: false }).map((command) => command.id)).toEqual(["skill"]);
   });
 
   it("keeps Skill visible without workspace skills and shows the project empty state inside it", () => {
@@ -58,8 +66,11 @@ describe("SlashCommandMenu", () => {
     );
 
     expect(screen.getByTestId("slash-command-menu")).not.toBeNull();
+    expect(screen.queryByText("/旁路对话")).toBeNull();
+    expect(screen.getByText("旁路对话")).not.toBeNull();
     expect(screen.getByRole("option", { name: /Skill/ })).not.toBeNull();
 
+    fireEvent.keyDown(screen.getByLabelText("继续输入"), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByLabelText("继续输入"), { key: "Enter" });
 
     expect(screen.getByText("当前项目无 Skill")).not.toBeNull();
@@ -157,6 +168,7 @@ describe("SlashCommandMenu", () => {
     expect(screen.getByText("Skill")).not.toBeNull();
 
     const input = screen.getByLabelText("继续输入");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("dev-plan")).not.toBeNull();
     fireEvent.keyDown(screen.getByLabelText("继续输入"), { key: "Enter" });
@@ -169,5 +181,25 @@ describe("SlashCommandMenu", () => {
       }),
     );
     expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("does not show bypass conversation when disabled", () => {
+    render(
+      <SendBox
+        value="/"
+        runtimeState="idle"
+        canSend
+        canStop={false}
+        allowBypassConversationSlashCommand={false}
+        workspaceSkills={[]}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("slash-command-menu")).not.toBeNull();
+    expect(screen.queryByText("旁路对话")).toBeNull();
+    expect(screen.getByRole("option", { name: /Skill/ })).not.toBeNull();
   });
 });

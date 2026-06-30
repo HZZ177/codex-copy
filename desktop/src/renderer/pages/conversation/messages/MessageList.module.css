@@ -265,8 +265,21 @@
   color: color-mix(in srgb, var(--color-text-tertiary) 72%, var(--color-success-6));
 }
 
+.contextCompressionNotice[data-state="success"] {
+  color: color-mix(in srgb, var(--color-success-6) 82%, var(--color-text-secondary));
+}
+
+.contextCompressionNotice[data-state="success"]::before,
+.contextCompressionNotice[data-state="success"]::after {
+  background: color-mix(in srgb, var(--color-success-6) 42%, var(--color-border-default));
+}
+
 .contextCompressionNotice[data-state="cancelled"] {
   color: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
+}
+
+.topNotice {
+  margin-bottom: 14px;
 }
 
 .forkMarker {

@@ -13,6 +13,7 @@ export type {
   MessageListEmptyLayout,
   MessageListPerformanceProfile,
   MessageListScrollControls,
+  MessageListTopNotice,
   MessageListTurnNavigationRequest,
   MessageListTurnNavigatorMode,
 } from "./MessageList";

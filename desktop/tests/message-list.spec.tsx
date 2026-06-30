@@ -73,6 +73,34 @@ describe("MessageList", () => {
     expect(screen.queryByRole("button", { name: "回溯到此处" })).toBeNull();
   });
 
+  it("can hide fork source markers while keeping turn actions", () => {
+    const forkSource = {
+      id: "fork-1",
+      source_session_id: "source-session",
+      target_session_id: "target-session",
+      source_message_event_id: "source-event",
+      target_message_event_id: "target-event",
+    };
+    const forkedAssistant = {
+      ...message("m1", "assistant", "派生后的回答"),
+      payload: {
+        messageEventId: "target-event",
+        forkSource,
+      },
+    };
+    const { rerender } = render(<MessageList messages={[forkedAssistant]} onForkFromMessage={vi.fn()} />);
+
+    expect(screen.getByTestId("message-fork-marker").textContent).toContain("从「源会话」中派生");
+    expect(screen.getByRole("button", { name: "从该轮派生对话" })).not.toBeNull();
+
+    rerender(
+      <MessageList messages={[forkedAssistant]} onForkFromMessage={vi.fn()} showForkSourceMarkers={false} />,
+    );
+
+    expect(screen.queryByTestId("message-fork-marker")).toBeNull();
+    expect(screen.getByRole("button", { name: "从该轮派生对话" })).not.toBeNull();
+  });
+
   it("exposes the requested density variant on the list root and scroll surface", () => {
     render(<MessageList messages={[]} variant="compact" />);
 

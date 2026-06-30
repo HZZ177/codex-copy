@@ -6,6 +6,7 @@ import {
   MessageList,
   type MessageListEmptyLayout,
   type MessageListPerformanceProfile,
+  type MessageListTopNotice,
   type MessageListTurnNavigationRequest,
   type MessageListTurnNavigatorMode,
 } from "./messages";
@@ -26,6 +27,9 @@ export interface ConversationPanelProps {
   scrollButtonMode?: "inline" | "external";
   turnNavigatorMode?: MessageListTurnNavigatorMode;
   turnNavigationRequest?: MessageListTurnNavigationRequest | null;
+  topNotice?: MessageListTopNotice | null;
+  showForkSourceMarkers?: boolean;
+  showForkActions?: boolean;
   className?: string;
 }
 
@@ -40,6 +44,9 @@ export function ConversationPanel({
   scrollButtonMode = "inline",
   turnNavigatorMode,
   turnNavigationRequest,
+  topNotice = null,
+  showForkSourceMarkers = true,
+  showForkActions = true,
   className = "",
 }: ConversationPanelProps) {
   return (
@@ -61,8 +68,9 @@ export function ConversationPanel({
         onFilePreview={model.openFileChangePreview}
         onLoadToolDetails={model.loadToolDetails}
         onQuoteSelection={model.quoteSelection}
-        onForkFromMessage={model.forkFromMessage}
+        onForkFromMessage={showForkActions ? model.forkFromMessage : undefined}
         onNavigateToForkSource={model.navigateToForkSource}
+        showForkSourceMarkers={showForkSourceMarkers}
         onReverseFromMessage={model.reverseFromMessage}
         hasMoreOlder={Boolean(model.sessionViewState?.historyHasMoreOlder)}
         loadingOlder={model.loadingOlderHistory}
@@ -70,6 +78,7 @@ export function ConversationPanel({
         scrollButtonMode={scrollButtonMode}
         turnNavigatorMode={turnNavigatorMode}
         turnNavigationRequest={turnNavigationRequest}
+        topNotice={topNotice}
         onScrollControlsChange={model.updateScrollControls}
         emptyLayout={emptyLayout}
         emptyText={emptyText}

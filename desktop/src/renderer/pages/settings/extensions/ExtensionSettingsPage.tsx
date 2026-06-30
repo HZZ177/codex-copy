@@ -146,7 +146,7 @@ export function ExtensionSettingsPage({
     <main className={styles.page} data-testid="extension-settings-page">
       <header className={styles.header}>
         <h1>扩展功能</h1>
-        <p>配置本地智能体运行时的基础增强能力</p>
+        <p>配置基础增强能力</p>
       </header>
 
       {loading ? <div className={styles.muted}>正在读取扩展功能配置</div> : null}

@@ -1,5 +1,8 @@
 import type { WorkspaceSkillSummary } from "@/runtime";
 
+const SLASH_QUERY_PATTERN = /(?:^|\s)\/([^\s/]*)$/;
+const SLASH_QUERY_REPLACE_PATTERN = /(?:^|\s)\/[^\s/]*$/;
+
 export interface SlashCommand {
   id: string;
   kind: "builtin" | "skill_group" | "skill";
@@ -9,6 +12,21 @@ export interface SlashCommand {
   skill?: WorkspaceSkillSummary;
   childCount?: number;
   searchText?: string;
+}
+
+export interface BuildSlashCommandsOptions {
+  includeBypassConversation?: boolean;
+}
+
+export function bypassConversationSlashCommand(): SlashCommand {
+  return {
+    id: "bypass-conversation",
+    kind: "builtin",
+    label: "旁路对话",
+    title: "旁路对话",
+    description: "从当前最新完整轮次开启临时旁路会话",
+    searchText: "btw bypass sidecar side conversation temporary",
+  };
 }
 
 export function skillGroupSlashCommand(skills: WorkspaceSkillSummary[] = []): SlashCommand {
@@ -36,12 +54,19 @@ export function skillToSlashCommand(skill: WorkspaceSkillSummary): SlashCommand 
   };
 }
 
-export function buildSlashCommands(skills: WorkspaceSkillSummary[] = []): SlashCommand[] {
-  return [skillGroupSlashCommand(skills)];
+export function buildSlashCommands(
+  skills: WorkspaceSkillSummary[] = [],
+  options: BuildSlashCommandsOptions = {},
+): SlashCommand[] {
+  const commands = [skillGroupSlashCommand(skills)];
+  if (options.includeBypassConversation !== false) {
+    commands.unshift(bypassConversationSlashCommand());
+  }
+  return commands;
 }
 
 export function getSlashQuery(value: string): string | null {
-  const match = /(?:^|\s)\/([\w-]*)$/.exec(value);
+  const match = SLASH_QUERY_PATTERN.exec(value);
   return match ? match[1].toLowerCase() : null;
 }
 
@@ -67,7 +92,7 @@ export function filterSlashSkills(skills: WorkspaceSkillSummary[], query: string
 }
 
 export function replaceSlashQuery(value: string, replacement: string): string {
-  return value.replace(/(?:^|\s)\/[\w-]*$/, (match) => {
+  return value.replace(SLASH_QUERY_REPLACE_PATTERN, (match) => {
     const prefix = match.startsWith(" ") ? " " : "";
     return `${prefix}${replacement}`;
   });

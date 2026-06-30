@@ -6,6 +6,7 @@ import {
   type SelectedImageAttachment,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
+import type { SlashCommand } from "@/renderer/components/chat/SlashCommandMenu";
 import { RuntimeModelSelector, type RuntimeModelSelection } from "@/renderer/components/model";
 import { runtimeBridge, type RuntimeBridge, type WorkspaceSearchResult, type WorkspaceSkillSummary } from "@/runtime";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
@@ -27,6 +28,7 @@ export interface ConversationComposerProps {
   sessionId?: string | null;
   fileAccessMode?: FileAccessMode;
   workspaceRoots?: string[];
+  allowBypassConversationSlashCommand?: boolean;
   onSearchWorkspace?: (query: string, options?: { signal?: AbortSignal }) => Promise<WorkspaceSearchResult[]>;
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenModelSettings?: () => void;
@@ -40,6 +42,7 @@ export interface ConversationComposerProps {
   onStop: () => void;
   onEscape?: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
+  onSlashCommand?: (command: SlashCommand) => void;
   externalFileRequest: { requestId: number; file: SelectedFile } | null;
   externalQuoteRequest: { requestId: number; quote: SelectedQuote } | null;
   controls?: ReactNode;
@@ -65,6 +68,7 @@ export function ConversationComposer({
   sessionId,
   fileAccessMode = "workspace_trusted",
   workspaceRoots = [],
+  allowBypassConversationSlashCommand = true,
   onSearchWorkspace,
   onListWorkspaceDirectory,
   onOpenModelSettings,
@@ -74,6 +78,7 @@ export function ConversationComposer({
   onStop,
   onEscape,
   onOpenFileReference,
+  onSlashCommand,
   externalFileRequest,
   externalQuoteRequest,
   controls,
@@ -116,6 +121,7 @@ export function ConversationComposer({
       }
       onChange={onChange}
       workspaceSkills={workspaceSkills}
+      allowBypassConversationSlashCommand={allowBypassConversationSlashCommand}
       selectedSkill={selectedSkill}
       onSkillChange={onSkillChange}
       onSend={onSend}
@@ -126,6 +132,7 @@ export function ConversationComposer({
       workspaceRoots={workspaceRoots}
       onEscape={onEscape}
       onOpenFileReference={onOpenFileReference}
+      onSlashCommand={onSlashCommand}
       externalFileRequest={externalFileRequest}
       externalQuoteRequest={externalQuoteRequest}
       allowFileSelection={Boolean(onSearchWorkspace || onListWorkspaceDirectory)}

@@ -41,7 +41,8 @@ import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessio
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { useTheme } from "@/renderer/providers/ThemeProvider";
-import type { AgentChatMessagePayload, AgentSession } from "@/types/protocol";
+import { latestCompleteForkSource } from "@/renderer/pages/conversation/conversationForkSource";
+import type { AgentSession } from "@/types/protocol";
 
 import styles from "./Sider.module.css";
 
@@ -1756,39 +1757,6 @@ function hoverCardStyle(top: number, left?: number): CSSProperties {
     "--session-card-top": `${top}px`,
     ...(left === undefined ? {} : { "--session-card-left": `${left}px` }),
   } as CSSProperties;
-}
-
-type ForkSourcePayload = { messageEventId: string } | { turnIndex: number };
-
-const NON_FORKABLE_MESSAGE_STATUSES = new Set(["running", "streaming", "failed", "error", "cancelled", "cancelling"]);
-
-function latestCompleteForkSource(messages: AgentChatMessagePayload[]): ForkSourcePayload | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!isCompleteAssistantForkMessage(message)) {
-      continue;
-    }
-    const messageEventId = nonEmptyString(message.messageEventId);
-    if (messageEventId) {
-      return { messageEventId };
-    }
-    if (typeof message.turnIndex === "number" && Number.isInteger(message.turnIndex)) {
-      return { turnIndex: message.turnIndex };
-    }
-  }
-  return null;
-}
-
-function isCompleteAssistantForkMessage(message: AgentChatMessagePayload): boolean {
-  if (message.role !== "assistant" || message.streaming || message.cancelled) {
-    return false;
-  }
-  const status = typeof message.status === "string" ? message.status.toLowerCase() : "";
-  return !NON_FORKABLE_MESSAGE_STATUSES.has(status);
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function sessionToEntry(session: AgentSession, groupTitle: string): SiderEntry {

@@ -37,7 +37,10 @@ export interface UseConversationPanelModelOptions {
   sessionId: string;
   controller: AgentSessionController;
   registerPreviewHost?: boolean;
+  previewPanelScopeKey?: string | null;
+  emitForkSessionCreated?: boolean;
   onBranchSessionCreated?: (sessionId: string) => void;
+  onForkSessionCreated?: (session: AgentSession) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
 }
 
@@ -65,7 +68,10 @@ export function useConversationPanelModel({
   sessionId,
   controller,
   registerPreviewHost = false,
+  previewPanelScopeKey = null,
+  emitForkSessionCreated = true,
   onBranchSessionCreated,
+  onForkSessionCreated,
   onNavigateToForkSource,
 }: UseConversationPanelModelOptions) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -138,18 +144,24 @@ export function useConversationPanelModel({
     });
   }, [session, sessionId]);
 
-  const searchWorkspace =
-    session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
-      ? (query: string, options?: { signal?: AbortSignal }) =>
-          runtime.workspace.search({ sessionId }, query, options)
-      : undefined;
-  const listWorkspaceDirectory =
-    session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
-      ? (path: string) =>
-          runtime.workspace
-            .listDirectory({ sessionId }, path)
-            .then((response) => workspaceEntriesToSearchResults(response.entries))
-      : undefined;
+  const searchWorkspace = useMemo(
+    () =>
+      workspaceAvailable
+        ? (query: string, options?: { signal?: AbortSignal }) =>
+            runtime.workspace.search({ sessionId }, query, options)
+        : undefined,
+    [runtime, sessionId, workspaceAvailable],
+  );
+  const listWorkspaceDirectory = useMemo(
+    () =>
+      workspaceAvailable
+        ? (path: string) =>
+            runtime.workspace
+              .listDirectory({ sessionId }, path)
+              .then((response) => workspaceEntriesToSearchResults(response.entries))
+        : undefined,
+    [runtime, sessionId, workspaceAvailable],
+  );
 
   const updateScrollControls = useCallback((controls: MessageListScrollControls) => {
     scrollToBottomRef.current = controls.scrollToBottom;
@@ -280,6 +292,7 @@ export function useConversationPanelModel({
 
   const previewRenderContext = useMemo<PreviewRenderContext>(
     () => ({
+      panelScopeKey: previewPanelScopeKey ?? undefined,
       sessionId,
       workspaceAvailable,
       workspaceLabel,
@@ -287,7 +300,7 @@ export function useConversationPanelModel({
       onQuoteSelection: quoteSelection,
       onStartChatFromAnnotation: startChatFromAnnotation,
     }),
-    [quoteSelection, runtime, sessionId, startChatFromAnnotation, workspaceAvailable, workspaceLabel],
+    [previewPanelScopeKey, quoteSelection, runtime, sessionId, startChatFromAnnotation, workspaceAvailable, workspaceLabel],
   );
 
   useEffect(() => {
@@ -379,8 +392,11 @@ export function useConversationPanelModel({
         notifications.success(mode === "fork" ? "已创建派生会话" : "已回溯到此处");
         if (mode === "fork") {
           controller.dispatch({ type: "session/upsert", session: response.session });
-          emitSessionCreated(response.session);
+          if (emitForkSessionCreated) {
+            emitSessionCreated(response.session);
+          }
           onBranchSessionCreated?.(response.session.id);
+          onForkSessionCreated?.(response.session);
         } else {
           controller.dispatch({ type: "session/upsert", session: response.session });
           await controller.reloadHistory();
@@ -390,7 +406,7 @@ export function useConversationPanelModel({
         notifications.error(branchActionErrorMessage(mode, reason));
       }
     },
-    [controller, notifications, onBranchSessionCreated, runtime, sessionId],
+    [controller, emitForkSessionCreated, notifications, onBranchSessionCreated, onForkSessionCreated, runtime, sessionId],
   );
 
   const forkFromMessage = useCallback(

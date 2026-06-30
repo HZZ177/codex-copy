@@ -29,6 +29,8 @@ def _prepare_source(tmp_path):
         user_id="local-user",
         scene_id="desktop-agent",
         title="源会话",
+        current_model_provider_id="provider-source",
+        current_model="qwen-coder",
     )
     saver = SQLiteCheckpointSaver(repositories.db)
     first_config = saver.put(
@@ -92,6 +94,8 @@ def test_session_fork_service_clones_checkpoint_and_copies_history_until_source(
 
     forked = result.session
     assert forked.session_tag == "chat"
+    assert forked.current_model_provider_id == "provider-source"
+    assert forked.current_model == "qwen-coder"
     assert forked.parent_session_id is None
     assert forked.source_trace_id is None
     assert forked.source_active_session_id is None

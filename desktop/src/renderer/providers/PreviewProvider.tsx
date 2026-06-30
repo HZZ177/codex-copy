@@ -9,6 +9,7 @@ const MAX_PREVIEW_ENTRIES = 8;
 const GLOBAL_PREVIEW_SCOPE = "global";
 
 export interface PreviewRenderContext {
+  panelScopeKey?: string;
   workspaceId?: string;
   sessionId?: string;
   workspaceAvailable?: boolean;
@@ -394,6 +395,9 @@ function createPreviewEntry(
 }
 
 function previewScopeKey(context: PreviewRenderContext | null | undefined): string {
+  if (context?.panelScopeKey) {
+    return context.panelScopeKey;
+  }
   if (context?.sessionId) {
     return `session:${context.sessionId}`;
   }
@@ -413,6 +417,7 @@ function samePreviewRenderContext(left: PreviewRenderContext | null, right: Prev
   return (
     left?.workspaceId === right?.workspaceId &&
     left?.sessionId === right?.sessionId &&
+    left?.panelScopeKey === right?.panelScopeKey &&
     left?.workspaceAvailable === right?.workspaceAvailable &&
     left?.workspaceLabel === right?.workspaceLabel &&
     left?.runtime === right?.runtime &&

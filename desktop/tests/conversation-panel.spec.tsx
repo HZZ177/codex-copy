@@ -61,6 +61,26 @@ describe("ConversationPanel", () => {
     expect(screen.getByTestId("message-list").getAttribute("data-performance-profile")).toBe("interactivePanel");
   });
 
+  it("renders a green top notice inside the shared message list", () => {
+    render(
+      <ConversationPanel
+        model={panelModel()}
+        workspaceRuntime={fakeRuntime()}
+        topNotice={{
+          content: "该会话历史消息已加载",
+          tone: "success",
+          testId: "btw-conversation-history-notice",
+        }}
+        emptyText="旁路对话暂无消息"
+      />,
+    );
+
+    const notice = screen.getByTestId("btw-conversation-history-notice");
+    expect(notice.textContent).toContain("该会话历史消息已加载");
+    expect(notice.getAttribute("data-state")).toBe("success");
+    expect(screen.getByTestId("message-empty").textContent).toBe("旁路对话暂无消息");
+  });
+
   it.each<ConversationPanelVariant>(["full", "compact", "overlay"])(
     "renders primary message kinds through the %s variant",
     (variant) => {
@@ -97,6 +117,39 @@ describe("ConversationPanel", () => {
       expect(screen.getByTestId("error-item")).not.toBeNull();
     },
   );
+
+  it("can hide fork actions while keeping message content visible", () => {
+    const forkFromMessage = vi.fn();
+    const assistant = message("assistant-1", "assistant", "助手回答", {
+      messageEventId: "evt-ai-1",
+    });
+    const { rerender } = render(
+      <ConversationPanel
+        model={panelModel({
+          messages: [assistant],
+          forkFromMessage,
+        })}
+        workspaceRuntime={fakeRuntime()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "从该轮派生对话" }));
+    expect(forkFromMessage).toHaveBeenCalledWith(assistant);
+
+    rerender(
+      <ConversationPanel
+        model={panelModel({
+          messages: [assistant],
+          forkFromMessage,
+        })}
+        workspaceRuntime={fakeRuntime()}
+        showForkActions={false}
+      />,
+    );
+
+    expect(screen.getByText("助手回答")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "从该轮派生对话" })).toBeNull();
+  });
 
   it("wires composer accessory file preview and scroll controls to the same model", () => {
     const openFileChangePreview = vi.fn();

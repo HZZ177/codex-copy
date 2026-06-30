@@ -510,10 +510,20 @@
   padding: 0;
 }
 
+.rightSidebarBody[data-content="conversation"] {
+  display: grid;
+  overflow: hidden;
+  padding: 0;
+}
+
 .rightSidebarBody[data-content="empty"] {
   display: grid;
   overflow: hidden;
   padding: 0;
+}
+
+.rightSidebarBody[hidden] {
+  display: none !important;
 }
 
 .rightSidebarLoading {

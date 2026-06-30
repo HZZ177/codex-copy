@@ -126,6 +126,8 @@ class SessionForkService:
                 session_type=source_session.session_type,
                 cwd=source_session.cwd,
                 workspace_roots=source_session.workspace_roots,
+                current_model_provider_id=source_session.current_model_provider_id,
+                current_model=source_session.current_model,
                 title_source="manual",
             )
             copied_events = self._copy_visible_history(

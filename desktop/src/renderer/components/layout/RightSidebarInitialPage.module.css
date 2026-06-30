@@ -2,8 +2,8 @@
   display: grid;
   min-height: 100%;
   align-content: center;
-  gap: 6px;
-  padding: 28px;
+  gap: 5px;
+  padding: 18px;
   box-sizing: border-box;
   place-items: center;
   color: var(--color-text-3);
@@ -14,20 +14,20 @@
 
 .action {
   display: grid;
-  width: min(100%, 440px);
-  height: 44px;
-  grid-template-columns: 18px minmax(0, 1fr);
+  width: min(100%, 468px);
+  height: 36px;
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--surface-muted);
-  color: var(--color-text-primary);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+  color: var(--color-text-2);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  line-height: var(--ui-line-height-compact);
-  padding: 0 14px;
+  font-size: 12px;
+  line-height: 14px;
+  padding: 0 12px;
   text-align: left;
   transition:
     background var(--motion-fast) ease,
@@ -36,13 +36,21 @@
 
 .action:hover,
 .action:focus-visible {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-hover) 82%, transparent);
   color: var(--color-text-1);
   outline: none;
 }
 
+.action svg {
+  display: block;
+  justify-self: center;
+}
+
 .action span {
+  display: inline-flex;
   min-width: 0;
+  min-height: 14px;
+  align-items: center;
   overflow: hidden;
   line-height: inherit;
   text-overflow: ellipsis;
