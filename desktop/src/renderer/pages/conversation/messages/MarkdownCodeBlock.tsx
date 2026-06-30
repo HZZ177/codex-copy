@@ -7,7 +7,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   RotateCcw,
-  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -27,8 +26,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 
+import { AppDialog } from "@/renderer/components/dialog";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import {
   MarkdownDocumentModelCache,
@@ -366,6 +365,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
               className={styles.codeIconButton}
               type="button"
               aria-label={`全屏显示 ${fullscreenLabel}`}
+              data-tooltip-label="全屏显示"
               title={`全屏显示 ${fullscreenLabel}`}
               onClick={() => setFullscreenOpen(true)}
             >
@@ -377,6 +377,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
               className={styles.codeIconButton}
               type="button"
               aria-label={panelPreviewActive ? `收起预览面板 ${panelPreview.title}` : `在预览面板打开 ${panelPreview.title}`}
+              data-tooltip-label={panelPreviewActive ? "收起预览面板" : "打开预览面板"}
               aria-pressed={panelPreviewActive}
               title={panelPreviewActive ? `收起预览面板 ${panelPreview.title}` : `在预览面板打开 ${panelPreview.title}`}
               onClick={openInPanel}
@@ -389,12 +390,19 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
               className={styles.codeIconButton}
               type="button"
               aria-label={expanded ? "折叠代码" : "展开代码"}
+              data-tooltip-label={expanded ? "折叠代码" : "展开代码"}
               onClick={toggleExpanded}
             >
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
           ) : null}
-          <button className={styles.codeIconButton} type="button" aria-label="复制代码" onClick={handleCopy}>
+          <button
+            className={styles.codeIconButton}
+            type="button"
+            aria-label="复制代码"
+            data-tooltip-label="复制代码"
+            onClick={handleCopy}
+          >
             {copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
           </button>
         </div>
@@ -548,35 +556,17 @@ function PreviewFullscreenDialog({
   children: ReactNode;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
-  return createPortal(
-    <div className={styles.previewFullscreenOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        className={styles.previewFullscreenDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className={styles.previewFullscreenHeader}>
-          <h2>{title}</h2>
-          <button className={styles.previewFullscreenClose} type="button" aria-label="关闭全屏预览" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </header>
-        <div className={styles.previewFullscreenBody}>{children}</div>
-      </section>
-    </div>,
-    document.body,
+  return (
+    <AppDialog
+      title={title}
+      size="fullscreen"
+      placement="fullscreen"
+      backdrop="preview"
+      closeLabel="关闭全屏预览"
+      onClose={onClose}
+    >
+      {children}
+    </AppDialog>
   );
 }
 

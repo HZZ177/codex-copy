@@ -217,6 +217,7 @@ function FileDiffPreview({ file }: { file: FileChangeFile }) {
           className={styles.copyButton}
           type="button"
           aria-label="复制 diff"
+          data-tooltip-label="复制 diff"
           title="复制 diff"
           disabled={!copySource}
           onClick={() => void navigator.clipboard?.writeText(copySource)}
@@ -253,6 +254,7 @@ function FileChangeErrorPanel({
           className={styles.copyButton}
           type="button"
           aria-label="复制错误信息"
+          data-tooltip-label="复制错误信息"
           title="复制错误信息"
           disabled={!copySource}
           onClick={() => void navigator.clipboard?.writeText(copySource)}

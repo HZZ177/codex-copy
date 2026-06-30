@@ -5,7 +5,7 @@ import type { SelectedFile, SelectedImageAttachment, SelectedQuote } from "@/ren
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
-import type { AgentActionEnvelope, AgentSession } from "@/types/protocol";
+import type { AgentActionEnvelope, AgentSession, AgentSessionFork } from "@/types/protocol";
 import type { FileAccessMode } from "@/types/protocol";
 
 import { ChatLayout } from "./ChatLayout";
@@ -77,12 +77,24 @@ export function ConversationPage({
   const session = controller.session;
   const pendingApproval = controller.pendingApproval;
   const agentMessages = controller.agentMessages;
+  const navigateToForkSource = useCallback(
+    (fork: AgentSessionFork | null | undefined) => {
+      const sourceSessionId = fork?.source_session_id?.trim() ?? "";
+      if (!sourceSessionId) {
+        notifications.warning("源会话信息不完整");
+        return;
+      }
+      onNavigateToConversation?.(sourceSessionId);
+    },
+    [notifications, onNavigateToConversation],
+  );
   const panelModel = useConversationPanelModel({
     runtime,
     sessionId: threadId,
     controller,
     registerPreviewHost: true,
     onBranchSessionCreated: onNavigateToConversation,
+    onNavigateToForkSource: onNavigateToConversation ? navigateToForkSource : undefined,
   });
   const runtimeState = panelModel.runtimeState;
   const title = session?.title || (threadId ? `对话 ${threadId}` : "对话");
@@ -203,6 +215,14 @@ export function ConversationPage({
       subtitle={conversationSubtitle(wsStatus, session)}
       workspaceLabel={workspaceMeta?.label}
       workspaceTitle={workspaceMeta?.title}
+      sourceSessionAction={
+        session?.fork_source && onNavigateToConversation
+          ? {
+              title: "查看源会话",
+              onClick: () => navigateToForkSource(session.fork_source),
+            }
+          : undefined
+      }
       composerAccessory={
         <ConversationPanelComposerAccessory model={panelModel} />
       }
@@ -257,8 +277,8 @@ export function ConversationPage({
 
 function conversationSubtitle(status: WsConnectionStatus, session: AgentSession | null): string {
   const base = connectionSubtitle(status);
-  if (session?.parent_session_id) {
-    return `分支会话 · ${base}`;
+  if (session?.fork_source) {
+    return `派生会话 · ${base}`;
   }
   if (session?.active_session_id && session.active_session_id !== session.id) {
     return `已切换到分支 · ${base}`;

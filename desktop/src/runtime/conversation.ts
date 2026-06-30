@@ -74,6 +74,7 @@ export interface UpdateSessionPayload {
 export interface SessionBranchPayload {
   userId?: string;
   title?: string | null;
+  sessionTag?: string | null;
   checkpointId?: string | null;
   checkpointNs?: string | null;
   traceId?: string | null;
@@ -301,6 +302,7 @@ function branchPayload(payload: SessionBranchPayload): Record<string, unknown> {
   return {
     ...(payload.userId !== undefined ? { user_id: payload.userId } : {}),
     ...(payload.title !== undefined ? { title: payload.title } : {}),
+    ...(payload.sessionTag !== undefined ? { session_tag: payload.sessionTag } : {}),
     ...(payload.checkpointId !== undefined ? { checkpoint_id: payload.checkpointId } : {}),
     ...(payload.checkpointNs !== undefined ? { checkpoint_ns: payload.checkpointNs } : {}),
     ...(payload.traceId !== undefined ? { trace_id: payload.traceId } : {}),

@@ -29,6 +29,7 @@ def test_init_database_creates_core_tables_idempotently(tmp_path) -> None:
         "model_defaults",
         "workspaces",
         "sessions",
+        "session_forks",
         "message_events",
         "compression_staging",
         "trace_record",
@@ -68,6 +69,12 @@ def test_init_database_creates_workspace_schema_and_session_columns(tmp_path) ->
         session_indexes = {
             str(row["name"]) for row in conn.execute("pragma index_list(sessions)").fetchall()
         }
+        session_fork_columns = {
+            str(row["name"]) for row in conn.execute("pragma table_info(session_forks)").fetchall()
+        }
+        session_fork_indexes = {
+            str(row["name"]) for row in conn.execute("pragma index_list(session_forks)").fetchall()
+        }
 
     assert {
         "id",
@@ -99,6 +106,22 @@ def test_init_database_creates_workspace_schema_and_session_columns(tmp_path) ->
         "idx_sessions_type_updated",
         "idx_sessions_pinned_at",
     }.issubset(session_indexes)
+    assert {
+        "source_session_id",
+        "target_session_id",
+        "source_message_event_id",
+        "target_message_event_id",
+        "source_turn_index",
+        "target_turn_index",
+        "source_checkpoint_id",
+        "source_checkpoint_ns",
+    }.issubset(session_fork_columns)
+    assert {
+        "idx_session_forks_target",
+        "idx_session_forks_source_message",
+        "idx_session_forks_target_message",
+        "idx_session_forks_source_turn",
+    }.issubset(session_fork_indexes)
 
 
 def test_init_database_upgrades_legacy_session_schema_idempotently(tmp_path) -> None:

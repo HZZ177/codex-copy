@@ -125,6 +125,7 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
                   className={styles.copyButton}
                   type="button"
                   aria-label={copyAriaLabel("入参", inputCopyStatus)}
+                  data-tooltip-label={copyAriaLabel("入参", inputCopyStatus)}
                   title={copyAriaLabel("入参", inputCopyStatus)}
                   onClick={() => void handleCopy("input", command.inputText)}
                   disabled={details.loading}
@@ -143,6 +144,7 @@ export function CommandExecutionBlock({ message, onLoadDetails }: CommandExecuti
                   className={styles.copyButton}
                   type="button"
                   aria-label={copyAriaLabel("输出", outputCopyStatus)}
+                  data-tooltip-label={copyAriaLabel("输出", outputCopyStatus)}
                   title={copyAriaLabel("输出", outputCopyStatus)}
                   onClick={() => void handleCopy("output", combinedOutput)}
                   disabled={!combinedOutput || details.loading}

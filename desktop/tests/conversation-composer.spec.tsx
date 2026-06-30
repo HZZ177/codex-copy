@@ -77,6 +77,75 @@ describe("ConversationComposer", () => {
     expect(onSend).toHaveBeenCalledWith([], [], []);
   });
 
+  it("animates the context window ring toward the latest usage", async () => {
+    const { rerender } = render(
+      <ConversationComposer
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        connectionReady
+        modelSelection={modelSelection()}
+        workspaceSkills={[]}
+        selectedSkill={null}
+        externalFileRequest={null}
+        externalQuoteRequest={null}
+        onChange={vi.fn()}
+        onSkillChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    const progress = contextWindowProgressCircle();
+    const circumference = 2 * Math.PI * 6;
+    expect(Number.parseFloat(progress.style.strokeDashoffset)).toBeCloseTo(circumference);
+
+    rerender(
+      <ConversationComposer
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        connectionReady
+        modelSelection={modelSelection()}
+        workspaceSkills={[]}
+        selectedSkill={null}
+        externalFileRequest={null}
+        externalQuoteRequest={null}
+        contextWindowUsage={{
+          sessionId: "ses-1",
+          activeSessionId: "ses-1",
+          tokenCount: 400,
+          contextWindow: 1000,
+          windowFraction: 0.4,
+          thresholdFraction: 0.8,
+          thresholdTokenCount: 800,
+          thresholdUsageFraction: 0.5,
+          emergencyFraction: 0.9,
+          remainingToThresholdTokens: 400,
+          callPhase: "after",
+          callStatus: "completed",
+          tokenSource: "usage_metadata",
+          updatedAtMs: 1000,
+        }}
+        onChange={vi.fn()}
+        onSkillChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(Number.parseFloat(progress.style.strokeDashoffset)).toBeCloseTo(circumference);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+
+    expect(Number.parseFloat(progress.style.strokeDashoffset)).toBeCloseTo(circumference * 0.5);
+  });
+
   it("does not render Workbench dock controls unless the surface supplies them", () => {
     render(
       <ConversationComposer
@@ -161,4 +230,13 @@ function modelSelection(): RuntimeModelSelection {
     modelLoadState: "ready",
     modelError: null,
   };
+}
+
+function contextWindowProgressCircle(): SVGElement {
+  const indicator = screen.getByTestId("context-window-indicator");
+  const progress = indicator.querySelector("circle[class*='contextWindowProgress']");
+  if (!progress) {
+    throw new Error("context window progress circle not found");
+  }
+  return progress as SVGElement;
 }

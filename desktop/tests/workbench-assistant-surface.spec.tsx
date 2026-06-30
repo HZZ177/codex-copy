@@ -2,15 +2,16 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useMemo, useState, type PropsWithChildren } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeBridge, WorkspaceSkillSummary } from "@/runtime";
+import type { ChatChannel, RuntimeBridge, WorkspaceSkillSummary, WsConnectionStatus } from "@/runtime";
 import { selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { WorkbenchAssistantSurface } from "@/renderer/pages/workbench/WorkbenchAssistantSurface";
+import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
-import type { AgentChatMessage, AgentSession, CommandApprovalRequest, Workspace } from "@/types/protocol";
+import type { AgentActionEnvelope, AgentChatMessage, AgentSession, CommandApprovalRequest, Workspace } from "@/types/protocol";
 
 import { mockReducedMotionPreference } from "./helpers/motionPreference";
 
@@ -36,6 +37,100 @@ describe("WorkbenchAssistantSurface", () => {
     const input = await screen.findByRole("textbox", { name: "工作台助手输入" });
     await waitFor(() => {
       expect(document.activeElement).toBe(input);
+    });
+  });
+
+  it("shows persisted context window usage in the bottom workbench composer", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController({
+            session: session("ses-usage", { context_window_usage: contextWindowUsage("ses-usage", 5371) }),
+          })}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+
+    const indicator = await screen.findByTestId("context-window-indicator");
+    await waitFor(() => {
+      const label = indicator.getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
+    });
+  });
+
+  it("shows persisted context window usage in the drawer workbench composer", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController({
+            session: session("ses-usage", { context_window_usage: contextWindowUsage("ses-usage", 5371) }),
+          })}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
+    await waitForSurfaceMode("drawer");
+
+    const drawerFrame = screen.getByTestId("workbench-assistant-drawer-composer-frame");
+    const indicator = within(drawerFrame).getByTestId("context-window-indicator");
+    await waitFor(() => {
+      const label = indicator.getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
+    });
+  });
+
+  it("updates context window usage in the workbench composer from live runtime snapshots", async () => {
+    const { runtime, emit } = fakeRuntimeWithEvents();
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <AgentSessionProvider runtime={runtime}>
+          <WorkbenchAssistantSurface
+            runtime={runtime}
+            workspaceId="ws-1"
+            workspace={workspace()}
+            controller={fakeController({ session: session("ses-live") })}
+          />
+        </AgentSessionProvider>
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台输入框" }));
+    const indicator = await screen.findByTestId("context-window-indicator");
+    expect(indicator.getAttribute("aria-label")).toContain("等待下一次模型调用");
+
+    await act(async () => {
+      emit({
+        action: "middleware_progress",
+        data: {
+          session_id: "ses-live",
+          active_session_id: "ses-live",
+          middleware: "ContextCompressionMiddleware",
+          stage: "context_window_snapshot",
+          timestamp_ms: 2000,
+          token_count: 5371,
+          context_window: 200000,
+          threshold_token_count: 160000,
+          threshold_usage_fraction: 5371 / 160000,
+          token_source: "usage_metadata",
+        },
+      } as AgentActionEnvelope);
+    });
+
+    await waitFor(() => {
+      const label = indicator.getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
     });
   });
 
@@ -268,10 +363,30 @@ describe("WorkbenchAssistantSurface", () => {
 
     const surface = screen.getByTestId("workbench-assistant-surface");
     const handle = screen.getByTestId("workbench-assistant-drawer-resize-handle");
-    expect(surface.style.getPropertyValue("--workbench-assistant-dock-width")).toBe("400px");
+    expect(surface.style.getPropertyValue("--workbench-assistant-dock-width")).toBe("360px");
     expect(handle.getAttribute("role")).toBe("separator");
     expect(handle.getAttribute("aria-orientation")).toBe("vertical");
     expect(handle.getAttribute("data-visible")).toBe("true");
+    expect(handle.getAttribute("title")).toBe("拖动调整宽度，双击恢复默认宽度");
+
+    act(() => {
+      dispatchPointer(handle, "pointerdown", { button: 0, pointerId: 7, clientX: 400 });
+    });
+    await waitFor(() => {
+      expect(handle.getAttribute("data-dragging")).toBe("true");
+    });
+    act(() => {
+      dispatchPointer(window, "pointermove", { pointerId: 7, clientX: 280 });
+    });
+    await waitFor(() => {
+      expect(surface.style.getPropertyValue("--workbench-assistant-dock-width")).toBe("480px");
+    });
+    act(() => {
+      dispatchPointer(window, "pointerup", { pointerId: 7, clientX: 280 });
+    });
+
+    fireEvent.doubleClick(handle);
+    expect(surface.style.getPropertyValue("--workbench-assistant-dock-width")).toBe("360px");
   });
 
   it("renders the shared approval card in the bottom and drawer composer areas", async () => {
@@ -371,6 +486,36 @@ describe("WorkbenchAssistantSurface", () => {
     fireEvent.click(within(screen.getByTestId("message-group-block")).getByRole("button"));
     expect(screen.getAllByTestId("tool-call-block")).toHaveLength(2);
     expect(screen.queryByTestId("file-change-block")).toBeNull();
+  });
+
+  it("shows the turn navigator inside the drawer conversation panel", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController({
+            agentMessages: [
+              agentMessage({ id: "user-1", role: "user", content: "第一轮问题" }),
+              agentMessage({ id: "assistant-1", role: "assistant", content: "第一轮回答" }),
+              agentMessage({ id: "user-2", role: "user", content: "第二轮问题" }),
+              agentMessage({ id: "assistant-2", role: "assistant", content: "第二轮回答" }),
+            ],
+          })}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
+    await waitForSurfaceMode("drawer");
+
+    expect(await screen.findByText("第一轮问题")).not.toBeNull();
+    expect(screen.getByTestId("conversation-panel").getAttribute("data-conversation-panel-variant")).toBe("compact");
+    expect(screen.getByTestId("message-list").getAttribute("data-message-list-variant")).toBe("compact");
+    expect(screen.getByTestId("message-list").getAttribute("data-turn-navigator")).toBe("true");
+    expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
+    expect(screen.getByTestId("conversation-turn-navigator-count").textContent).toBe("2 turn");
   });
 
   it("shows a separate live message carrier while the assistant is running", async () => {
@@ -1878,6 +2023,50 @@ function fakeRuntime({ skills = [] }: { skills?: WorkspaceSkillSummary[] } = {})
   } as unknown as RuntimeBridge;
 }
 
+function fakeRuntimeWithEvents({ skills = [] }: { skills?: WorkspaceSkillSummary[] } = {}) {
+  let handler: ((event: AgentActionEnvelope) => void) | null = null;
+  const base = fakeRuntime({ skills });
+  const channel: ChatChannel = {
+    close: vi.fn(),
+    getStatus: vi.fn(() => "open" as WsConnectionStatus),
+    getSessionId: vi.fn(() => "ses-live"),
+    createSession: vi.fn(),
+    bindSession: vi.fn(),
+    unbindSession: vi.fn(),
+    chat: vi.fn(),
+    approvalDecision: vi.fn(),
+    cancel: vi.fn(),
+    requestStatus: vi.fn(),
+    ping: vi.fn(),
+  };
+  const runtime = {
+    ...base,
+    conversation: {
+      openChatChannel: vi.fn(
+        (onEvent: (event: AgentActionEnvelope) => void, options?: { onStatus?: (status: WsConnectionStatus) => void }) => {
+          handler = onEvent;
+          options?.onStatus?.("open");
+          return channel;
+        },
+      ),
+    },
+  } as unknown as RuntimeBridge;
+  return {
+    runtime,
+    emit(event: AgentActionEnvelope) {
+      handler?.(event);
+    },
+  };
+}
+
+function dispatchPointer(target: EventTarget, type: string, props: Record<string, number>) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [key, value] of Object.entries(props)) {
+    Object.defineProperty(event, key, { configurable: true, value });
+  }
+  target.dispatchEvent(event);
+}
+
 function workspaceSkill(): WorkspaceSkillSummary {
   return {
     name: "dev-plan",
@@ -1898,7 +2087,7 @@ function workspace(): Workspace {
   } as Workspace;
 }
 
-function session(id = "ses-1"): AgentSession {
+function session(id = "ses-1", patch: Partial<AgentSession> = {}): AgentSession {
   return {
     id,
     title: "Workbench",
@@ -1909,5 +2098,21 @@ function session(id = "ses-1"): AgentSession {
     updated_at: "2026-06-26T00:00:00Z",
     current_model_provider_id: "provider-1",
     current_model: "qwen-coder",
+    ...patch,
   } as AgentSession;
+}
+
+function contextWindowUsage(sessionId: string, tokenCount: number): NonNullable<AgentSession["context_window_usage"]> {
+  return {
+    middleware: "ContextCompressionMiddleware",
+    stage: "context_window_snapshot",
+    session_id: sessionId,
+    active_session_id: sessionId,
+    timestamp_ms: 1000,
+    token_count: tokenCount,
+    context_window: 200000,
+    threshold_token_count: 160000,
+    threshold_usage_fraction: tokenCount / 160000,
+    token_source: "usage_metadata",
+  };
 }

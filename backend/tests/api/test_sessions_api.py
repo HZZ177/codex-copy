@@ -33,6 +33,26 @@ def test_sessions_api_creates_lists_and_reads_detail(tmp_path) -> None:
     assert detail.json()["session"]["title"] == "会话一"
 
 
+def test_sessions_api_defaults_list_to_chat_tag(tmp_path) -> None:
+    client = _client(tmp_path)
+
+    chat = client.post("/api/sessions", json={"title": "普通会话"}).json()["session"]
+    transient = client.post(
+        "/api/sessions",
+        json={"title": "临时会话", "session_tag": "btw"},
+    ).json()["session"]
+
+    default_list = client.get("/api/sessions")
+    btw_list = client.get("/api/sessions", params={"session_tag": "btw"})
+    grouped_default = client.get("/api/sessions/grouped")
+
+    assert chat["session_tag"] == "chat"
+    assert transient["session_tag"] == "btw"
+    assert [item["id"] for item in default_list.json()["list"]] == [chat["id"]]
+    assert [item["id"] for item in btw_list.json()["list"]] == [transient["id"]]
+    assert grouped_default.json()["total"] == 1
+
+
 def test_sessions_api_creates_workspace_session_and_filters(tmp_path) -> None:
     project = tmp_path / "project"
     project.mkdir()

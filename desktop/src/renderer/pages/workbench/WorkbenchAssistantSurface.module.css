@@ -1598,7 +1598,7 @@
   z-index: 6;
   top: 0;
   bottom: 0;
-  left: -5px;
+  left: 0;
   width: 10px;
   border: 0;
   background: transparent;
@@ -1610,7 +1610,7 @@
   position: absolute;
   top: 18px;
   bottom: 18px;
-  left: 5px;
+  left: 0;
   width: 1px;
   border-radius: var(--radius-pill);
   background: transparent;

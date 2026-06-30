@@ -313,8 +313,9 @@ function setSessions(state: AgentConversationState, sessions: AgentSession[]): A
   let next = cloneState(state);
   next.sessionsById = { ...state.sessionsById };
   for (const session of sessions) {
-    next.sessionsById[session.id] = session;
-    ensureSessionState(next, session.id, metaFromSession(session));
+    const merged = mergeSessionRecord(state.sessionsById[session.id], session);
+    next.sessionsById[session.id] = merged;
+    ensureSessionState(next, session.id, metaFromSession(merged));
   }
   next.sessionIds = sortSessionIds(Object.values(next.sessionsById));
   next.selectedSessionId = state.selectedSessionId ?? next.sessionIds[0] ?? null;
@@ -327,16 +328,27 @@ function upsertSession(
   options: { select: boolean },
 ): AgentConversationState {
   const next = cloneState(state);
+  const merged = mergeSessionRecord(state.sessionsById[session.id], session);
   next.sessionsById = {
     ...state.sessionsById,
-    [session.id]: session,
+    [session.id]: merged,
   };
   next.sessionIds = sortSessionIds(Object.values(next.sessionsById));
   if (options.select || !next.selectedSessionId) {
     next.selectedSessionId = session.id;
   }
-  ensureSessionState(next, session.id, metaFromSession(session));
+  ensureSessionState(next, session.id, metaFromSession(merged));
   return next;
+}
+
+function mergeSessionRecord(existing: AgentSession | undefined, incoming: AgentSession): AgentSession {
+  if (!existing) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    context_window_usage: incoming.context_window_usage ?? existing.context_window_usage ?? null,
+  };
 }
 
 function loadHistory(
@@ -1771,6 +1783,7 @@ function normalizeSession(data: Record<string, unknown>): AgentSession {
     source_active_session_id: nullableString(data.source_active_session_id),
     source_checkpoint_id: nullableString(data.source_checkpoint_id),
     source_checkpoint_ns: nullableString(data.source_checkpoint_ns),
+    fork_source: normalizeSessionFork(data.fork_source),
     created_at: stringValue(data.created_at) || now,
     updated_at: stringValue(data.updated_at) || now,
     is_debug: Boolean(data.is_debug),
@@ -1778,9 +1791,56 @@ function normalizeSession(data: Record<string, unknown>): AgentSession {
     is_current: Boolean(data.is_current),
     current_model_provider_id: nullableString(data.current_model_provider_id),
     current_model: nullableString(data.current_model),
+    context_window_usage: normalizeContextWindowUsageSnapshot(data.context_window_usage),
     pinned: data.pinned === true || Boolean(pinnedAt),
     pinned_at: pinnedAt,
     scene_version_seq: typeof data.scene_version_seq === "number" ? data.scene_version_seq : null,
+  };
+}
+
+function normalizeContextWindowUsageSnapshot(value: unknown): AgentMiddlewareProgressData | null {
+  const data = asRecord(value);
+  if (!data) {
+    return null;
+  }
+  const tokenCount = numberValue(data.token_count);
+  const contextWindow = numberValue(data.context_window);
+  if (tokenCount === null || contextWindow === null) {
+    return null;
+  }
+  return data as AgentMiddlewareProgressData;
+}
+
+function normalizeSessionFork(value: unknown): AgentSession["fork_source"] {
+  const data = asRecord(value);
+  if (!data) {
+    return null;
+  }
+  const id = stringValue(data.id);
+  const sourceSessionId = stringValue(data.source_session_id);
+  const targetSessionId = stringValue(data.target_session_id);
+  const sourceMessageEventId = stringValue(data.source_message_event_id);
+  const targetMessageEventId = stringValue(data.target_message_event_id);
+  if (!id || !sourceSessionId || !targetSessionId || !sourceMessageEventId || !targetMessageEventId) {
+    return null;
+  }
+  return {
+    id,
+    source_session_id: sourceSessionId,
+    target_session_id: targetSessionId,
+    source_message_event_id: sourceMessageEventId,
+    target_message_event_id: targetMessageEventId,
+    source_turn_index: numberValue(data.source_turn_index) ?? 0,
+    target_turn_index: numberValue(data.target_turn_index) ?? 0,
+    source_trace_id: nullableString(data.source_trace_id),
+    source_active_session_id: nullableString(data.source_active_session_id),
+    source_checkpoint_id: nullableString(data.source_checkpoint_id),
+    source_checkpoint_ns: nullableString(data.source_checkpoint_ns),
+    relation_type: stringValue(data.relation_type) || "fork",
+    created_at: stringValue(data.created_at) || new Date(0).toISOString(),
+    updated_at: stringValue(data.updated_at) || new Date(0).toISOString(),
+    target_title: nullableString(data.target_title),
+    source_title: nullableString(data.source_title),
   };
 }
 

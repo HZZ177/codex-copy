@@ -1,7 +1,7 @@
-import { X } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 
 import type { ModelProvider, RuntimeBridge } from "@/runtime";
+import { AppDialog, DialogButton } from "@/renderer/components/dialog";
 
 import styles from "./ProviderModal.module.css";
 
@@ -103,98 +103,93 @@ export function ProviderModal({
   }
 
   return (
-    <div className={styles.backdrop} role="presentation">
-      <section aria-labelledby="provider-modal-title" aria-modal="true" className={styles.panel} role="dialog">
-        <header className={styles.header}>
-          <div>
-            <h2 id="provider-modal-title">{title}</h2>
-            <p>仅支持 OpenAI 兼容供应商</p>
-          </div>
-          <button aria-label="关闭" className={styles.iconButton} onClick={onClose} type="button">
-            <X size={16} />
-          </button>
-        </header>
+    <AppDialog
+      title={title}
+      description="仅支持 OpenAI 兼容供应商"
+      size="form"
+      closeLabel="关闭"
+      closeOnOverlayClick={false}
+      onClose={onClose}
+    >
+      <form aria-label={title} className={styles.form} onSubmit={submit}>
+        <label className={styles.field}>
+          <span>名称</span>
+          <input
+            autoFocus
+            onChange={(event) => setName(event.target.value)}
+            placeholder="例如 默认模型服务"
+            value={name}
+          />
+        </label>
 
-        <form aria-label={title} className={styles.form} onSubmit={submit}>
-          <label className={styles.field}>
-            <span>名称</span>
-            <input
-              autoFocus
-              onChange={(event) => setName(event.target.value)}
-              placeholder="例如 默认模型服务"
-              value={name}
-            />
-          </label>
+        <label className={styles.field}>
+          <span>接口地址</span>
+          <input
+            aria-label="接口地址"
+            onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder="https://api.example.com/v1"
+            value={baseUrl}
+          />
+        </label>
 
-          <label className={styles.field}>
-            <span>接口地址</span>
-            <input
-              aria-label="接口地址"
-              onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="https://api.example.com/v1"
-              value={baseUrl}
-            />
-          </label>
+        <label className={styles.field}>
+          <span>接口密钥</span>
+          <input
+            aria-label="接口密钥"
+            autoComplete="off"
+            onChange={(event) => setApiKey(event.target.value)}
+            placeholder={mode === "create" ? "sk-..." : "留空则不修改"}
+            type="password"
+            value={apiKey}
+          />
+          <small>{keyHint}</small>
+        </label>
 
-          <label className={styles.field}>
-            <span>接口密钥</span>
-            <input
-              aria-label="接口密钥"
-              autoComplete="off"
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={mode === "create" ? "sk-..." : "留空则不修改"}
-              type="password"
-              value={apiKey}
-            />
-            <small>{keyHint}</small>
-          </label>
+        <label className={styles.toggleRow}>
+          <span>
+            <strong>启用供应商</strong>
+            <small>停用后不会作为可选模型来源</small>
+          </span>
+          <input checked={enabled} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" />
+        </label>
 
-          <label className={styles.toggleRow}>
-            <span>
-              <strong>启用供应商</strong>
-              <small>停用后不会作为可选模型来源</small>
-            </span>
-            <input checked={enabled} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" />
-          </label>
+        {error ? <div className={styles.error} role="alert">{error}</div> : null}
 
-          {error ? <div className={styles.error} role="alert">{error}</div> : null}
-
-          {confirmDelete ? (
-            <div className={styles.confirmBox}>
-              <span>确认删除该供应商？已刷新模型和健康检查状态会一并移除。</span>
-              <div>
-                <button disabled={deleting} onClick={() => void deleteProvider()} type="button">
-                  {deleting ? "删除中" : "确认删除"}
-                </button>
-                <button disabled={deleting} onClick={() => setConfirmDelete(false)} type="button">
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <footer className={styles.footer}>
-            {canDelete ? (
-              <button
-                className={styles.dangerButton}
-                disabled={saving || deleting}
-                onClick={() => setConfirmDelete(true)}
-                type="button"
-              >
-                删除供应商
+        {confirmDelete ? (
+          <div className={styles.confirmBox}>
+            <span>确认删除该供应商？已刷新模型和健康检查状态会一并移除。</span>
+            <div>
+              <button disabled={deleting} onClick={() => void deleteProvider()} type="button">
+                {deleting ? "删除中" : "确认删除"}
               </button>
-            ) : null}
-            <span className={styles.spacer} />
-            <button className={styles.secondaryButton} disabled={saving || deleting} onClick={onClose} type="button">
-              取消
-            </button>
-            <button className={styles.primaryButton} disabled={saving || deleting} type="submit">
-              {saving ? "保存中" : "保存"}
-            </button>
-          </footer>
-        </form>
-      </section>
-    </div>
+              <button disabled={deleting} onClick={() => setConfirmDelete(false)} type="button">
+                取消
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <footer className={styles.footer}>
+          {canDelete ? (
+            <DialogButton
+              tone="danger"
+              disabled={saving || deleting}
+              onClick={() => setConfirmDelete(true)}
+              type="button"
+            >
+              删除供应商
+            </DialogButton>
+          ) : null}
+          <span className={styles.spacer} />
+          <DialogButton disabled={saving || deleting} onClick={onClose} type="button">
+            取消
+          </DialogButton>
+          <DialogButton tone="primary" disabled={saving || deleting} type="submit">
+            {saving ? "保存中" : "保存"}
+          </DialogButton>
+        </footer>
+      </form>
+    </AppDialog>
   );
 }
 

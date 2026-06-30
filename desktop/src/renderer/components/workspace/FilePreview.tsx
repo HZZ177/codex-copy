@@ -77,6 +77,7 @@ import type {
   WorkspaceMediaResponse,
   WorkspaceScope,
 } from "@/runtime";
+import { AppDialog } from "@/renderer/components/dialog";
 import { MarkdownImage } from "@/renderer/pages/conversation/messages/MarkdownImage";
 import { SelectionToolbar } from "@/renderer/pages/conversation/messages/SelectionToolbar";
 import { copyText } from "@/renderer/pages/conversation/messages/markdown";
@@ -5339,35 +5340,17 @@ function FilePreviewFullscreenDialog({
   onClose: () => void;
   title: string;
 }) {
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
-  return createPortal(
-    <div className={styles.previewFullscreenOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        className={styles.previewFullscreenDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className={styles.previewFullscreenHeader}>
-          <h2>{title}</h2>
-          <button className={styles.previewFullscreenClose} type="button" aria-label="关闭 Mermaid 预览" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </header>
-        <div className={styles.previewFullscreenBody}>{children}</div>
-      </section>
-    </div>,
-    document.body,
+  return (
+    <AppDialog
+      title={title}
+      size="fullscreen"
+      placement="fullscreen"
+      backdrop="preview"
+      closeLabel="关闭 Mermaid 预览"
+      onClose={onClose}
+    >
+      {children}
+    </AppDialog>
   );
 }
 

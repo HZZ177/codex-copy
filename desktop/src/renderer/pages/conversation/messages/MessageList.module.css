@@ -10,7 +10,7 @@
   --turn-navigator-fluid-room: max(0px, calc(100cqw - var(--conversation-document-min-width, 420px)));
   --turn-navigator-content-right: max(var(--conversation-edge-padding, 18px), calc((100cqw - var(--composer-width)) / 2));
   --turn-navigator-edge: clamp(8px, calc(8px + var(--turn-navigator-fluid-room) / 8), 20px);
-  --turn-navigator-gap: clamp(7px, calc(7px + var(--turn-navigator-fluid-room) / 24), 16px);
+  --turn-navigator-gap: clamp(8px, calc(8px + var(--turn-navigator-fluid-room) / 8), 64px);
   --turn-navigator-list-padding-right: 0px;
   --turn-navigator-min-content-right: calc(
     var(--turn-navigator-edge) + var(--turn-navigator-width) + var(--turn-navigator-gap)
@@ -69,7 +69,7 @@
   --message-assistant-bubble-backdrop-filter: blur(14px) saturate(1.12);
   --turn-navigator-content-right: max(26px, calc((100cqw - 720px) / 2 + 26px));
   --turn-navigator-edge: 12px;
-  --turn-navigator-gap: 13px;
+  --turn-navigator-gap: clamp(12px, calc(12px + var(--turn-navigator-fluid-room) / 12), 44px);
   --turn-navigator-width: 48px;
   background: transparent;
 }
@@ -269,6 +269,36 @@
   color: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
 }
 
+.forkMarker {
+  margin-top: 8px;
+  color: color-mix(in srgb, var(--color-info-6) 78%, var(--color-text-secondary));
+}
+
+.forkMarker::before,
+.forkMarker::after {
+  background: color-mix(in srgb, var(--color-info-6) 42%, var(--color-border-default));
+}
+
+.forkSourceButton {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 46%, transparent);
+  text-underline-offset: 2px;
+}
+
+.forkSourceButton:hover,
+.forkSourceButton:focus-visible {
+  color: var(--color-info-6);
+  text-decoration-color: currentColor;
+}
+
 @keyframes context-compression-spin {
   to {
     transform: rotate(1turn);
@@ -384,14 +414,24 @@
 }
 
 .turnNavigator {
+  --turn-navigator-count-height: 13px;
+  --turn-navigator-count-gap: 4px;
+  --turn-navigator-tail-height: calc(var(--turn-navigator-count-height) + var(--turn-navigator-count-gap));
+  --turn-navigator-track-width: 44px;
+
   position: absolute;
   top: 50%;
   right: var(--turn-navigator-right);
   z-index: 12;
+  display: grid;
   width: var(--turn-navigator-width);
-  height: var(--turn-navigator-height);
-  max-height: 70%;
-  transform: translateY(-50%);
+  height: calc(var(--turn-navigator-height) + var(--turn-navigator-tail-height));
+  max-height: calc(70% + var(--turn-navigator-tail-height));
+  grid-template-rows: minmax(0, 1fr) var(--turn-navigator-count-height);
+  row-gap: var(--turn-navigator-count-gap);
+  align-items: stretch;
+  justify-items: center;
+  transform: translateY(calc(-50% + var(--turn-navigator-tail-height) / 2));
   overflow: visible;
 }
 
@@ -402,15 +442,19 @@
   width: var(--turn-navigator-width, 44px);
   height: 100%;
   max-height: 100%;
+  grid-template-rows: minmax(0, 1fr) var(--turn-navigator-count-height);
   transform: none;
 }
 
 .turnNavigatorViewport {
   position: relative;
-  width: 100%;
+  width: var(--turn-navigator-track-width);
   height: 100%;
+  min-height: 0;
+  justify-self: center;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: none;
 }
 
@@ -418,9 +462,24 @@
   display: none;
 }
 
-.turnNavigatorViewport[data-scrollable="true"] {
+.turnNavigatorViewport[data-fade-top="true"][data-fade-bottom="true"] {
   mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+}
+
+.turnNavigatorViewport[data-fade-top="true"][data-fade-bottom="false"] {
+  mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18px, #000 100%);
+}
+
+.turnNavigatorViewport[data-fade-top="false"][data-fade-bottom="true"] {
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 18px), transparent 100%);
+}
+
+.turnNavigatorViewport[data-scrollable="false"] {
+  display: flex;
+  align-items: center;
 }
 
 .turnNavigator[data-layout="contained"] .turnNavigatorViewport {
@@ -436,30 +495,30 @@
   --turn-marker-line-radius: var(--radius-pill);
   --turn-current-marker-color: color-mix(in srgb, #f59e0b 88%, var(--color-text-primary) 12%);
   position: relative;
-  width: 100%;
+  width: var(--turn-navigator-track-width);
   height: var(--turn-navigator-rail-height, var(--turn-navigator-height));
 }
 
 .turnNavigatorMarker {
   position: absolute;
   top: var(--turn-marker-top);
-  right: 0;
+  left: 0;
   display: flex;
-  width: 44px;
+  width: var(--turn-navigator-track-width);
   height: 14px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   transform: translateY(-50%);
   border: 0;
   background: transparent;
-  padding: 0 8px 0 0;
+  padding: 0;
 }
 
 .turnNavigatorMarker span {
   display: block;
   width: var(--turn-marker-width);
   height: var(--turn-marker-line-height);
-  transform-origin: right center;
+  transform-origin: center;
   border-radius: var(--turn-marker-line-radius);
   background: color-mix(in srgb, var(--color-text-tertiary) 36%, transparent);
   transition: opacity 120ms ease;
@@ -538,6 +597,29 @@
   box-shadow: 0 18px 44px rgb(15 23 42 / 12%), 0 2px 10px rgb(15 23 42 / 6%);
   -webkit-backdrop-filter: blur(20px) saturate(1.16);
   backdrop-filter: blur(20px) saturate(1.16);
+}
+
+.turnNavigatorCount {
+  display: grid;
+  width: var(--turn-navigator-track-width);
+  min-width: 0;
+  justify-self: center;
+  place-items: center;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-text-tertiary) 72%, transparent);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.turnNavigator:hover .turnNavigatorCount,
+.turnNavigator:focus-within .turnNavigatorCount {
+  color: color-mix(in srgb, var(--color-text-secondary) 84%, transparent);
 }
 
 .turnNavigatorCard strong {

@@ -98,6 +98,45 @@ describe("agentSessionStore reducer", () => {
     });
   });
 
+  it("preserves persisted context window usage when later session payloads omit it", () => {
+    const usage = contextWindowUsage("ses-usage", 5371);
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "history/loaded",
+      sessionId: "ses-usage",
+      history: {
+        ...history([]),
+        session: {
+          ...session("ses-usage", "2026-06-18T09:00:00Z"),
+          context_window_usage: usage,
+        },
+      },
+    });
+
+    state = agentConversationReducer(state, {
+      type: "sessions/set",
+      sessions: [session("ses-usage", "2026-06-18T09:10:00Z")],
+    });
+
+    expect(selectAgentSessions(state)[0].context_window_usage).toEqual(usage);
+
+    state = reduceAgentWsEvent(state, {
+      action: "session_title_updated",
+      data: {
+        session: {
+          ...session("ses-usage", "2026-06-18T09:20:00Z"),
+          title: "新标题",
+          context_window_usage: null,
+        },
+      },
+    });
+
+    expect(selectAgentSessions(state)[0]).toMatchObject({
+      id: "ses-usage",
+      title: "新标题",
+      context_window_usage: usage,
+    });
+  });
+
   it("loads history into the same message view model as realtime messages", () => {
     const state = agentConversationReducer(createInitialAgentConversationState(), {
       type: "history/loaded",
@@ -1041,6 +1080,21 @@ function session(id: string, updatedAt: string, status: AgentSession["status"] =
     is_current: false,
     current_model_provider_id: "provider-1",
     current_model: "qwen-coder",
+  };
+}
+
+function contextWindowUsage(sessionId: string, tokenCount: number): NonNullable<AgentSession["context_window_usage"]> {
+  return {
+    middleware: "ContextCompressionMiddleware",
+    stage: "context_window_snapshot",
+    session_id: sessionId,
+    active_session_id: sessionId,
+    timestamp_ms: 1000,
+    token_count: tokenCount,
+    context_window: 200000,
+    threshold_token_count: 160000,
+    threshold_usage_fraction: tokenCount / 160000,
+    token_source: "usage_metadata",
   };
 }
 

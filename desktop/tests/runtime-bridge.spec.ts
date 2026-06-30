@@ -384,7 +384,24 @@ describe("RuntimeBridge", () => {
       if (url.endsWith("/api/sessions/ses%201/fork") && init.method === "POST") {
         return Promise.resolve(
           jsonResponse(200, {
-            session: { ...session, id: "ses-fork", parent_session_id: "ses 1" },
+            session: {
+              ...session,
+              id: "ses-fork",
+              fork_source: {
+                id: "fork 1",
+                source_session_id: "ses 1",
+                target_session_id: "ses-fork",
+                source_message_event_id: "evt 1",
+                target_message_event_id: "evt fork 1",
+                source_turn_index: 1,
+                target_turn_index: 1,
+                source_checkpoint_id: "ckpt_1",
+                source_checkpoint_ns: "",
+                relation_type: "fork",
+                created_at: "2026-06-17T10:00:00Z",
+                updated_at: "2026-06-17T10:00:00Z",
+              },
+            },
             source: {
               session_id: "ses 1",
               active_session_id: "ses 1",
@@ -462,6 +479,7 @@ describe("RuntimeBridge", () => {
       runtime.conversation.forkSession("ses 1", {
         messageEventId: "evt 1",
         title: "从这里继续",
+        sessionTag: "btw",
       }),
     ).resolves.toMatchObject({ session: { id: "ses-fork" }, source: { checkpoint_id: "ckpt_1" } });
     await expect(
@@ -524,7 +542,7 @@ describe("RuntimeBridge", () => {
       "http://127.0.0.1:8765/api/sessions/ses%201/fork",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ title: "从这里继续", message_event_id: "evt 1" }),
+        body: JSON.stringify({ title: "从这里继续", session_tag: "btw", message_event_id: "evt 1" }),
       }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(

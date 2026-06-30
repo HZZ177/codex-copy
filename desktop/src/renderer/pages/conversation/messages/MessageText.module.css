@@ -721,88 +721,6 @@
   font-size: 11px;
 }
 
-.previewFullscreenOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 140;
-  display: grid;
-  place-items: center;
-  background: rgb(255 255 255 / 58%);
-  padding: 24px;
-  animation: previewFullscreenOverlayIn 150ms ease both;
-  backdrop-filter: blur(10px);
-}
-
-:global(html[data-theme="dark"]) .previewFullscreenOverlay {
-  background: rgb(0 0 0 / 56%);
-}
-
-.previewFullscreenDialog {
-  display: grid;
-  width: min(1320px, calc(100vw - 48px));
-  height: min(860px, calc(100vh - 48px));
-  min-width: 0;
-  min-height: 0;
-  grid-template-rows: 42px minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 86%, transparent);
-  border-radius: 12px;
-  background: var(--color-bg-elevated);
-  box-shadow:
-    0 24px 70px rgb(15 23 42 / 22%),
-    0 6px 20px rgb(15 23 42 / 12%);
-  animation: previewFullscreenDialogIn 180ms var(--motion-ease-out) both;
-}
-
-.previewFullscreenHeader {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--surface-muted));
-  padding: 0 10px 0 14px;
-}
-
-.previewFullscreenHeader h2 {
-  overflow: hidden;
-  margin: 0;
-  color: var(--color-text-1);
-  font-size: 13px;
-  font-weight: 650;
-  line-height: var(--ui-line-height-compact);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.previewFullscreenClose {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-tertiary);
-}
-
-.previewFullscreenClose:hover {
-  background: var(--surface-hover);
-  color: var(--color-text-primary);
-}
-
-.previewFullscreenClose:focus-visible {
-  outline: none;
-}
-
-.previewFullscreenBody {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--surface-bg);
-}
-
 .fullscreenMarkdown {
   box-sizing: border-box;
   height: 100%;
@@ -1085,26 +1003,6 @@
   }
 }
 
-@keyframes previewFullscreenOverlayIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes previewFullscreenDialogIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 @keyframes contextItemCardEnter {
   from {
     opacity: 0;
@@ -1128,11 +1026,6 @@
 
   .codeViewSwitch::before {
     transition: none;
-  }
-
-  .previewFullscreenOverlay,
-  .previewFullscreenDialog {
-    animation: none;
   }
 
   .contextItemCard[data-floating-ready="true"] {

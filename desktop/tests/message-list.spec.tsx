@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "@/runtime";
-import { MessageList } from "@/renderer/pages/conversation/messages";
+import { ConversationTurnNavigator, MessageList } from "@/renderer/pages/conversation/messages";
 import { visibleTurnIndexesFromMountedTurns } from "@/renderer/pages/conversation/messages/MessageList";
 import { MessageGroupBlock } from "@/renderer/pages/conversation/messages/MessageGroupBlock";
 import { useAutoScroll } from "@/renderer/pages/conversation/messages/useAutoScroll";
@@ -60,17 +60,17 @@ describe("MessageList", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "从这里继续" }));
-    fireEvent.click(screen.getByRole("button", { name: "回退到这里继续" }));
+    fireEvent.click(screen.getByRole("button", { name: "从该轮派生对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "回溯到此处" }));
     expect(fork).toHaveBeenCalledWith(branchableAssistant);
     expect(reverse).toHaveBeenCalledWith(reversibleUser);
 
     rerender(<MessageList messages={[message("m3", "assistant", "没有事件")]} onForkFromMessage={fork} />);
-    expect(screen.queryByRole("button", { name: "从这里继续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "从该轮派生对话" })).toBeNull();
 
     rerender(<MessageList messages={[running]} onForkFromMessage={fork} onReverseFromMessage={reverse} />);
-    expect(screen.queryByRole("button", { name: "从这里继续" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "回退到这里继续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "从该轮派生对话" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "回溯到此处" })).toBeNull();
   });
 
   it("exposes the requested density variant on the list root and scroll surface", () => {
@@ -108,6 +108,7 @@ describe("MessageList", () => {
 
       expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
       expect(screen.getByTestId("conversation-turn-navigator-viewport")).not.toBeNull();
+      expect(screen.getByTestId("conversation-turn-navigator-count").textContent).toBe("2 turn");
       const markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
       expect(markers).toHaveLength(2);
       expect(markers[0].getAttribute("data-current")).toBe("true");
@@ -137,6 +138,45 @@ describe("MessageList", () => {
         delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
       }
     }
+  });
+
+  it("only fades turn navigator edges with hidden markers", async () => {
+    render(
+      <ConversationTurnNavigator
+        turns={Array.from({ length: 8 }, (_, index) => ({
+          id: `turn-${index + 1}`,
+          targetIndex: index,
+          userPreview: `第 ${index + 1} 轮问题`,
+          assistantPreview: [`第 ${index + 1} 轮回答`],
+        }))}
+        highlightedIndexes={[]}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    const viewport = screen.getByTestId("conversation-turn-navigator-viewport") as HTMLDivElement;
+
+    mockScrollMetrics(viewport, { scrollHeight: 240, clientHeight: 80, scrollTop: 0 });
+    await act(async () => {
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.getAttribute("data-scrollable")).toBe("true");
+    expect(viewport.getAttribute("data-fade-top")).toBe("false");
+    expect(viewport.getAttribute("data-fade-bottom")).toBe("true");
+
+    mockScrollMetrics(viewport, { scrollHeight: 240, clientHeight: 80, scrollTop: 80 });
+    await act(async () => {
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.getAttribute("data-fade-top")).toBe("true");
+    expect(viewport.getAttribute("data-fade-bottom")).toBe("true");
+
+    mockScrollMetrics(viewport, { scrollHeight: 240, clientHeight: 80, scrollTop: 160 });
+    await act(async () => {
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.getAttribute("data-fade-top")).toBe("true");
+    expect(viewport.getAttribute("data-fade-bottom")).toBe("false");
   });
 
   it("keeps an external turn navigation request until delayed content is mounted", async () => {

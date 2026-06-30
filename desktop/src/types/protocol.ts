@@ -511,6 +511,7 @@ export interface AgentSession {
   workspace: Workspace | null;
   current_model_provider_id: string | null;
   current_model: string | null;
+  context_window_usage?: AgentMiddlewareProgressData | null;
   pinned?: boolean;
   pinned_at?: string | null;
   active_session_id: string | null;
@@ -520,12 +521,32 @@ export interface AgentSession {
   source_active_session_id?: string | null;
   source_checkpoint_id?: string | null;
   source_checkpoint_ns?: string | null;
+  fork_source?: AgentSessionFork | null;
   created_at: string;
   updated_at: string;
   is_debug: boolean;
   is_scheduled: boolean;
   is_current: boolean;
   scene_version_seq?: number | null;
+}
+
+export interface AgentSessionFork {
+  id: string;
+  source_session_id: string;
+  target_session_id: string;
+  source_message_event_id: string;
+  target_message_event_id: string;
+  source_turn_index: number;
+  target_turn_index: number;
+  source_trace_id?: string | null;
+  source_active_session_id?: string | null;
+  source_checkpoint_id?: string | null;
+  source_checkpoint_ns?: string | null;
+  relation_type: string;
+  created_at: string;
+  updated_at: string;
+  target_title?: string | null;
+  source_title?: string | null;
 }
 
 export interface AgentSessionResponse {
@@ -712,6 +733,7 @@ export interface AgentChatMessage {
   ghostStats?: AgentGhostStats;
   traceId?: string;
   traceQueryContext?: AgentTraceQueryContext;
+  forkSource?: AgentSessionFork | null;
   runId?: string;
   toolCallId?: string;
   toolDetailRef?: AgentToolDetailRef;

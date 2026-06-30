@@ -266,7 +266,7 @@ async def test_context_compression_before_model_runs_emergency_compression(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_context_compression_wrap_model_emits_context_window_snapshots(tmp_path) -> None:
+async def test_context_compression_wrap_model_emits_usage_context_window_snapshot(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     session = repositories.sessions.create(
         session_id="ses_window_snapshot",
@@ -338,16 +338,92 @@ async def test_context_compression_wrap_model_emits_context_window_snapshots(tmp
         if event.event_type == DomainEventType.MIDDLEWARE_PROGRESS.value
         and event.payload.get("stage") == "context_window_snapshot"
     ]
-    assert [snapshot["call_phase"] for snapshot in snapshots] == ["before", "after"]
-    assert snapshots[0]["call_status"] == "running"
-    assert snapshots[0]["token_source"] == "estimated"
-    assert snapshots[1]["call_status"] == "completed"
-    assert snapshots[1]["token_source"] == "usage_metadata"
-    assert snapshots[1]["token_count"] == 700
-    assert snapshots[1]["context_window"] == 1000
-    assert snapshots[1]["threshold_fraction"] == 0.75
-    assert snapshots[1]["threshold_token_count"] == 750
-    assert snapshots[1]["threshold_usage_fraction"] == pytest.approx(700 / 750)
+    assert len(snapshots) == 1
+    assert snapshots[0]["call_phase"] == "after"
+    assert snapshots[0]["call_status"] == "completed"
+    assert snapshots[0]["token_source"] == "usage_metadata"
+    assert snapshots[0]["token_count"] == 700
+    assert snapshots[0]["context_window"] == 1000
+    assert snapshots[0]["threshold_fraction"] == 0.75
+    assert snapshots[0]["threshold_token_count"] == 750
+    assert snapshots[0]["threshold_usage_fraction"] == pytest.approx(700 / 750)
+    persisted = repositories.sessions.get(session.id)
+    assert persisted is not None
+    assert persisted.context_window_usage is not None
+    assert persisted.context_window_usage["stage"] == "context_window_snapshot"
+    assert persisted.context_window_usage["token_source"] == "usage_metadata"
+    assert persisted.context_window_usage["token_count"] == 700
+    assert persisted.context_window_usage["threshold_usage_fraction"] == pytest.approx(700 / 750)
+
+
+@pytest.mark.asyncio
+async def test_context_compression_wrap_model_skips_snapshot_without_usage_metadata(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_window_snapshot_without_usage",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="源会话",
+    )
+    events: list[DomainEvent] = []
+
+    async def collect(event: DomainEvent) -> None:
+        events.append(event)
+
+    token = set_request_context(
+        session_id=session.id,
+        active_session_id=session.id,
+        trace_id="trace_window_without_usage",
+        user_id=session.user_id,
+    )
+    try:
+        middleware = ContextCompressionMiddleware(
+            settings=ContextCompressionRuntimeSettings(
+                enabled=True,
+                context_window_tokens=1000,
+                trigger_fraction=0.75,
+                emergency_fraction=0.9,
+                retain_rounds=1,
+            ),
+            repositories=repositories,
+            dispatcher=EventDispatcher([collect]),
+            checkpointer=object(),
+        )
+
+        async def handler(_: ModelRequest) -> ModelResponse:
+            return ModelResponse(
+                result=[AIMessage(content="回答")],
+                structured_response=None,
+            )
+
+        result = await middleware.awrap_model_call(
+            ModelRequest(
+                model=object(),
+                messages=[HumanMessage(content="需要分析上下文")],
+                system_message=None,
+                tool_choice=None,
+                tools=[],
+                response_format=None,
+                state={},
+                runtime=None,
+                model_settings={},
+            ),
+            handler,
+        )
+    finally:
+        reset_request_context(token)
+
+    assert isinstance(result, ModelResponse)
+    snapshots = [
+        event.payload
+        for event in events
+        if event.event_type == DomainEventType.MIDDLEWARE_PROGRESS.value
+        and event.payload.get("stage") == "context_window_snapshot"
+    ]
+    assert snapshots == []
+    persisted = repositories.sessions.get(session.id)
+    assert persisted is not None
+    assert persisted.context_window_usage is None
 
 
 @pytest.mark.asyncio

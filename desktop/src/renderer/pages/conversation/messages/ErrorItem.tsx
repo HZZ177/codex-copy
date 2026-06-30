@@ -46,13 +46,20 @@ export function ErrorItem({ message }: ErrorItemProps) {
               className={styles.actionButton}
               type="button"
               aria-expanded={detailsOpen}
+              aria-label={detailsOpen ? "收起错误详情" : "展开错误详情"}
               onClick={() => setDetailsOpen((value) => !value)}
             >
               <ChevronDown size={14} data-expanded={detailsOpen ? "true" : "false"} />
               <span>错误详情</span>
             </button>
           ) : null}
-          <button className={styles.actionButton} type="button" aria-label="复制错误" onClick={handleCopy}>
+          <button
+            className={styles.actionButton}
+            type="button"
+            aria-label="复制错误"
+            data-tooltip-label="复制错误"
+            onClick={handleCopy}
+          >
             {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
             <span>{copyState === "failed" ? "复制失败" : copyState === "copied" ? "已复制" : "复制错误"}</span>
           </button>

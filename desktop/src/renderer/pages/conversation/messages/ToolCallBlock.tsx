@@ -163,6 +163,7 @@ export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCal
                   className={styles.copyButton}
                   type="button"
                   aria-label={copyAriaLabel("入参", inputCopyStatus)}
+                  data-tooltip-label={copyAriaLabel("入参", inputCopyStatus)}
                   title={copyAriaLabel("入参", inputCopyStatus)}
                   onClick={() => void handleCopy("input", tool.argsText)}
                   disabled={details.loading}
@@ -182,6 +183,7 @@ export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCal
                   className={styles.copyButton}
                   type="button"
                   aria-label={copyAriaLabel("输出", outputCopyStatus)}
+                  data-tooltip-label={copyAriaLabel("输出", outputCopyStatus)}
                   title={copyAriaLabel("输出", outputCopyStatus)}
                   onClick={() => void handleCopy("output", tool.resultText)}
                   disabled={!tool.resultText || details.loading}

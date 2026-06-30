@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   SendBox,
@@ -146,13 +146,25 @@ export function conversationComposerStatusText(_state: ConversationRuntimeState,
 function ContextWindowIndicator({ usage }: { usage: ContextWindowUsageStatus | null }) {
   const thresholdProgress = usage ? clampNonNegative(usage.thresholdUsageFraction) : 0;
   const ringProgress = clamp01(thresholdProgress);
+  const [animatedRingProgress, setAnimatedRingProgress] = useState(0);
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - ringProgress);
+  const dashOffset = circumference * (1 - clamp01(animatedRingProgress));
   const level = usage ? (thresholdProgress >= 1 ? "danger" : thresholdProgress >= 0.85 ? "warning" : "normal") : "idle";
   const ariaLabel = usage
     ? `当前已使用上下文 ${formatTokens(usage.tokenCount)} tokens，触发压缩进度 ${formatPercent(thresholdProgress)}`
     : "上下文窗口占用等待下一次模型调用";
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setAnimatedRingProgress(ringProgress);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      setAnimatedRingProgress(ringProgress);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [ringProgress]);
 
   return (
     <span
@@ -171,7 +183,7 @@ function ContextWindowIndicator({ usage }: { usage: ContextWindowUsageStatus | n
           cy="8"
           r={radius}
           strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
+          style={{ strokeDashoffset: dashOffset }}
         />
       </svg>
       <span className={styles.contextWindowTooltip} role="tooltip">

@@ -30,7 +30,10 @@ import { useRafPanelResize } from "@/renderer/components/layout/useRafPanelResiz
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
-import { clampWorkbenchAssistantDrawerWidth } from "@/renderer/hooks/layout/layoutStore";
+import {
+  clampWorkbenchAssistantDrawerWidth,
+  DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH,
+} from "@/renderer/hooks/layout/layoutStore";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
 import { ComposerApprovalCard } from "@/renderer/pages/conversation/ComposerApprovalCard";
 import { ConversationComposer } from "@/renderer/pages/conversation/ConversationComposer";
@@ -42,7 +45,10 @@ import {
 } from "@/renderer/pages/conversation/messages";
 import { LineChangeTicker } from "@/renderer/pages/conversation/messages/LineChangeTicker";
 import { preloadMarkdownCodeBlockRuntime } from "@/renderer/pages/conversation/messages/MarkdownCodeBlock";
-import { useConversationPanelModel } from "@/renderer/pages/conversation/useConversationPanelModel";
+import {
+  useConversationPanelModel,
+  type ContextWindowUsageStatus,
+} from "@/renderer/pages/conversation/useConversationPanelModel";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import { prefersReducedMotion } from "@/renderer/utils/motionPreference";
 import type {
@@ -309,6 +315,13 @@ export function WorkbenchAssistantSurface({
     onPreview: previewDrawerWidth,
     onCommit: commitDrawerWidth,
   });
+  const resetDrawerWidth = () => {
+    if (!renderDrawerContent) {
+      return;
+    }
+    drawerResize.finishDrag();
+    commitDrawerWidth(DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
+  };
   const renderMorphContent = dockTransitionPhase !== null;
   const renderBottomContent = true;
   const reducedMotion = prefersReducedMotion();
@@ -882,6 +895,7 @@ export function WorkbenchAssistantSurface({
       approvalError={controller.approvalError}
       fileChipRequest={composerFileChipRequest}
       quoteChipRequest={composerQuoteChipRequest}
+      contextWindowUsage={panelModel.contextWindowUsage}
       autoFocusKey={surfaceMode === "capsule" ? undefined : `workbench-composer:${composerFocusSeq}`}
       onChange={controller.setDraft}
       onSkillChange={controller.setSelectedSkill}
@@ -931,7 +945,7 @@ export function WorkbenchAssistantSurface({
       emptyText="当前工作空间还没有助手消息。"
       emptyTestId={`workbench-${stablePanelMode === "drawer" ? "drawer" : "morph"}-message-empty`}
       scrollButtonMode="external"
-      turnNavigatorMode="hidden"
+      turnNavigatorMode="auto"
       className={styles.drawerPanel}
     />
   ) : null;
@@ -972,6 +986,26 @@ export function WorkbenchAssistantSurface({
         width="compact"
       />
     ) : null;
+  const drawerResizeHandle = (
+    <div
+      className={styles.drawerResizeHandle}
+      role="separator"
+      aria-label="调整工作台助手侧栏宽度"
+      aria-orientation="vertical"
+      data-visible={stablePanelMode === "drawer" ? "true" : "false"}
+      data-dragging={drawerResize.dragging ? "true" : "false"}
+      data-testid="workbench-assistant-drawer-resize-handle"
+      tabIndex={stablePanelMode === "drawer" ? 0 : -1}
+      title="拖动调整宽度，双击恢复默认宽度"
+      onDoubleClick={resetDrawerWidth}
+      onPointerDown={(event) => {
+        if (event.button > 0) {
+          return;
+        }
+        drawerResize.startDrag(event);
+      }}
+    />
+  );
   const stableAssistantPanel = shouldMountStablePanel ? (
     <section
       className={[
@@ -984,21 +1018,6 @@ export function WorkbenchAssistantSurface({
       aria-hidden={stablePanelMode === "prewarm" ? "true" : undefined}
       aria-label={stablePanelMode === "drawer" ? "工作台助手" : "工作台助手过渡面板"}
     >
-      <div
-        className={styles.drawerResizeHandle}
-        role="separator"
-        aria-label="调整工作台助手侧栏宽度"
-        aria-orientation="vertical"
-        data-visible={stablePanelMode === "drawer" ? "true" : "false"}
-        data-dragging={drawerResize.dragging ? "true" : "false"}
-        data-testid="workbench-assistant-drawer-resize-handle"
-        onPointerDown={(event) => {
-          if (event.button > 0) {
-            return;
-          }
-          drawerResize.startDrag(event);
-        }}
-      />
       <header className={styles.drawerHeader} data-testid={stablePanelHeaderTestId}>
         <div className={styles.drawerTitle}>
           <span title={currentSessionTitle || undefined}>{currentSessionTitle || "助手"}</span>
@@ -1087,6 +1106,7 @@ export function WorkbenchAssistantSurface({
         transitionPhase={dockTransitionPhase ?? "idle"}
         reducedMotion={reducedMotion}
       >
+        {drawerResizeHandle}
         {stableAssistantPanel}
         {renderBottomContent ? (
           <motion.div
@@ -2032,6 +2052,7 @@ function WorkbenchComposer({
   approvalError,
   fileChipRequest,
   quoteChipRequest,
+  contextWindowUsage,
   autoFocusKey,
   onChange,
   onSkillChange,
@@ -2061,6 +2082,7 @@ function WorkbenchComposer({
   approvalError: string | null;
   fileChipRequest: AgentSessionController["fileChipRequest"];
   quoteChipRequest: AgentSessionController["quoteChipRequest"];
+  contextWindowUsage: ContextWindowUsageStatus | null;
   autoFocusKey?: string;
   onChange: (value: string) => void;
   onSkillChange: (skill: WorkspaceSkillSummary | null) => void;
@@ -2110,6 +2132,7 @@ function WorkbenchComposer({
       ariaLabel="工作台助手表单"
       inputLabel="工作台助手输入"
       modelSelectorPlacement="top"
+      contextWindowUsage={contextWindowUsage}
       externalFileRequest={fileChipRequest}
       externalQuoteRequest={quoteChipRequest}
       onChange={onChange}

@@ -1,15 +1,17 @@
 import {
-  Check,
   ChevronDown,
   Folder,
   FolderOpen,
+  GitBranch,
   LoaderCircle,
   MessageCircle,
   Moon,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Pin,
+  PinOff,
   Search,
   Settings,
   ShieldCheck,
@@ -20,10 +22,13 @@ import {
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
+import { AppDialog, ConfirmDialog, DialogButton } from "@/renderer/components/dialog";
 import type { AppMode } from "@/renderer/components/layout/appMode";
 import { LoadingSkeleton } from "@/renderer/components/loading";
+import { AppTooltipLayer } from "@/renderer/components/tooltip";
 import {
   subscribeSessionCreated,
   subscribeSessionUpdated,
@@ -43,6 +48,7 @@ export interface SiderEntry {
   updatedAt?: string;
   pinnedAt?: string;
   groupTitle?: string;
+  forked?: boolean;
 }
 
 interface SiderGroup {
@@ -67,7 +73,13 @@ const EMPTY_SESSION_INDICATOR: SessionIndicator = {
 };
 
 const WORKSPACE_SESSION_PREVIEW_LIMIT = 5;
+const WORKSPACE_SESSION_EXPAND_STEP = 10;
 const WORKSPACE_SESSION_HISTORY_PAGE_SIZE = 100;
+const SESSION_ACTION_MENU_WIDTH = 112;
+const SESSION_ACTION_MENU_HEIGHT = 66;
+const SESSION_ACTION_MENU_GAP = 10;
+const SESSION_ACTION_MENU_EDGE = 8;
+const SESSION_ACTION_MENU_CLOSE_MS = 120;
 
 export interface SiderProps {
   collapsed?: boolean;
@@ -171,6 +183,10 @@ export function Sider({
         ? displayHistoryGroups.flatMap((group) => group.items)
         : [...pinnedItems, ...displayHistoryGroups.flatMap((group) => group.items)],
     [appMode, displayHistoryGroups, pinnedItems],
+  );
+  const deleteCandidate = useMemo(
+    () => (confirmDeleteId ? historyItems.find((item) => item.id === confirmDeleteId) ?? null : null),
+    [confirmDeleteId, historyItems],
   );
   const showInitialHistorySkeleton = historyEmptyLoading && !collapsed && historyItems.length === 0;
   const searchResults = useMemo(() => {
@@ -312,6 +328,18 @@ export function Sider({
     }
   }
 
+  function startRenameConversation(item: SiderEntry) {
+    setSearchOpen(false);
+    setConfirmDeleteId(null);
+    setEditing({ id: item.id, title: item.title });
+  }
+
+  function startDeleteConversation(id: string) {
+    setSearchOpen(false);
+    setEditing(null);
+    setConfirmDeleteId(id);
+  }
+
   async function deleteConversation(id: string) {
     if (!canMutateConversations) {
       notifications.warning("当前后端不支持删除会话");
@@ -393,12 +421,14 @@ export function Sider({
       data-collapsed={collapsed ? "true" : "false"}
       data-footer-feather={showFooterFeather ? "true" : "false"}
     >
+      <AppTooltipLayer scopeSelector="[data-layout-sidebar='true']" defaultPlacement="top" />
       <nav className={styles.nav} aria-label="主导航">
         {onToggleSidebar ? (
           <button
             className={styles.navItem}
             data-state={collapsed ? "collapsed" : "expanded"}
             data-icon={collapsed ? "panel-left-open" : "panel-left-close"}
+            data-tooltip-label={collapsed ? "展开侧边栏" : undefined}
             type="button"
             aria-label={collapsed ? "展开侧边栏" : "折叠侧边栏"}
             title={collapsed ? "展开侧边栏" : ""}
@@ -420,6 +450,7 @@ export function Sider({
               type="button"
               key={item.key}
               title={collapsed ? item.label : ""}
+              data-tooltip-label={collapsed ? item.label : undefined}
               data-active={isActivePath(activePath, item.path) ? "true" : "false"}
               onClick={() => (item.key === "search" ? setSearchOpen(true) : navigateTo(item.path))}
             >
@@ -462,14 +493,9 @@ export function Sider({
                 flat
                 hideTitle
                 getSessionPath={getSessionPath}
-                onDelete={(id) => void deleteConversation(id)}
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                onCancelRename={() => setEditing(null)}
-                onConfirmDelete={setConfirmDeleteId}
-                onRename={(id, title) => void renameConversation(id, title)}
-                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                onConfirmDelete={startDeleteConversation}
+                onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                 onNavigate={navigateTo}
               />
             )}
@@ -503,14 +529,9 @@ export function Sider({
                 canMutate={canMutateConversations}
                 sessionIndicators={sessionIndicators}
                 getSessionPath={getSessionPath}
-                onDelete={(id) => void deleteConversation(id)}
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                onCancelRename={() => setEditing(null)}
-                onConfirmDelete={setConfirmDeleteId}
-                onRename={(id, title) => void renameConversation(id, title)}
-                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                onConfirmDelete={startDeleteConversation}
+                onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                 onNavigate={navigateTo}
               />
               {displayHistoryGroups.length === 0 && pinnedItems.length === 0 ? (
@@ -541,17 +562,12 @@ export function Sider({
                   historyExpansionLoading={Boolean(group.workspaceId && loadingWorkspaceHistoryIds.has(group.workspaceId))}
                   historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                   key={group.id}
-                  onDelete={(id) => void deleteConversation(id)}
                   onLoadHistoryExpansion={
                     group.workspaceId && !controlled ? () => loadWorkspaceSessions(group.workspaceId as string) : undefined
                   }
-                  onCancelDelete={() => setConfirmDeleteId(null)}
-                  onCancelRename={() => setEditing(null)}
-                  onConfirmDelete={setConfirmDeleteId}
-                  onRename={(id, title) => void renameConversation(id, title)}
-                  onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                  onConfirmDelete={startDeleteConversation}
+                  onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                  onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                   onNavigate={navigateTo}
                 />
               ))}
@@ -572,19 +588,18 @@ export function Sider({
                 sessionIndicators={sessionIndicators}
                 historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                 getSessionPath={getSessionPath}
-                onDelete={(id) => void deleteConversation(id)}
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                onCancelRename={() => setEditing(null)}
-                onConfirmDelete={setConfirmDeleteId}
-                onRename={(id, title) => void renameConversation(id, title)}
-                onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                onConfirmDelete={startDeleteConversation}
+                onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                 onNavigate={navigateTo}
               />
               <HistoryBucket
                 title="项目"
                 kind="workspace"
+                active={workspaceGroups.some((group) =>
+                  group.items.some((item) => isActivePath(activePath, getSessionPath(item.id))),
+                )}
+                activePath={activePath}
                 newConversationPath={getWorkspaceNewConversationPath(firstWorkspaceId)}
                 onNavigate={navigateTo}
               >
@@ -609,19 +624,14 @@ export function Sider({
                     )}
                     historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                     key={group.id}
-                    onDelete={(id) => void deleteConversation(id)}
                     onLoadHistoryExpansion={
                       group.workspaceId && !controlled
                         ? () => loadWorkspaceSessions(group.workspaceId as string)
                         : undefined
                     }
-                    onCancelDelete={() => setConfirmDeleteId(null)}
-                    onCancelRename={() => setEditing(null)}
-                    onConfirmDelete={setConfirmDeleteId}
-                    onRename={(id, title) => void renameConversation(id, title)}
-                    onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                    onConfirmDelete={startDeleteConversation}
+                    onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                    onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                     onNavigate={navigateTo}
                   />
                 ))}
@@ -630,6 +640,8 @@ export function Sider({
                 <HistoryBucket
                   title="对话"
                   kind="chat"
+                  active={chatItems.some((item) => isActivePath(activePath, getSessionPath(item.id)))}
+                  activePath={activePath}
                   newConversationPath={newChatConversationPath()}
                   onNavigate={navigateTo}
                 >
@@ -647,14 +659,9 @@ export function Sider({
                     sessionIndicators={sessionIndicators}
                     hideTitle
                     getSessionPath={getSessionPath}
-                    onDelete={(id) => void deleteConversation(id)}
-                    onCancelDelete={() => setConfirmDeleteId(null)}
-                    onCancelRename={() => setEditing(null)}
-                    onConfirmDelete={setConfirmDeleteId}
-                    onRename={(id, title) => void renameConversation(id, title)}
-                    onStartRename={(item) => setEditing({ id: item.id, title: item.title })}
+                    onConfirmDelete={startDeleteConversation}
+                    onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
-                    onUpdateRename={(title) => setEditing((value) => (value ? { ...value, title } : value))}
                     onNavigate={navigateTo}
                   />
                 </HistoryBucket>
@@ -670,6 +677,7 @@ export function Sider({
           type="button"
           title={collapsed ? "切换主题" : ""}
           aria-label="切换主题"
+          data-tooltip-label={collapsed ? "切换主题" : undefined}
           onClick={toggleTheme}
         >
           <ThemeIcon size={17} strokeWidth={2} />
@@ -679,6 +687,8 @@ export function Sider({
           className={styles.navItem}
           type="button"
           title={collapsed ? "设置" : ""}
+          aria-label="设置"
+          data-tooltip-label={collapsed ? "设置" : undefined}
           data-active={activePath.startsWith("/settings") ? "true" : "false"}
           onClick={() => onNavigate?.("/settings/general")}
         >
@@ -696,6 +706,21 @@ export function Sider({
           onNavigate={navigateTo}
           onQueryChange={setQuery}
           query={query}
+        />
+      ) : null}
+      {editing ? (
+        <SessionRenameDialog
+          editing={editing}
+          onCancel={() => setEditing(null)}
+          onChange={(title) => setEditing((value) => (value ? { ...value, title } : value))}
+          onSubmit={(id, title) => void renameConversation(id, title)}
+        />
+      ) : null}
+      {deleteCandidate ? (
+        <SessionDeleteDialog
+          title={deleteCandidate.title}
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={() => void deleteConversation(deleteCandidate.id)}
         />
       ) : null}
     </aside>
@@ -733,54 +758,129 @@ function SessionSearchDialog({
 }) {
   const hasQuery = query.trim().length > 0;
   return (
-    <div className={styles.searchOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        className={styles.searchDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label="搜索会话"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className={styles.searchHeader}>
-          <Search size={17} />
-          <input
-            autoFocus
-            aria-label="搜索会话"
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="搜索会话或打开新对话"
-            value={query}
-          />
-          <button aria-label="关闭搜索" type="button" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </header>
+    <AppDialog
+      ariaLabel="搜索会话"
+      size="search"
+      placement="top"
+      backdrop="page"
+      inset="below-titlebar"
+      showClose={false}
+      onClose={onClose}
+    >
+      <header className={styles.searchHeader}>
+        <Search size={17} />
+        <input
+          autoFocus
+          aria-label="搜索会话"
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="搜索会话或打开新对话"
+          value={query}
+        />
+        <button aria-label="关闭搜索" type="button" onClick={onClose}>
+          <X size={16} />
+        </button>
+      </header>
 
-        <div className={styles.searchQuickActions}>
-          <button type="button" onClick={() => onNavigate(newPromptConversationPath())}>
-            <SquarePen size={15} />
-            <span>新建对话</span>
-          </button>
-        </div>
+      <div className={styles.searchQuickActions}>
+        <button type="button" onClick={() => onNavigate(newPromptConversationPath())}>
+          <SquarePen size={15} />
+          <span>新建对话</span>
+        </button>
+      </div>
 
-        <section className={styles.searchSection}>
-          <div className={styles.sectionTitle}>{hasQuery ? "匹配会话" : "最近会话"}</div>
-          {loading ? <div className={styles.empty}>正在加载会话</div> : null}
-          {!loading && conversations.length === 0 ? <div className={styles.empty}>没有匹配会话</div> : null}
-          {conversations.map((item) => (
-            <button
-              className={styles.searchResult}
-              key={item.id}
-              type="button"
-              onClick={() => onNavigate(getSessionPath(item.id))}
-            >
-              <MessageCircle size={15} />
-              <span>{item.title}</span>
-              {item.updatedAt ? <time>{formatRelativeTime(item.updatedAt)}</time> : null}
-            </button>
-          ))}
-        </section>
+      <section className={styles.searchSection}>
+        <div className={styles.sectionTitle}>{hasQuery ? "匹配会话" : "最近会话"}</div>
+        {loading ? <div className={styles.empty}>正在加载会话</div> : null}
+        {!loading && conversations.length === 0 ? <div className={styles.empty}>没有匹配会话</div> : null}
+        {conversations.map((item) => (
+          <button
+            className={styles.searchResult}
+            key={item.id}
+            type="button"
+            onClick={() => onNavigate(getSessionPath(item.id))}
+          >
+            {item.forked ? <GitBranch size={15} /> : <MessageCircle size={15} />}
+            <span>{item.title}</span>
+            {item.updatedAt ? <time>{formatRelativeTime(item.updatedAt)}</time> : null}
+          </button>
+        ))}
       </section>
-    </div>
+    </AppDialog>
+  );
+}
+
+function SessionRenameDialog({
+  editing,
+  onCancel,
+  onChange,
+  onSubmit,
+}: {
+  editing: { id: string; title: string };
+  onCancel: () => void;
+  onChange: (title: string) => void;
+  onSubmit: (id: string, title: string) => void;
+}) {
+  const inputId = useId();
+  return (
+    <AppDialog
+      title="重命名会话"
+      description="修改后会同步到会话历史。"
+      size="form"
+      closeLabel="取消重命名"
+      closeOnOverlayClick={false}
+      onClose={onCancel}
+    >
+      <form
+        className={styles.renameDialogForm}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(editing.id, editing.title);
+        }}
+      >
+        <label className={styles.renameDialogField} htmlFor={inputId}>
+          <span>会话名称</span>
+          <input
+            id={inputId}
+            autoFocus
+            aria-label="会话名称"
+            onChange={(event) => onChange(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            value={editing.title}
+          />
+        </label>
+        <footer className={styles.renameDialogActions}>
+          <DialogButton type="button" aria-label="取消重命名" onClick={onCancel}>
+            取消
+          </DialogButton>
+          <DialogButton tone="primary" type="submit" aria-label="保存重命名">
+            保存
+          </DialogButton>
+        </footer>
+      </form>
+    </AppDialog>
+  );
+}
+
+function SessionDeleteDialog({
+  title,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const summary = title.trim() || "该会话";
+  return (
+    <ConfirmDialog
+      title="确认删除会话？"
+      description="会删除该会话的历史记录，操作不可撤销。"
+      preview={summary}
+      confirmLabel="删除"
+      confirmTone="danger"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -804,34 +904,42 @@ interface SiderSectionProps {
   historyPreviewLimit?: number;
   getSessionPath?: (sessionId: string) => string;
   getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
-  onDelete?: (id: string) => void;
-  onCancelDelete?: () => void;
-  onCancelRename?: () => void;
   onConfirmDelete?: (id: string) => void;
   onLoadHistoryExpansion?: () => Promise<void> | void;
   onNavigate?: (path: string) => void;
-  onRename?: (id: string, title: string) => void;
   onStartRename?: (item: SiderEntry) => void;
   onTogglePinned?: (item: SiderEntry, pinned: boolean) => void;
-  onUpdateRename?: (title: string) => void;
 }
 
 function HistoryBucket({
   title,
   kind,
+  active = false,
+  activePath = "",
   newConversationPath,
   onNavigate,
   children,
 }: {
   title: string;
   kind: "workspace" | "chat";
+  active?: boolean;
+  activePath?: string;
   newConversationPath: string;
   onNavigate: (path: string) => void;
   children: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(true);
   const bucketItemsId = useId();
+  const previousActivePathRef = useRef(activePath);
   const newLabel = kind === "workspace" ? "新建项目对话" : "新建无项目对话";
+
+  useEffect(() => {
+    const activePathChanged = previousActivePathRef.current !== activePath;
+    previousActivePathRef.current = activePath;
+    if (active && activePathChanged) {
+      setExpanded(true);
+    }
+  }, [active, activePath]);
 
   return (
     <section className={styles.historyBucket} data-kind={kind} aria-label={title}>
@@ -851,6 +959,7 @@ function HistoryBucket({
           className={styles.historyBucketNewButton}
           type="button"
           aria-label={newLabel}
+          data-tooltip-label={newLabel}
           title={newLabel}
           onClick={() => onNavigate(newConversationPath)}
         >
@@ -889,22 +998,23 @@ function SiderSection({
   historyPreviewLimit,
   getSessionPath = conversationPath,
   getWorkspaceNewConversationPath = newWorkspaceConversationPath,
-  onDelete,
-  onCancelDelete,
-  onCancelRename,
   onConfirmDelete,
   onLoadHistoryExpansion,
   onNavigate,
-  onRename,
   onStartRename,
   onTogglePinned,
-  onUpdateRename,
 }: SiderSectionProps) {
   const [hoveredSession, setHoveredSession] = useState<SessionHoverCard | null>(null);
   const [hoveredProject, setHoveredProject] = useState<ProjectHoverCard | null>(null);
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const [closingActionMenuId, setClosingActionMenuId] = useState<string | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState<CSSProperties | null>(null);
   const [sectionExpanded, setSectionExpanded] = useState(true);
-  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [requestedHistoryExpansionCount, setRequestedHistoryExpansionCount] = useState(0);
   const [localHistoryExpansionLoading, setLocalHistoryExpansionLoading] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const actionTriggerRef = useRef<HTMLDivElement | null>(null);
+  const actionMenuCloseTimerRef = useRef<number | null>(null);
   const sectionItemsId = useId();
   const previousActivePathRef = useRef(activePath);
   const canToggleSection = (kind === "workspace" || kind === "pinned") && !disableSectionToggle;
@@ -915,6 +1025,12 @@ function SiderSection({
   const shouldLimitHistory = canPreviewWorkspaceHistory && items.length > normalizedHistoryLimit;
   const previewItems = shouldLimitHistory ? items.slice(0, normalizedHistoryLimit) : items;
   const extraItems = shouldLimitHistory ? items.slice(normalizedHistoryLimit) : [];
+  const visibleExtraItemCount = shouldLimitHistory
+    ? Math.min(requestedHistoryExpansionCount, extraItems.length)
+    : 0;
+  const visibleExtraItems = shouldLimitHistory ? extraItems.slice(0, visibleExtraItemCount) : [];
+  const hasExpandedHistory = visibleExtraItemCount > 0;
+  const canExpandHistory = shouldLimitHistory && visibleExtraItemCount < extraItems.length;
   const historyToggleLoading = historyExpansionLoading || localHistoryExpansionLoading;
 
   useEffect(() => {
@@ -926,20 +1042,101 @@ function SiderSection({
     if (items.some((item) => isActivePath(activePath, getSessionPath(item.id)))) {
       setSectionExpanded(true);
     }
-  }, [activePath, canToggleSection, getSessionPath, items]);
+    if (shouldLimitHistory) {
+      const activeExtraIndex = extraItems.findIndex((item) =>
+        isActivePath(activePath, getSessionPath(item.id)),
+      );
+      if (activeExtraIndex >= 0) {
+        const requiredExpansionCount =
+          Math.ceil((activeExtraIndex + 1) / WORKSPACE_SESSION_EXPAND_STEP) *
+          WORKSPACE_SESSION_EXPAND_STEP;
+        setRequestedHistoryExpansionCount((current) => Math.max(current, requiredExpansionCount));
+      }
+    }
+  }, [activePath, canToggleSection, extraItems, getSessionPath, items, shouldLimitHistory]);
 
   useEffect(() => {
-    if (!shouldLimitHistory && historyExpanded) {
-      setHistoryExpanded(false);
+    if (!shouldLimitHistory && requestedHistoryExpansionCount > 0) {
+      setRequestedHistoryExpansionCount(0);
     }
-  }, [historyExpanded, shouldLimitHistory]);
+  }, [requestedHistoryExpansionCount, shouldLimitHistory]);
 
-  async function toggleHistoryExpansion() {
-    if (historyExpanded) {
-      setHistoryExpanded(false);
+  useEffect(() => {
+    return () => {
+      if (actionMenuCloseTimerRef.current) {
+        window.clearTimeout(actionMenuCloseTimerRef.current);
+      }
+    };
+  }, []);
+
+  const closeActionMenu = useCallback(() => {
+    if (!actionMenuId) {
       return;
     }
-    setHistoryExpanded(true);
+    if (actionMenuCloseTimerRef.current) {
+      window.clearTimeout(actionMenuCloseTimerRef.current);
+    }
+    setClosingActionMenuId(actionMenuId);
+    setActionMenuId(null);
+    actionMenuCloseTimerRef.current = window.setTimeout(() => {
+      setClosingActionMenuId((current) => (current === actionMenuId ? null : current));
+      setActionMenuPosition(null);
+      actionMenuCloseTimerRef.current = null;
+    }, SESSION_ACTION_MENU_CLOSE_MS);
+  }, [actionMenuId]);
+
+  const getActionMenuPosition = useCallback((target: HTMLElement): CSSProperties => {
+    const rect = target.getBoundingClientRect();
+    const left = Math.min(
+      rect.right + SESSION_ACTION_MENU_GAP,
+      window.innerWidth - SESSION_ACTION_MENU_WIDTH - SESSION_ACTION_MENU_EDGE,
+    );
+    const top = Math.min(
+      Math.max(rect.top - 4, SESSION_ACTION_MENU_EDGE),
+      window.innerHeight - SESSION_ACTION_MENU_HEIGHT - SESSION_ACTION_MENU_EDGE,
+    );
+    return {
+      left: Math.round(left),
+      top: Math.round(top),
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!actionMenuId) {
+      return;
+    }
+    const closeFromPointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        (actionMenuRef.current?.contains(target) || actionTriggerRef.current?.contains(target))
+      ) {
+        return;
+      }
+      closeActionMenu();
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeActionMenu();
+      }
+    };
+    document.addEventListener("pointerdown", closeFromPointer, true);
+    document.addEventListener("keydown", closeFromEscape, true);
+    document.addEventListener("scroll", closeActionMenu, true);
+    window.addEventListener("resize", closeActionMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromPointer, true);
+      document.removeEventListener("keydown", closeFromEscape, true);
+      document.removeEventListener("scroll", closeActionMenu, true);
+      window.removeEventListener("resize", closeActionMenu);
+    };
+  }, [actionMenuId, closeActionMenu]);
+
+  async function expandHistory() {
+    if (historyToggleLoading || !canExpandHistory) {
+      return;
+    }
+    setRequestedHistoryExpansionCount((count) => count + WORKSPACE_SESSION_EXPAND_STEP);
     if (!onLoadHistoryExpansion) {
       return;
     }
@@ -949,6 +1146,10 @@ function SiderSection({
     } finally {
       setLocalHistoryExpansionLoading(false);
     }
+  }
+
+  function collapseHistory() {
+    setRequestedHistoryExpansionCount(0);
   }
 
   const showSessionCard = (item: SiderEntry, active: boolean, target: HTMLElement) => {
@@ -985,11 +1186,16 @@ function SiderSection({
       item.updatedAt && !indicator.isStreaming && !indicator.hasUnread && !indicator.waitingApproval,
     );
     const hasMeta = Boolean(showUpdatedTime || indicator.isStreaming || indicator.hasUnread || indicator.waitingApproval);
-    const canShowHoverCard = editing?.id !== item.id && confirmDeleteId !== item.id;
+    const menuOpen = actionMenuId === item.id;
+    const menuVisible = menuOpen || closingActionMenuId === item.id;
+    const canShowHoverCard = editing?.id !== item.id && confirmDeleteId !== item.id && !menuVisible;
     return (
       <div
         className={styles.historyRow}
         key={item.id}
+        data-active={active ? "true" : "false"}
+        data-can-mutate={canMutate ? "true" : "false"}
+        data-menu-open={menuVisible ? "true" : "false"}
         onBlurCapture={
           canShowHoverCard
             ? (event) => {
@@ -1008,93 +1214,115 @@ function SiderSection({
         }
         onMouseLeave={canShowHoverCard ? () => setHoveredSession(null) : undefined}
       >
-        {editing?.id === item.id ? (
-          <form
-            className={styles.renameForm}
-            onSubmit={(event) => {
-              event.preventDefault();
-              onRename?.(item.id, editing.title);
-            }}
-          >
-            <input
-              aria-label={`重命名 ${item.title}`}
-              onChange={(event) => onUpdateRename?.(event.target.value)}
-              value={editing.title}
-            />
-            <button aria-label="保存重命名" type="submit">
-              <Check size={13} />
-            </button>
-            <button aria-label="取消重命名" onClick={onCancelRename} type="button">
-              <X size={13} />
-            </button>
-          </form>
-        ) : confirmDeleteId === item.id ? (
-          <div className={styles.confirmRow}>
-            <span>确认删除？</span>
-            <button onClick={onCancelDelete} type="button">
-              取消
-            </button>
-            <button onClick={() => onDelete?.(item.id)} type="button">
-              确认
-            </button>
-          </div>
-        ) : (
-          <>
-            <button
-              className={styles.historyItem}
-              type="button"
-              aria-label={item.title}
-              aria-current={active ? "page" : undefined}
-              data-active={active ? "true" : "false"}
-              onClick={() => onNavigate?.(path)}
-            >
-              <span className={styles.historyTitle}>{item.title}</span>
-              {hasMeta ? (
-                <span className={styles.historyMeta}>
-                  {showUpdatedTime && item.updatedAt ? (
-                    <time dateTime={item.updatedAt}>{formatRelativeTime(item.updatedAt)}</time>
-                  ) : null}
-                  <SessionStatusIndicators indicator={indicator} />
-                </span>
-              ) : null}
-            </button>
+        <button
+          className={styles.historyItem}
+          type="button"
+          aria-label={item.title}
+          aria-current={active ? "page" : undefined}
+          data-active={active ? "true" : "false"}
+          data-tooltip-disabled="true"
+          onClick={() => onNavigate?.(path)}
+        >
+          <span className={styles.historyTitle}>
+            {item.forked ? <GitBranch className={styles.historyForkIcon} size={12} aria-hidden="true" /> : null}
+            <span>{item.title}</span>
+          </span>
+        </button>
+        {hasMeta || canMutate ? (
+          <div className={styles.historyTrailing}>
+            {hasMeta ? (
+              <span className={styles.historyMeta}>
+                {showUpdatedTime && item.updatedAt ? (
+                  <time dateTime={item.updatedAt}>{formatRelativeTime(item.updatedAt)}</time>
+                ) : null}
+                <SessionStatusIndicators indicator={indicator} />
+              </span>
+            ) : null}
             {canMutate ? (
-              <div className={styles.historyActions}>
+              <div
+                className={styles.historyActions}
+                data-menu-open={menuOpen ? "true" : "false"}
+                ref={menuOpen ? actionTriggerRef : null}
+              >
                 <button
                   aria-label={`${item.pinnedAt ? "取消置顶" : "置顶"} ${item.title}`}
+                  data-tooltip-label={item.pinnedAt ? "取消置顶" : "置顶"}
                   data-pinned={item.pinnedAt ? "true" : "false"}
                   onClick={() => {
                     setHoveredSession(null);
+                    closeActionMenu();
                     onTogglePinned?.(item, !item.pinnedAt);
                   }}
                   type="button"
                 >
-                  <Pin size={13} />
+                  {item.pinnedAt ? <PinOff size={13} aria-hidden="true" /> : <Pin size={13} aria-hidden="true" />}
                 </button>
                 <button
-                  aria-label={`重命名 ${item.title}`}
-                  onClick={() => {
+                  aria-label={`更多操作 ${item.title}`}
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
+                  data-tooltip-label="更多操作"
+                  onClick={(event) => {
+                    event.stopPropagation();
                     setHoveredSession(null);
-                    onStartRename?.(item);
+                    if (menuOpen) {
+                      closeActionMenu();
+                      return;
+                    }
+                    if (actionMenuCloseTimerRef.current) {
+                      window.clearTimeout(actionMenuCloseTimerRef.current);
+                      actionMenuCloseTimerRef.current = null;
+                    }
+                    setClosingActionMenuId(null);
+                    setActionMenuPosition(getActionMenuPosition(event.currentTarget));
+                    setActionMenuId(item.id);
                   }}
                   type="button"
                 >
-                  <Pencil size={13} />
+                  <MoreHorizontal size={14} aria-hidden="true" />
                 </button>
-                <button
-                  aria-label={`删除 ${item.title}`}
-                  onClick={() => {
-                    setHoveredSession(null);
-                    onConfirmDelete?.(item.id);
-                  }}
-                  type="button"
-                >
-                  <Trash2 size={13} />
-                </button>
+                {menuVisible && actionMenuPosition
+                  ? createPortal(
+                      <div
+                        className={styles.historyActionMenu}
+                        data-state={menuOpen ? "open" : "closing"}
+                        ref={actionMenuRef}
+                        role="menu"
+                        aria-label={`会话操作 ${item.title}`}
+                        style={actionMenuPosition}
+                      >
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setHoveredSession(null);
+                            closeActionMenu();
+                            onStartRename?.(item);
+                          }}
+                        >
+                          <Pencil size={13} aria-hidden="true" />
+                          <span>重命名</span>
+                        </button>
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setHoveredSession(null);
+                            closeActionMenu();
+                            onConfirmDelete?.(item.id);
+                          }}
+                        >
+                          <Trash2 size={13} aria-hidden="true" />
+                          <span>删除</span>
+                        </button>
+                      </div>,
+                      document.body,
+                    )
+                  : null}
               </div>
             ) : null}
-          </>
-        )}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -1208,6 +1436,7 @@ function SiderSection({
               className={styles.sectionNewButton}
               type="button"
               aria-label={`在项目 ${title} 中新建对话`}
+              data-tooltip-label="新建对话"
               title={`在项目 ${title} 中新建对话`}
               onClick={() => onNavigate?.(getWorkspaceNewConversationPath(workspaceId))}
             >
@@ -1242,23 +1471,38 @@ function SiderSection({
                 <>
                   <div
                     className={styles.historyExtraItems}
-                    aria-hidden={!historyExpanded}
+                    aria-hidden={!hasExpandedHistory}
                     data-history-extra-items="true"
-                    data-expanded={historyExpanded ? "true" : "false"}
+                    data-expanded={hasExpandedHistory ? "true" : "false"}
                   >
-                    <div className={styles.historyExtraItemsInner}>{extraItems.map(renderHistoryRow)}</div>
+                    <div className={styles.historyExtraItemsInner}>{visibleExtraItems.map(renderHistoryRow)}</div>
                   </div>
-                  <button
-                    aria-expanded={historyExpanded}
-                    aria-label={`${historyExpanded ? "折叠" : "展开"} ${title} 会话历史`}
-                    className={styles.historyToggleButton}
-                    disabled={historyToggleLoading}
-                    onClick={() => void toggleHistoryExpansion()}
-                    type="button"
-                  >
-                    {historyToggleLoading ? <LoaderCircle size={12} strokeWidth={2} aria-hidden="true" /> : null}
-                    <span>{historyToggleLoading ? "加载中" : historyExpanded ? "折叠会话" : "展开会话"}</span>
-                  </button>
+                  <div className={styles.historyToggleActions}>
+                    {canExpandHistory ? (
+                      <button
+                        aria-expanded={hasExpandedHistory}
+                        aria-label={`展开 ${title} 会话历史`}
+                        className={styles.historyToggleButton}
+                        disabled={historyToggleLoading}
+                        onClick={() => void expandHistory()}
+                        type="button"
+                      >
+                        {historyToggleLoading ? <LoaderCircle size={12} strokeWidth={2} aria-hidden="true" /> : null}
+                        <span>{historyToggleLoading ? "加载中" : "展开会话"}</span>
+                      </button>
+                    ) : null}
+                    {hasExpandedHistory ? (
+                      <button
+                        aria-expanded="true"
+                        aria-label={`折叠 ${title} 会话历史`}
+                        className={styles.historyToggleButton}
+                        onClick={collapseHistory}
+                        type="button"
+                      >
+                        <span>折叠会话</span>
+                      </button>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
             </>
@@ -1384,6 +1628,7 @@ function sessionToEntry(session: AgentSession, groupTitle: string): SiderEntry {
     updatedAt: session.updated_at,
     pinnedAt,
     groupTitle,
+    forked: Boolean(session.fork_source),
   };
 }
 

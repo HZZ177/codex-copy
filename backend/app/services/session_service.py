@@ -11,7 +11,7 @@ from backend.app.core.logger import logger
 from backend.app.security import WorkspacePathError, resolve_workspace_path
 from backend.app.services.message_event_service import MessageEventService
 from backend.app.services.workspace_service import WorkspaceService, WorkspaceServiceError
-from backend.app.storage import MessageEventRecord, SessionRecord
+from backend.app.storage import MessageEventRecord, SessionForkRecord, SessionRecord
 
 
 class SessionServiceError(Exception):
@@ -60,10 +60,12 @@ class SessionService:
         sessions_repository,
         message_events_repository,
         workspaces_repository=None,
+        session_forks_repository=None,
         message_event_service: MessageEventService | None = None,
     ) -> None:
         self._sessions = sessions_repository
         self._message_events = message_events_repository
+        self._session_forks = session_forks_repository
         self._workspace_service = (
             WorkspaceService(workspaces_repository) if workspaces_repository is not None else None
         )
@@ -261,6 +263,8 @@ class SessionService:
         record = self._sessions.soft_delete(session_id)
         if record is None:
             raise SessionNotFoundError(f"会话不存在: {session_id}")
+        if self._session_forks is not None:
+            self._session_forks.soft_delete_by_target(session_id)
         logger.info(f"[SessionService] 删除会话 | session_id={session_id}")
         return self._serialize_session(record)
 
@@ -339,6 +343,7 @@ class SessionService:
             f"turn_index={request.turn_index if request.turn_index is not None else '-'} | "
             f"messages={total} | events={event_total} | page={page} | page_size={page_size}"
         )
+        self._attach_fork_origin_marker(session.id, messages)
         return {
             "list": messages,
             "total": total,
@@ -508,14 +513,56 @@ class SessionService:
             "workspace_roots": record.workspace_roots,
             "current_model_provider_id": record.current_model_provider_id,
             "current_model": record.current_model,
+            "context_window_usage": record.context_window_usage,
             "pinned": record.pinned_at is not None,
             "pinned_at": record.pinned_at,
             "workspace": workspace,
+            "fork_source": self._serialize_fork_record(
+                self._session_forks.get_by_target(record.id)
+                if self._session_forks is not None
+                else None
+            ),
             "created_at": record.created_at,
             "updated_at": record.updated_at,
             "is_debug": record.is_debug,
             "is_scheduled": record.is_scheduled,
             "is_current": record.id == current_session_id if current_session_id else False,
+        }
+
+    def _attach_fork_origin_marker(self, session_id: str, messages: list[dict[str, Any]]) -> None:
+        if self._session_forks is None or not messages:
+            return
+        fork_record = self._session_forks.get_by_target(session_id)
+        if fork_record is None:
+            return
+        serialized = self._serialize_fork_record(fork_record)
+        for message in messages:
+            message_event_id = message.get("messageEventId")
+            if message_event_id == fork_record.target_message_event_id:
+                message["forkSource"] = serialized
+
+    def _serialize_fork_record(self, record: SessionForkRecord | None) -> dict[str, Any] | None:
+        if record is None:
+            return None
+        target = self._sessions.get(record.target_session_id)
+        source = self._sessions.get(record.source_session_id)
+        return {
+            "id": record.id,
+            "source_session_id": record.source_session_id,
+            "target_session_id": record.target_session_id,
+            "source_message_event_id": record.source_message_event_id,
+            "target_message_event_id": record.target_message_event_id,
+            "source_turn_index": record.source_turn_index,
+            "target_turn_index": record.target_turn_index,
+            "source_trace_id": record.source_trace_id,
+            "source_active_session_id": record.source_active_session_id,
+            "source_checkpoint_id": record.source_checkpoint_id,
+            "source_checkpoint_ns": record.source_checkpoint_ns,
+            "relation_type": record.relation_type,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "target_title": target.title if target else None,
+            "source_title": source.title if source else None,
         }
 
     def _workspace_summary(self, workspace_id: str) -> dict[str, Any] | None:

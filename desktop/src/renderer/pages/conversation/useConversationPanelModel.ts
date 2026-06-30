@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceSearchResult } from "@/runtime";
 import type { SelectedFile } from "@/renderer/components/chat/SendBox";
+import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import type { AgentSessionController } from "@/renderer/hooks/useAgentSessionController";
+import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
 import {
   usePreview,
   type PreviewAnnotationChatRequest,
@@ -14,7 +16,13 @@ import {
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import type { AgentActionEnvelope, AgentErrorData, AgentMiddlewareProgressData } from "@/types/protocol";
+import type {
+  AgentActionEnvelope,
+  AgentErrorData,
+  AgentMiddlewareProgressData,
+  AgentSession,
+  AgentSessionFork,
+} from "@/types/protocol";
 
 import { agentMessageToConversationMessage } from "./conversationMessageAdapter";
 import {
@@ -30,9 +38,12 @@ export interface UseConversationPanelModelOptions {
   controller: AgentSessionController;
   registerPreviewHost?: boolean;
   onBranchSessionCreated?: (sessionId: string) => void;
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void;
 }
 
 export interface ContextWindowUsageStatus {
+  sessionId: string;
+  activeSessionId: string;
   tokenCount: number;
   contextWindow: number;
   windowFraction: number;
@@ -55,17 +66,24 @@ export function useConversationPanelModel({
   controller,
   registerPreviewHost = false,
   onBranchSessionCreated,
+  onNavigateToForkSource,
 }: UseConversationPanelModelOptions) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [contextWindowUsage, setContextWindowUsage] = useState<ContextWindowUsageStatus | null>(null);
+  const appliedContextWindowSnapshotKeyRef = useRef<string | null>(null);
+  const contextWindowSessionIdRef = useRef<string | null>(null);
+  const [forkCandidate, setForkCandidate] = useState<ConversationMessage | null>(null);
   const [reverseCandidate, setReverseCandidate] = useState<ConversationMessage | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const handledRuntimeSideEffectKeysRef = useRef(new Set<string>());
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null);
   const toolDetailCacheRef = useRef(
     new Map<string, Promise<Partial<ConversationMessage>> | Partial<ConversationMessage>>(),
   );
   const { openFilePanel, openPreview: openPreviewRequest, setPreviewHostContext } = usePreview();
   const notifications = useNotifications();
+  const optionalAgentRuntime = useOptionalAgentSessionRuntime();
+  const sharedSubscribeEvent = optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime.subscribeEvent : null;
 
   const session = controller.session;
   const messages = useMemo(
@@ -86,6 +104,39 @@ export function useConversationPanelModel({
     enabled: workspaceAvailable,
   });
   const workspaceSkills = workspaceAvailable ? workspaceSkillsState.skills : [];
+
+  useEffect(() => {
+    if (contextWindowSessionIdRef.current !== sessionId) {
+      contextWindowSessionIdRef.current = sessionId;
+      appliedContextWindowSnapshotKeyRef.current = null;
+      setContextWindowUsage(null);
+    }
+    if (!session || session.id !== sessionId) {
+      appliedContextWindowSnapshotKeyRef.current = null;
+      setContextWindowUsage(null);
+      return;
+    }
+    const snapshotKey = contextWindowSnapshotKey(session.context_window_usage);
+    if (!snapshotKey || appliedContextWindowSnapshotKeyRef.current === snapshotKey) {
+      return;
+    }
+    const restoredUsage = contextWindowUsageFromSession(session, sessionId);
+    if (!restoredUsage) {
+      return;
+    }
+    appliedContextWindowSnapshotKeyRef.current = snapshotKey;
+    setContextWindowUsage((current) => {
+      if (
+        current &&
+        current.sessionId === restoredUsage.sessionId &&
+        current.activeSessionId === restoredUsage.activeSessionId &&
+        current.updatedAtMs > restoredUsage.updatedAtMs
+      ) {
+        return current;
+      }
+      return restoredUsage;
+    });
+  }, [session, sessionId]);
 
   const searchWorkspace =
     session?.session_type === "workspace" && session.workspace && !workspaceUnavailable
@@ -156,6 +207,20 @@ export function useConversationPanelModel({
 
   const handleRuntimeEventSideEffects = useCallback(
     (event: AgentActionEnvelope) => {
+      const sideEffectKey = runtimeSideEffectKey(event);
+      if (sideEffectKey) {
+        const handledKeys = handledRuntimeSideEffectKeysRef.current;
+        if (handledKeys.has(sideEffectKey)) {
+          return;
+        }
+        handledKeys.add(sideEffectKey);
+        if (handledKeys.size > 512) {
+          const oldestKey = handledKeys.values().next().value;
+          if (oldestKey) {
+            handledKeys.delete(oldestKey);
+          }
+        }
+      }
       if (event.action === "workspaceSkillsChanged") {
         void refreshWorkspaceSkills({ forceReload: true });
       }
@@ -176,6 +241,13 @@ export function useConversationPanelModel({
     },
     [handleRuntimeError, notifications, refreshWorkspaceSkills, sessionId],
   );
+
+  useEffect(() => {
+    if (!sharedSubscribeEvent) {
+      return;
+    }
+    return sharedSubscribeEvent(handleRuntimeEventSideEffects);
+  }, [handleRuntimeEventSideEffects, sharedSubscribeEvent]);
 
   useEffect(() => {
     if (!controller.selectedSkill) {
@@ -260,7 +332,7 @@ export function useConversationPanelModel({
   }, [runtime, sessionId]);
 
   useEffect(() => {
-    setContextWindowUsage(null);
+    setForkCandidate(null);
     setReverseCandidate(null);
   }, [sessionId]);
 
@@ -295,7 +367,7 @@ export function useConversationPanelModel({
     async (message: ConversationMessage, mode: "fork" | "reverse") => {
       const messageEventId = typeof message.payload.messageEventId === "string" ? message.payload.messageEventId : "";
       if (!messageEventId) {
-        notifications.warning(mode === "fork" ? "该消息还不能从这里继续" : "该消息还不能回退");
+        notifications.warning(mode === "fork" ? "该消息还不能派生对话" : "该消息还不能回溯");
         return;
       }
 
@@ -304,12 +376,15 @@ export function useConversationPanelModel({
           mode === "fork"
             ? await runtime.conversation.forkSession(sessionId, { messageEventId })
             : await runtime.conversation.reverseSession(sessionId, { messageEventId });
-        notifications.success(mode === "fork" ? "已创建分支会话" : "回退成功");
+        notifications.success(mode === "fork" ? "已创建派生会话" : "已回溯到此处");
         if (mode === "fork") {
+          controller.dispatch({ type: "session/upsert", session: response.session });
+          emitSessionCreated(response.session);
           onBranchSessionCreated?.(response.session.id);
         } else {
           controller.dispatch({ type: "session/upsert", session: response.session });
           await controller.reloadHistory();
+          controller.setDraft(message.content);
         }
       } catch (reason) {
         notifications.error(branchActionErrorMessage(mode, reason));
@@ -320,17 +395,39 @@ export function useConversationPanelModel({
 
   const forkFromMessage = useCallback(
     (message: ConversationMessage) => {
-      void branchFromMessage(message, "fork");
+      setReverseCandidate(null);
+      setForkCandidate(message);
     },
-    [branchFromMessage],
+    [],
   );
 
   const reverseFromMessage = useCallback(
     (message: ConversationMessage) => {
+      setForkCandidate(null);
       setReverseCandidate(message);
     },
     [],
   );
+
+  const navigateToForkSource = useCallback(
+    (fork: AgentSessionFork) => {
+      onNavigateToForkSource?.(fork);
+    },
+    [onNavigateToForkSource],
+  );
+
+  const cancelForkFromMessage = useCallback(() => {
+    setForkCandidate(null);
+  }, []);
+
+  const confirmForkFromMessage = useCallback(() => {
+    const message = forkCandidate;
+    if (!message) {
+      return;
+    }
+    setForkCandidate(null);
+    void branchFromMessage(message, "fork");
+  }, [branchFromMessage, forkCandidate]);
 
   const cancelReverseFromMessage = useCallback(() => {
     setReverseCandidate(null);
@@ -377,6 +474,10 @@ export function useConversationPanelModel({
     loadToolDetails,
     contextWindowUsage,
     forkFromMessage,
+    forkConfirmation: forkCandidate,
+    cancelForkFromMessage,
+    confirmForkFromMessage,
+    navigateToForkSource,
     reverseFromMessage,
     reverseConfirmation: reverseCandidate,
     cancelReverseFromMessage,
@@ -442,7 +543,33 @@ function contextWindowUsageFromProgress(
   data: AgentMiddlewareProgressData,
   currentSessionId: string,
 ): ContextWindowUsageStatus | null {
-  if (data.middleware !== "ContextCompressionMiddleware" || data.stage !== "context_window_snapshot") {
+  return contextWindowUsageFromSnapshot(data, currentSessionId, Date.now(), {
+    requireProgressMarker: true,
+  });
+}
+
+function contextWindowUsageFromSession(
+  session: AgentSession,
+  currentSessionId: string,
+): ContextWindowUsageStatus | null {
+  return contextWindowUsageFromSnapshot(session.context_window_usage, currentSessionId, 0, {
+    requireProgressMarker: false,
+  });
+}
+
+function contextWindowUsageFromSnapshot(
+  data: AgentMiddlewareProgressData | null | undefined,
+  currentSessionId: string,
+  fallbackUpdatedAtMs: number,
+  options: { requireProgressMarker: boolean },
+): ContextWindowUsageStatus | null {
+  if (!data) {
+    return null;
+  }
+  if (
+    options.requireProgressMarker &&
+    (data.middleware !== "ContextCompressionMiddleware" || data.stage !== "context_window_snapshot")
+  ) {
     return null;
   }
   const payloadSessionId = stringValue(data.session_id);
@@ -466,8 +593,12 @@ function contextWindowUsageFromProgress(
     positiveNumber(data.threshold_token_count) ?? Math.max(1, Math.round(contextWindow * thresholdFraction));
   const thresholdUsageFraction =
     nonNegativeNumber(data.threshold_usage_fraction) ?? tokenCount / thresholdTokenCount;
+  const resolvedSessionId = payloadSessionId || currentSessionId;
+  const resolvedActiveSessionId = payloadActiveSessionId || resolvedSessionId;
 
   return {
+    sessionId: resolvedSessionId,
+    activeSessionId: resolvedActiveSessionId,
     tokenCount,
     contextWindow,
     windowFraction: nonNegativeNumber(data.window_fraction) ?? tokenCount / contextWindow,
@@ -480,8 +611,56 @@ function contextWindowUsageFromProgress(
     callPhase: stringValue(data.call_phase) || "after",
     callStatus: stringValue(data.call_status) || "completed",
     tokenSource: stringValue(data.token_source) || "estimated",
-    updatedAtMs: Date.now(),
+    updatedAtMs: nonNegativeNumber(data.timestamp_ms) ?? fallbackUpdatedAtMs,
   };
+}
+
+function contextWindowSnapshotKey(data: AgentMiddlewareProgressData | null | undefined): string {
+  if (!data) {
+    return "";
+  }
+  return [
+    stringValue(data.session_id),
+    stringValue(data.active_session_id),
+    numberValue(data.timestamp_ms) ?? "",
+    numberValue(data.token_count) ?? "",
+    numberValue(data.context_window) ?? "",
+    numberValue(data.threshold_token_count) ?? "",
+    numberValue(data.threshold_usage_fraction) ?? "",
+    stringValue(data.token_source),
+  ].join(":");
+}
+
+function runtimeSideEffectKey(event: AgentActionEnvelope): string {
+  const data = event.data;
+  const explicitId = stringValue(data.event_id) || stringValue(data.id);
+  if (explicitId) {
+    return `${event.action}:${explicitId}`;
+  }
+  if (event.action === "middleware_progress") {
+    return [
+      event.action,
+      stringValue(data.middleware),
+      stringValue(data.stage),
+      stringValue(data.session_id),
+      stringValue(data.active_session_id),
+      stringValue(data.notice_id),
+      stringValue(data.trace_id),
+      numberValue(data.timestamp_ms) ?? "",
+      numberValue(data.token_count) ?? "",
+      stringValue(data.reason),
+    ].join(":");
+  }
+  if (event.action === "error") {
+    return [
+      event.action,
+      stringValue(data.session_id),
+      stringValue(data.code),
+      stringValue(data.message),
+      stringValue(data.trace_id),
+    ].join(":");
+  }
+  return "";
 }
 
 function errorMessage(reason: unknown): string {
@@ -504,7 +683,7 @@ function branchActionErrorMessage(mode: "fork" | "reverse", reason: unknown): st
   if (mode === "fork") {
     return message;
   }
-  return message === "操作失败" ? "回退失败" : `回退失败：${message}`;
+  return message === "操作失败" ? "回溯失败" : `回溯失败：${message}`;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {

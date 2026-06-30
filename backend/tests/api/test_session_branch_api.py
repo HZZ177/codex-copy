@@ -73,17 +73,49 @@ def test_session_fork_api_returns_new_session_and_source_metadata(tmp_path) -> N
     with TestClient(app) as client:
         response = client.post(
             "/api/sessions/ses_source/fork",
-            json={"trace_id": "trace_1", "title": "API 分支"},
+            json={"message_event_id": "evt_ai_1", "title": "API 分支"},
         )
+        source_history_response = client.get("/api/sessions/ses_source/history?all_turns=true")
+        forked_session_id = response.json()["session"]["id"]
+        forked_history_response = client.get(f"/api/sessions/{forked_session_id}/history?all_turns=true")
 
     assert response.status_code == 200
     body = response.json()
     assert body["session"]["id"] != "ses_source"
     assert body["session"]["title"] == "API 分支"
-    assert body["session"]["parent_session_id"] == "ses_source"
-    assert body["session"]["source_trace_id"] == "trace_1"
-    assert body["session"]["source_checkpoint_id"] == "ckpt_1"
+    assert body["session"]["parent_session_id"] is None
+    assert body["session"]["child_session_id"] is None
+    assert body["session"]["fork_source"]["source_session_id"] == "ses_source"
+    assert body["session"]["fork_source"]["source_message_event_id"] == "evt_ai_1"
+    assert body["session"]["fork_source"]["target_message_event_id"] != "evt_ai_1"
+    assert body["session"]["fork_source"]["source_checkpoint_id"] == "ckpt_1"
     assert body["source"]["checkpoint_id"] == "ckpt_1"
+    source_messages = source_history_response.json()["list"]
+    assert all("forkSource" not in item for item in source_messages)
+    forked_messages = forked_history_response.json()["list"]
+    marker_message = next(
+        item for item in forked_messages if item["messageEventId"] == body["session"]["fork_source"]["target_message_event_id"]
+    )
+    assert marker_message["forkSource"]["source_session_id"] == "ses_source"
+
+
+def test_session_fork_api_can_create_tagged_branch_outside_default_list(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    _prepare_source(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/ses_source/fork",
+            json={"message_event_id": "evt_ai_1", "title": "临时分支", "session_tag": "btw"},
+        )
+        default_list = client.get("/api/sessions")
+        tagged_list = client.get("/api/sessions", params={"session_tag": "btw"})
+
+    assert response.status_code == 200
+    forked_session = response.json()["session"]
+    assert forked_session["session_tag"] == "btw"
+    assert [item["id"] for item in default_list.json()["list"]] == ["ses_source"]
+    assert [item["id"] for item in tagged_list.json()["list"]] == [forked_session["id"]]
 
 
 def test_session_reverse_api_rolls_back_same_session(tmp_path) -> None:

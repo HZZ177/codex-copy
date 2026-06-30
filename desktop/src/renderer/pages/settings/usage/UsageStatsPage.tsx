@@ -9,13 +9,13 @@ import {
   RefreshCw,
   Search,
   Upload,
-  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
+import { AppDialog } from "@/renderer/components/dialog";
 import type {
   UsageRequestDetail,
   UsageRequestListResponse,
@@ -1156,32 +1156,25 @@ function UsageDetailLayer({
   }
 
   return (
-    <div className={styles.detailOverlay} role="presentation" onMouseDown={onClose}>
-      <aside
-        className={styles.detail}
-        role="dialog"
-        aria-label="请求详情"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <h2>请求详情</h2>
-            <p>{requestId}</p>
-          </div>
-          <button aria-label="关闭详情" onClick={onClose} type="button">
-            <X size={17} />
-          </button>
-        </header>
-        {loading ? (
-          <div className={styles.detailState}>
-            <Loader2 className={styles.spin} size={16} />
-            正在读取详情
-          </div>
-        ) : null}
-        {error ? <div className={styles.detailError}>{error}</div> : null}
-        {detail ? <UsageDetailContent detail={detail} /> : null}
-      </aside>
-    </div>
+    <AppDialog
+      title="请求详情"
+      description={requestId}
+      size="drawer"
+      placement="right"
+      backdrop="panel"
+      inset="below-titlebar"
+      closeLabel="关闭详情"
+      onClose={onClose}
+    >
+      {loading ? (
+        <div className={styles.detailState}>
+          <Loader2 className={styles.spin} size={16} />
+          正在读取详情
+        </div>
+      ) : null}
+      {error ? <div className={styles.detailError}>{error}</div> : null}
+      {detail ? <UsageDetailContent detail={detail} /> : null}
+    </AppDialog>
   );
 }
 

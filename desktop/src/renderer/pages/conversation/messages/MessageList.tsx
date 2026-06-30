@@ -1,4 +1,4 @@
-import { ArrowDown, CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowDown, CheckCircle2, GitBranch, Loader2, TriangleAlert } from "lucide-react";
 import {
   forwardRef,
   type ReactNode,
@@ -23,6 +23,7 @@ import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import type { AgentSessionFork } from "@/types/protocol";
 
 import styles from "./MessageList.module.css";
 import { ApprovalPrompt, type ApprovalDecisionHandler } from "./ApprovalPrompt";
@@ -68,6 +69,7 @@ export interface MessageListProps {
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
@@ -109,6 +111,7 @@ export function MessageList({
   onLoadToolDetails,
   onQuoteSelection,
   onForkFromMessage,
+  onNavigateToForkSource,
   onReverseFromMessage,
   hasMoreOlder = false,
   loadingOlder = false,
@@ -573,6 +576,7 @@ export function MessageList({
               onLoadToolDetails,
               onQuoteSelection,
               onForkFromMessage,
+              onNavigateToForkSource,
               onReverseFromMessage,
             })}
           </div>
@@ -615,6 +619,7 @@ export function MessageList({
           onLoadToolDetails,
           onQuoteSelection,
           onForkFromMessage,
+          onNavigateToForkSource,
           onReverseFromMessage,
         })
       }
@@ -754,6 +759,7 @@ function renderMessageTurn({
   onLoadToolDetails,
   onQuoteSelection,
   onForkFromMessage,
+  onNavigateToForkSource,
   onReverseFromMessage,
 }: {
   turn: MessageTurn;
@@ -767,6 +773,7 @@ function renderMessageTurn({
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   return turn.items.map((item) => (
@@ -784,6 +791,7 @@ function renderMessageTurn({
         onLoadToolDetails,
         onQuoteSelection,
         onForkFromMessage,
+        onNavigateToForkSource,
         onReverseFromMessage,
       })}
     </div>
@@ -803,6 +811,7 @@ function renderMessageItem({
   onLoadToolDetails,
   onQuoteSelection,
   onForkFromMessage,
+  onNavigateToForkSource,
   onReverseFromMessage,
 }: {
   item: ProcessedMessageItem;
@@ -817,6 +826,7 @@ function renderMessageItem({
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   if (item.type === "message") {
@@ -836,7 +846,7 @@ function renderMessageItem({
       />
     );
     return withTurnEndStreamingCursor(
-      withTurnActionFooter(renderedMessage, footerMessage, onForkFromMessage, onReverseFromMessage),
+      withTurnActionFooter(renderedMessage, footerMessage, onForkFromMessage, onReverseFromMessage, onNavigateToForkSource),
       showTurnEndStreamingCursor,
     );
   }
@@ -864,7 +874,7 @@ function renderMessageItem({
     </MessageGroupBlock>
   );
   return withTurnEndStreamingCursor(
-    withTurnActionFooter(renderedGroup, footerMessage, onForkFromMessage, onReverseFromMessage),
+    withTurnActionFooter(renderedGroup, footerMessage, onForkFromMessage, onReverseFromMessage, onNavigateToForkSource),
     showTurnEndStreamingCursor,
   );
 }
@@ -874,10 +884,12 @@ function withTurnActionFooter(
   footerMessage?: ConversationMessage,
   onForkFromMessage?: (message: ConversationMessage) => void,
   onReverseFromMessage?: (message: ConversationMessage) => void,
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void,
 ) {
   if (!footerMessage) {
     return content;
   }
+  const forkSource = forkSourceFromMessage(footerMessage);
   return (
     <>
       {content}
@@ -889,7 +901,66 @@ function withTurnActionFooter(
           onReverseFromMessage={onReverseFromMessage}
         />
       </div>
+      {forkSource ? <ForkMarker fork={forkSource} onNavigateToForkSource={onNavigateToForkSource} /> : null}
     </>
+  );
+}
+
+function ForkMarker({
+  fork,
+  onNavigateToForkSource,
+}: {
+  fork: AgentSessionFork;
+  onNavigateToForkSource?: (fork: AgentSessionFork) => void;
+}) {
+  return (
+    <div
+      className={`${styles.contextCompressionNotice} ${styles.forkMarker}`}
+      data-state="fork"
+      data-testid="message-fork-marker"
+      title="从源会话中派生"
+    >
+      <span className={styles.contextCompressionNoticeLabel}>
+        <span className={styles.contextCompressionNoticeIcon} aria-hidden="true">
+          <GitBranch size={13} />
+        </span>
+        <span>
+          从「
+          {onNavigateToForkSource ? (
+            <button
+              className={styles.forkSourceButton}
+              type="button"
+              aria-label="查看源会话"
+              onClick={() => onNavigateToForkSource(fork)}
+            >
+              源会话
+            </button>
+          ) : (
+            <span>源会话</span>
+          )}
+          」中派生
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function forkSourceFromMessage(message: ConversationMessage): AgentSessionFork | null {
+  const value = message.payload.forkSource;
+  return isSessionFork(value) ? value : null;
+}
+
+function isSessionFork(value: unknown): value is AgentSessionFork {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const fork = value as Partial<AgentSessionFork>;
+  return (
+    typeof fork.id === "string" &&
+    typeof fork.source_session_id === "string" &&
+    typeof fork.target_session_id === "string" &&
+    typeof fork.source_message_event_id === "string" &&
+    typeof fork.target_message_event_id === "string"
   );
 }
 

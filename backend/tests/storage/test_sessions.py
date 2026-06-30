@@ -155,6 +155,34 @@ def test_session_repository_update_status_title_and_touch(tmp_path) -> None:
     assert touched.updated_at >= closed.updated_at
 
 
+def test_session_repository_persists_context_window_usage(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_context_usage",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="上下文窗口",
+    )
+    snapshot = {
+        "middleware": "ContextCompressionMiddleware",
+        "stage": "context_window_snapshot",
+        "session_id": session.id,
+        "active_session_id": session.id,
+        "token_count": 5371,
+        "context_window": 200000,
+        "threshold_token_count": 160000,
+        "threshold_usage_fraction": 5371 / 160000,
+        "token_source": "usage_metadata",
+    }
+
+    updated = repositories.sessions.update_context_window_usage(session.id, snapshot)
+
+    assert updated is not None
+    assert updated.context_window_usage == snapshot
+    assert updated.updated_at >= session.updated_at
+    assert repositories.sessions.get(session.id).context_window_usage == snapshot
+
+
 def test_session_repository_auto_title_write_respects_title_source(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     auto_session = repositories.sessions.create(

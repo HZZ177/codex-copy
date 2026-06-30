@@ -8,6 +8,7 @@ import { Layout } from "@/renderer/components/layout/Layout";
 import { LayoutStateProvider } from "@/renderer/hooks/layout/LayoutStateProvider";
 import { ConversationPage } from "@/renderer/pages/conversation";
 import { clearQuickChatSendQueue, queueQuickChatSend } from "@/renderer/pages/conversation/quickSend";
+import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
@@ -17,6 +18,7 @@ import type {
   AgentHistoryResponse,
   AgentSession,
   AgentSessionBranchSource,
+  AgentSessionFork,
   AgentToolDetails,
   CommandApprovalRequest,
   Workspace,
@@ -39,6 +41,200 @@ describe("ConversationPage", () => {
       pageSize: undefined,
     });
     expect(runtime.conversation.openChatChannel).toHaveBeenCalled();
+  });
+
+  it("restores persisted context window usage when opening a session", async () => {
+    const { runtime } = fakeRuntime({
+      session: agentSession({
+        context_window_usage: {
+          session_id: "ses-1",
+          active_session_id: "ses-1",
+          token_count: 5371,
+          context_window: 200000,
+          threshold_token_count: 160000,
+          threshold_usage_fraction: 5371 / 160000,
+          token_source: "usage_metadata",
+        },
+      }),
+    });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await readyComposer();
+    const indicator = screen.getByTestId("context-window-indicator");
+    await waitFor(() => {
+      expect(indicator.getAttribute("aria-label")).toContain("5,371 tokens");
+      expect(indicator.getAttribute("aria-label")).toContain("3.36%");
+    });
+  });
+
+  it("restores persisted context window usage when history refreshes a stale session", async () => {
+    let resolveHistory: ((response: AgentHistoryResponse) => void) | null = null;
+    const loadHistory = vi.fn(
+      () =>
+        new Promise<AgentHistoryResponse>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+    const staleSession = agentSession({ context_window_usage: null });
+    const hydratedSession = agentSession({
+      context_window_usage: {
+        middleware: "ContextCompressionMiddleware",
+        stage: "context_window_snapshot",
+        session_id: "ses-1",
+        active_session_id: "ses-1",
+        timestamp_ms: 1000,
+        token_count: 5371,
+        context_window: 200000,
+        threshold_token_count: 160000,
+        threshold_usage_fraction: 5371 / 160000,
+        token_source: "usage_metadata",
+      },
+    });
+    const { runtime, emit } = fakeRuntime({ session: staleSession, loadHistory });
+
+    renderConversation(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    act(() => {
+      emit(agentEvent("session_created", { session: staleSession }));
+    });
+    await readyComposer();
+    expect(screen.getByTestId("context-window-indicator").getAttribute("aria-label")).toBe(
+      "上下文窗口占用等待下一次模型调用",
+    );
+
+    await act(async () => {
+      resolveHistory?.(historyResponse(hydratedSession, []));
+    });
+
+    await waitFor(() => {
+      const label = screen.getByTestId("context-window-indicator").getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
+    });
+  });
+
+  it("restores persisted context window usage after switching sessions with shared runtime state", async () => {
+    const sessionA = agentSession({
+      id: "ses-a",
+      title: "会话 A",
+      context_window_usage: {
+        middleware: "ContextCompressionMiddleware",
+        stage: "context_window_snapshot",
+        session_id: "ses-a",
+        active_session_id: "ses-a",
+        timestamp_ms: 999999,
+        token_count: 20000,
+        context_window: 200000,
+        threshold_token_count: 160000,
+        threshold_usage_fraction: 20000 / 160000,
+        token_source: "usage_metadata",
+      },
+    });
+    const sessionB = agentSession({
+      id: "ses-b",
+      title: "会话 B",
+      context_window_usage: {
+        middleware: "ContextCompressionMiddleware",
+        stage: "context_window_snapshot",
+        session_id: "ses-b",
+        active_session_id: "ses-b",
+        timestamp_ms: 2000,
+        token_count: 5371,
+        context_window: 200000,
+        threshold_token_count: 160000,
+        threshold_usage_fraction: 5371 / 160000,
+        token_source: "usage_metadata",
+      },
+    });
+    const loadHistory = vi.fn((sessionId: string) =>
+      Promise.resolve(historyResponse(sessionId === "ses-b" ? sessionB : sessionA, [])),
+    );
+    const { runtime } = fakeRuntime({ session: sessionA, loadHistory });
+
+    const view = render(
+      <AgentSessionProvider runtime={runtime}>
+        <PreviewProvider>
+          <ConversationPage threadId="ses-a" runtime={runtime} />
+        </PreviewProvider>
+      </AgentSessionProvider>,
+    );
+
+    await readyComposer();
+    await waitFor(() => {
+      expect(screen.getByTestId("context-window-indicator").getAttribute("aria-label")).toContain("20,000 tokens");
+    });
+
+    view.rerender(
+      <AgentSessionProvider runtime={runtime}>
+        <PreviewProvider>
+          <ConversationPage threadId="ses-b" runtime={runtime} />
+        </PreviewProvider>
+      </AgentSessionProvider>,
+    );
+
+    await waitFor(() => {
+      const label = screen.getByTestId("context-window-indicator").getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
+    });
+  });
+
+  it("restores context window usage when switching from an empty session to a hydrated session", async () => {
+    const sessionA = agentSession({
+      id: "ses-a",
+      title: "无窗口数据会话",
+      context_window_usage: null,
+    });
+    const sessionB = agentSession({
+      id: "ses-b",
+      title: "有窗口数据会话",
+      context_window_usage: {
+        middleware: "ContextCompressionMiddleware",
+        stage: "context_window_snapshot",
+        session_id: "ses-b",
+        active_session_id: "ses-b",
+        timestamp_ms: 2000,
+        token_count: 5371,
+        context_window: 200000,
+        threshold_token_count: 160000,
+        threshold_usage_fraction: 5371 / 160000,
+        token_source: "usage_metadata",
+      },
+    });
+    const loadHistory = vi.fn((sessionId: string) =>
+      Promise.resolve(historyResponse(sessionId === "ses-b" ? sessionB : sessionA, [])),
+    );
+    const { runtime } = fakeRuntime({ session: sessionA, loadHistory });
+
+    const view = render(
+      <AgentSessionProvider runtime={runtime}>
+        <PreviewProvider>
+          <ConversationPage threadId="ses-a" runtime={runtime} />
+        </PreviewProvider>
+      </AgentSessionProvider>,
+    );
+
+    await readyComposer();
+    await waitFor(() => {
+      expect(screen.getByTestId("context-window-indicator").getAttribute("aria-label")).toBe(
+        "上下文窗口占用等待下一次模型调用",
+      );
+    });
+
+    view.rerender(
+      <AgentSessionProvider runtime={runtime}>
+        <PreviewProvider>
+          <ConversationPage threadId="ses-b" runtime={runtime} />
+        </PreviewProvider>
+      </AgentSessionProvider>,
+    );
+
+    await waitFor(() => {
+      const label = screen.getByTestId("context-window-indicator").getAttribute("aria-label");
+      expect(label).toContain("5,371 tokens");
+      expect(label).toContain("3.36%");
+    });
   });
 
   it("keeps the Agent route free of Workbench assistant shell chrome", async () => {
@@ -330,9 +526,14 @@ describe("ConversationPage", () => {
     const forkSession = vi.fn().mockResolvedValue({
       session: agentSession({
         id: "ses-fork",
-        title: "从这里继续",
-        parent_session_id: "ses-1",
-        source_checkpoint_id: "checkpoint-1",
+        title: "从该轮派生对话",
+        fork_source: sessionFork({
+          source_session_id: "ses-1",
+          target_session_id: "ses-fork",
+          source_message_event_id: "evt-ai-1",
+          target_message_event_id: "evt-fork-ai-1",
+          source_checkpoint_id: "checkpoint-1",
+        }),
       }),
       source: branchSource({ message_event_id: "evt-ai-1" }),
     });
@@ -348,12 +549,123 @@ describe("ConversationPage", () => {
       <ConversationPage threadId="ses-1" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "从这里继续" }));
+    fireEvent.click(await screen.findByRole("button", { name: "从该轮派生对话" }));
+
+    expect(forkSession).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog", { name: "确认从该轮派生对话？" })).not.toBeNull();
+    expect(screen.getAllByText("历史回答").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "派生对话" }));
 
     await waitFor(() => {
       expect(forkSession).toHaveBeenCalledWith("ses-1", { messageEventId: "evt-ai-1" });
       expect(navigateToConversation).toHaveBeenCalledWith("ses-fork");
     });
+  });
+
+  it("cancels fork confirmation without creating a branch", async () => {
+    const forkSession = vi.fn().mockResolvedValue({
+      session: agentSession({ id: "ses-fork" }),
+      source: branchSource({ message_event_id: "evt-ai-1" }),
+    });
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "历史问题", { messageEventId: "evt-user-1" }),
+        historyMessage("assistant", "历史回答", { messageEventId: "evt-ai-1" }),
+      ],
+      forkSession,
+    });
+
+    renderConversationWithNotifications(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "从该轮派生对话" }));
+    expect(await screen.findByRole("dialog", { name: "确认从该轮派生对话？" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "确认从该轮派生对话？" })).toBeNull();
+    });
+    expect(forkSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "从该轮派生对话" }));
+    expect(await screen.findByRole("dialog", { name: "确认从该轮派生对话？" })).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "确认从该轮派生对话？" })).toBeNull();
+    });
+    expect(forkSession).not.toHaveBeenCalled();
+  });
+
+  it("renders the fork origin marker inside the forked session", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "历史问题", { messageEventId: "evt-user-1" }),
+        historyMessage("assistant", "历史回答", {
+          messageEventId: "evt-fork-ai-1",
+          forkSource: sessionFork({
+            target_session_id: "ses-fork",
+            target_message_event_id: "evt-fork-ai-1",
+          }),
+        }),
+      ],
+    });
+
+    renderConversationWithNotifications(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    expect((await screen.findByTestId("message-fork-marker")).textContent).toContain("从「源会话」中派生");
+  });
+
+  it("navigates to the source session from the fork origin marker", async () => {
+    const navigateToConversation = vi.fn();
+    const fork = sessionFork({
+      source_session_id: "ses-source",
+      source_title: "很长很长的源会话标题不应该显示在标记里",
+      target_session_id: "ses-fork",
+      target_message_event_id: "evt-fork-ai-1",
+    });
+    const { runtime } = fakeRuntime({
+      session: agentSession({ id: "ses-fork", fork_source: fork }),
+      history: [
+        historyMessage("user", "历史问题", { messageEventId: "evt-user-1" }),
+        historyMessage("assistant", "历史回答", {
+          messageEventId: "evt-fork-ai-1",
+          forkSource: fork,
+        }),
+      ],
+    });
+
+    renderConversationWithNotifications(
+      <ConversationPage threadId="ses-fork" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
+    );
+
+    const marker = await screen.findByTestId("message-fork-marker");
+    expect(marker.textContent).toContain("从「源会话」中派生");
+    expect(marker.textContent).not.toContain("很长很长的源会话标题");
+    fireEvent.click(within(marker).getByRole("button", { name: /查看源会话/ }));
+
+    expect(navigateToConversation).toHaveBeenCalledWith("ses-source");
+  });
+
+  it("navigates to the source session from the conversation action menu", async () => {
+    const navigateToConversation = vi.fn();
+    const fork = sessionFork({
+      source_session_id: "ses-source",
+      source_title: "源会话",
+      target_session_id: "ses-fork",
+    });
+    const { runtime } = fakeRuntime({
+      session: agentSession({ id: "ses-fork", fork_source: fork }),
+    });
+
+    renderConversationWithNotifications(
+      <ConversationPage threadId="ses-fork" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "测试对话" })).not.toBeNull();
+    fireEvent.click(screen.getByLabelText("更多对话操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "查看源会话" }));
+
+    expect(navigateToConversation).toHaveBeenCalledWith("ses-source");
   });
 
   it("confirms and reverses a restored user message in the current session", async () => {
@@ -381,19 +693,22 @@ describe("ConversationPage", () => {
       <ConversationPage threadId="ses-1" runtime={runtime} onNavigateToConversation={navigateToConversation} />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "回退到这里继续" }));
+    fireEvent.click(await screen.findByRole("button", { name: "回溯到此处" }));
 
     expect(reverseSession).not.toHaveBeenCalled();
-    expect(await screen.findByRole("dialog", { name: "确认回退到这一轮？" })).not.toBeNull();
+    expect(await screen.findByRole("dialog", { name: "确认回溯到此处？" })).not.toBeNull();
     expect(screen.getAllByText("历史问题").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "确认回退" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认回溯" }));
 
     await waitFor(() => {
       expect(reverseSession).toHaveBeenCalledWith("ses-1", { messageEventId: "evt-user-1" });
       expect(navigateToConversation).not.toHaveBeenCalled();
       expect(loadHistory).toHaveBeenCalledTimes(2);
     });
-    expect((await screen.findByTestId("notification-item")).textContent).toContain("回退成功");
+    await waitFor(() => {
+      expect(screen.getByLabelText("继续输入").textContent).toBe("历史问题");
+    });
+    expect((await screen.findByTestId("notification-item")).textContent).toContain("已回溯到此处");
   });
 
   it("shows reverse failure copy with a reverse-specific prefix", async () => {
@@ -409,11 +724,11 @@ describe("ConversationPage", () => {
 
     renderConversationWithNotifications(<ConversationPage threadId="ses-1" runtime={runtime} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "回退到这里继续" }));
-    fireEvent.click(await screen.findByRole("button", { name: "确认回退" }));
+    fireEvent.click(await screen.findByRole("button", { name: "回溯到此处" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认回溯" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "回退失败：该轮缺少输入前 checkpoint，不能安全回退",
+      "回溯失败：该轮缺少输入前 checkpoint，不能安全回退",
     );
   });
 
@@ -1053,7 +1368,7 @@ describe("ConversationPage", () => {
     typeComposer("实时问题");
     await waitSendEnabled();
     fireEvent.click(screen.getByLabelText("发送"));
-    expect(screen.queryByRole("button", { name: "回退到这里继续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "回溯到此处" })).toBeNull();
 
     await act(async () => {
       emit(agentEvent("stream", { id: "evt-stream-realtime-actions", session_id: "ses-1", content: "实时回答" }));
@@ -1065,8 +1380,8 @@ describe("ConversationPage", () => {
       }));
     });
 
-    expect(await screen.findByRole("button", { name: "回退到这里继续" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "从这里继续" })).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "回溯到此处" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "从该轮派生对话" })).not.toBeNull();
     await waitFor(() => {
       expect(loadHistory).toHaveBeenCalledTimes(2);
     });
@@ -2030,7 +2345,10 @@ function fakeRuntime({
   chat = vi.fn(),
   cancel = vi.fn(),
   forkSession = vi.fn().mockResolvedValue({
-    session: agentSession({ id: "ses-fork", parent_session_id: session.id }),
+    session: agentSession({
+      id: "ses-fork",
+      fork_source: sessionFork({ source_session_id: session.id, target_session_id: "ses-fork" }),
+    }),
     source: branchSource(),
   }),
   reverseSession = vi.fn().mockResolvedValue({
@@ -2266,6 +2584,28 @@ function branchSource(patch: Partial<AgentSessionBranchSource> = {}): AgentSessi
     turn_index: 1,
     message_event_id: "evt-ai-1",
     source_type: "message_event",
+    ...patch,
+  };
+}
+
+function sessionFork(patch: Partial<AgentSessionFork> = {}): AgentSessionFork {
+  return {
+    id: "fork-1",
+    source_session_id: "ses-1",
+    target_session_id: "ses-fork",
+    source_message_event_id: "evt-ai-1",
+    target_message_event_id: "evt-fork-ai-1",
+    source_turn_index: 1,
+    target_turn_index: 1,
+    source_trace_id: "trace-1",
+    source_active_session_id: "ses-1",
+    source_checkpoint_id: "checkpoint-1",
+    source_checkpoint_ns: "",
+    relation_type: "fork",
+    created_at: "2026-06-17T10:00:00Z",
+    updated_at: "2026-06-17T10:00:00Z",
+    target_title: "从该轮派生对话",
+    source_title: "源会话",
     ...patch,
   };
 }

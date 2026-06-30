@@ -2,6 +2,7 @@
   --titlebar-left-padding: 10px;
   --titlebar-left-gap: max(8px, calc(var(--sidebar-collapsed-width) - 40px));
   --titlebar-brand-size: 30px;
+  --titlebar-mode-switch-width: calc(var(--sidebar-default-width) - var(--sidebar-collapsed-width));
 
   height: var(--titlebar-height);
   display: grid;
@@ -31,13 +32,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  width: max(
-    176px,
-    calc(
-      var(--sidebar-width) - var(--titlebar-left-padding) - var(--titlebar-brand-size) -
-        var(--titlebar-left-gap)
-    )
-  );
+  width: max(176px, var(--titlebar-mode-switch-width));
   height: 30px;
   min-width: 0;
   padding: 3px;

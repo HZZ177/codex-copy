@@ -23,6 +23,7 @@ const PEAK_MARKER_WIDTH = 35;
 const MARKER_STEP_PX = 12;
 const MARKER_HIT_HEIGHT_PX = 14;
 const SCROLL_EDGE_PX = 24;
+const SCROLL_FADE_EPSILON_PX = 1;
 
 export function ConversationTurnNavigator({
   turns,
@@ -86,6 +87,10 @@ export function ConversationTurnNavigator({
     Math.max(MARKER_HIT_HEIGHT_PX / 2, (viewportMetrics.clientHeight || railHeight) - MARKER_HIT_HEIGHT_PX / 2),
   );
   const isScrollable = viewportMetrics.scrollHeight - viewportMetrics.clientHeight > 1;
+  const canScrollUp = isScrollable && viewportMetrics.scrollTop > SCROLL_FADE_EPSILON_PX;
+  const canScrollDown =
+    isScrollable &&
+    viewportMetrics.scrollTop + viewportMetrics.clientHeight < viewportMetrics.scrollHeight - SCROLL_FADE_EPSILON_PX;
 
   useLayoutEffect(() => {
     if (knownTurnIdsRef.current === null) {
@@ -215,9 +220,6 @@ export function ConversationTurnNavigator({
     <nav
       className={styles.turnNavigator}
       aria-label="对话轮次导航"
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-      onClick={navigateHoveredTurn}
       data-layout={layout}
       data-testid="conversation-turn-navigator"
       style={
@@ -230,9 +232,14 @@ export function ConversationTurnNavigator({
     >
       <div
         className={styles.turnNavigatorViewport}
+        data-fade-bottom={canScrollDown ? "true" : "false"}
+        data-fade-top={canScrollUp ? "true" : "false"}
         data-scrollable={isScrollable ? "true" : "false"}
         data-testid="conversation-turn-navigator-viewport"
         ref={viewportRef}
+        onClick={navigateHoveredTurn}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
         onScroll={handleViewportScroll}
       >
         <div className={styles.turnNavigatorRail} ref={railRef}>
@@ -281,6 +288,9 @@ export function ConversationTurnNavigator({
           )}
         </article>
       ) : null}
+      <div className={styles.turnNavigatorCount} data-testid="conversation-turn-navigator-count">
+        {turns.length} turn
+      </div>
     </nav>
   );
 }

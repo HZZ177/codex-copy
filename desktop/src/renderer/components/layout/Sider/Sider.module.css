@@ -78,8 +78,8 @@
   gap: 14px;
   min-height: 0;
   overflow: hidden auto;
-  padding: 5px 5px 0 0;
-  scrollbar-gutter: stable;
+  padding: 5px 0 0;
+  scrollbar-gutter: auto;
   scrollbar-width: auto;
   scrollbar-color: color-mix(in srgb, var(--color-text-4) 34%, transparent) transparent;
 }
@@ -399,31 +399,11 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   padding-left: 31px;
 }
 
-.section[data-kind="workspace"] .renameForm,
-.section[data-kind="chat"] .renameForm,
-.section[data-kind="pinned"] .renameForm {
-  padding-left: 31px;
-}
-
-.section[data-kind="workspace"] .confirmRow,
-.section[data-kind="chat"] .confirmRow,
-.section[data-kind="pinned"] .confirmRow {
-  padding-left: 31px;
-}
-
 .section[data-kind="workspace"][data-flat="true"] .historyItem {
   padding-left: 10px;
 }
 
 .section[data-kind="workspace"][data-flat="true"] .empty {
-  padding-left: 10px;
-}
-
-.section[data-kind="workspace"][data-flat="true"] .renameForm {
-  padding-left: 8px;
-}
-
-.section[data-kind="workspace"][data-flat="true"] .confirmRow {
   padding-left: 10px;
 }
 
@@ -465,41 +445,73 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
 
 .historyRow {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   min-width: 0;
   align-items: center;
+  color: var(--color-text-2);
   border-radius: var(--radius-pill);
   --history-row-edge: 8px;
+  --history-action-width: 48px;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 .navItem:hover,
-.historyItem:hover,
+.historyRow:hover,
 .historyRow:focus-within {
   background: var(--sidebar-pill-hover);
   color: var(--color-text-1);
 }
 
 .navItem[data-active="true"],
-.historyItem[data-active="true"] {
+.historyRow[data-active="true"] {
   background: var(--sidebar-pill-active);
   color: var(--color-text-1);
   box-shadow: var(--sidebar-pill-ring);
 }
 
+.historyRow[data-menu-open="true"] {
+  z-index: 2;
+}
+
 .historyItem {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  gap: 7px;
-  padding: 0 var(--history-row-edge) 0 10px;
+  display: flex;
+  min-width: 0;
+  padding: 0 0 0 10px;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.historyItem:hover,
+.historyItem[data-active="true"] {
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
 }
 
 .historyTitle {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   line-height: inherit;
+  white-space: nowrap;
+}
+
+.historyTitle span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.historyForkIcon {
+  flex: 0 0 auto;
 }
 
 .historyExtraItems {
@@ -528,15 +540,21 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   overflow: hidden;
 }
 
-.historyToggleButton {
+.historyToggleActions {
   display: inline-flex;
   width: fit-content;
   max-width: calc(100% - 17px);
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  margin: 5px 0 4px 17px;
+}
+
+.historyToggleButton {
+  display: inline-flex;
   height: 24px;
   align-items: center;
   gap: 5px;
-  justify-self: start;
-  margin: 5px 0 4px 17px;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -578,6 +596,16 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   opacity: 0.86;
   transition: opacity var(--motion-fast) ease;
   white-space: nowrap;
+}
+
+.historyTrailing {
+  position: relative;
+  display: inline-flex;
+  min-width: var(--history-action-width);
+  height: 30px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--history-row-edge);
 }
 
 .historyIndicators {
@@ -659,86 +687,136 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   transition: opacity var(--motion-fast) ease;
 }
 
-.historyRow:hover .historyActions,
-.historyRow:focus-within .historyActions {
+.historyRow[data-can-mutate="true"]:hover .historyActions,
+.historyRow[data-can-mutate="true"]:focus-within .historyActions,
+.historyActions[data-menu-open="true"] {
   opacity: 1;
   pointer-events: auto;
 }
 
-.historyRow:hover .historyMeta,
-.historyRow:focus-within .historyMeta {
+.historyRow[data-can-mutate="true"]:hover .historyMeta,
+.historyRow[data-can-mutate="true"]:focus-within .historyMeta,
+.historyRow[data-menu-open="true"] .historyMeta {
   opacity: 0;
 }
 
-.historyActions button,
-.renameForm button,
-.confirmRow button {
+.historyActions > button {
   display: inline-grid;
   width: 22px;
   height: 22px;
   place-items: center;
   border: 0;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--sidebar-bg) 86%, transparent);
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text-3);
+  padding: 0;
+  transition:
+    color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
 }
 
-.historyActions button:hover,
-.renameForm button:hover,
-.confirmRow button:hover {
-  background: var(--surface-active);
+.historyActions > button:hover,
+.historyActions > button:focus-visible {
+  outline: none;
+  background: transparent;
   color: var(--color-text-1);
 }
 
-.historyActions button[data-pinned="true"] {
-  color: var(--color-primary-6);
-}
-
-.renameForm {
+.historyActionMenu {
+  position: fixed;
+  z-index: 170;
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 5px 3px 8px;
+  min-width: 118px;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 98%, var(--surface-bg));
+  box-shadow:
+    0 18px 54px rgb(15 23 42 / 12%),
+    0 2px 10px rgb(15 23 42 / 5%);
+  transform-origin: left top;
+  animation: historyActionMenuIn 160ms var(--motion-ease-out) both;
+  backdrop-filter: blur(18px);
 }
 
-.renameForm input {
-  min-width: 0;
+.historyActionMenu[data-state="closing"] {
+  pointer-events: none;
+  animation: historyActionMenuOut 120ms ease both;
+}
+
+.historyActionMenu button {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  width: 100%;
   height: 28px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+  padding: 0 9px;
+  text-align: left;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-fast) var(--motion-ease-out);
+}
+
+.historyActionMenu button:hover,
+.historyActionMenu button:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+  color: var(--color-text-1);
+}
+
+.historyActionMenu svg {
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+
+.renameDialogForm {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+}
+
+.renameDialogField {
+  display: grid;
+  gap: 7px;
+}
+
+.renameDialogField span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.renameDialogField input {
+  width: 100%;
+  height: 34px;
+  min-width: 0;
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   outline: 0;
   background: var(--surface-bg);
-  color: var(--color-text-1);
+  color: var(--color-text-primary);
   font: inherit;
-  font-size: 11px;
-  padding: 0 8px;
+  font-size: 13px;
+  padding: 0 10px;
 }
 
-.confirmRow {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 4px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
-  padding: 4px 5px 4px 10px;
+.renameDialogField input:focus {
+  border-color: color-mix(in srgb, var(--color-text-primary) 28%, var(--color-border-default));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 12%, transparent);
 }
 
-.confirmRow span {
-  overflow: hidden;
-  color: var(--color-danger);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.confirmRow button {
-  width: auto;
-  padding: 0 8px;
-  font-size: 11px;
+.renameDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .navItem span,
@@ -788,34 +866,6 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   justify-items: stretch;
   height: 100%;
   min-height: 0;
-}
-
-.searchOverlay {
-  position: fixed;
-  inset: var(--titlebar-height) 0 0;
-  z-index: 40;
-  display: grid;
-  place-items: start center;
-  background: rgb(255 255 255 / 34%);
-  padding-top: min(12vh, 92px);
-  animation: overlayIn 140ms ease both;
-}
-
-:global(html[data-theme="dark"]) .searchOverlay {
-  background: rgb(0 0 0 / 30%);
-}
-
-.searchDialog {
-  display: grid;
-  width: min(720px, calc(100vw - 52px));
-  max-height: min(720px, calc(100vh - var(--titlebar-height) - 92px));
-  grid-template-rows: auto auto minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-elevated);
-  box-shadow: var(--shadow-popover);
-  animation: searchDialogIn 180ms ease both;
 }
 
 .searchHeader {
@@ -1144,26 +1194,6 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   line-height: var(--ui-line-height-tight);
 }
 
-@keyframes overlayIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes searchDialogIn {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 @keyframes collapsedSessionCardIn {
   from {
     opacity: 0;
@@ -1172,6 +1202,28 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   to {
     opacity: 1;
     transform: translate(0, -50%) scale(1);
+  }
+}
+
+@keyframes historyActionMenuIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes historyActionMenuOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.975);
   }
 }
 
@@ -1186,9 +1238,11 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
     transition: none;
   }
 
-  .searchOverlay,
-  .searchDialog,
   .collapsedSessionCard {
+    animation: none;
+  }
+
+  .historyActionMenu {
     animation: none;
   }
 

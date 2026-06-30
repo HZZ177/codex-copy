@@ -185,7 +185,6 @@
 .modelMenu button:focus-visible,
 .bucketToggle button:focus-visible,
 .heatCell:focus-visible,
-.detail button:focus-visible,
 .table tr:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
@@ -863,77 +862,6 @@
   opacity: 0.42;
 }
 
-.detailOverlay {
-  position: fixed;
-  inset: var(--titlebar-height) 0 0;
-  z-index: 50;
-  display: grid;
-  justify-content: end;
-  background: rgb(255 255 255 / 24%);
-  backdrop-filter: blur(10px);
-  animation: overlayIn 150ms ease both;
-}
-
-:global(html[data-theme="dark"]) .detailOverlay {
-  background: rgb(0 0 0 / 32%);
-}
-
-.detail {
-  display: grid;
-  width: min(560px, calc(100vw - 36px));
-  height: 100%;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  border-left: 1px solid var(--color-border-default);
-  background: color-mix(in srgb, var(--color-bg-elevated) 94%, transparent);
-  box-shadow: -18px 0 44px rgb(15 23 42 / 8%);
-  backdrop-filter: blur(18px);
-  animation: detailIn 180ms ease both;
-}
-
-.detail header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  padding: 18px 18px 14px;
-}
-
-.detail h2,
-.detail h3 {
-  margin: 0;
-  letter-spacing: 0;
-}
-
-.detail h2 {
-  font-size: 16px;
-  font-weight: 650;
-}
-
-.detail header p {
-  margin: 5px 0 0;
-  color: var(--color-text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.detail header button {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-tertiary);
-}
-
-.detail header button:hover {
-  background: var(--surface-hover);
-  color: var(--color-text-primary);
-}
-
 .detailBody {
   min-height: 0;
   overflow: auto;
@@ -947,9 +875,11 @@
 }
 
 .detailBody h3 {
+  margin: 0;
   color: var(--color-text-primary);
   font-size: 12px;
   font-weight: 650;
+  letter-spacing: 0;
 }
 
 .detailBody dl {
@@ -1054,26 +984,6 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes overlayIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes detailIn {
-  from {
-    opacity: 0;
-    transform: translateX(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 

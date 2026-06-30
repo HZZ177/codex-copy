@@ -1,4 +1,4 @@
-import { Check, Copy, GitBranch, Undo2 } from "lucide-react";
+import { Check, Copy, GitBranchPlus, Undo2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -741,7 +741,13 @@ export function MessageActionFooter({
       data-message-kind={message.kind}
       data-placement={placement}
     >
-      <button className={styles.actionButton} type="button" aria-label="复制消息" onClick={handleCopy}>
+      <button
+        className={styles.actionButton}
+        type="button"
+        aria-label="复制消息"
+        data-tooltip-label="复制消息"
+        onClick={handleCopy}
+      >
         {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
         <span>{copyState === "failed" ? "复制失败" : copyState === "copied" ? "已复制" : "复制"}</span>
       </button>
@@ -749,22 +755,24 @@ export function MessageActionFooter({
         <button
           className={styles.actionButton}
           type="button"
-          aria-label="从这里继续"
+          aria-label="从该轮派生对话"
+          data-tooltip-label="从该轮派生对话"
           onClick={() => onForkFromMessage(message)}
         >
-          <GitBranch size={13} />
-          <span>从这里继续</span>
+          <GitBranchPlus size={13} />
+          <span>从该轮派生对话</span>
         </button>
       ) : null}
       {canReverse && onReverseFromMessage ? (
         <button
           className={styles.actionButton}
           type="button"
-          aria-label="回退到这里继续"
+          aria-label="回溯到此处"
+          data-tooltip-label="回溯到此处"
           onClick={() => onReverseFromMessage(message)}
         >
           <Undo2 size={13} />
-          <span>回退到这里继续</span>
+          <span>回溯到此处</span>
         </button>
       ) : null}
       {time ? <time dateTime={message.updatedAt || message.createdAt}>{time}</time> : null}
@@ -871,6 +879,10 @@ interface FloatingQuotePosition {
   placement: "top" | "bottom";
 }
 
+type DataAttributes = {
+  [key: `data-${string}`]: string | undefined;
+};
+
 interface FloatingQuotePreviewProps {
   quoteText: string;
   copyValue?: string;
@@ -882,7 +894,7 @@ interface FloatingQuotePreviewProps {
   bodyClassName: string;
   actionsClassName?: string;
   chipElement?: "span" | "button";
-  chipButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  chipButtonProps?: ButtonHTMLAttributes<HTMLButtonElement> & DataAttributes;
   chipProps?: Record<string, string>;
   showCopyAction?: boolean;
   children: ReactNode;

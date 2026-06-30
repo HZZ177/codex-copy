@@ -115,6 +115,7 @@ export function ConversationComposerAccessory({
           className={styles.scrollBottomButton}
           type="button"
           aria-label="滚动到底"
+          data-tooltip-label="滚动到底"
           title="滚动到底"
           disabled={!showScrollToBottom}
           onClick={onScrollToBottom}
@@ -166,6 +167,7 @@ function ComposerAccessorySwitcher({
         className={styles.accessorySwitchButton}
         type="button"
         aria-label="切换胶囊信息"
+        data-tooltip-label="切换胶囊信息"
         aria-expanded={open}
         aria-haspopup="menu"
         data-open={open ? "true" : "false"}

@@ -87,6 +87,7 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
     ghostStats: message.ghostStats,
     traceId: message.traceId,
     traceQueryContext: message.traceQueryContext,
+    forkSource: message.forkSource,
     cancelled: message.cancelled,
     contextItems: message.contextItems,
     attachments: message.attachments,

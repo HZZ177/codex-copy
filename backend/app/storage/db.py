@@ -83,6 +83,7 @@ create table if not exists sessions (
   workspace_roots_json text not null default '[]',
   current_model_provider_id text,
   current_model text,
+  context_window_usage_json text,
   pinned_at text,
   title text,
   title_source text not null default 'manual',
@@ -102,6 +103,36 @@ create index if not exists idx_sessions_active_session_id on sessions(active_ses
 create index if not exists idx_sessions_parent_session_id on sessions(parent_session_id);
 create index if not exists idx_sessions_child_session_id on sessions(child_session_id);
 create index if not exists idx_sessions_updated_at on sessions(updated_at desc);
+
+create table if not exists session_forks (
+  id text primary key,
+  source_session_id text not null,
+  target_session_id text not null,
+  source_message_event_id text not null,
+  target_message_event_id text not null,
+  source_turn_index integer not null,
+  target_turn_index integer not null,
+  source_trace_id text,
+  source_active_session_id text,
+  source_checkpoint_id text,
+  source_checkpoint_ns text not null default '',
+  relation_type text not null default 'fork',
+  created_at text not null,
+  updated_at text not null,
+  is_deleted integer not null default 0,
+  foreign key(source_session_id) references sessions(id),
+  foreign key(target_session_id) references sessions(id)
+);
+
+create unique index if not exists idx_session_forks_target
+  on session_forks(target_session_id)
+  where is_deleted = 0;
+create index if not exists idx_session_forks_source_message
+  on session_forks(source_session_id, source_message_event_id)
+  where is_deleted = 0;
+create index if not exists idx_session_forks_source_turn
+  on session_forks(source_session_id, source_turn_index)
+  where is_deleted = 0;
 
 create table if not exists attachments (
   id text primary key,
@@ -490,8 +521,18 @@ class Database:
             )
             self._ensure_column(conn, "sessions", "current_model_provider_id", "text")
             self._ensure_column(conn, "sessions", "current_model", "text")
+            self._ensure_column(conn, "sessions", "context_window_usage_json", "text")
             self._ensure_column(conn, "sessions", "pinned_at", "text")
             self._ensure_column(conn, "sessions", "title_source", "text not null default 'manual'")
+            self._ensure_column(conn, "session_forks", "target_message_event_id", "text not null default ''")
+            self._ensure_column(conn, "session_forks", "target_turn_index", "integer not null default 0")
+            conn.execute(
+                """
+                create index if not exists idx_session_forks_target_message
+                  on session_forks(target_session_id, target_message_event_id)
+                  where is_deleted = 0
+                """
+            )
             self._migrate_model_default_scopes(conn)
             self._ensure_column(conn, "llm_request_logs", "gateway_thread_id", "text")
             self._ensure_column(conn, "llm_request_logs", "gateway_trace_id", "text")

@@ -71,9 +71,37 @@ def test_session_service_lists_sessions_with_sort_filter_and_current_marker(tmp_
     assert result["list"][1]["is_current"] is False
     assert result["list"][0]["pinned"] is False
     assert result["list"][0]["pinned_at"] is None
+    assert result["list"][0]["context_window_usage"] is None
 
     filtered = service.list_sessions(ListSessionsRequest(title="旧"))
     assert [item["id"] for item in filtered["list"]] == [first.id]
+
+
+def test_session_service_serializes_context_window_usage(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    session = repositories.sessions.create(
+        session_id="ses_usage_snapshot",
+        user_id="local-user",
+        scene_id="desktop-agent",
+        title="上下文窗口",
+    )
+    snapshot = {
+        "middleware": "ContextCompressionMiddleware",
+        "stage": "context_window_snapshot",
+        "session_id": session.id,
+        "active_session_id": session.id,
+        "token_count": 5371,
+        "context_window": 200000,
+        "threshold_token_count": 160000,
+        "threshold_usage_fraction": 5371 / 160000,
+        "token_source": "usage_metadata",
+    }
+    repositories.sessions.update_context_window_usage(session.id, snapshot)
+    service = _service(repositories)
+
+    result = service.list_sessions(ListSessionsRequest(user_id="local-user"))
+
+    assert result["list"][0]["context_window_usage"] == snapshot
 
 
 def test_session_service_sets_pinned_state(tmp_path) -> None:

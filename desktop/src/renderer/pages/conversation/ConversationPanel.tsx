@@ -1,4 +1,5 @@
 import type { RuntimeBridge } from "@/runtime";
+import { ConfirmDialog } from "@/renderer/components/dialog";
 import { ConversationComposerAccessory } from "@/renderer/pages/conversation/ComposerAccessory";
 
 import {
@@ -61,6 +62,7 @@ export function ConversationPanel({
         onLoadToolDetails={model.loadToolDetails}
         onQuoteSelection={model.quoteSelection}
         onForkFromMessage={model.forkFromMessage}
+        onNavigateToForkSource={model.navigateToForkSource}
         onReverseFromMessage={model.reverseFromMessage}
         hasMoreOlder={Boolean(model.sessionViewState?.historyHasMoreOlder)}
         loadingOlder={model.loadingOlderHistory}
@@ -73,6 +75,13 @@ export function ConversationPanel({
         emptyText={emptyText}
         emptyTestId={emptyTestId}
       />
+      {model.forkConfirmation ? (
+        <ForkConfirmDialog
+          preview={model.forkConfirmation.content}
+          onCancel={model.cancelForkFromMessage}
+          onConfirm={model.confirmForkFromMessage}
+        />
+      ) : null}
       {model.reverseConfirmation ? (
         <ReverseConfirmDialog
           preview={model.reverseConfirmation.content}
@@ -81,6 +90,28 @@ export function ConversationPanel({
         />
       ) : null}
     </div>
+  );
+}
+
+function ForkConfirmDialog({
+  preview,
+  onCancel,
+  onConfirm,
+}: {
+  preview: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const summary = preview.trim().split(/\r?\n/u).find(Boolean) ?? "这条回复";
+  return (
+    <ConfirmDialog
+      title="确认从该轮派生对话？"
+      description="会以当前对话截至这条回复的上下文创建新的派生会话，并切换到新会话。当前对话不会被修改。"
+      preview={summary}
+      confirmLabel="派生对话"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -95,28 +126,15 @@ function ReverseConfirmDialog({
 }) {
   const summary = preview.trim().split(/\r?\n/u).find(Boolean) ?? "这一轮对话";
   return (
-    <div className={styles.confirmBackdrop} role="presentation">
-      <section
-        aria-labelledby="reverse-confirm-title"
-        aria-modal="true"
-        className={styles.confirmPanel}
-        role="dialog"
-      >
-        <header className={styles.confirmHeader}>
-          <h2 id="reverse-confirm-title">确认回退到这一轮？</h2>
-          <p>会删除这条用户消息以及之后的回复、工具调用和后续消息，并恢复到这一轮发送前的上下文。</p>
-        </header>
-        <div className={styles.confirmPreview}>{summary}</div>
-        <div className={styles.confirmActions}>
-          <button className={styles.confirmSecondary} type="button" onClick={onCancel}>
-            取消
-          </button>
-          <button className={styles.confirmDanger} type="button" onClick={onConfirm}>
-            确认回退
-          </button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      title="确认回溯到此处？"
+      description="会删除这条用户消息以及之后的回复、工具调用和后续消息，并把这条用户消息重新填充到输入框。"
+      preview={summary}
+      confirmLabel="确认回溯"
+      confirmTone="danger"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

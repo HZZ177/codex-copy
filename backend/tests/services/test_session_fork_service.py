@@ -86,17 +86,29 @@ def test_session_fork_service_clones_checkpoint_and_copies_history_until_source(
     result = service.fork_session(
         session_id="ses_source",
         user_id="local-user",
-        trace_id="trace_1",
+        message_event_id="evt_ai_1",
         title="从第一轮继续",
     )
 
     forked = result.session
-    assert forked.parent_session_id == "ses_source"
-    assert forked.source_trace_id == "trace_1"
-    assert forked.source_active_session_id == "ses_source"
-    assert forked.source_checkpoint_id == "ckpt_1"
-    assert forked.source_checkpoint_ns == ""
-    assert repositories.sessions.get("ses_source").child_session_id == forked.id
+    assert forked.session_tag == "chat"
+    assert forked.parent_session_id is None
+    assert forked.source_trace_id is None
+    assert forked.source_active_session_id is None
+    assert forked.source_checkpoint_id is None
+    assert forked.source_checkpoint_ns is None
+    assert repositories.sessions.get("ses_source").child_session_id is None
+    fork_record = repositories.session_forks.get_by_target(forked.id)
+    assert fork_record is not None
+    assert fork_record.source_session_id == "ses_source"
+    assert fork_record.source_message_event_id == "evt_ai_1"
+    assert fork_record.target_message_event_id != "evt_ai_1"
+    assert fork_record.source_turn_index == 1
+    assert fork_record.target_turn_index == 1
+    assert fork_record.source_trace_id == "trace_1"
+    assert fork_record.source_active_session_id == "ses_source"
+    assert fork_record.source_checkpoint_id == "ckpt_1"
+    assert fork_record.source_checkpoint_ns == ""
 
     copied_events = repositories.message_events.list_by_session(forked.id)
     assert [event.turn_index for event in copied_events] == [1, 1]
@@ -105,6 +117,48 @@ def test_session_fork_service_clones_checkpoint_and_copies_history_until_source(
         {"configurable": {"thread_id": forked.id, "checkpoint_ns": ""}}
     )
     assert cloned_checkpoint.config["configurable"]["checkpoint_id"] == "ckpt_1"
+
+
+def test_session_fork_service_allows_multiple_forks_from_same_message(tmp_path) -> None:
+    repositories, saver = _prepare_source(tmp_path)
+    service = SessionForkService(repositories, checkpointer=saver)
+
+    first = service.fork_session(
+        session_id="ses_source",
+        user_id="local-user",
+        message_event_id="evt_ai_1",
+        title="分支一",
+    ).session
+    second = service.fork_session(
+        session_id="ses_source",
+        user_id="local-user",
+        message_event_id="evt_ai_1",
+        title="分支二",
+    ).session
+
+    fork_records = repositories.session_forks.list_by_source("ses_source")
+    assert [record.target_session_id for record in fork_records] == [first.id, second.id]
+    assert {record.source_message_event_id for record in fork_records} == {"evt_ai_1"}
+    assert len({record.target_message_event_id for record in fork_records}) == 2
+    assert repositories.sessions.get("ses_source").child_session_id is None
+    assert saver.get_tuple({"configurable": {"thread_id": first.id, "checkpoint_ns": ""}}) is not None
+    assert saver.get_tuple({"configurable": {"thread_id": second.id, "checkpoint_ns": ""}}) is not None
+
+
+def test_session_fork_service_allows_target_session_tag_override(tmp_path) -> None:
+    repositories, saver = _prepare_source(tmp_path)
+    service = SessionForkService(repositories, checkpointer=saver)
+
+    forked = service.fork_session(
+        session_id="ses_source",
+        user_id="local-user",
+        message_event_id="evt_ai_1",
+        title="临时分支",
+        session_tag="btw",
+    ).session
+
+    assert forked.session_tag == "btw"
+    assert repositories.session_forks.get_by_target(forked.id) is not None
 
 
 def test_session_reverse_rolls_back_same_session_to_user_turn_input_checkpoint(tmp_path) -> None:
@@ -233,7 +287,7 @@ def test_session_fork_service_rolls_back_when_clone_fails(tmp_path) -> None:
         service.fork_session(
             session_id="ses_source",
             user_id="local-user",
-            trace_id="trace_1",
+            message_event_id="evt_ai_1",
         )
 
     assert exc_info.value.code == "session_fork_failed"

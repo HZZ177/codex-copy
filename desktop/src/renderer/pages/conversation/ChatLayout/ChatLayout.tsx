@@ -1,5 +1,7 @@
-import { Check, Copy, FolderOpen, MoreHorizontal, SendHorizontal } from "lucide-react";
+import { Check, Copy, FolderOpen, GitBranch, MoreHorizontal, SendHorizontal } from "lucide-react";
 import { type PropsWithChildren, type ReactNode, useEffect, useRef, useState } from "react";
+
+import { AppTooltipLayer } from "@/renderer/components/tooltip";
 
 import styles from "./ChatLayout.module.css";
 
@@ -8,6 +10,10 @@ export interface ChatLayoutProps extends PropsWithChildren {
   subtitle?: string;
   workspaceLabel?: string;
   workspaceTitle?: string;
+  sourceSessionAction?: {
+    title?: string;
+    onClick: () => void;
+  };
   composer?: ReactNode;
   composerAccessory?: ReactNode;
 }
@@ -17,6 +23,7 @@ export function ChatLayout({
   subtitle,
   workspaceLabel,
   workspaceTitle,
+  sourceSessionAction,
   children,
   composer,
   composerAccessory,
@@ -60,8 +67,14 @@ export function ChatLayout({
     }
   };
 
+  const openSourceSession = () => {
+    setMenuOpen(false);
+    sourceSessionAction?.onClick();
+  };
+
   return (
-    <main ref={layoutRef} className={styles.chatLayout} data-testid="chat-layout">
+    <main ref={layoutRef} className={styles.chatLayout} data-conversation-tooltips="true" data-testid="chat-layout">
+      <AppTooltipLayer scopeSelector="[data-conversation-tooltips='true']" defaultPlacement="top" />
       <div className={styles.topBar}>
         <div className={styles.topBarInner}>
           <div className={styles.titleMenuAnchor} ref={menuRef}>
@@ -82,6 +95,7 @@ export function ChatLayout({
               className={styles.moreButton}
               type="button"
               aria-label="更多对话操作"
+              data-tooltip-label="更多操作"
               aria-expanded={menuOpen}
               aria-haspopup="menu"
               onClick={() => setMenuOpen((open) => !open)}
@@ -93,6 +107,18 @@ export function ChatLayout({
               <div className={styles.menu} role="menu" aria-label="对话操作菜单">
                 {subtitle ? <div className={styles.menuStatus}>{subtitle}</div> : null}
                 {subtitle ? <div className={styles.menuDivider} /> : null}
+                {sourceSessionAction ? (
+                  <button
+                    className={styles.menuItem}
+                    type="button"
+                    role="menuitem"
+                    title={sourceSessionAction.title}
+                    onClick={openSourceSession}
+                  >
+                    <GitBranch size={15} />
+                    <span>查看源会话</span>
+                  </button>
+                ) : null}
                 <button className={styles.menuItem} type="button" role="menuitem" onClick={() => void copyTitle()}>
                   {titleCopied ? <Check size={15} /> : <Copy size={15} />}
                   <span>{titleCopied ? "已复制标题" : "复制标题"}</span>

@@ -126,9 +126,29 @@ class SessionRecord:
     workspace_roots: list[str] = field(default_factory=list)
     current_model_provider_id: str | None = None
     current_model: str | None = None
+    context_window_usage: dict[str, Any] | None = None
     pinned_at: str | None = None
     is_deleted: bool = False
     title_source: str = "manual"
+
+
+@dataclass(frozen=True)
+class SessionForkRecord:
+    id: str
+    source_session_id: str
+    target_session_id: str
+    source_message_event_id: str
+    target_message_event_id: str
+    source_turn_index: int
+    target_turn_index: int
+    relation_type: str
+    created_at: str
+    updated_at: str
+    source_trace_id: str | None = None
+    source_active_session_id: str | None = None
+    source_checkpoint_id: str | None = None
+    source_checkpoint_ns: str = ""
+    is_deleted: bool = False
 
 
 @dataclass(frozen=True)
@@ -973,6 +993,25 @@ class SessionsRepository:
             )
         return self.get(session_id)
 
+    def update_context_window_usage(
+        self,
+        session_id: str,
+        snapshot: dict[str, Any],
+    ) -> SessionRecord | None:
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                update sessions
+                set context_window_usage_json = ?, updated_at = ?
+                where id = ? and is_deleted = 0
+                """,
+                (_json_dumps(snapshot), now, session_id),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get(session_id)
+
     def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord | None:
         pinned_at = to_iso_z(utc_now()) if pinned else None
         with self.db.transaction() as conn:
@@ -1047,9 +1086,149 @@ class SessionsRepository:
             workspace_roots=_json_loads(row["workspace_roots_json"], []),
             current_model_provider_id=row["current_model_provider_id"],
             current_model=row["current_model"],
+            context_window_usage=_json_loads(row["context_window_usage_json"], None),
             pinned_at=row["pinned_at"],
             title=row["title"],
             title_source=row["title_source"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            is_deleted=bool(row["is_deleted"]),
+        )
+
+
+class SessionForksRepository:
+    VALID_RELATION_TYPES = {"fork"}
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def create(
+        self,
+        *,
+        fork_id: str,
+        source_session_id: str,
+        target_session_id: str,
+        source_message_event_id: str,
+        target_message_event_id: str,
+        source_turn_index: int,
+        target_turn_index: int,
+        source_trace_id: str | None = None,
+        source_active_session_id: str | None = None,
+        source_checkpoint_id: str | None = None,
+        source_checkpoint_ns: str | None = None,
+        relation_type: str = "fork",
+    ) -> SessionForkRecord:
+        self._validate_relation_type(relation_type)
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                insert into session_forks (
+                  id, source_session_id, target_session_id, source_message_event_id,
+                  target_message_event_id, source_turn_index, target_turn_index,
+                  source_trace_id, source_active_session_id,
+                  source_checkpoint_id, source_checkpoint_ns, relation_type,
+                  created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fork_id,
+                    source_session_id,
+                    target_session_id,
+                    source_message_event_id,
+                    target_message_event_id,
+                    int(source_turn_index),
+                    int(target_turn_index),
+                    source_trace_id,
+                    source_active_session_id,
+                    source_checkpoint_id,
+                    source_checkpoint_ns or "",
+                    relation_type,
+                    now,
+                    now,
+                ),
+            )
+        record = self.get(fork_id)
+        if record is None:
+            raise RuntimeError(f"创建 session fork 后无法读取: {fork_id}")
+        return record
+
+    def get(self, fork_id: str, *, include_deleted: bool = False) -> SessionForkRecord | None:
+        query = "select * from session_forks where id = ?"
+        params: list[Any] = [fork_id]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._from_row(row) if row else None
+
+    def get_by_target(
+        self,
+        target_session_id: str,
+        *,
+        relation_type: str = "fork",
+        include_deleted: bool = False,
+    ) -> SessionForkRecord | None:
+        self._validate_relation_type(relation_type)
+        query = "select * from session_forks where target_session_id = ? and relation_type = ?"
+        params: list[Any] = [target_session_id, relation_type]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        query += " order by created_at desc, id desc limit 1"
+        with self.db.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._from_row(row) if row else None
+
+    def list_by_source(
+        self,
+        source_session_id: str,
+        *,
+        relation_type: str = "fork",
+        include_deleted: bool = False,
+    ) -> list[SessionForkRecord]:
+        self._validate_relation_type(relation_type)
+        query = "select * from session_forks where source_session_id = ? and relation_type = ?"
+        params: list[Any] = [source_session_id, relation_type]
+        if not include_deleted:
+            query += " and is_deleted = 0"
+        query += " order by source_turn_index asc, created_at asc, id asc"
+        with self.db.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def soft_delete_by_target(self, target_session_id: str) -> int:
+        now = to_iso_z(utc_now())
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                update session_forks
+                set is_deleted = 1, updated_at = ?
+                where target_session_id = ? and is_deleted = 0
+                """,
+                (now, target_session_id),
+            )
+        return int(cursor.rowcount)
+
+    @classmethod
+    def _validate_relation_type(cls, relation_type: str) -> None:
+        if relation_type not in cls.VALID_RELATION_TYPES:
+            raise ValueError(f"不支持的 session fork 关系类型: {relation_type}")
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> SessionForkRecord:
+        return SessionForkRecord(
+            id=row["id"],
+            source_session_id=row["source_session_id"],
+            target_session_id=row["target_session_id"],
+            source_message_event_id=row["source_message_event_id"],
+            target_message_event_id=row["target_message_event_id"],
+            source_turn_index=int(row["source_turn_index"]),
+            target_turn_index=int(row["target_turn_index"]),
+            source_trace_id=row["source_trace_id"],
+            source_active_session_id=row["source_active_session_id"],
+            source_checkpoint_id=row["source_checkpoint_id"],
+            source_checkpoint_ns=row["source_checkpoint_ns"] or "",
+            relation_type=row["relation_type"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_deleted=bool(row["is_deleted"]),
@@ -3351,6 +3530,7 @@ class StorageRepositories:
         self.model_providers = ModelProvidersRepository(db)
         self.workspaces = WorkspacesRepository(db)
         self.sessions = SessionsRepository(db)
+        self.session_forks = SessionForksRepository(db)
         self.attachments = AttachmentsRepository(db)
         self.workspace_file_annotations = WorkspaceFileAnnotationsRepository(db)
         self.message_events = MessageEventsRepository(db)

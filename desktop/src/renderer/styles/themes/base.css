@@ -1,6 +1,7 @@
 :root {
   --app-min-width: 360px;
   --titlebar-height: 36px;
+  --sidebar-default-width: 286px;
   --sidebar-width: 286px;
   --sidebar-collapsed-width: 58px;
   --composer-width: 780px;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -216,37 +217,30 @@ class ContextCompressionMiddleware(AgentMiddleware):
         if not original_session_id or not active_session_id:
             return await handler(request)
 
-        request_messages = self._model_request_messages(request)
-        await self._emit_model_call_window_snapshot(
-            hook="model_call_before",
-            call_phase="before",
-            call_status="running",
-            token_source="estimated",
-            original_session_id=original_session_id,
-            active_session_id=active_session_id,
-            messages=request_messages,
-        )
         try:
             response = await handler(request)
         except Exception:
-            await self._emit_model_call_window_snapshot(
-                hook="model_call_after",
-                call_phase="after",
-                call_status="failed",
-                token_source="estimated",
-                original_session_id=original_session_id,
-                active_session_id=active_session_id,
-                messages=request_messages,
+            logger.debug(
+                "[ContextCompressionMiddleware] LLM调用失败，跳过上下文窗口用量更新 | "
+                f"原始会话={original_session_id} | 活动会话={active_session_id}"
             )
             raise
 
         response_messages = self._model_response_messages(response)
         usage_total_tokens = self._extract_usage_total_tokens(response_messages)
+        if usage_total_tokens is None:
+            logger.debug(
+                "[ContextCompressionMiddleware] LLM调用后未返回真实usage，跳过上下文窗口用量更新 | "
+                f"原始会话={original_session_id} | 活动会话={active_session_id}"
+            )
+            return response
+
+        request_messages = self._model_request_messages(request)
         await self._emit_model_call_window_snapshot(
             hook="model_call_after",
             call_phase="after",
             call_status="completed",
-            token_source="usage_metadata" if usage_total_tokens is not None else "estimated",
+            token_source="usage_metadata",
             original_session_id=original_session_id,
             active_session_id=active_session_id,
             messages=[*request_messages, *response_messages],
@@ -975,27 +969,86 @@ class ContextCompressionMiddleware(AgentMiddleware):
             f"调用状态={call_status_label} | "
             f"令牌来源={token_source_label}"
         )
+        trace_id = get_trace_id()
+        timestamp_ms = int(time.time() * 1000)
+        snapshot_payload = {
+            "middleware": "ContextCompressionMiddleware",
+            "stage": "context_window_snapshot",
+            "compression_mode": "snapshot",
+            "session_id": original_session_id,
+            "active_session_id": active_session_id,
+            "trace_id": trace_id,
+            "timestamp_ms": timestamp_ms,
+            "snapshot_hook": hook,
+            "token_count": token_count,
+            "context_window": context_window,
+            "window_fraction": window_fraction,
+            "trigger_fraction": trigger_fraction,
+            "threshold_fraction": trigger_fraction,
+            "emergency_fraction": emergency_fraction,
+            "threshold_token_count": threshold_token_count,
+            "threshold_usage_fraction": threshold_usage_fraction,
+            "remaining_to_threshold_tokens": remaining_to_threshold_tokens,
+            "compression_available": compression_count > 0,
+            "total_message_count": total_message_count,
+            "compression_message_count": compression_count,
+            "retain_message_count": retain_count,
+            **extra_payload,
+        }
+        self._persist_context_window_snapshot(
+            original_session_id=original_session_id,
+            active_session_id=active_session_id,
+            snapshot_payload=snapshot_payload,
+        )
         await self._emit_middleware_progress(
             stage="context_window_snapshot",
             original_session_id=original_session_id,
             active_session_id=active_session_id,
             compression_mode="snapshot",
-            snapshot_hook=hook,
-            token_count=token_count,
-            context_window=context_window,
-            window_fraction=window_fraction,
-            trigger_fraction=trigger_fraction,
-            threshold_fraction=trigger_fraction,
-            emergency_fraction=emergency_fraction,
-            threshold_token_count=threshold_token_count,
-            threshold_usage_fraction=threshold_usage_fraction,
-            remaining_to_threshold_tokens=remaining_to_threshold_tokens,
-            compression_available=compression_count > 0,
-            total_message_count=total_message_count,
-            compression_message_count=compression_count,
-            retain_message_count=retain_count,
-            **extra_payload,
+            **{
+                key: value
+                for key, value in snapshot_payload.items()
+                if key
+                not in {
+                    "middleware",
+                    "stage",
+                    "compression_mode",
+                    "session_id",
+                    "active_session_id",
+                    "trace_id",
+                }
+            },
         )
+
+    def _persist_context_window_snapshot(
+        self,
+        *,
+        original_session_id: str,
+        active_session_id: str,
+        snapshot_payload: dict[str, Any],
+    ) -> None:
+        try:
+            record = self.repositories.sessions.update_context_window_usage(
+                original_session_id,
+                snapshot_payload,
+            )
+            if record is None:
+                logger.debug(
+                    "[ContextCompressionMiddleware] 上下文窗口状态持久化跳过，会话不存在 | "
+                    f"原始会话ID={original_session_id} | 活动会话ID={active_session_id}"
+                )
+                return
+            logger.debug(
+                "[ContextCompressionMiddleware] 上下文窗口状态已持久化 | "
+                f"原始会话ID={original_session_id} | 活动会话ID={active_session_id} | "
+                f"令牌数={snapshot_payload.get('token_count')} | "
+                f"上下文窗口={snapshot_payload.get('context_window')}"
+            )
+        except Exception as exc:
+            logger.debug(
+                "[ContextCompressionMiddleware] 上下文窗口状态持久化失败 | "
+                f"原始会话ID={original_session_id} | 活动会话ID={active_session_id} | 错误={exc}"
+            )
 
     async def _emit_model_call_window_snapshot(
         self,

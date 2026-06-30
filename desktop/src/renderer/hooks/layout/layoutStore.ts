@@ -44,9 +44,9 @@ export const MIN_RIGHT_SIDEBAR_RATIO = 0.2;
 export const MAX_RIGHT_SIDEBAR_RATIO = 0.8;
 export const MIN_PANEL_WIDTH = 280;
 export const MAX_PANEL_WIDTH = 760;
-export const DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 400;
 export const MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 360;
 export const MAX_WORKBENCH_ASSISTANT_DRAWER_WIDTH = 520;
+export const DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH = MIN_WORKBENCH_ASSISTANT_DRAWER_WIDTH;
 
 export const defaultLayoutState: LayoutState = {
   sidebarCollapsed: false,

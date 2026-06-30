@@ -84,12 +84,12 @@ class SessionForkService:
         session_id: str,
         user_id: str,
         title: str | None = None,
+        session_tag: str | None = None,
         checkpoint_id: str | None = None,
         checkpoint_ns: str | None = None,
         trace_id: str | None = None,
         message_event_id: str | None = None,
         turn_index: int | None = None,
-        make_active: bool = False,
     ) -> SessionForkResult:
         source_session = self._require_session(session_id)
         try:
@@ -104,6 +104,7 @@ class SessionForkService:
         except CheckpointServiceError as exc:
             raise SessionForkServiceError(exc.code, exc.message, exc.details) from exc
 
+        self._validate_fork_source(source_session=source_session, source=source)
         target_session_id = new_id()
         try:
             self.checkpointer.clone_checkpoint_to_thread(
@@ -118,7 +119,7 @@ class SessionForkService:
                 scene_id=source_session.scene_id,
                 title=self._fork_title(source_session, title),
                 status="active",
-                session_tag=source_session.session_tag,
+                session_tag=self._fork_session_tag(source_session, session_tag),
                 scene_version_seq=source_session.scene_version_seq,
                 active_session_id=target_session_id,
                 workspace_id=source_session.workspace_id,
@@ -126,29 +127,39 @@ class SessionForkService:
                 cwd=source_session.cwd,
                 workspace_roots=source_session.workspace_roots,
                 title_source="manual",
-                parent_session_id=source_session.id,
-                source_trace_id=source.trace_id,
-                source_active_session_id=source.active_session_id,
-                source_checkpoint_id=source.checkpoint_id,
-                source_checkpoint_ns=source.checkpoint_ns,
             )
-            self._copy_visible_history(
+            copied_events = self._copy_visible_history(
                 source_session=source_session,
                 target_session=target,
                 cutoff_turn_index=source.turn_index,
             )
-            self.repositories.sessions.update(source_session.id, child_session_id=target.id)
-            if make_active:
-                self.repositories.sessions.update(source_session.id, active_session_id=target.id)
+            target_event = copied_events.get(source.message_event_id or "")
+            if target_event is None:
+                raise SessionForkServiceError(
+                    "fork_target_message_missing",
+                    "未能在派生会话中定位 fork 消息",
+                    {
+                        "session_id": source_session.id,
+                        "target_session_id": target.id,
+                        "message_event_id": source.message_event_id,
+                    },
+                )
+            self._record_fork_relation(
+                source_session=source_session,
+                target_session=target,
+                source=source,
+                target_event=target_event,
+            )
             target = self._require_session(target.id)
             logger.info(
                 "[SessionForkService] 创建 session 分支 | "
                 f"source_session_id={source_session.id} | target_session_id={target.id} | "
-                f"checkpoint_id={source.checkpoint_id} | make_active={make_active}"
+                f"checkpoint_id={source.checkpoint_id}"
             )
             return SessionForkResult(session=target, source=source)
         except Exception as exc:
             self.checkpointer.delete_thread(target_session_id)
+            self.repositories.session_forks.soft_delete_by_target(target_session_id)
             if self.repositories.sessions.get(target_session_id) is not None:
                 self.repositories.sessions.soft_delete(target_session_id)
             if isinstance(exc, SessionForkServiceError):
@@ -231,12 +242,13 @@ class SessionForkService:
         source_session: SessionRecord,
         target_session: SessionRecord,
         cutoff_turn_index: int | None,
-    ) -> None:
+    ) -> dict[str, MessageEventRecord]:
+        copied_events: dict[str, MessageEventRecord] = {}
         events = self.repositories.message_events.list_by_session(source_session.id, limit=5000)
         for event in events:
             if cutoff_turn_index is not None and event.turn_index > cutoff_turn_index:
                 continue
-            self.repositories.message_events.append(
+            copied = self.repositories.message_events.append(
                 event_id=new_id(),
                 session_id=target_session.id,
                 trace_record_id=event.trace_record_id,
@@ -248,6 +260,8 @@ class SessionForkService:
                     target_session=target_session,
                 ),
             )
+            copied_events[event.id] = copied
+        return copied_events
 
     @staticmethod
     def _copy_event_data(
@@ -272,6 +286,54 @@ class SessionForkService:
             return cleaned
         base = (source_session.title or "新会话").strip() or "新会话"
         return f"{base} 分支"
+
+    @staticmethod
+    def _fork_session_tag(source_session: SessionRecord, session_tag: str | None) -> str:
+        cleaned = (session_tag or "").strip()
+        return cleaned or source_session.session_tag
+
+    @staticmethod
+    def _validate_fork_source(*, source_session: SessionRecord, source: CheckpointSource) -> None:
+        if not source.message_event_id:
+            raise SessionForkServiceError(
+                "fork_message_event_missing",
+                "fork 必须绑定到具体消息事件",
+                {
+                    "session_id": source_session.id,
+                    "source_type": source.source_type,
+                },
+            )
+        if source.turn_index is None:
+            raise SessionForkServiceError(
+                "fork_turn_index_missing",
+                "fork 必须绑定到具体回合",
+                {
+                    "session_id": source_session.id,
+                    "message_event_id": source.message_event_id,
+                },
+            )
+
+    def _record_fork_relation(
+        self,
+        *,
+        source_session: SessionRecord,
+        target_session: SessionRecord,
+        source: CheckpointSource,
+        target_event: MessageEventRecord,
+    ) -> None:
+        self.repositories.session_forks.create(
+            fork_id=new_id(),
+            source_session_id=source_session.id,
+            target_session_id=target_session.id,
+            source_message_event_id=source.message_event_id or "",
+            target_message_event_id=target_event.id,
+            source_turn_index=source.turn_index or 0,
+            target_turn_index=target_event.turn_index,
+            source_trace_id=source.trace_id,
+            source_active_session_id=source.active_session_id,
+            source_checkpoint_id=source.checkpoint_id,
+            source_checkpoint_ns=source.checkpoint_ns,
+        )
 
     def _resolve_reverse_source(
         self,

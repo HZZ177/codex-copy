@@ -54,6 +54,7 @@ class UpdateSessionRequest(BaseModel):
 class SessionBranchRequest(BaseModel):
     user_id: str | None = None
     title: str | None = None
+    session_tag: str | None = None
     checkpoint_id: str | None = None
     checkpoint_ns: str | None = None
     trace_id: str | None = None
@@ -132,7 +133,7 @@ def list_sessions(
     user_id: str | None = None,
     scene_id: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
-    session_tag: str | None = None,
+    session_tag: str | None = "chat",
     workspace_id: str | None = None,
     session_type: str | None = None,
     title: str | None = None,
@@ -168,7 +169,7 @@ def group_sessions(
     user_id: str | None = None,
     scene_id: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
-    session_tag: str | None = None,
+    session_tag: str | None = "chat",
     workspace_id: str | None = None,
     session_type: str | None = None,
     title: str | None = None,
@@ -268,6 +269,7 @@ def fork_session(
             session_id=session_id,
             user_id=payload.user_id or settings.default_user_id,
             title=payload.title,
+            session_tag=payload.session_tag,
             checkpoint_id=payload.checkpoint_id,
             checkpoint_ns=payload.checkpoint_ns,
             trace_id=payload.trace_id,
@@ -400,6 +402,7 @@ def _service(repositories: StorageRepositories) -> SessionService:
         repositories.sessions,
         repositories.message_events,
         repositories.workspaces,
+        repositories.session_forks,
     )
 
 
@@ -450,6 +453,9 @@ def _branch_error(exc: SessionForkServiceError) -> HTTPException:
         "turn_checkpoint_missing": status.HTTP_400_BAD_REQUEST,
         "reverse_input_checkpoint_missing": status.HTTP_400_BAD_REQUEST,
         "session_reverse_failed": status.HTTP_400_BAD_REQUEST,
+        "fork_message_event_missing": status.HTTP_400_BAD_REQUEST,
+        "fork_turn_index_missing": status.HTTP_400_BAD_REQUEST,
+        "fork_target_message_missing": status.HTTP_400_BAD_REQUEST,
     }.get(exc.code, status.HTTP_400_BAD_REQUEST)
     return HTTPException(
         status_code=status_code,
