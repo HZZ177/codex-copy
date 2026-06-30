@@ -6,9 +6,18 @@ import type { ChatChannel, ListSessionsOptions, RuntimeBridge, WsConnectionStatu
 import { Sider } from "@/renderer/components/layout/Sider";
 import { emitSessionCreated } from "@/renderer/events/sessionEvents";
 import { AgentSessionProvider } from "@/renderer/providers/AgentSessionProvider";
+import { AppContextMenuProvider } from "@/renderer/providers/AppContextMenuProvider";
 import { RuntimeConnectionProvider } from "@/renderer/providers/RuntimeConnectionProvider";
 import { ThemeProvider } from "@/renderer/providers/ThemeProvider";
-import type { AgentActionEnvelope, AgentSession, CommandApprovalRequest, Workspace } from "@/types/protocol";
+import type {
+  AgentActionEnvelope,
+  AgentChatMessagePayload,
+  AgentHistoryResponse,
+  AgentSession,
+  AgentSessionBranchResponse,
+  CommandApprovalRequest,
+  Workspace,
+} from "@/types/protocol";
 
 function renderSider(ui: ReactElement) {
   return render(<ThemeProvider>{ui}</ThemeProvider>);
@@ -937,6 +946,98 @@ describe("Sider", () => {
     expect(await screen.findByText("新标题")).not.toBeNull();
   });
 
+  it("opens the same session action menu from right-click", async () => {
+    const runtime = fakeRuntime([thread({ id: "thread-a", title: "右键会话" })], {
+      forkSession: vi.fn(),
+      loadHistory: vi.fn(),
+    });
+    renderSider(
+      <AppContextMenuProvider>
+        <Sider runtime={runtime} />
+      </AppContextMenuProvider>,
+    );
+
+    await screen.findByText("右键会话");
+    const sessionButton = screen.getByRole("button", { name: "右键会话" });
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 80,
+      clientY: 96,
+    });
+    fireEvent(sessionButton, event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("menu", { name: "页面右键菜单" })).toBeNull();
+    const menu = screen.getByRole("menu", { name: "会话操作 右键会话" });
+    expect(within(menu).getByRole("menuitem", { name: "从对话派生" })).not.toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "重命名" })).not.toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "删除" })).not.toBeNull();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "重命名" }));
+    expect(screen.getByRole("dialog", { name: "重命名会话" })).not.toBeNull();
+  });
+
+  it("forks a session from the latest complete turn in the action menu", async () => {
+    const sourceSession = thread({ id: "thread-a", title: "可派生会话" });
+    const forkedSession = thread({
+      id: "thread-fork",
+      title: "派生会话",
+      parent_session_id: "thread-a",
+      updated_at: "2026-06-17T11:30:00Z",
+    });
+    const loadHistory = vi.fn().mockResolvedValue(
+      historyResponse(
+        sourceSession,
+        [
+          chatMessage({
+            role: "user",
+            content: "上一轮问题",
+            messageEventId: "event-user-complete",
+            turnIndex: 1,
+          }),
+          chatMessage({
+            role: "assistant",
+            content: "上一轮回答",
+            messageEventId: "event-assistant-complete",
+            turnIndex: 1,
+          }),
+          chatMessage({
+            role: "user",
+            content: "正在进行的问题",
+            messageEventId: "event-user-running",
+            turnIndex: 2,
+          }),
+          chatMessage({
+            role: "assistant",
+            content: "正在流式输出",
+            messageEventId: "event-assistant-running",
+            status: "streaming",
+            streaming: true,
+            turnIndex: 2,
+          }),
+        ],
+      ),
+    );
+    const forkSession = vi.fn().mockResolvedValue(branchResponse(forkedSession));
+    const runtime = fakeRuntime([sourceSession], { forkSession, loadHistory });
+    const onNavigate = vi.fn();
+
+    renderSider(<Sider runtime={runtime} onNavigate={onNavigate} />);
+
+    await screen.findByText("可派生会话");
+    fireEvent.click(within(openSessionMenu("可派生会话")).getByRole("menuitem", { name: "从对话派生" }));
+
+    await waitFor(() => {
+      expect(loadHistory).toHaveBeenCalledWith("thread-a", { pageSize: 100 });
+    });
+    expect(forkSession).toHaveBeenCalledWith("thread-a", { messageEventId: "event-assistant-complete" });
+    await waitFor(() => {
+      expect(onNavigate).toHaveBeenCalledWith("/conversation/thread-fork");
+    });
+    expect(await screen.findByText("派生会话")).not.toBeNull();
+  });
+
   it("renames a session inside its workspace group without moving it", async () => {
     const runtime = fakeRuntime([
       thread({
@@ -1024,7 +1125,12 @@ describe("Sider", () => {
   });
 });
 
-function fakeRuntime(threads: AgentSession[]): RuntimeBridge {
+interface FakeRuntimeOptions {
+  forkSession?: RuntimeBridge["conversation"]["forkSession"];
+  loadHistory?: RuntimeBridge["conversation"]["loadHistory"];
+}
+
+function fakeRuntime(threads: AgentSession[], options: FakeRuntimeOptions = {}): RuntimeBridge {
   const listSessions = vi.fn().mockResolvedValue({
     list: threads,
     total: threads.length,
@@ -1041,8 +1147,50 @@ function fakeRuntime(threads: AgentSession[]): RuntimeBridge {
       listSessions,
       updateSession,
       deleteSession,
+      ...(options.forkSession ? { forkSession: options.forkSession } : {}),
+      ...(options.loadHistory ? { loadHistory: options.loadHistory } : {}),
     },
   } as unknown as RuntimeBridge;
+}
+
+function chatMessage(
+  patch: Pick<AgentChatMessagePayload, "content" | "role"> & Partial<AgentChatMessagePayload>,
+): AgentChatMessagePayload {
+  return patch;
+}
+
+function historyResponse(session: AgentSession, list: AgentChatMessagePayload[]): AgentHistoryResponse {
+  return {
+    list,
+    total: list.length,
+    page: 1,
+    page_size: 100,
+    session,
+    event_total: list.length,
+    turn_indexes: Array.from(
+      new Set(
+        list
+          .map((message) => message.turnIndex)
+          .filter((turnIndex): turnIndex is number => typeof turnIndex === "number"),
+      ),
+    ),
+  };
+}
+
+function branchResponse(session: AgentSession): AgentSessionBranchResponse {
+  return {
+    session,
+    source: {
+      session_id: session.id,
+      active_session_id: session.active_session_id ?? session.id,
+      checkpoint_id: null,
+      checkpoint_ns: "",
+      trace_id: null,
+      turn_index: null,
+      message_event_id: null,
+      source_type: "message_event",
+    },
+  };
 }
 
 function thread(patch: Partial<AgentSession> = {}): AgentSession {

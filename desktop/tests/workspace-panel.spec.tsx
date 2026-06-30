@@ -31,6 +31,28 @@ describe("WorkspacePanel", () => {
     expect(onSelectFile).toHaveBeenCalledWith("src/main.py");
   });
 
+  it("marks directory and file rows for the app context menu", async () => {
+    const runtime = fakeRuntime({
+      "": [
+        entry("src", "src", "directory"),
+        entry("README.md", "README.md", "file", 12),
+      ],
+    });
+
+    render(<WorkspacePanel sessionId="ses-1" label="D:/repo" runtime={runtime} />);
+
+    const directory = await screen.findByRole("button", { name: "展开 src" });
+    const file = screen.getByRole("button", { name: "选择文件 README.md" });
+
+    expect(directory.getAttribute("data-workspace-entry-kind")).toBe("directory");
+    expect(directory.getAttribute("data-workspace-entry-path")).toBe("src");
+    expect(directory.getAttribute("data-workspace-entry-absolute-path")).toBe("D:/repo/src");
+    expect(directory.getAttribute("data-workspace-session-id")).toBe("ses-1");
+    expect(file.getAttribute("data-workspace-entry-kind")).toBe("file");
+    expect(file.getAttribute("data-workspace-entry-path")).toBe("README.md");
+    expect(file.getAttribute("data-workspace-entry-absolute-path")).toBe("D:/repo/README.md");
+  });
+
   it("waits for the first directory load before mounting expanded content", async () => {
     const srcDirectory = deferred<WorkspaceTreeResponse>();
     const runtime = {

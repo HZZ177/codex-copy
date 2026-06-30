@@ -71,6 +71,7 @@ export function WorkspacePanel({
   const [subtreeBusyPaths, setSubtreeBusyPaths] = useState<Set<string>>(() => new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
   const [errorsByPath, setErrorsByPath] = useState<ErrorMap>({});
+  const [workspaceRoot, setWorkspaceRoot] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [keyboardActivePath, setKeyboardActivePath] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export function WorkspacePanel({
     setExpandedPaths(new Set([""]));
     setBulkExpandedSubtreePaths(new Set());
     setSubtreeBusyPaths(new Set());
+    setWorkspaceRoot("");
     setSelectedPath(null);
     setFilterQuery("");
     setLoadingPaths(new Set([""]));
@@ -111,6 +113,7 @@ export function WorkspacePanel({
         if (!active) {
           return;
         }
+        setWorkspaceRoot(response.root);
         setEntriesByPath((entries) => ({ ...entries, "": sortEntries(response.entries) }));
       })
       .catch((reason) => {
@@ -199,6 +202,7 @@ export function WorkspacePanel({
       }
       const response = await runtime.workspace.listDirectory(scope, path);
       const sortedEntries = sortEntries(response.entries);
+      setWorkspaceRoot(response.root);
       setEntriesByPath((entries) => ({ ...entries, [path]: sortedEntries }));
       return sortedEntries;
     } catch (reason) {
@@ -232,6 +236,7 @@ export function WorkspacePanel({
         return;
       }
       const response = await runtime.workspace.listDirectorySubtree(scope, path, SUBTREE_EXPAND_OPTIONS);
+      setWorkspaceRoot(response.root);
       setEntriesByPath((entries) => ({
         ...entries,
         ...sortEntryMap(response.entries_by_path),
@@ -504,6 +509,9 @@ export function WorkspacePanel({
                     onSelectFile={(path) => void openSearchFile(path)}
                     keyboardActivePath={keyboardActivePath}
                     selectedPath={effectiveSelectedPath}
+                    sessionId={sessionId}
+                    workspaceId={workspaceId}
+                    workspaceRoot={workspaceRoot}
                   />
                 ))
               : visibleRootEntries.map((entry) => (
@@ -523,6 +531,9 @@ export function WorkspacePanel({
                     keyboardActivePath={keyboardActivePath}
                     selectedPath={effectiveSelectedPath}
                     subtreeBusyPaths={subtreeBusyPaths}
+                    sessionId={sessionId}
+                    workspaceId={workspaceId}
+                    workspaceRoot={workspaceRoot}
                   />
                 ))}
           </div>
@@ -622,7 +633,10 @@ interface TreeNodeProps {
   onToggleDirectory: (path: string) => void;
   keyboardActivePath: string | null;
   selectedPath: string | null;
+  sessionId?: string;
   subtreeBusyPaths: Set<string>;
+  workspaceId?: string;
+  workspaceRoot: string;
   depth?: number;
 }
 
@@ -640,7 +654,10 @@ const TreeNode = memo(function TreeNode({
   onToggleDirectory,
   keyboardActivePath,
   selectedPath,
+  sessionId,
   subtreeBusyPaths,
+  workspaceId,
+  workspaceRoot,
   depth = 0,
 }: TreeNodeProps) {
   const isDirectory = entry.type === "directory";
@@ -664,6 +681,13 @@ const TreeNode = memo(function TreeNode({
             className={styles.nodeButton}
             data-entry-path={entry.path}
             data-keyboard-active={keyboardActivePath === entry.path ? "true" : undefined}
+            data-workspace-entry-absolute-path={workspaceAbsolutePath(workspaceRoot, entry.path)}
+            data-workspace-entry-kind="directory"
+            data-workspace-entry-name={entry.name}
+            data-workspace-entry-path={entry.path}
+            data-workspace-id={workspaceId}
+            data-workspace-root={workspaceRoot}
+            data-workspace-session-id={sessionId}
             onClick={() => onToggleDirectory(entry.path)}
             style={{ paddingLeft }}
             type="button"
@@ -691,6 +715,13 @@ const TreeNode = memo(function TreeNode({
           data-selected={selectedPath === entry.path ? "true" : "false"}
           data-entry-path={entry.path}
           data-keyboard-active={keyboardActivePath === entry.path ? "true" : undefined}
+          data-workspace-entry-absolute-path={workspaceAbsolutePath(workspaceRoot, entry.path)}
+          data-workspace-entry-kind="file"
+          data-workspace-entry-name={entry.name}
+          data-workspace-entry-path={entry.path}
+          data-workspace-id={workspaceId}
+          data-workspace-root={workspaceRoot}
+          data-workspace-session-id={sessionId}
           onClick={() => onSelectFile(entry.path)}
           style={{ paddingLeft }}
           type="button"
@@ -721,6 +752,9 @@ const TreeNode = memo(function TreeNode({
               keyboardActivePath={keyboardActivePath}
               selectedPath={selectedPath}
               subtreeBusyPaths={subtreeBusyPaths}
+              sessionId={sessionId}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
               depth={depth + 1}
             />
           ))}
@@ -747,7 +781,10 @@ function areTreeNodePropsEqual(previous: TreeNodeProps, next: TreeNodeProps): bo
     previous.onToggleSubtree !== next.onToggleSubtree ||
     previous.onToggleDirectory !== next.onToggleDirectory ||
     previous.keyboardActivePath !== next.keyboardActivePath ||
+    previous.sessionId !== next.sessionId ||
     previous.subtreeBusyPaths !== next.subtreeBusyPaths ||
+    previous.workspaceId !== next.workspaceId ||
+    previous.workspaceRoot !== next.workspaceRoot ||
     previous.depth !== next.depth
   ) {
     return false;
@@ -820,12 +857,18 @@ const SearchResultNode = memo(function SearchResultNode({
   onSelectFile,
   keyboardActivePath,
   selectedPath,
+  sessionId,
+  workspaceId,
+  workspaceRoot,
 }: {
   entry: WorkspaceSearchResult;
   onOpenDirectory: (path: string) => void;
   onSelectFile: (path: string) => void;
   keyboardActivePath: string | null;
   selectedPath: string | null;
+  sessionId?: string;
+  workspaceId?: string;
+  workspaceRoot: string;
 }) {
   const isDirectory = entry.type === "directory";
   const sizeLabel = !isDirectory && typeof entry.size === "number" ? formatSize(entry.size) : null;
@@ -838,6 +881,13 @@ const SearchResultNode = memo(function SearchResultNode({
         data-selected={!isDirectory && selectedPath === entry.path ? "true" : "false"}
         data-entry-path={entry.path}
         data-keyboard-active={keyboardActivePath === entry.path ? "true" : undefined}
+        data-workspace-entry-absolute-path={workspaceAbsolutePath(workspaceRoot, entry.path)}
+        data-workspace-entry-kind={entry.type}
+        data-workspace-entry-name={entry.name}
+        data-workspace-entry-path={entry.path}
+        data-workspace-id={workspaceId}
+        data-workspace-root={workspaceRoot}
+        data-workspace-session-id={sessionId}
         onClick={() => (isDirectory ? onOpenDirectory(entry.path) : onSelectFile(entry.path))}
         type="button"
       >
@@ -1128,6 +1178,19 @@ function directoryRevealPaths(path: string): string[] {
 function directoryAncestorPaths(path: string): string[] {
   const parts = path.split("/").filter(Boolean);
   return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function workspaceAbsolutePath(root: string, path: string): string {
+  const cleanedRoot = root.trim();
+  const cleanedPath = path.replace(/^[/\\]+/, "");
+  if (!cleanedRoot) {
+    return cleanedPath;
+  }
+  const separator = cleanedRoot.includes("\\") ? "\\" : "/";
+  const normalizedPath =
+    separator === "\\" ? cleanedPath.replace(/\//g, "\\") : cleanedPath.replace(/\\/g, "/");
+  const normalizedRoot = cleanedRoot.replace(/[\\/]+$/, "");
+  return normalizedPath ? `${normalizedRoot}${separator}${normalizedPath}` : normalizedRoot;
 }
 
 function findTreeEntryButton(root: HTMLElement | null, path: string): HTMLElement | null {

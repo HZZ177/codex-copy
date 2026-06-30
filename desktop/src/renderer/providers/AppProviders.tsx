@@ -5,6 +5,7 @@ import { PreviewProvider } from "./PreviewProvider";
 import { ThemeProvider } from "./ThemeProvider";
 import { FontProvider } from "./FontProvider";
 import { AgentSessionProvider } from "./AgentSessionProvider";
+import { AppContextMenuProvider } from "./AppContextMenuProvider";
 import { NotificationProvider } from "./NotificationProvider";
 import { RuntimeConnectionProvider, type RuntimeConnectionProviderProps } from "./RuntimeConnectionProvider";
 import { WindowClosePreferenceController } from "./WindowClosePreferenceController";
@@ -27,18 +28,20 @@ export function AppProviders({
   return (
     <ThemeProvider>
       <NotificationProvider>
-        <LayoutStateProvider>
-          <RuntimeConnectionProvider runtime={runtime} {...runtimeConnection}>
-            <WindowClosePreferenceController runtime={runtime} />
-            <FontProvider>
-              <AgentSessionProvider runtime={runtime}>
-                <PreviewProvider>
-                  <HashRouter>{children}</HashRouter>
-                </PreviewProvider>
-              </AgentSessionProvider>
-            </FontProvider>
-          </RuntimeConnectionProvider>
-        </LayoutStateProvider>
+        <AppContextMenuProvider>
+          <LayoutStateProvider>
+            <RuntimeConnectionProvider runtime={runtime} {...runtimeConnection}>
+              <WindowClosePreferenceController runtime={runtime} />
+              <FontProvider>
+                <AgentSessionProvider runtime={runtime}>
+                  <PreviewProvider>
+                    <HashRouter>{children}</HashRouter>
+                  </PreviewProvider>
+                </AgentSessionProvider>
+              </FontProvider>
+            </RuntimeConnectionProvider>
+          </LayoutStateProvider>
+        </AppContextMenuProvider>
       </NotificationProvider>
     </ThemeProvider>
   );

@@ -3,6 +3,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  GitBranchPlus,
   LoaderCircle,
   MessageCircle,
   Moon,
@@ -20,7 +21,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -30,6 +31,7 @@ import type { AppMode } from "@/renderer/components/layout/appMode";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import { AppTooltipLayer } from "@/renderer/components/tooltip";
 import {
+  emitSessionCreated,
   emitSessionUpdated,
   subscribeSessionCreated,
   subscribeSessionUpdated,
@@ -39,7 +41,7 @@ import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessio
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnectionProvider";
 import { useTheme } from "@/renderer/providers/ThemeProvider";
-import type { AgentSession } from "@/types/protocol";
+import type { AgentChatMessagePayload, AgentSession } from "@/types/protocol";
 
 import styles from "./Sider.module.css";
 
@@ -76,8 +78,9 @@ const EMPTY_SESSION_INDICATOR: SessionIndicator = {
 const WORKSPACE_SESSION_PREVIEW_LIMIT = 5;
 const WORKSPACE_SESSION_EXPAND_STEP = 10;
 const WORKSPACE_SESSION_HISTORY_PAGE_SIZE = 100;
+const SESSION_FORK_HISTORY_PAGE_SIZE = 100;
 const SESSION_ACTION_MENU_WIDTH = 112;
-const SESSION_ACTION_MENU_HEIGHT = 66;
+const SESSION_ACTION_MENU_HEIGHT = 98;
 const SESSION_ACTION_MENU_GAP = 10;
 const SESSION_ACTION_MENU_EDGE = 8;
 const SESSION_ACTION_MENU_CLOSE_MS = 120;
@@ -129,11 +132,14 @@ export function Sider({
   const [loadingWorkspaceHistoryIds, setLoadingWorkspaceHistoryIds] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [forkingSessionId, setForkingSessionId] = useState<string | null>(null);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const loadedWorkspaceHistoryIdsRef = useRef<Set<string>>(new Set());
   const [showFooterFeather, setShowFooterFeather] = useState(false);
   const canMutateConversations =
     typeof runtime.conversation.updateSession === "function" && typeof runtime.conversation.deleteSession === "function";
+  const canForkConversations =
+    typeof runtime.conversation.loadHistory === "function" && typeof runtime.conversation.forkSession === "function";
 
   const controlled = conversations !== undefined;
   const loadedGroups = useMemo(() => buildSessionGroups(loadedSessions), [loadedSessions]);
@@ -371,6 +377,37 @@ export function Sider({
     }
   }
 
+  async function forkConversationFromLatestTurn(item: SiderEntry) {
+    if (!canForkConversations) {
+      notifications.warning("当前后端不支持派生会话");
+      return;
+    }
+    if (forkingSessionId) {
+      return;
+    }
+    setSearchOpen(false);
+    setEditing(null);
+    setConfirmDeleteId(null);
+    setForkingSessionId(item.id);
+    try {
+      const history = await runtime.conversation.loadHistory(item.id, { pageSize: SESSION_FORK_HISTORY_PAGE_SIZE });
+      const source = latestCompleteForkSource(history.list);
+      if (!source) {
+        notifications.warning("没有可派生的完整回合");
+        return;
+      }
+      const response = await runtime.conversation.forkSession(item.id, source);
+      setLoadedSessions((items) => upsertSession(items, response.session));
+      emitSessionCreated(response.session);
+      notifications.success("已创建派生会话");
+      onNavigate?.(getSessionPath(response.session.id));
+    } catch (reason) {
+      notifications.error(`派生失败：${errorMessage(reason)}`);
+    } finally {
+      setForkingSessionId(null);
+    }
+  }
+
   const loadWorkspaceSessions = useCallback(
     async (workspaceId: string) => {
       if (controlled || loadedWorkspaceHistoryIdsRef.current.has(workspaceId) || loadingWorkspaceHistoryIds.has(workspaceId)) {
@@ -487,10 +524,13 @@ export function Sider({
                   editing={editing}
                   confirmDeleteId={confirmDeleteId}
                   canMutate={canMutateConversations}
+                  canFork={canForkConversations}
+                  forkingSessionId={forkingSessionId}
                   sessionIndicators={sessionIndicators}
                   historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                   getSessionPath={getSessionPath}
                   onConfirmDelete={startDeleteConversation}
+                  onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                   onNavigate={navigateTo}
@@ -506,6 +546,8 @@ export function Sider({
                   editing={editing}
                   confirmDeleteId={confirmDeleteId}
                   canMutate={canMutateConversations}
+                  canFork={canForkConversations}
+                  forkingSessionId={forkingSessionId}
                   sessionIndicators={sessionIndicators}
                   workspaceId={workbenchGroup.workspaceId}
                   disableSectionToggle
@@ -513,6 +555,7 @@ export function Sider({
                   hideTitle
                   getSessionPath={getSessionPath}
                   onConfirmDelete={startDeleteConversation}
+                  onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                   onNavigate={navigateTo}
@@ -547,9 +590,12 @@ export function Sider({
                 editing={editing}
                 confirmDeleteId={confirmDeleteId}
                 canMutate={canMutateConversations}
+                canFork={canForkConversations}
+                forkingSessionId={forkingSessionId}
                 sessionIndicators={sessionIndicators}
                 getSessionPath={getSessionPath}
                 onConfirmDelete={startDeleteConversation}
+                onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                 onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                 onNavigate={navigateTo}
@@ -575,6 +621,8 @@ export function Sider({
                   editing={editing}
                   confirmDeleteId={confirmDeleteId}
                   canMutate={canMutateConversations}
+                  canFork={canForkConversations}
+                  forkingSessionId={forkingSessionId}
                   sessionIndicators={sessionIndicators}
                   workspaceId={group.workspaceId}
                   getSessionPath={getSessionPath}
@@ -586,6 +634,7 @@ export function Sider({
                     group.workspaceId && !controlled ? () => loadWorkspaceSessions(group.workspaceId as string) : undefined
                   }
                   onConfirmDelete={startDeleteConversation}
+                  onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                   onNavigate={navigateTo}
@@ -605,10 +654,13 @@ export function Sider({
                 editing={editing}
                 confirmDeleteId={confirmDeleteId}
                 canMutate={canMutateConversations}
+                canFork={canForkConversations}
+                forkingSessionId={forkingSessionId}
                 sessionIndicators={sessionIndicators}
                 historyPreviewLimit={WORKSPACE_SESSION_PREVIEW_LIMIT}
                 getSessionPath={getSessionPath}
                 onConfirmDelete={startDeleteConversation}
+                onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                 onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                 onNavigate={navigateTo}
@@ -635,6 +687,8 @@ export function Sider({
                     editing={editing}
                     confirmDeleteId={confirmDeleteId}
                     canMutate={canMutateConversations}
+                    canFork={canForkConversations}
+                    forkingSessionId={forkingSessionId}
                     sessionIndicators={sessionIndicators}
                     workspaceId={group.workspaceId}
                     getSessionPath={getSessionPath}
@@ -650,6 +704,7 @@ export function Sider({
                         : undefined
                     }
                     onConfirmDelete={startDeleteConversation}
+                    onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                     onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                     onNavigate={navigateTo}
@@ -676,10 +731,13 @@ export function Sider({
                     editing={editing}
                     confirmDeleteId={confirmDeleteId}
                     canMutate={canMutateConversations}
+                    canFork={canForkConversations}
+                    forkingSessionId={forkingSessionId}
                     sessionIndicators={sessionIndicators}
                     hideTitle
                     getSessionPath={getSessionPath}
                     onConfirmDelete={startDeleteConversation}
+                    onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                     onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
                     onNavigate={navigateTo}
@@ -918,6 +976,8 @@ interface SiderSectionProps {
   editing?: { id: string; title: string } | null;
   confirmDeleteId?: string | null;
   canMutate?: boolean;
+  canFork?: boolean;
+  forkingSessionId?: string | null;
   sessionIndicators?: Record<string, SessionIndicator>;
   workspaceId?: string;
   historyExpansionLoading?: boolean;
@@ -925,6 +985,7 @@ interface SiderSectionProps {
   getSessionPath?: (sessionId: string) => string;
   getWorkspaceNewConversationPath?: (workspaceId?: string) => string;
   onConfirmDelete?: (id: string) => void;
+  onForkSession?: (item: SiderEntry) => void;
   onLoadHistoryExpansion?: () => Promise<void> | void;
   onNavigate?: (path: string) => void;
   onStartRename?: (item: SiderEntry) => void;
@@ -1012,6 +1073,8 @@ function SiderSection({
   editing,
   confirmDeleteId,
   canMutate = false,
+  canFork = false,
+  forkingSessionId = null,
   sessionIndicators = {},
   workspaceId,
   historyExpansionLoading = false,
@@ -1019,6 +1082,7 @@ function SiderSection({
   getSessionPath = conversationPath,
   getWorkspaceNewConversationPath = newWorkspaceConversationPath,
   onConfirmDelete,
+  onForkSession,
   onLoadHistoryExpansion,
   onNavigate,
   onStartRename,
@@ -1052,6 +1116,7 @@ function SiderSection({
   const hasExpandedHistory = visibleExtraItemCount > 0;
   const canExpandHistory = shouldLimitHistory && visibleExtraItemCount < extraItems.length;
   const historyToggleLoading = historyExpansionLoading || localHistoryExpansionLoading;
+  const canOpenActionMenu = canMutate || canFork;
 
   useEffect(() => {
     const activePathChanged = previousActivePathRef.current !== activePath;
@@ -1119,6 +1184,31 @@ function SiderSection({
       left: Math.round(left),
       top: Math.round(top),
     };
+  }, []);
+
+  const getActionMenuPositionFromPoint = useCallback((clientX: number, clientY: number): CSSProperties => {
+    const maxLeft = Math.max(
+      SESSION_ACTION_MENU_EDGE,
+      window.innerWidth - SESSION_ACTION_MENU_WIDTH - SESSION_ACTION_MENU_EDGE,
+    );
+    const maxTop = Math.max(
+      SESSION_ACTION_MENU_EDGE,
+      window.innerHeight - SESSION_ACTION_MENU_HEIGHT - SESSION_ACTION_MENU_EDGE,
+    );
+    return {
+      left: Math.round(clamp(clientX, SESSION_ACTION_MENU_EDGE, maxLeft)),
+      top: Math.round(clamp(clientY, SESSION_ACTION_MENU_EDGE, maxTop)),
+    };
+  }, []);
+
+  const openActionMenu = useCallback((id: string, position: CSSProperties) => {
+    if (actionMenuCloseTimerRef.current) {
+      window.clearTimeout(actionMenuCloseTimerRef.current);
+      actionMenuCloseTimerRef.current = null;
+    }
+    setClosingActionMenuId(null);
+    setActionMenuPosition(position);
+    setActionMenuId(id);
   }, []);
 
   useEffect(() => {
@@ -1209,13 +1299,26 @@ function SiderSection({
     const menuOpen = actionMenuId === item.id;
     const menuVisible = menuOpen || closingActionMenuId === item.id;
     const canShowHoverCard = editing?.id !== item.id && confirmDeleteId !== item.id && !menuVisible;
+    const isForking = forkingSessionId === item.id;
+    const openContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+      if (!canOpenActionMenu) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setHoveredSession(null);
+      openActionMenu(item.id, getActionMenuPositionFromPoint(event.clientX, event.clientY));
+    };
     return (
       <div
         className={styles.historyRow}
         key={item.id}
+        data-app-context-menu={canOpenActionMenu ? "local" : undefined}
         data-active={active ? "true" : "false"}
+        data-can-actions={canOpenActionMenu ? "true" : "false"}
         data-can-mutate={canMutate ? "true" : "false"}
         data-menu-open={menuVisible ? "true" : "false"}
+        onContextMenu={canOpenActionMenu ? openContextMenu : undefined}
         onBlurCapture={
           canShowHoverCard
             ? (event) => {
@@ -1248,7 +1351,7 @@ function SiderSection({
             <span>{item.title}</span>
           </span>
         </button>
-        {hasMeta || canMutate ? (
+        {hasMeta || canOpenActionMenu ? (
           <div className={styles.historyTrailing}>
             {hasMeta ? (
               <span className={styles.historyMeta}>
@@ -1258,25 +1361,27 @@ function SiderSection({
                 <SessionStatusIndicators indicator={indicator} />
               </span>
             ) : null}
-            {canMutate ? (
+            {canOpenActionMenu ? (
               <div
                 className={styles.historyActions}
                 data-menu-open={menuOpen ? "true" : "false"}
                 ref={menuOpen ? actionTriggerRef : null}
               >
-                <button
-                  aria-label={`${item.pinnedAt ? "取消置顶" : "置顶"} ${item.title}`}
-                  data-tooltip-label={item.pinnedAt ? "取消置顶" : "置顶"}
-                  data-pinned={item.pinnedAt ? "true" : "false"}
-                  onClick={() => {
-                    setHoveredSession(null);
-                    closeActionMenu();
-                    onTogglePinned?.(item, !item.pinnedAt);
-                  }}
-                  type="button"
-                >
-                  {item.pinnedAt ? <PinOff size={13} aria-hidden="true" /> : <Pin size={13} aria-hidden="true" />}
-                </button>
+                {canMutate ? (
+                  <button
+                    aria-label={`${item.pinnedAt ? "取消置顶" : "置顶"} ${item.title}`}
+                    data-tooltip-label={item.pinnedAt ? "取消置顶" : "置顶"}
+                    data-pinned={item.pinnedAt ? "true" : "false"}
+                    onClick={() => {
+                      setHoveredSession(null);
+                      closeActionMenu();
+                      onTogglePinned?.(item, !item.pinnedAt);
+                    }}
+                    type="button"
+                  >
+                    {item.pinnedAt ? <PinOff size={13} aria-hidden="true" /> : <Pin size={13} aria-hidden="true" />}
+                  </button>
+                ) : null}
                 <button
                   aria-label={`更多操作 ${item.title}`}
                   aria-expanded={menuOpen}
@@ -1289,13 +1394,7 @@ function SiderSection({
                       closeActionMenu();
                       return;
                     }
-                    if (actionMenuCloseTimerRef.current) {
-                      window.clearTimeout(actionMenuCloseTimerRef.current);
-                      actionMenuCloseTimerRef.current = null;
-                    }
-                    setClosingActionMenuId(null);
-                    setActionMenuPosition(getActionMenuPosition(event.currentTarget));
-                    setActionMenuId(item.id);
+                    openActionMenu(item.id, getActionMenuPosition(event.currentTarget));
                   }}
                   type="button"
                 >
@@ -1311,30 +1410,49 @@ function SiderSection({
                         aria-label={`会话操作 ${item.title}`}
                         style={actionMenuPosition}
                       >
-                        <button
-                          role="menuitem"
-                          type="button"
-                          onClick={() => {
-                            setHoveredSession(null);
-                            closeActionMenu();
-                            onStartRename?.(item);
-                          }}
-                        >
-                          <Pencil size={13} aria-hidden="true" />
-                          <span>重命名</span>
-                        </button>
-                        <button
-                          role="menuitem"
-                          type="button"
-                          onClick={() => {
-                            setHoveredSession(null);
-                            closeActionMenu();
-                            onConfirmDelete?.(item.id);
-                          }}
-                        >
-                          <Trash2 size={13} aria-hidden="true" />
-                          <span>删除</span>
-                        </button>
+                        {canFork ? (
+                          <button
+                            disabled={isForking}
+                            role="menuitem"
+                            type="button"
+                            onClick={() => {
+                              setHoveredSession(null);
+                              closeActionMenu();
+                              onForkSession?.(item);
+                            }}
+                          >
+                            <GitBranchPlus size={13} aria-hidden="true" />
+                            <span>{isForking ? "派生中" : "从对话派生"}</span>
+                          </button>
+                        ) : null}
+                        {canMutate ? (
+                          <>
+                            <button
+                              role="menuitem"
+                              type="button"
+                              onClick={() => {
+                                setHoveredSession(null);
+                                closeActionMenu();
+                                onStartRename?.(item);
+                              }}
+                            >
+                              <Pencil size={13} aria-hidden="true" />
+                              <span>重命名</span>
+                            </button>
+                            <button
+                              role="menuitem"
+                              type="button"
+                              onClick={() => {
+                                setHoveredSession(null);
+                                closeActionMenu();
+                                onConfirmDelete?.(item.id);
+                              }}
+                            >
+                              <Trash2 size={13} aria-hidden="true" />
+                              <span>删除</span>
+                            </button>
+                          </>
+                        ) : null}
                       </div>,
                       document.body,
                     )
@@ -1640,6 +1758,39 @@ function hoverCardStyle(top: number, left?: number): CSSProperties {
   } as CSSProperties;
 }
 
+type ForkSourcePayload = { messageEventId: string } | { turnIndex: number };
+
+const NON_FORKABLE_MESSAGE_STATUSES = new Set(["running", "streaming", "failed", "error", "cancelled", "cancelling"]);
+
+function latestCompleteForkSource(messages: AgentChatMessagePayload[]): ForkSourcePayload | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isCompleteAssistantForkMessage(message)) {
+      continue;
+    }
+    const messageEventId = nonEmptyString(message.messageEventId);
+    if (messageEventId) {
+      return { messageEventId };
+    }
+    if (typeof message.turnIndex === "number" && Number.isInteger(message.turnIndex)) {
+      return { turnIndex: message.turnIndex };
+    }
+  }
+  return null;
+}
+
+function isCompleteAssistantForkMessage(message: AgentChatMessagePayload): boolean {
+  if (message.role !== "assistant" || message.streaming || message.cancelled) {
+    return false;
+  }
+  const status = typeof message.status === "string" ? message.status.toLowerCase() : "";
+  return !NON_FORKABLE_MESSAGE_STATUSES.has(status);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 function sessionToEntry(session: AgentSession, groupTitle: string): SiderEntry {
   const pinnedAt = session.pinned_at ?? (session.pinned ? session.updated_at : undefined);
   return {
@@ -1885,6 +2036,10 @@ function isActivePath(activePath: string, path: string): boolean {
 
 function stripQuery(path: string): string {
   return path.split(/[?#]/, 1)[0] ?? path;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
 function errorMessage(reason: unknown): string {

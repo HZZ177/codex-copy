@@ -206,6 +206,79 @@ fn request_app_exit(app: tauri::AppHandle, state: State<'_, SidecarState>) -> Re
     request_exit(&app, &state)
 }
 
+#[tauri::command]
+fn open_path_in_file_manager(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let resolved = resolve_existing_filesystem_path(&path)?;
+        let mut command = Command::new("explorer.exe");
+        command
+            .arg(format!("/select,{}", resolved.to_string_lossy()))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        command.spawn().map_err(|err| err.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("当前平台暂不支持在资源管理器中打开".to_string())
+    }
+}
+
+#[tauri::command]
+fn copy_file_to_clipboard(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let resolved = resolve_existing_filesystem_path(&path)?;
+        let resolved_text = resolved.to_string_lossy().to_string();
+        if !resolved.is_file() {
+            return Err("只能复制文件".to_string());
+        }
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$files = New-Object System.Collections.Specialized.StringCollection
+[void]$files.Add($args[0])
+[System.Windows.Forms.Clipboard]::SetFileDropList($files)
+"#;
+        let mut command = Command::new("powershell.exe");
+        command
+            .args(["-NoProfile", "-NonInteractive", "-STA", "-Command", script])
+            .arg(resolved_text)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        let status = command.status().map_err(|err| err.to_string())?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err("复制文件到剪贴板失败".to_string());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("当前平台暂不支持复制文件".to_string())
+    }
+}
+
+#[cfg(windows)]
+fn resolve_existing_filesystem_path(path: &str) -> Result<PathBuf, String> {
+    let cleaned = path.trim();
+    if cleaned.is_empty() {
+        return Err("文件路径不能为空".to_string());
+    }
+    let path = PathBuf::from(cleaned);
+    if !path.exists() {
+        return Err("文件不存在".to_string());
+    }
+    path.canonicalize().map_err(|err| err.to_string())
+}
+
 fn request_exit(app: &tauri::AppHandle, state: &SidecarState) -> Result<(), String> {
     if state.closing.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -288,7 +361,9 @@ pub fn run() {
             stop_sidecar,
             wait_for_health,
             hide_main_window,
-            request_app_exit
+            request_app_exit,
+            open_path_in_file_manager,
+            copy_file_to_clipboard
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -773,6 +773,17 @@ button.sectionTitle[data-kind="pinned"]:focus-visible,
   color: var(--color-text-1);
 }
 
+.historyActionMenu button:disabled {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.historyActionMenu button:disabled:hover,
+.historyActionMenu button:disabled:focus-visible {
+  background: transparent;
+  color: var(--color-text-2);
+}
+
 .historyActionMenu svg {
   color: color-mix(in srgb, currentColor 78%, transparent);
 }

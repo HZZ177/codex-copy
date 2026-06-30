@@ -14,6 +14,7 @@ import {
   type SelectedImageAttachment,
   type SelectedQuote,
 } from "@/renderer/components/chat/SendBox";
+import { subscribeAddWorkspaceFileToChat } from "@/renderer/events/workspaceFileContext";
 import type { RuntimeSelectedModel } from "@/renderer/components/model";
 import { emitSessionEventsFromRuntimeEvent } from "@/renderer/events/sessionEvents";
 import { useOptionalAgentSessionRuntime } from "@/renderer/providers/AgentSessionProvider";
@@ -450,6 +451,24 @@ export function useAgentSessionController({
       }));
     }
   }, []);
+
+  useEffect(() => {
+    return subscribeAddWorkspaceFileToChat((detail) => {
+      if (detail.file.type !== "file") {
+        return;
+      }
+      if (detail.sessionId && sessionId && detail.sessionId !== sessionId) {
+        return;
+      }
+      if (detail.workspaceId && session?.workspace_id && detail.workspaceId !== session.workspace_id) {
+        return;
+      }
+      setFileChipRequest((current) => ({
+        requestId: (current?.requestId ?? 0) + 1,
+        file: detail.file,
+      }));
+    });
+  }, [session?.workspace_id, sessionId]);
 
   const resolveSessionId = useCallback(
     async (message: string, contextItems: AgentContextItem[], model: RuntimeSelectedModel | null) => {

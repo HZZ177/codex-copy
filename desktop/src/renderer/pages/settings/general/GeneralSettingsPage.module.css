@@ -60,17 +60,16 @@
   display: grid;
   grid-template-columns: minmax(180px, 0.42fr) minmax(320px, 1fr);
   gap: 22px;
-  align-items: start;
+  align-items: center;
   min-height: 82px;
   padding: 12px 14px;
 }
 
 .sectionHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 2px 0;
 }
 
 .settingIcon {
