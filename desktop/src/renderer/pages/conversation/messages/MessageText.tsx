@@ -68,6 +68,7 @@ export interface MessageTextProps {
   workspaceRuntime?: RuntimeBridge;
   workspaceScope?: WorkspaceScope | null;
   onQuoteSelection?: (text: string) => void;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }
 
@@ -78,13 +79,14 @@ export function MessageText({
   workspaceRuntime,
   workspaceScope,
   onQuoteSelection,
+  onAskSelectionInBtwConversation,
   onReverseFromMessage,
 }: MessageTextProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const previewContext = useOptionalPreview();
   const isUser = message.kind === "user";
   const isStreaming = message.status === "pending" || message.status === "running";
-  const selection = useTextSelection(contentRef, Boolean(onQuoteSelection));
+  const selection = useTextSelection(contentRef, Boolean(onQuoteSelection || onAskSelectionInBtwConversation));
   const cancelled = message.status === "cancelled" || message.payload.cancelled === true;
   const fastDrainTyping = !isUser && message.status === "completed" && !cancelled;
   const assistantContent = useMemo(
@@ -272,11 +274,12 @@ export function MessageText({
             )
           ) : null}
           {cancelled ? <div className={styles.cancelledBadge}>已取消</div> : null}
-          {onQuoteSelection ? (
+          {onQuoteSelection || onAskSelectionInBtwConversation ? (
             <SelectionToolbar
               selectedText={selection.selectedText}
               position={selection.selectionPosition}
               onQuote={onQuoteSelection}
+              onAskInBtwConversation={onAskSelectionInBtwConversation}
               onClear={selection.clearSelection}
             />
           ) : null}

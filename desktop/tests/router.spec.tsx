@@ -10,6 +10,7 @@ import {
   conversationPath,
   modeSwitchTargetsForPath,
   parseWorkbenchPath,
+  PROJECT_PATH,
   workbenchPath,
 } from "@/renderer/components/layout/appMode";
 import { AppRouter } from "@/renderer/components/layout/Router";
@@ -65,15 +66,23 @@ describe("AppRouter", () => {
     });
     expect(parseWorkbenchPath("/conversation/thread-1")).toBeNull();
     expect(appModeFromPath("/workbench/workspace-a")).toBe("workbench");
+    expect(appModeFromPath(PROJECT_PATH)).toBe("project");
     expect(appModeFromPath("/conversation/thread-1")).toBe("agent");
     expect(appModeFromPath("/settings/general")).toBe("agent");
     expect(modeSwitchTargetsForPath("/conversation/session%201", "workspace A")).toEqual({
       agent: "/conversation/session%201",
       workbench: "/workbench/workspace%20A",
+      project: PROJECT_PATH,
     });
     expect(modeSwitchTargetsForPath("/workbench/workspace%20A/session/session%201", "workspace B")).toEqual({
       agent: "/conversation/session%201",
       workbench: "/workbench/workspace%20A/session/session%201",
+      project: PROJECT_PATH,
+    });
+    expect(modeSwitchTargetsForPath(PROJECT_PATH, "workspace A")).toEqual({
+      agent: "/guid",
+      workbench: "/workbench/workspace%20A",
+      project: PROJECT_PATH,
     });
     expect(modeSwitchTargetsForPath("/guid", null).workbench).toBe("/workbench");
   });
@@ -173,6 +182,19 @@ describe("AppRouter", () => {
     expect(screen.getByTestId("workbench-workspace-picker")).not.toBeNull();
     expect(screen.getByTestId("workbench-assistant-capsule").getAttribute("data-disabled")).toBe("true");
     expect(screen.queryByRole("button", { name: /无项目聊天/ })).toBeNull();
+  });
+
+  it("opens the project mode placeholder route", async () => {
+    renderRouter([PROJECT_PATH]);
+
+    expect(await screen.findByTestId("project-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "项目模式" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("功能开发中，敬请期待")).not.toBeNull();
+    expect(screen.getByTestId("app-shell").dataset.rightSidebarEnabled).toBe("false");
+    expect(screen.queryByLabelText("侧边栏")).toBeNull();
+    expect(screen.queryByText("新对话")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "调整侧边栏宽度" })).toBeNull();
+    expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
   });
 
   it("selects a workspace from the workbench picker", async () => {
@@ -627,6 +649,33 @@ describe("AppRouter", () => {
     }
 
     expect(await screen.findByTestId("workbench-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
+  });
+
+  it("switches to the project mode placeholder without local skeleton placeholders", async () => {
+    renderRouter(["/conversation/thread-1"]);
+
+    expect(await screen.findByRole("heading", { name: /thread-1/ }, { timeout: 10000 })).not.toBeNull();
+    expect(screen.queryByTestId("project-mode-page")).toBeNull();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "项目模式" }));
+
+      expect(screen.getByTestId("app-mode-switch").getAttribute("data-mode")).toBe("project");
+      expect(screen.getByTestId("app-shell").dataset.appModeLoading).toBeUndefined();
+      expect(screen.queryByTestId("app-mode-session-loading-skeleton")).toBeNull();
+      expect(screen.queryByTestId("app-mode-content-loading-skeleton")).toBeNull();
+      expect(screen.queryByTestId("project-mode-page")).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(180);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(await screen.findByTestId("project-mode-page", undefined, { timeout: 10000 })).not.toBeNull();
   });
 });
 

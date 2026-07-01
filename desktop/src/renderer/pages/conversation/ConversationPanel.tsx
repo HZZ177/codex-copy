@@ -30,6 +30,7 @@ export interface ConversationPanelProps {
   topNotice?: MessageListTopNotice | null;
   showForkSourceMarkers?: boolean;
   showForkActions?: boolean;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   className?: string;
 }
 
@@ -47,6 +48,7 @@ export function ConversationPanel({
   topNotice = null,
   showForkSourceMarkers = true,
   showForkActions = true,
+  onAskSelectionInBtwConversation,
   className = "",
 }: ConversationPanelProps) {
   return (
@@ -68,6 +70,7 @@ export function ConversationPanel({
         onFilePreview={model.openFileChangePreview}
         onLoadToolDetails={model.loadToolDetails}
         onQuoteSelection={model.quoteSelection}
+        onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
         onForkFromMessage={showForkActions ? model.forkFromMessage : undefined}
         onNavigateToForkSource={model.navigateToForkSource}
         showForkSourceMarkers={showForkSourceMarkers}

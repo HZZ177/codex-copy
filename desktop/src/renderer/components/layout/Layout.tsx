@@ -46,6 +46,7 @@ import { useOptionalRuntimeConnection } from "@/renderer/providers/RuntimeConnec
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { ConnectionStatus } from "@/renderer/components/runtime";
 import { LoadingSkeleton } from "@/renderer/components/loading";
+import type { SelectedQuote } from "@/renderer/components/chat/SendBox";
 import type { AppMode } from "@/renderer/components/layout/appMode";
 import {
   BTW_CONVERSATION_TITLE,
@@ -104,6 +105,12 @@ interface RightSidebarConversationPanelState {
   sessionId: string;
   title: string;
   sourceSessionId: string | null;
+  quoteRequest: RightSidebarConversationQuoteRequest | null;
+}
+
+interface RightSidebarConversationQuoteRequest {
+  requestId: number;
+  quote: SelectedQuote;
 }
 
 interface RightSidebarScopePanelState {
@@ -233,7 +240,8 @@ export function Layout({
   const runtimeConnection = useOptionalRuntimeConnection();
   const notifications = useNotifications();
   const collapsed = state.sidebarCollapsed;
-  const globalRightSidebarEnabled = appMode !== "workbench";
+  const sidebarEnabled = appMode !== "project";
+  const globalRightSidebarEnabled = appMode === "agent";
   const { sidebarMotion, toggleSidebar } = useSidebarCollapseMotion(actions.toggleSidebar);
   const {
     sidebarMotion: rightSidebarMotion,
@@ -492,6 +500,7 @@ export function Layout({
           session,
           title: request.title,
           sourceSessionId: request.sourceSessionId,
+          quote: request.quote,
         });
         if (sameRightSidebarScopePanelState(previous, next)) {
           return current;
@@ -504,7 +513,7 @@ export function Layout({
   );
 
   const openBtwConversationFromSession = useCallback(
-    async ({ sessionId, runtime: requestRuntime }: OpenBtwConversationRequest) => {
+    async ({ sessionId, runtime: requestRuntime, quote }: OpenBtwConversationRequest) => {
       const cleanedSessionId = sessionId.trim();
       if (!cleanedSessionId) {
         notifications.warning("当前会话无法开启旁路对话");
@@ -520,6 +529,7 @@ export function Layout({
           session: result.session,
           sourceSessionId: cleanedSessionId,
           title: result.session.title || BTW_CONVERSATION_TITLE,
+          quote,
         });
         notifications.success("已打开旁路对话");
         return result.session;
@@ -698,27 +708,31 @@ export function Layout({
       ) : null}
 
       <div className={styles.body}>
-        <Sider
-          appMode={appMode}
-          runtime={runtime}
-          activePath={activePath}
-          collapsed={collapsed}
-          projects={projects}
-          conversations={conversations}
-          showChatBucket={showChatBucket}
-          newConversationPath={newConversationPath}
-          deleteActiveFallbackPath={deleteActiveFallbackPath}
-          getSessionPath={getSessionPath}
-          getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
-          onToggleSidebar={toggleSidebar}
-          onNavigate={navigateFromShell}
-        />
-        <SidebarResizeHandle
-          disabled={collapsed}
-          width={state.sidebarWidth}
-          onResizePreview={previewSidebarWidth}
-          onResize={actions.setSidebarWidth}
-        />
+        {sidebarEnabled ? (
+          <>
+            <Sider
+              appMode={appMode}
+              runtime={runtime}
+              activePath={activePath}
+              collapsed={collapsed}
+              projects={projects}
+              conversations={conversations}
+              showChatBucket={showChatBucket}
+              newConversationPath={newConversationPath}
+              deleteActiveFallbackPath={deleteActiveFallbackPath}
+              getSessionPath={getSessionPath}
+              getWorkspaceNewConversationPath={getWorkspaceNewConversationPath}
+              onToggleSidebar={toggleSidebar}
+              onNavigate={navigateFromShell}
+            />
+            <SidebarResizeHandle
+              disabled={collapsed}
+              width={state.sidebarWidth}
+              onResizePreview={previewSidebarWidth}
+              onResize={actions.setSidebarWidth}
+            />
+          </>
+        ) : null}
 
         <section className={styles.content} data-content={contentMode} aria-label="主内容区">
           <div className={styles.readingColumn} data-content={contentMode}>
@@ -1236,6 +1250,28 @@ function RightSidebarPanel({
     [activeFilePanel?.id, updateActiveScopePanelState],
   );
 
+  const handleConversationQuoteRequestHandled = useCallback(
+    (panelId: string, requestId: number) => {
+      updateActiveScopePanelState((current) => {
+        const panel = current.conversationPanels[panelId];
+        if (!panel?.quoteRequest || panel.quoteRequest.requestId !== requestId) {
+          return current;
+        }
+        return {
+          ...current,
+          conversationPanels: {
+            ...current.conversationPanels,
+            [panelId]: {
+              ...panel,
+              quoteRequest: null,
+            },
+          },
+        };
+      });
+    },
+    [updateActiveScopePanelState],
+  );
+
   const controls = (
     <RightSidebarControls
       maximized={maximized}
@@ -1415,6 +1451,10 @@ function RightSidebarPanel({
                     runtime={runtime}
                     mode="sidecar"
                     previewPanelScopeKey={activeScopeKey}
+                    sidecarQuoteRequest={conversationPanel.quoteRequest}
+                    onSidecarQuoteRequestHandled={(requestId) =>
+                      handleConversationQuoteRequestHandled(panelId, requestId)
+                    }
                     onNavigateToConversation={onNavigateToConversation}
                     onOpenModelSettings={onOpenModelSettings}
                   />
@@ -1533,7 +1573,15 @@ function normalizeRightSidebarScopePanelState(
     };
   }
   const conversationPanelIds = state?.conversationPanelIds ?? [];
-  const conversationPanels = { ...(state?.conversationPanels ?? {}) };
+  const conversationPanels = Object.fromEntries(
+    Object.entries(state?.conversationPanels ?? {}).map(([panelId, panel]) => [
+      panelId,
+      {
+        ...panel,
+        quoteRequest: panel.quoteRequest ?? null,
+      },
+    ]),
+  );
   const initialPanelIds = state?.initialPanelIds ?? [];
   const nextPanelSeq = Math.max(
     state?.nextPanelSeq ?? state?.initialPanelSeq ?? 0,
@@ -1642,6 +1690,7 @@ function activateOrCreateConversationPanel(
     session: AgentSession;
     title?: string | null;
     sourceSessionId?: string | null;
+    quote?: SelectedQuote | null;
   },
 ): RightSidebarScopePanelState {
   const sessionId = options.session.id.trim();
@@ -1680,6 +1729,7 @@ function activateExistingConversationPanel(
     session: AgentSession;
     title?: string | null;
     sourceSessionId?: string | null;
+    quote?: SelectedQuote | null;
   },
 ): RightSidebarScopePanelState {
   const panel = state.conversationPanels[panelId];
@@ -1695,6 +1745,7 @@ function activateExistingConversationPanel(
         ...panel,
         title: conversationPanelTitle(options),
         sourceSessionId: options.sourceSessionId ?? panel.sourceSessionId,
+        quoteRequest: options.quote ? nextConversationQuoteRequest(options.quote, panel.quoteRequest) : panel.quoteRequest,
       },
     },
   };
@@ -1706,6 +1757,7 @@ function conversationPanelState(
     session: AgentSession;
     title?: string | null;
     sourceSessionId?: string | null;
+    quote?: SelectedQuote | null;
   },
 ): RightSidebarConversationPanelState {
   return {
@@ -1713,6 +1765,17 @@ function conversationPanelState(
     sessionId: options.session.id,
     title: conversationPanelTitle(options),
     sourceSessionId: options.sourceSessionId ?? null,
+    quoteRequest: options.quote ? nextConversationQuoteRequest(options.quote, null) : null,
+  };
+}
+
+function nextConversationQuoteRequest(
+  quote: SelectedQuote,
+  previous: RightSidebarConversationQuoteRequest | null,
+): RightSidebarConversationQuoteRequest {
+  return {
+    requestId: (previous?.requestId ?? 0) + 1,
+    quote,
   };
 }
 
@@ -1803,9 +1866,20 @@ function sameConversationPanels(left: RightSidebarScopePanelState, right: RightS
       Boolean(rightPanel) &&
       leftPanel.sessionId === rightPanel.sessionId &&
       leftPanel.title === rightPanel.title &&
-      leftPanel.sourceSessionId === rightPanel.sourceSessionId
+      leftPanel.sourceSessionId === rightPanel.sourceSessionId &&
+      sameConversationQuoteRequest(leftPanel.quoteRequest, rightPanel.quoteRequest)
     );
   });
+}
+
+function sameConversationQuoteRequest(
+  left: RightSidebarConversationQuoteRequest | null,
+  right: RightSidebarConversationQuoteRequest | null,
+): boolean {
+  return (
+    (left?.requestId ?? null) === (right?.requestId ?? null) &&
+    (left?.quote.id ?? null) === (right?.quote.id ?? null)
+  );
 }
 
 function samePreviewFileRevealTarget(

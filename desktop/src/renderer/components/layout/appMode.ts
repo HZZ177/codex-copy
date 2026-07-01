@@ -1,7 +1,8 @@
-export type AppMode = "agent" | "workbench";
+export type AppMode = "agent" | "workbench" | "project";
 
 export const HOME_PATH = "/guid";
 export const WORKBENCH_PATH = "/workbench";
+export const PROJECT_PATH = "/project";
 
 export interface WorkbenchRouteParams {
   workspaceId?: string;
@@ -9,12 +10,20 @@ export interface WorkbenchRouteParams {
 }
 
 export function appModeFromPath(pathname: string): AppMode {
+  if (isProjectPath(pathname)) {
+    return "project";
+  }
   return isWorkbenchPath(pathname) ? "workbench" : "agent";
 }
 
 export function isWorkbenchPath(pathname: string): boolean {
   const path = stripQuery(pathname);
   return path === WORKBENCH_PATH || path.startsWith(`${WORKBENCH_PATH}/`);
+}
+
+export function isProjectPath(pathname: string): boolean {
+  const path = stripQuery(pathname);
+  return path === PROJECT_PATH || path.startsWith(`${PROJECT_PATH}/`);
 }
 
 export function conversationPath(sessionId: string): string {
@@ -66,6 +75,7 @@ export function modeSwitchTargetsForPath(
         : lastWorkbenchWorkspaceId
           ? workbenchPath(lastWorkbenchWorkspaceId)
           : WORKBENCH_PATH,
+    project: mode === "project" ? pathname : PROJECT_PATH,
   };
 }
 

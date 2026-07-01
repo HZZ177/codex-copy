@@ -1,4 +1,4 @@
-import { CirclePlus, MessageSquarePlus } from "lucide-react";
+import { CirclePlus, MessageCircleQuestion, MessageSquarePlus } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import type { SelectionPosition } from "./useTextSelection";
@@ -8,6 +8,7 @@ export interface SelectionToolbarProps {
   selectedText: string;
   position: SelectionPosition | null;
   onQuote?: (text: string) => void;
+  onAskInBtwConversation?: (text: string) => void;
   onAnnotate?: (text: string) => void;
   onClear: () => void;
 }
@@ -16,10 +17,11 @@ export function SelectionToolbar({
   selectedText,
   position,
   onQuote,
+  onAskInBtwConversation,
   onAnnotate,
   onClear,
 }: SelectionToolbarProps) {
-  if (!selectedText || !position || (!onQuote && !onAnnotate)) {
+  if (!selectedText || !position || (!onQuote && !onAskInBtwConversation && !onAnnotate)) {
     return null;
   }
 
@@ -50,6 +52,21 @@ export function SelectionToolbar({
         >
           <CirclePlus size={13} strokeWidth={2.1} />
           <span>添加到对话</span>
+        </button>
+      ) : null}
+      {onAskInBtwConversation ? (
+        <button
+          className={styles.action}
+          type="button"
+          aria-label="在旁路对话中询问选中文本"
+          title="在旁路对话中询问"
+          onClick={() => {
+            onAskInBtwConversation(selectedText);
+            onClear();
+          }}
+        >
+          <MessageCircleQuestion size={13} strokeWidth={2.1} />
+          <span>在旁路对话中询问</span>
         </button>
       ) : null}
       {onAnnotate ? (

@@ -522,26 +522,35 @@ async function openWorkbenchComposer(page: Page): Promise<Locator> {
 async function expectTitlebarModeSwitchGeometry(page: Page) {
   const metrics = await page.getByTestId("app-mode-switch").evaluate((switchElement) => {
     const buttons = Array.from(switchElement.querySelectorAll("button"));
-    const [agentButton, workbenchButton] = buttons;
-    if (!(agentButton instanceof HTMLElement) || !(workbenchButton instanceof HTMLElement)) {
+    const [agentButton, workbenchButton, projectButton] = buttons;
+    if (
+      !(agentButton instanceof HTMLElement) ||
+      !(workbenchButton instanceof HTMLElement) ||
+      !(projectButton instanceof HTMLElement)
+    ) {
       throw new Error("Titlebar mode switch buttons were not rendered.");
     }
     const sliderStyle = window.getComputedStyle(switchElement, "::before");
     const agentRect = agentButton.getBoundingClientRect();
     const workbenchRect = workbenchButton.getBoundingClientRect();
+    const projectRect = projectButton.getBoundingClientRect();
 
     return {
       sliderBoxSizing: sliderStyle.boxSizing,
       agentWidth: agentRect.width,
       workbenchWidth: workbenchRect.width,
+      projectWidth: projectRect.width,
       agentCenterY: agentRect.top + agentRect.height / 2,
       workbenchCenterY: workbenchRect.top + workbenchRect.height / 2,
+      projectCenterY: projectRect.top + projectRect.height / 2,
     };
   });
 
   expect(metrics.sliderBoxSizing).toBe("border-box");
   expect(Math.abs(metrics.agentWidth - metrics.workbenchWidth)).toBeLessThan(0.5);
+  expect(Math.abs(metrics.agentWidth - metrics.projectWidth)).toBeLessThan(0.5);
   expect(Math.abs(metrics.agentCenterY - metrics.workbenchCenterY)).toBeLessThan(0.5);
+  expect(Math.abs(metrics.agentCenterY - metrics.projectCenterY)).toBeLessThan(0.5);
 }
 
 async function selectVisibleText(page: Page, text: string) {

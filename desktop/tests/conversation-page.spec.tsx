@@ -1791,6 +1791,77 @@ describe("ConversationPage", () => {
     selection.restore();
   });
 
+  it("asks selected assistant text in a bypass conversation with the same quote chip", async () => {
+    const sourceSession = agentSession({ id: "ses-1" });
+    const forkedSession = agentSession({
+      id: "ses-btw",
+      title: "旁路对话",
+      session_tag: "btw",
+      fork_source: sessionFork({
+        source_session_id: "ses-1",
+        target_session_id: "ses-btw",
+        target_message_event_id: "evt-btw-ai-1",
+      }),
+    });
+    const history = [
+      historyMessage("user", "历史问题", { messageEventId: "evt-user-1", turnIndex: 1 }),
+      historyMessage("assistant", "可以旁路追问的回答", { messageEventId: "evt-ai-1", turnIndex: 1 }),
+    ];
+    const loadHistory = vi.fn((sessionId: string) =>
+      Promise.resolve(historyResponse(sessionId === "ses-btw" ? forkedSession : sourceSession, history)),
+    );
+    const forkSession = vi.fn().mockResolvedValue({
+      session: forkedSession,
+      source: branchSource(),
+    });
+    const { runtime } = fakeRuntime({ session: sourceSession, history, loadHistory, forkSession });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />, runtime);
+
+    await screen.findByText("可以旁路追问的回答");
+    const message = screen
+      .getAllByTestId("message-text")
+      .find((node) => node.textContent?.includes("可以旁路追问的回答"));
+    if (!message) {
+      throw new Error("message container not found");
+    }
+    const markdown = message.querySelector(".keydex-markdown");
+    if (!markdown) {
+      throw new Error("markdown container not found");
+    }
+    const selection = mockSelection(markdown, "可以旁路追问的回答");
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "在旁路对话中询问选中文本" }));
+
+    await waitFor(() => {
+      expect(forkSession).toHaveBeenCalledWith("ses-1", {
+        messageEventId: "evt-ai-1",
+        sessionTag: "btw",
+        title: "旁路对话",
+      });
+    });
+    const panel = await screen.findByTestId("btw-conversation-panel");
+    await waitFor(() => {
+      expect(within(panel).getByLabelText("已添加上下文").textContent).toContain("引用片段");
+    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseEnter(within(panel).getByText("引用片段"));
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+      const hoverCard = document.querySelector('[data-sendbox-context-hover-card="true"]');
+      expect(hoverCard?.textContent).toContain("可以旁路追问的回答");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(selection.removeAllRanges).toHaveBeenCalled();
+    selection.restore();
+  });
+
   it("searches project files from the composer through the bound session workspace", async () => {
     const workspaceSearch = vi.fn().mockResolvedValue([
       { path: "README.md", name: "README.md", type: "file" },
@@ -1993,7 +2064,8 @@ describe("ConversationPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
       expect(screen.queryByTitle("HTML 文件预览")).toBeNull();
-      expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+      expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "旁路对话" })).not.toBeNull();
     });
   });
 
@@ -2286,16 +2358,16 @@ function renderConversationWithNotifications(ui: ReactElement) {
   );
 }
 
-function renderConversationInLayout(ui: ReactElement) {
-  return render(conversationInLayout(ui));
+function renderConversationInLayout(ui: ReactElement, runtime?: RuntimeBridge) {
+  return render(conversationInLayout(ui, runtime));
 }
 
-function conversationInLayout(ui: ReactElement) {
+function conversationInLayout(ui: ReactElement, runtime?: RuntimeBridge) {
   return (
     <ThemeProvider>
       <LayoutStateProvider>
         <PreviewProvider>
-          <Layout contentMode="full">{ui}</Layout>
+          <Layout contentMode="full" runtime={runtime}>{ui}</Layout>
         </PreviewProvider>
       </LayoutStateProvider>
     </ThemeProvider>

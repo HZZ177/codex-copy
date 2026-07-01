@@ -256,8 +256,9 @@ describe("UsageStatsPage", () => {
 
   it("opens and closes request detail layer", async () => {
     const runtime = fakeRuntime();
+    const onNavigateToConversationTurn = vi.fn();
 
-    render(<UsageStatsPage runtime={runtime} />);
+    render(<UsageStatsPage runtime={runtime} onNavigateToConversationTurn={onNavigateToConversationTurn} />);
 
     fireEvent.click(await screen.findByText("deepseek-v4-flash"));
 
@@ -267,6 +268,12 @@ describe("UsageStatsPage", () => {
     expect(screen.getByText("ses-1234567890")).not.toBeNull();
     expect(screen.getByText("命中缓存 12,960 (72.4%)")).not.toBeNull();
     expect(screen.getByText("on_chat_model_end")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转对话" }));
+    expect(onNavigateToConversationTurn).toHaveBeenCalledWith({
+      sessionId: "ses-1234567890",
+      turnIndex: 1,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "关闭详情" }));
 

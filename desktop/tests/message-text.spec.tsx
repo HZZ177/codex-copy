@@ -1124,6 +1124,31 @@ describe("MessageText", () => {
     selection.restore();
   });
 
+  it("asks selected message text in the bypass conversation from the floating selection toolbar", async () => {
+    const onAskSelectionInBtwConversation = vi.fn();
+    const { container } = render(
+      <MessageText
+        message={message("assistant", "这一段可以旁路追问", "completed")}
+        onQuoteSelection={vi.fn()}
+        onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
+      />,
+    );
+    const markdown = container.querySelector(".keydex-markdown");
+    if (!markdown) {
+      throw new Error("markdown container not found");
+    }
+    const selection = mockSelection(markdown, "这一段可以旁路追问");
+
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "在旁路对话中询问选中文本" }));
+
+    expect(onAskSelectionInBtwConversation).toHaveBeenCalledWith("这一段可以旁路追问");
+    expect(selection.removeAllRanges).toHaveBeenCalled();
+    selection.restore();
+  });
+
   it("smooths streaming assistant text with animation frames", () => {
     const frames: FrameRequestCallback[] = [];
     const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {

@@ -32,12 +32,20 @@ describe("Titlebar", () => {
     expect(modeSwitch.getAttribute("data-mode")).toBe("agent");
     expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "项目模式" }).getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(screen.getByRole("button", { name: "工作台模式" }));
     expect(modeSwitch.getAttribute("data-mode")).toBe("workbench");
     expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "项目模式" }).getAttribute("aria-pressed")).toBe("false");
     expect(onModeChange).toHaveBeenCalledWith("workbench");
+
+    fireEvent.click(screen.getByRole("button", { name: "项目模式" }));
+    expect(modeSwitch.getAttribute("data-mode")).toBe("project");
+    expect(screen.getByRole("button", { name: "工作台模式" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "项目模式" }).getAttribute("aria-pressed")).toBe("true");
+    expect(onModeChange).toHaveBeenCalledWith("project");
   });
 
   it("turns the brand mark into a titlebar-safe action when a click handler is provided", async () => {
@@ -87,6 +95,22 @@ describe("Titlebar", () => {
       <Titlebar
         title="测试标题"
         modeSwitch={{ currentMode: "agent", onModeChange: vi.fn() }}
+        workbenchWorkspaceSelector={{
+          value: { type: "workspace", workspace },
+          workspaces: [workspace],
+          loading: false,
+          allowProjectFreeChat: false,
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId("workbench-titlebar-workspace-selector")).toBeNull();
+    expect(screen.queryByLabelText("选择工作区")).toBeNull();
+
+    rerender(
+      <Titlebar
+        title="测试标题"
+        modeSwitch={{ currentMode: "project", onModeChange: vi.fn() }}
         workbenchWorkspaceSelector={{
           value: { type: "workspace", workspace },
           workspaces: [workspace],

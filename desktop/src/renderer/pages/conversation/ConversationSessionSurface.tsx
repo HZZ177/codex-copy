@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { runtimeBridge, type RuntimeBridge, type WsConnectionStatus } from "@/runtime";
-import type { SelectedFile, SelectedImageAttachment, SelectedQuote } from "@/renderer/components/chat/SendBox";
+import {
+  selectedQuoteFromText,
+  type SendBoxExternalQuoteRequest,
+  type SelectedFile,
+  type SelectedImageAttachment,
+  type SelectedQuote,
+} from "@/renderer/components/chat/SendBox";
 import type { SlashCommand } from "@/renderer/components/chat/SlashCommandMenu";
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
 import { useAgentSessionController } from "@/renderer/hooks/useAgentSessionController";
@@ -26,9 +32,13 @@ export interface ConversationSessionSurfaceProps {
   runtime?: RuntimeBridge;
   initialModel?: RuntimeSelectedModel | null;
   quickSendId?: string;
+  focusTurnIndex?: number | null;
+  focusTurnRequestId?: number;
   mode?: ConversationSessionSurfaceMode;
   previewPanelScopeKey?: string | null;
+  sidecarQuoteRequest?: SendBoxExternalQuoteRequest | null;
   onOpenModelSettings?: () => void;
+  onSidecarQuoteRequestHandled?: (requestId: number) => void;
   onQuickSendConsumed?: () => void;
   onNavigateToConversation?: (threadId: string) => void;
 }
@@ -43,9 +53,13 @@ export function ConversationSessionSurface({
   runtime = runtimeBridge,
   initialModel = null,
   quickSendId = "",
+  focusTurnIndex = null,
+  focusTurnRequestId,
   mode = "main",
   previewPanelScopeKey = null,
+  sidecarQuoteRequest = null,
   onOpenModelSettings,
+  onSidecarQuoteRequestHandled,
   onQuickSendConsumed,
   onNavigateToConversation,
 }: ConversationSessionSurfaceProps) {
@@ -163,6 +177,16 @@ export function ConversationSessionSurface({
         : panelModel.sessionViewState,
     };
   }, [isSidecar, panelModel, sidecarMessages]);
+  const focusTurnNavigationRequest = useMemo(() => {
+    if (typeof focusTurnIndex !== "number" || !Number.isFinite(focusTurnIndex)) {
+      return null;
+    }
+    return {
+      flash: true,
+      requestId: focusTurnRequestId ?? focusTurnIndex,
+      targetTurnIndex: focusTurnIndex,
+    };
+  }, [focusTurnIndex, focusTurnRequestId]);
   const sidecarHistoryNotice = useMemo(
     () =>
       isSidecar
@@ -281,6 +305,25 @@ export function ConversationSessionSurface({
     });
   }, [notifications, rightSidebarConversation, runtime, threadId]);
 
+  const askSelectionInBtwConversation = useCallback(
+    (text: string) => {
+      const quote = selectedQuoteFromText(text, "selection");
+      if (!quote) {
+        return;
+      }
+      if (!threadId || !rightSidebarConversation) {
+        notifications.warning("当前会话无法开启旁路对话");
+        return;
+      }
+      void rightSidebarConversation.openBtwConversationFromSession({
+        sessionId: threadId,
+        runtime,
+        quote,
+      });
+    },
+    [notifications, rightSidebarConversation, runtime, threadId],
+  );
+
   const handleSlashCommand = useCallback(
     (command: SlashCommand) => {
       if (command.id === "bypass-conversation") {
@@ -288,6 +331,26 @@ export function ConversationSessionSurface({
       }
     },
     [openBtwConversation],
+  );
+
+  const sidecarExternalQuoteRequest = useMemo<SendBoxExternalQuoteRequest | null>(() => {
+    if (!isSidecar || !sidecarQuoteRequest) {
+      return null;
+    }
+    return {
+      ...sidecarQuoteRequest,
+      requestId: -Math.abs(sidecarQuoteRequest.requestId),
+    };
+  }, [isSidecar, sidecarQuoteRequest]);
+
+  const handleExternalQuoteRequestHandled = useCallback(
+    (requestId: number) => {
+      if (!isSidecar || !sidecarQuoteRequest || requestId !== -Math.abs(sidecarQuoteRequest.requestId)) {
+        return;
+      }
+      onSidecarQuoteRequestHandled?.(sidecarQuoteRequest.requestId);
+    },
+    [isSidecar, onSidecarQuoteRequestHandled, sidecarQuoteRequest],
   );
 
   useEffect(() => {
@@ -367,7 +430,8 @@ export function ConversationSessionSurface({
       onSlashCommand={handleSlashCommand}
       onRefreshWorkspaceSkills={() => panelModel.refreshWorkspaceSkills({ forceReload: true })}
       externalFileRequest={fileChipRequest}
-      externalQuoteRequest={quoteChipRequest}
+      externalQuoteRequest={sidecarExternalQuoteRequest ?? quoteChipRequest}
+      onExternalQuoteRequestHandled={handleExternalQuoteRequestHandled}
       contextWindowUsage={panelModel.contextWindowUsage}
       modelSelectorPlacement={isSidecar ? "bottom" : "top"}
     />
@@ -419,6 +483,8 @@ export function ConversationSessionSurface({
         model={panelModel}
         workspaceRuntime={runtime}
         scrollButtonMode="external"
+        turnNavigationRequest={focusTurnNavigationRequest}
+        onAskSelectionInBtwConversation={rightSidebarConversation ? askSelectionInBtwConversation : undefined}
         emptyText="还没有消息，输入需求开始对话。"
         emptyTestId="conversation-empty"
       />

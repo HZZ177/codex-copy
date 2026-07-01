@@ -8,6 +8,8 @@ export interface ConversationPageProps {
   runtime?: RuntimeBridge;
   initialModel?: RuntimeSelectedModel | null;
   quickSendId?: string;
+  focusTurnIndex?: number | null;
+  focusTurnRequestId?: number;
   onOpenModelSettings?: () => void;
   onQuickSendConsumed?: () => void;
   onNavigateToConversation?: (threadId: string) => void;
@@ -18,6 +20,8 @@ export function ConversationPage({
   runtime = runtimeBridge,
   initialModel = null,
   quickSendId = "",
+  focusTurnIndex = null,
+  focusTurnRequestId,
   onOpenModelSettings,
   onQuickSendConsumed,
   onNavigateToConversation,
@@ -28,6 +32,8 @@ export function ConversationPage({
       runtime={runtime}
       initialModel={initialModel}
       quickSendId={quickSendId}
+      focusTurnIndex={focusTurnIndex}
+      focusTurnRequestId={focusTurnRequestId}
       onOpenModelSettings={onOpenModelSettings}
       onQuickSendConsumed={onQuickSendConsumed}
       onNavigateToConversation={onNavigateToConversation}

@@ -1,17 +1,20 @@
 import { createContext, useContext } from "react";
 
 import type { RuntimeBridge } from "@/runtime";
+import type { SelectedQuote } from "@/renderer/components/chat/SendBox";
 import type { AgentSession } from "@/types/protocol";
 
 export interface OpenRightSidebarConversationRequest {
   session: AgentSession;
   sourceSessionId?: string | null;
   title?: string | null;
+  quote?: SelectedQuote | null;
 }
 
 export interface OpenBtwConversationRequest {
   sessionId: string;
   runtime: RuntimeBridge;
+  quote?: SelectedQuote | null;
 }
 
 export interface RightSidebarConversationContextValue {

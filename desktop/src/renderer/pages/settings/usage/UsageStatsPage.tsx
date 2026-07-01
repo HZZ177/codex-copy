@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChevronDown,
   Database,
+  LocateFixed,
   Loader2,
   RefreshCw,
   Search,
@@ -72,9 +73,15 @@ const EMPTY_REQUESTS: UsageRequestListResponse = {
 
 export interface UsageStatsPageProps {
   runtime?: RuntimeBridge;
+  onNavigateToConversationTurn?: (target: UsageConversationTurnTarget) => void;
 }
 
-export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps) {
+export interface UsageConversationTurnTarget {
+  sessionId: string;
+  turnIndex: number;
+}
+
+export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversationTurn }: UsageStatsPageProps) {
   const [rangePreset, setRangePreset] = useState<RangePreset>("7d");
   const initialCustomRange = useMemo(() => computeRange("7d"), []);
   const [customStart, setCustomStart] = useState(toDateTimeLocal(initialCustomRange.startTime));
@@ -439,7 +446,12 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
         </section>
       </section>
 
-      <UsageDetailLayer requestId={detailId} runtime={runtime} onClose={() => setDetailId("")} />
+      <UsageDetailLayer
+        requestId={detailId}
+        runtime={runtime}
+        onClose={() => setDetailId("")}
+        onNavigateToConversationTurn={onNavigateToConversationTurn}
+      />
     </main>
   );
 }
@@ -1155,10 +1167,12 @@ function UsageDetailLayer({
   requestId,
   runtime,
   onClose,
+  onNavigateToConversationTurn,
 }: {
   requestId: string;
   runtime: RuntimeBridge;
   onClose: () => void;
+  onNavigateToConversationTurn?: (target: UsageConversationTurnTarget) => void;
 }) {
   const [detail, setDetail] = useState<UsageRequestDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1216,17 +1230,43 @@ function UsageDetailLayer({
         </div>
       ) : null}
       {error ? <div className={styles.detailError}>{error}</div> : null}
-      {detail ? <UsageDetailContent detail={detail} /> : null}
+      {detail ? <UsageDetailContent detail={detail} onNavigateToConversationTurn={onNavigateToConversationTurn} /> : null}
     </AppDialog>
   );
 }
 
-function UsageDetailContent({ detail }: { detail: UsageRequestDetail }) {
+function UsageDetailContent({
+  detail,
+  onNavigateToConversationTurn,
+}: {
+  detail: UsageRequestDetail;
+  onNavigateToConversationTurn?: (target: UsageConversationTurnTarget) => void;
+}) {
   const request = detail.request;
+  const conversationSessionId = (request.active_session_id || request.session_id || "").trim();
+  const canNavigateToTurn =
+    Boolean(conversationSessionId) && typeof request.turn_index === "number" && Number.isFinite(request.turn_index);
   return (
     <div className={styles.detailBody}>
       <section>
-        <h3>基本信息</h3>
+        <div className={styles.detailSectionHeader}>
+          <h3>基本信息</h3>
+          {canNavigateToTurn && onNavigateToConversationTurn ? (
+            <button
+              className={styles.detailActionButton}
+              type="button"
+              onClick={() =>
+                onNavigateToConversationTurn({
+                  sessionId: conversationSessionId,
+                  turnIndex: request.turn_index as number,
+                })
+              }
+            >
+              <LocateFixed size={14} />
+              <span>跳转对话</span>
+            </button>
+          ) : null}
+        </div>
         <dl>
           <dt>模型</dt>
           <dd>{request.model}</dd>

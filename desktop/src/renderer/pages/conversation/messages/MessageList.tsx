@@ -47,6 +47,7 @@ const VIRTUAL_MESSAGE_VIEWPORT_BUFFER = { bottom: 2600, top: 1800 } as const;
 const LOAD_OLDER_TRIGGER_PX = 44;
 const LOAD_OLDER_ARM_PX = 120;
 const TURN_NAVIGATION_RETRY_FRAMES = 8;
+const TURN_FOCUS_FLASH_DURATION_MS = 1300;
 
 export interface MessageListProps {
   messages: ConversationMessage[];
@@ -69,6 +70,7 @@ export interface MessageListProps {
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   showForkSourceMarkers?: boolean;
@@ -98,7 +100,9 @@ export type MessageListEmptyLayout = "default" | "center";
 export type MessageListTurnNavigatorMode = "auto" | "hidden";
 export interface MessageListTurnNavigationRequest {
   requestId: number;
-  targetIndex: number;
+  targetIndex?: number;
+  targetTurnIndex?: number;
+  flash?: boolean;
 }
 
 export function MessageList({
@@ -120,6 +124,7 @@ export function MessageList({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onAskSelectionInBtwConversation,
   onForkFromMessage,
   onNavigateToForkSource,
   showForkSourceMarkers = true,
@@ -137,8 +142,11 @@ export function MessageList({
   const virtualVisibleTurnFrameRef = useRef<number | null>(null);
   const virtualScrollerRef = useRef<HTMLElement | null>(null);
   const staticTurnRefsRef = useRef<Array<HTMLDivElement | null>>([]);
+  const flashTurnFrameRef = useRef<number | null>(null);
+  const flashTurnTimeoutRef = useRef<number | null>(null);
   const previousTurnSummaryRef = useRef<{ count: number; lastId: string | null } | null>(null);
   const [showOlderTrigger, setShowOlderTrigger] = useState(false);
+  const [flashingTurnIndex, setFlashingTurnIndex] = useState<number | null>(null);
   const visibleMessages = useMemo(() => messages.filter((message) => message.kind !== "plan"), [messages]);
   const processedMessages = useMemo(() => processMessages(visibleMessages), [visibleMessages]);
   const pendingAssistantMessage = useMemo(
@@ -176,10 +184,11 @@ export function MessageList({
   const useStaticList = shouldUseStaticMessageList(displayItems.length, performanceProfile);
   const [visibleTurnIndexes, setVisibleTurnIndexes] = useState<Set<number>>(() => new Set([0]));
   const listMode = useStaticList ? "static" : "virtual";
-  const externalTurnNavigationIndex =
-    turnNavigationRequest && turnNavigationRequest.targetIndex >= 0 && turnNavigationRequest.targetIndex < displayTurns.length
-      ? turnNavigationRequest.targetIndex
-      : null;
+  const externalTurnNavigationIndex = useMemo(
+    () => resolveTurnNavigationIndex(turnNavigationRequest, displayTurns),
+    [displayTurns, turnNavigationRequest],
+  );
+  const externalTurnNavigationRequestId = turnNavigationRequest?.requestId;
   const shouldAutoFollowMessages = externalTurnNavigationIndex === null;
   const staticAutoScroll = useAutoScroll({
     deps: [displayTurns, isProcessing],
@@ -482,8 +491,22 @@ export function MessageList({
           </>
         );
       },
+      Item: function MessageItem({ children, style, ...props }: ItemProps<MessageTurn>) {
+        const turnIndex = (props as { "data-index"?: number | string })["data-index"];
+        return (
+          <div
+            {...props}
+            className={styles.turnGroup}
+            data-turn-index={turnIndex}
+            data-testid="message-turn"
+            style={style}
+          >
+            {children}
+          </div>
+        );
+      },
     }),
-    [handleVirtualScroll, markNativeScrollbarDrag, olderLoader, renderedTopNotice, variant],
+    [flashingTurnIndex, handleVirtualScroll, markNativeScrollbarDrag, olderLoader, renderedTopNotice, variant],
   );
 
   useEffect(() => {
@@ -492,6 +515,45 @@ export function MessageList({
       scrollToBottom: scrollControls.scrollToBottom,
     });
   }, [onScrollControlsChange, scrollControls.scrollToBottom, scrollControls.showScrollToBottom]);
+
+  const clearTurnFlashTimers = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (flashTurnFrameRef.current !== null) {
+      window.cancelAnimationFrame(flashTurnFrameRef.current);
+      flashTurnFrameRef.current = null;
+    }
+    if (flashTurnTimeoutRef.current !== null) {
+      window.clearTimeout(flashTurnTimeoutRef.current);
+      flashTurnTimeoutRef.current = null;
+    }
+  }, []);
+
+  const triggerTurnFlash = useCallback(
+    (index: number) => {
+      if (!turnNavigationRequest?.flash || index < 0 || index >= displayTurns.length) {
+        return;
+      }
+      clearTurnFlashTimers();
+      setFlashingTurnIndex(null);
+      if (typeof window === "undefined") {
+        setFlashingTurnIndex(index);
+        return;
+      }
+      flashTurnFrameRef.current = window.requestAnimationFrame(() => {
+        flashTurnFrameRef.current = null;
+        setFlashingTurnIndex(index);
+        flashTurnTimeoutRef.current = window.setTimeout(() => {
+          flashTurnTimeoutRef.current = null;
+          setFlashingTurnIndex((current) => (current === index ? null : current));
+        }, TURN_FOCUS_FLASH_DURATION_MS);
+      });
+    },
+    [clearTurnFlashTimers, displayTurns.length, turnNavigationRequest?.flash],
+  );
+
+  useEffect(() => () => clearTurnFlashTimers(), [clearTurnFlashTimers]);
 
   const navigateToTurn = useCallback(
     (index: number) => {
@@ -527,11 +589,13 @@ export function MessageList({
   );
 
   useEffect(() => {
-    if (!turnNavigationRequest || loading) {
+    if (externalTurnNavigationRequestId === undefined || loading || externalTurnNavigationIndex === null) {
       return;
     }
     if (typeof window === "undefined") {
-      navigateToTurn(turnNavigationRequest.targetIndex);
+      if (navigateToTurn(externalTurnNavigationIndex)) {
+        triggerTurnFlash(externalTurnNavigationIndex);
+      }
       return;
     }
     let cancelled = false;
@@ -542,9 +606,12 @@ export function MessageList({
       if (cancelled) {
         return;
       }
-      const navigated = navigateToTurn(turnNavigationRequest.targetIndex);
+      const navigated = navigateToTurn(externalTurnNavigationIndex);
       remainingAttempts -= 1;
       if (navigated || remainingAttempts <= 0) {
+        if (navigated) {
+          triggerTurnFlash(externalTurnNavigationIndex);
+        }
         return;
       }
       frameId = window.requestAnimationFrame(attemptNavigation);
@@ -556,7 +623,13 @@ export function MessageList({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [loading, navigateToTurn, turnNavigationRequest]);
+  }, [
+    externalTurnNavigationIndex,
+    externalTurnNavigationRequestId,
+    loading,
+    navigateToTurn,
+    triggerTurnFlash,
+  ]);
 
   const messageListContent = useStaticList ? (
     <div
@@ -584,6 +657,7 @@ export function MessageList({
           >
             {renderMessageTurn({
               turn,
+              focusFlash: index === flashingTurnIndex,
               renderMessage,
               assistantTurnFooters,
               turnEndStreamingCursor,
@@ -593,6 +667,7 @@ export function MessageList({
               onFilePreview,
               onLoadToolDetails,
               onQuoteSelection,
+              onAskSelectionInBtwConversation,
               onForkFromMessage,
               onNavigateToForkSource,
               showForkSourceMarkers,
@@ -625,9 +700,10 @@ export function MessageList({
           ? { align: "end", index: Math.max(0, displayTurns.length - 1) }
           : { align: "center", index: externalTurnNavigationIndex }
       }
-      itemContent={(_, turn) =>
+      itemContent={(index, turn) =>
         renderMessageTurn({
           turn,
+          focusFlash: index === flashingTurnIndex,
           renderMessage,
           assistantTurnFooters,
           turnEndStreamingCursor,
@@ -637,6 +713,7 @@ export function MessageList({
           onFilePreview,
           onLoadToolDetails,
           onQuoteSelection,
+          onAskSelectionInBtwConversation,
           onForkFromMessage,
           onNavigateToForkSource,
           showForkSourceMarkers,
@@ -799,6 +876,7 @@ function renderTopNotice(notice: MessageListTopNotice | null): ReactNode {
 
 function renderMessageTurn({
   turn,
+  focusFlash = false,
   renderMessage,
   assistantTurnFooters,
   turnEndStreamingCursor,
@@ -808,12 +886,14 @@ function renderMessageTurn({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onAskSelectionInBtwConversation,
   onForkFromMessage,
   onNavigateToForkSource,
   showForkSourceMarkers,
   onReverseFromMessage,
 }: {
   turn: MessageTurn;
+  focusFlash?: boolean;
   renderMessage?: (message: ConversationMessage) => ReactNode;
   assistantTurnFooters: AssistantTurnFooters;
   turnEndStreamingCursor: TurnEndStreamingCursor;
@@ -823,13 +903,21 @@ function renderMessageTurn({
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   showForkSourceMarkers: boolean;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
+  const focusAssistantItemId = focusFlash ? findLastAssistantItemId(turn.items) : null;
   return turn.items.map((item) => (
-    <div className={styles.item} data-kind={itemKind(item)} role="listitem" key={item.id}>
+    <div
+      className={styles.item}
+      data-focus-flash={item.id === focusAssistantItemId ? "true" : undefined}
+      data-kind={itemKind(item)}
+      role="listitem"
+      key={item.id}
+    >
       {renderMessageItem({
         item,
         renderMessage,
@@ -842,6 +930,7 @@ function renderMessageTurn({
         onFilePreview,
         onLoadToolDetails,
         onQuoteSelection,
+        onAskSelectionInBtwConversation,
         onForkFromMessage,
         onNavigateToForkSource,
         showForkSourceMarkers,
@@ -863,6 +952,7 @@ function renderMessageItem({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onAskSelectionInBtwConversation,
   onForkFromMessage,
   onNavigateToForkSource,
   showForkSourceMarkers,
@@ -879,6 +969,7 @@ function renderMessageItem({
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
   onNavigateToForkSource?: (fork: AgentSessionFork) => void;
   showForkSourceMarkers: boolean;
@@ -897,6 +988,7 @@ function renderMessageItem({
         onFilePreview={onFilePreview}
         onLoadToolDetails={onLoadToolDetails}
         onQuoteSelection={onQuoteSelection}
+        onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
         onReverseFromMessage={onReverseFromMessage}
       />
     );
@@ -929,6 +1021,7 @@ function renderMessageItem({
           onFilePreview={onFilePreview}
           onLoadToolDetails={onLoadToolDetails}
           onQuoteSelection={onQuoteSelection}
+          onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
           onReverseFromMessage={onReverseFromMessage}
           key={message.id}
         />
@@ -1056,6 +1149,7 @@ function DefaultMessage({
   onFilePreview,
   onLoadToolDetails,
   onQuoteSelection,
+  onAskSelectionInBtwConversation,
   onReverseFromMessage,
 }: {
   message: ConversationMessage;
@@ -1066,6 +1160,7 @@ function DefaultMessage({
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
   onQuoteSelection?: (text: string) => void;
+  onAskSelectionInBtwConversation?: (text: string) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
 }) {
   if (message.kind === "thinking") {
@@ -1110,6 +1205,7 @@ function DefaultMessage({
       workspaceRuntime={workspaceRuntime}
       workspaceScope={workspaceScope}
       onQuoteSelection={onQuoteSelection}
+      onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
       onReverseFromMessage={onReverseFromMessage}
     />
   );
@@ -1330,6 +1426,49 @@ function buildTurnNavigationItems(turns: MessageTurn[]): ConversationTurnNavigat
 
 function messagesFromProcessedItem(item: ProcessedMessageItem): ConversationMessage[] {
   return item.type === "message" ? [item.message] : item.messages;
+}
+
+function findLastAssistantItemId(items: ProcessedMessageItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item && itemKind(item) === "assistant") {
+      return item.id;
+    }
+  }
+  return null;
+}
+
+function resolveTurnNavigationIndex(
+  request: MessageListTurnNavigationRequest | null | undefined,
+  turns: MessageTurn[],
+): number | null {
+  if (!request) {
+    return null;
+  }
+  if (typeof request.targetTurnIndex === "number" && Number.isFinite(request.targetTurnIndex)) {
+    const turnIndex = turns.findIndex((turn) =>
+      turn.items
+        .flatMap(messagesFromProcessedItem)
+        .some((message) => messageBusinessTurnIndex(message) === request.targetTurnIndex),
+    );
+    if (turnIndex >= 0) {
+      return turnIndex;
+    }
+  }
+  if (
+    typeof request.targetIndex === "number" &&
+    Number.isInteger(request.targetIndex) &&
+    request.targetIndex >= 0 &&
+    request.targetIndex < turns.length
+  ) {
+    return request.targetIndex;
+  }
+  return null;
+}
+
+function messageBusinessTurnIndex(message: ConversationMessage): number | null {
+  const value = message.payload.turnIndex ?? message.payload.turn_index;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function previewLine(content: string): string {

@@ -916,12 +916,45 @@
   margin-bottom: 18px;
 }
 
+.detailSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
 .detailBody h3 {
   margin: 0;
   color: var(--color-text-primary);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
+}
+
+.detailActionButton {
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 60%, transparent);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 11px;
+  gap: 5px;
+  padding: 0 9px;
+}
+
+.detailActionButton:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 36%, transparent);
+  color: var(--color-accent);
+}
+
+.detailActionButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 36%, transparent);
+  outline-offset: 2px;
 }
 
 .detailBody dl {

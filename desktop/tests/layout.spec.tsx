@@ -203,6 +203,24 @@ describe("Layout", () => {
     expect(screen.queryByRole("separator", { name: "调整右侧栏宽度" })).toBeNull();
   });
 
+  it("keeps the shared right sidebar unavailable in project mode", () => {
+    renderLayout(
+      <Layout appMode="project" contentMode="full">
+        <div>功能开发中，敬请期待</div>
+      </Layout>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.dataset.rightSidebarEnabled).toBe("false");
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryByLabelText("侧边栏")).toBeNull();
+    expect(screen.queryByText("新对话")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "调整侧边栏宽度" })).toBeNull();
+    expect(screen.queryByLabelText("展开右侧栏")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "右侧栏" })).toBeNull();
+    expect(screen.queryByRole("separator", { name: "调整右侧栏宽度" })).toBeNull();
+  });
+
   it("does not open the shared right sidebar from preview requests in workbench mode", () => {
     renderLayoutWithPreview(
       <>

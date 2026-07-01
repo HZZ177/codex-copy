@@ -190,6 +190,44 @@
   padding-bottom: 20px;
 }
 
+.item[data-kind="assistant"][data-focus-flash="true"] {
+  position: relative;
+  contain: layout style;
+}
+
+.item[data-kind="assistant"][data-focus-flash="true"]::after {
+  position: absolute;
+  z-index: 2;
+  inset: -8px -10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 0%, transparent);
+  border-radius: 10px;
+  content: "";
+  pointer-events: none;
+  animation: assistantMessageFocusRing 620ms var(--motion-ease-out) 2;
+}
+
+@keyframes assistantMessageFocusRing {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--color-warning) 0%, transparent);
+    opacity: 0;
+  }
+
+  42%,
+  64% {
+    border-color: color-mix(in srgb, var(--color-warning) 88%, transparent);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item[data-kind="assistant"][data-focus-flash="true"]::after {
+    animation: none;
+    border-color: color-mix(in srgb, var(--color-warning) 78%, transparent);
+    opacity: 1;
+  }
+}
+
 .turnActionRow {
   display: flex;
   max-width: 100%;

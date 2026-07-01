@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
@@ -14,6 +14,7 @@ import {
   conversationPath,
   HOME_PATH,
   modeSwitchTargetsForPath,
+  PROJECT_PATH,
   workbenchPath,
   WORKBENCH_PATH,
 } from "./appMode";
@@ -33,6 +34,11 @@ const HomePage = lazy(() =>
 const WorkbenchModePage = lazy(() =>
   import("@/renderer/pages/workbench/WorkbenchModePage").then((module) => ({
     default: module.WorkbenchModePage,
+  })),
+);
+const ProjectModePage = lazy(() =>
+  import("@/renderer/pages/project/ProjectModePage").then((module) => ({
+    default: module.ProjectModePage,
   })),
 );
 const SettingsShell = lazy(() =>
@@ -87,6 +93,7 @@ export function AppRouter({ runtime = runtimeBridge }: AppRouterProps = {}) {
         <Route path="/workbench" element={<WorkbenchRoute runtime={runtime} />} />
         <Route path="/workbench/:workspaceId" element={<WorkbenchRoute runtime={runtime} />} />
         <Route path="/workbench/:workspaceId/session/:sessionId" element={<WorkbenchRoute runtime={runtime} />} />
+        <Route path={PROJECT_PATH} element={<ProjectRoute />} />
         <Route path="/conversation/:threadId" element={<ConversationRoute runtime={runtime} />} />
         <Route path="/__dev/event-replay" element={<EventReplayRoute />} />
         <Route path="/settings/providers" element={<ProviderSettingsRoute runtime={runtime} />} />
@@ -173,6 +180,14 @@ function RoutedLayout({
     >
       {children}
     </Layout>
+  );
+}
+
+function ProjectRoute() {
+  return (
+    <RoutedLayout title="" contentMode="full">
+      <ProjectModePage />
+    </RoutedLayout>
   );
 }
 
@@ -505,6 +520,9 @@ function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const focusTurnIndex = parseConversationTurnIndex(searchParams.get("turnIndex"));
+  const focusTurnRequestId = parseConversationFocusRequestId(searchParams.get("focus"));
   const routeState = location.state as {
     initialModel?: RuntimeSelectedModel;
     quickSendId?: string;
@@ -530,6 +548,8 @@ function ConversationRoute({ runtime }: { runtime: RuntimeBridge }) {
         runtime={runtime}
         initialModel={initialModel}
         quickSendId={quickSendId}
+        focusTurnIndex={focusTurnIndex}
+        focusTurnRequestId={focusTurnRequestId}
         onQuickSendConsumed={clearQuickSend}
         onOpenModelSettings={() => void navigate("/settings/model-defaults", { state: { from: location.pathname } })}
         onNavigateToConversation={(nextThreadId) => void navigate(conversationPath(nextThreadId))}
@@ -589,9 +609,19 @@ function ExtensionSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
 }
 
 function UsageSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
+  const navigate = useNavigate();
+  const navigateToConversationTurn = useCallback(
+    ({ sessionId, turnIndex }: { sessionId: string; turnIndex: number }) => {
+      const params = new URLSearchParams();
+      params.set("turnIndex", String(turnIndex));
+      params.set("focus", Date.now().toString(36));
+      void navigate(`${conversationPath(sessionId)}?${params.toString()}`);
+    },
+    [navigate],
+  );
   return (
     <SettingsShell activeSection="usage">
-      <UsageStatsPage runtime={runtime} />
+      <UsageStatsPage runtime={runtime} onNavigateToConversationTurn={navigateToConversationTurn} />
     </SettingsShell>
   );
 }
@@ -602,4 +632,26 @@ function ConfigSettingsRoute({ runtime }: { runtime: RuntimeBridge }) {
       <ConfigSettingsPage runtime={runtime} />
     </SettingsShell>
   );
+}
+
+function parseConversationTurnIndex(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseConversationFocusRequestId(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
 }

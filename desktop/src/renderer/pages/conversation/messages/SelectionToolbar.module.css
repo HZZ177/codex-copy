@@ -10,7 +10,8 @@
     0 10px 24px rgb(15 23 42 / 10%),
     0 2px 7px rgb(15 23 42 / 7%);
   color: var(--color-text-2);
-  padding: 4px 6px;
+  gap: 2px;
+  padding: 4px;
   transform: translate(-50%, -100%);
   backdrop-filter: blur(12px);
   animation: toolbarEnter 110ms ease-out both;
@@ -28,7 +29,7 @@
   border-radius: var(--radius-pill);
   font-size: 11px;
   line-height: var(--ui-line-height-tight);
-  padding: 0 8px 0 6px;
+  padding: 0 7px;
   white-space: nowrap;
 }
 

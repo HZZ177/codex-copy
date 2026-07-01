@@ -11,6 +11,11 @@ import { createWindowControls } from "./windowControls";
 import type { WindowControls } from "./windowControls";
 
 const APP_ICON_SRC = "/favicon-32.png";
+const APP_MODE_OPTIONS: Array<{ mode: AppMode; label: string }> = [
+  { mode: "agent", label: "Agent" },
+  { mode: "workbench", label: "工作台模式" },
+  { mode: "project", label: "项目模式" },
+];
 
 export interface TitlebarProps {
   title: string;
@@ -199,7 +204,7 @@ function ModeSwitch({ modeSwitch }: { modeSwitch: NonNullable<TitlebarProps["mod
       data-titlebar-interactive="true"
       data-testid="app-mode-switch"
     >
-      {(["agent", "workbench"] as const).map((mode) => {
+      {APP_MODE_OPTIONS.map(({ mode, label }) => {
         const active = visualMode === mode;
         return (
           <button
@@ -210,7 +215,7 @@ function ModeSwitch({ modeSwitch }: { modeSwitch: NonNullable<TitlebarProps["mod
             key={mode}
             onClick={() => switchMode(mode)}
           >
-            {mode === "agent" ? "Agent" : "工作台模式"}
+            {label}
           </button>
         );
       })}

@@ -283,6 +283,50 @@ describe("MessageList", () => {
     }
   });
 
+  it("navigates to a business turn index and flashes the target assistant message", async () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      render(
+        <MessageList
+          messages={[
+            { ...message("m1", "user", "第一轮问题"), payload: { turnIndex: 1 } },
+            { ...message("m2", "assistant", "第一轮回答"), payload: { turnIndex: 1 } },
+            { ...message("m3", "user", "第二轮问题"), payload: { turnIndex: 2 } },
+            { ...message("m4", "assistant", "第二轮回答"), payload: { turnIndex: 2 } },
+          ]}
+          turnNavigationRequest={{ requestId: 1, targetTurnIndex: 2, flash: true }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "center",
+          behavior: "smooth",
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("第二轮回答").closest('[data-kind="assistant"]')?.getAttribute("data-focus-flash")).toBe(
+          "true",
+        );
+      });
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+          configurable: true,
+          value: originalScrollIntoView,
+        });
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element["scrollIntoView"] }).scrollIntoView;
+      }
+    }
+  });
+
   it("highlights every static turn intersecting the visible viewport", async () => {
     render(
       <MessageList
