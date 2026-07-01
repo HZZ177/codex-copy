@@ -250,24 +250,37 @@ function ListRenderer({ annotationRanges, block, blockAttributes, findMatches, r
     blockAttributes,
     items.map((item, index) => {
       const task = /^\[(x|X| )]\s+(.*)$/.exec(item.text);
+      const markerText = markdownListMarkerText(block, index);
       return (
         <li key={`${block.id}-item-${index + 1}`}>
-          {task ? (
-            <>
-              <input checked={task[1].toLowerCase() === "x"} disabled readOnly type="checkbox" />
-              {renderInlineMarkdown(
-                task[2],
-                item.sourceStart + task[0].length - task[2].length,
-                annotationRanges,
-                findMatches,
-                renderImage,
-              )}
-            </>
-          ) : renderInlineMarkdown(item.text, item.sourceStart, annotationRanges, findMatches, renderImage)}
+          <span aria-hidden="true" data-markdown-list-marker="true">
+            {markerText}
+          </span>
+          <span data-markdown-list-content="true">
+            {task ? (
+              <>
+                <input checked={task[1].toLowerCase() === "x"} disabled readOnly type="checkbox" />
+                {renderInlineMarkdown(
+                  task[2],
+                  item.sourceStart + task[0].length - task[2].length,
+                  annotationRanges,
+                  findMatches,
+                  renderImage,
+                )}
+              </>
+            ) : renderInlineMarkdown(item.text, item.sourceStart, annotationRanges, findMatches, renderImage)}
+          </span>
         </li>
       );
     }),
   );
+}
+
+function markdownListMarkerText(block: MarkdownBlock, index: number): string {
+  if (block.metadata.listOrdered) {
+    return `${(block.metadata.listStart ?? 1) + index}. `;
+  }
+  return "• ";
 }
 
 function CodeRenderer({ annotationRanges, block, blockAttributes, findMatches }: MarkdownBlockRendererProps) {

@@ -221,7 +221,9 @@ describe("ToolCallBlock", () => {
     expect(onPreviewFile.mock.calls[0][0].message.id).toBe("tool-1");
   });
 
-  it("renders file mutation tool details as a diff review panel", () => {
+  it("renders file mutation tool details as a diff review panel", async () => {
+    const clipboard = navigator.clipboard.writeText as unknown as ReturnType<typeof vi.fn>;
+    const diff = "--- a/src/main.py\n+++ b/src/main.py\n@@ -1 +1 @@\n-old\n+new";
     render(
       <ToolCallBlock
         message={toolMessage(
@@ -235,7 +237,7 @@ describe("ToolCallBlock", () => {
                 operation: "update",
                 added_lines: 1,
                 deleted_lines: 1,
-                diff: "--- a/src/main.py\n+++ b/src/main.py\n@@ -1 +1 @@\n-old\n+new",
+                diff,
               },
             ],
           },
@@ -252,6 +254,12 @@ describe("ToolCallBlock", () => {
     expect(screen.getByLabelText("文件 diff").textContent).toContain("+new");
     expect(screen.queryByLabelText("工具入参")).toBeNull();
     expect(screen.queryByLabelText("工具输出")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制 diff" }));
+    await waitFor(() => {
+      expect(clipboard).toHaveBeenLastCalledWith(diff);
+    });
+    expect(screen.getByRole("button", { name: "已复制 diff" }).querySelector(".lucide-check")).not.toBeNull();
   });
 
   it("passes file mutation preview clicks through MessageList", () => {

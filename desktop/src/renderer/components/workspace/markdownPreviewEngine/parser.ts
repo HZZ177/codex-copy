@@ -193,6 +193,11 @@ function blockMetadataForToken(token: MarkdownSerializedToken): MarkdownBlockMet
   }
   if (token.type === "ordered_list_open") {
     metadata.listOrdered = true;
+    const startValue = token.attrs?.find(([name]) => name === "start")?.[1];
+    const listStart = startValue ? Number.parseInt(startValue, 10) : NaN;
+    if (Number.isSafeInteger(listStart)) {
+      metadata.listStart = listStart;
+    }
   }
   if (token.markup) {
     metadata.markup = token.markup;

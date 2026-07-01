@@ -1,4 +1,4 @@
-import { ChevronRight, Copy, ExternalLink, FileDiff, WrapText } from "lucide-react";
+import { Check, ChevronRight, Copy, ExternalLink, FileDiff, WrapText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppTooltipLayer } from "@/renderer/components/tooltip";
@@ -59,7 +59,7 @@ export function FileReviewCard({ file, compact = true, titlePrefix = "" }: FileR
           disabled={!copySource}
           onClick={() => void handleCopy()}
         >
-          <Copy size={14} />
+          {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
       </header>
       {lines.length ? (

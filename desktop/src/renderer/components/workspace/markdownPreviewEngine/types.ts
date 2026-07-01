@@ -53,6 +53,7 @@ export interface MarkdownBlockMetadata {
   headingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
   language?: string;
   listOrdered?: boolean;
+  listStart?: number;
   markup?: string;
 }
 

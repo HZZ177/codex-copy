@@ -58,12 +58,34 @@
 
 .keydex-markdown :where(ul, ol) {
   margin: 10px 0;
-  padding-left: 22px;
+  list-style: none;
+  padding-left: 0;
 }
 
 .keydex-markdown :where(li) {
+  --markdown-list-marker-width: 22px;
+
+  display: grid;
+  grid-template-columns: var(--markdown-list-marker-width) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 4px;
   margin: 4px 0;
-  padding-left: 2px;
+  padding-left: 0;
+}
+
+.keydex-markdown :where(ol) > :where(li) {
+  --markdown-list-marker-width: 26px;
+}
+
+.keydex-markdown :where(li) > :where([data-markdown-list-marker="true"]) {
+  min-width: 0;
+  user-select: text;
+  text-align: right;
+  white-space: pre;
+}
+
+.keydex-markdown :where(li) > :where([data-markdown-list-content="true"]) {
+  min-width: 0;
 }
 
 .keydex-markdown :where(blockquote) {

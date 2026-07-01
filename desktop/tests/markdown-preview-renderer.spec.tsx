@@ -42,7 +42,7 @@ describe("MarkdownDocumentView", () => {
     expect(screen.getByRole("heading", { name: "Title" })).not.toBeNull();
     expect(screen.getByText("Paragraph text.")).not.toBeNull();
     expect(screen.getByRole("list")).not.toBeNull();
-    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["first", "second"]);
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["• first", "• second"]);
     expect(screen.getByText("quoted")).not.toBeNull();
     expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("const value = 1;");
 
@@ -50,6 +50,20 @@ describe("MarkdownDocumentView", () => {
     expect(firstBlock.dataset.markdownBlockId).toBe(model.blocks[0].id);
     expect(firstBlock.dataset.markdownSourceStart).toBe("0");
     expect(firstBlock.dataset.markdownSourceEnd).toBe(String(model.blocks[0].sourceEnd));
+  });
+
+  it("renders list markers as selectable text nodes", () => {
+    const source = ["3. first step", "4. second step"].join("\n");
+    const model = buildMarkdownDocumentModel(source);
+
+    render(<MarkdownDocumentView model={model} />);
+
+    const markers = Array.from(document.querySelectorAll("[data-markdown-list-marker='true']"));
+    expect(markers.map((marker) => marker.textContent)).toEqual(["3. ", "4. "]);
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "3. first step",
+      "4. second step",
+    ]);
   });
 
   it("renders tables and keeps markdown html as inert source text", () => {
