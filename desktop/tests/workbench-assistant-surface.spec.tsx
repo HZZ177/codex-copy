@@ -1846,6 +1846,37 @@ describe("WorkbenchAssistantSurface", () => {
     expect(await screen.findByTestId("file-change-summary-pill")).not.toBeNull();
     expect(screen.getByText(/编辑了 1 个文件/)).not.toBeNull();
   });
+
+  it("opens file review as a drawer secondary page without the composer", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchReviewProbe />
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController()}
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开工作台审阅" }));
+
+    await waitForSurfaceMode("drawer", 8000);
+    expect(await screen.findByTestId("workbench-review-panel")).not.toBeNull();
+    expect(screen.getByTestId("workbench-review-panel").textContent).toContain("src/main.ts");
+    expect(screen.getByLabelText("文件 diff").textContent).toContain("+const value = 2;");
+    expect(screen.getByRole("button", { name: "返回主对话" })).not.toBeNull();
+    expect(screen.queryByTestId("workbench-assistant-drawer-input-surface")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "工作台助手输入" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "返回主对话" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("workbench-review-panel")).toBeNull();
+    });
+    expect(screen.getByTestId("workbench-assistant-drawer-input-surface")).not.toBeNull();
+  });
 });
 
 async function waitForSurfaceMode(mode: string, timeout = 2000) {
@@ -1892,6 +1923,36 @@ function PreviewFilePanelProbe() {
         {JSON.stringify(preview.filePanelRequest?.revealTarget ?? null)}
       </output>
     </div>
+  );
+}
+
+function WorkbenchReviewProbe() {
+  const preview = usePreview();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        preview.openReviewPanel(
+          {
+            files: [
+              {
+                path: "src/main.ts",
+                additions: 1,
+                deletions: 1,
+                diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@\n-const value = 1;\n+const value = 2;",
+                operation: "update",
+                source: "streaming",
+              },
+            ],
+            focusedPath: "src/main.ts",
+            title: "审阅",
+          },
+          { sessionId: "ses-1", workspaceId: "ws-1", workspaceAvailable: true },
+        )
+      }
+    >
+      打开工作台审阅
+    </button>
   );
 }
 

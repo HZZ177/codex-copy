@@ -10,9 +10,9 @@
   --ghost-row-height: 20px;
 
   display: inline-flex;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   border: 0;
   border-radius: 0;
@@ -66,23 +66,26 @@
 
 .titleGroup {
   display: inline-flex;
-  height: var(--ghost-row-height);
+  min-height: var(--ghost-row-height);
   min-width: 0;
-  align-items: center;
+  flex: 1 1 auto;
+  align-items: flex-start;
   gap: 6px;
 }
 
 .title {
   display: inline-flex;
-  height: var(--ghost-row-height);
+  min-height: var(--ghost-row-height);
   align-items: center;
   min-width: 0;
-  overflow: hidden;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  overflow: visible;
   color: currentColor;
   font-size: 13px;
   line-height: var(--ui-line-height-compact);
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .fileTarget {
@@ -93,10 +96,11 @@
 
 .fileTargetButton {
   display: inline-flex;
-  height: var(--ghost-row-height);
+  min-height: var(--ghost-row-height);
   align-items: center;
   min-width: 0;
-  overflow: hidden;
+  max-width: 100%;
+  overflow: visible;
   border: 0;
   margin-left: 4px;
   background: transparent;
@@ -106,7 +110,9 @@
   padding: 0;
   text-align: left;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .fileTargetButton:hover,
@@ -120,6 +126,7 @@
 }
 
 .inlineTicker {
+  flex: 0 0 auto;
   min-height: var(--ghost-row-height);
   align-items: center;
   gap: 6px;

@@ -7,7 +7,6 @@ import styles from "./ChatLayout.module.css";
 
 export interface ChatLayoutProps extends PropsWithChildren {
   title: string;
-  subtitle?: string;
   workspaceLabel?: string;
   workspaceTitle?: string;
   sourceSessionAction?: {
@@ -20,7 +19,6 @@ export interface ChatLayoutProps extends PropsWithChildren {
 
 export function ChatLayout({
   title,
-  subtitle,
   workspaceLabel,
   workspaceTitle,
   sourceSessionAction,
@@ -105,8 +103,6 @@ export function ChatLayout({
 
             {menuOpen ? (
               <div className={styles.menu} role="menu" aria-label="对话操作菜单">
-                {subtitle ? <div className={styles.menuStatus}>{subtitle}</div> : null}
-                {subtitle ? <div className={styles.menuDivider} /> : null}
                 {sourceSessionAction ? (
                   <button
                     className={styles.menuItem}

@@ -29,6 +29,7 @@ import type { SlashCommand } from "@/renderer/components/chat/SlashCommandMenu";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import { useRafPanelResize } from "@/renderer/components/layout/useRafPanelResize";
 import { useRuntimeModelSelection, type RuntimeSelectedModel } from "@/renderer/components/model";
+import { FileReviewPanel } from "@/renderer/components/review/FileReviewDiff";
 import { useWorkspaceSkills } from "@/renderer/hooks/useWorkspaceSkills";
 import { useLayoutState } from "@/renderer/hooks/layout/LayoutStateProvider";
 import {
@@ -56,7 +57,12 @@ import {
   useConversationPanelModel,
   type ContextWindowUsageStatus,
 } from "@/renderer/pages/conversation/useConversationPanelModel";
-import { usePreview, type PreviewFileRevealTarget, type PreviewRenderContext } from "@/renderer/providers/PreviewProvider";
+import {
+  usePreview,
+  type PreviewFileRevealTarget,
+  type PreviewRenderContext,
+  type ReviewPanelRequest,
+} from "@/renderer/providers/PreviewProvider";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
 import { prefersReducedMotion } from "@/renderer/utils/motionPreference";
 import type {
@@ -208,6 +214,8 @@ export function WorkbenchAssistantSurface({
   const workspaceSkills = Array.isArray(workspaceSkillsState.skills) ? workspaceSkillsState.skills : [];
   const previewContext = usePreview();
   const workbenchWorkspaceLabel = workspace?.root_path ?? workspace?.name ?? workspaceId;
+  const handledReviewPanelRequestIdRef = useRef(previewContext.reviewPanelRequest?.requestId ?? 0);
+  const [workbenchReviewPanel, setWorkbenchReviewPanel] = useState<ReviewPanelRequest | null>(null);
   const pendingApproval = controller.pendingApproval;
   const panelSessionId = controller.session?.id ?? "";
   const currentFileChipRequestId = controller.fileChipRequest?.requestId ?? 0;
@@ -260,6 +268,8 @@ export function WorkbenchAssistantSurface({
   }, [btwActive, btwLoadedHistoryTurnCount, controller.loading, panelModel.messages, panelSessionId]);
   const activeBtwHistorySnapshot =
     btwActive && btwHistorySnapshot?.sessionId === panelSessionId ? btwHistorySnapshot : null;
+  const reviewActive = Boolean(workbenchReviewPanel);
+  const secondaryPageActive = btwActive || reviewActive;
   const displayPanelMessages = useMemo(() => {
     if (!btwActive) {
       return panelModel.messages;
@@ -408,7 +418,11 @@ export function WorkbenchAssistantSurface({
     [controller, modelSelection, runtime],
   );
   const currentSessionTitle =
-    (btwActive ? BTW_CONVERSATION_TITLE : controller.session?.title?.trim() || controller.session?.id?.trim()) || "";
+    (btwActive
+      ? BTW_CONVERSATION_TITLE
+      : workbenchReviewPanel
+        ? workbenchReviewPanel.title || "审阅"
+        : controller.session?.title?.trim() || controller.session?.id?.trim()) || "";
   const sessionTitleVisible = Boolean(currentSessionTitle);
   const collapsedDraftPreview = controller.draft.replace(/\s+/g, " ").trim();
   const collapsedComposerLabel = collapsedDraftPreview || (hasComposerContext ? "已添加上下文" : "要求后续变更");
@@ -484,7 +498,7 @@ export function WorkbenchAssistantSurface({
     commitDrawerWidth(DEFAULT_WORKBENCH_ASSISTANT_DRAWER_WIDTH);
   };
   const renderMorphContent = dockTransitionPhase !== null;
-  const renderBottomContent = true;
+  const renderBottomContent = !reviewActive;
   const reducedMotion = prefersReducedMotion();
   const drawerDockActionActive = renderDrawerContent || dockTransitionPhase === "dock-out";
   const headerActionsDisabled = dockTransitionPhase !== null;
@@ -956,24 +970,30 @@ export function WorkbenchAssistantSurface({
     if (btwActive) {
       onCloseBtwConversation?.();
     }
+    if (reviewActive) {
+      setWorkbenchReviewPanel(null);
+    }
     const hasDraft = !btwActive && hasComposerContent;
     setDockReturnMode(hasDraft ? "composer" : "capsule");
     beginDockTransition("dock-out", () => {
       dispatchAssistantState({ type: "close-drawer", hasDraft });
       setDockReturnMode(null);
     });
-  }, [beginDockTransition, btwActive, hasComposerContent, onCloseBtwConversation]);
+  }, [beginDockTransition, btwActive, hasComposerContent, onCloseBtwConversation, reviewActive]);
 
   const collapseDrawerToCapsule = useCallback(() => {
     if (btwActive) {
       onCloseBtwConversation?.();
+    }
+    if (reviewActive) {
+      setWorkbenchReviewPanel(null);
     }
     setDockReturnMode("capsule");
     beginDockTransition("dock-out", () => {
       dispatchAssistantState({ type: "close-drawer", hasDraft: false });
       setDockReturnMode(null);
     });
-  }, [beginDockTransition, btwActive, onCloseBtwConversation]);
+  }, [beginDockTransition, btwActive, onCloseBtwConversation, reviewActive]);
 
   const handleComposerEscape = useCallback(() => {
     if (surfaceMode === "drawer") {
@@ -1003,6 +1023,38 @@ export function WorkbenchAssistantSurface({
     });
   }, [btwActive, dockToDrawer, onOpenBtwConversation, surfaceMode]);
 
+  const closeWorkbenchReviewPanel = useCallback(() => {
+    setWorkbenchReviewPanel(null);
+  }, []);
+
+  const openWorkbenchReviewFile = useCallback(
+    (path: string) => {
+      previewContext.openFilePanel(path, workbenchPreviewRenderContext);
+    },
+    [previewContext, workbenchPreviewRenderContext],
+  );
+
+  useEffect(() => {
+    handledReviewPanelRequestIdRef.current = previewContext.reviewPanelRequest?.requestId ?? 0;
+    setWorkbenchReviewPanel(null);
+  }, [panelSessionId, workspaceId]);
+
+  useEffect(() => {
+    const request = previewContext.reviewPanelRequest ?? null;
+    if (
+      !request?.requestId ||
+      request.requestId === handledReviewPanelRequestIdRef.current ||
+      !reviewPanelRequestMatchesWorkbench(request, panelSessionId, workspaceId)
+    ) {
+      return;
+    }
+    handledReviewPanelRequestIdRef.current = request.requestId;
+    setWorkbenchReviewPanel(request);
+    if (surfaceMode !== "drawer") {
+      dockToDrawer();
+    }
+  }, [dockToDrawer, panelSessionId, previewContext.reviewPanelRequest, surfaceMode, workspaceId]);
+
   const handleSlashCommand = useCallback(
     (command: SlashCommand) => {
       if (command.id === "bypass-conversation") {
@@ -1019,11 +1071,21 @@ export function WorkbenchAssistantSurface({
       if (btwActive) {
         onCloseBtwConversation?.();
       }
+      if (reviewActive) {
+        setWorkbenchReviewPanel(null);
+      }
       dispatchAssistantState({ type: "close-expanded", returnMode: "composer" });
       return;
     }
     dispatchAssistantState({ type: "toggle-expanded", hasDraft: hasComposerContent });
-  }, [btwActive, finishMessageTriggerPriming, hasComposerContent, onCloseBtwConversation, surfaceMode]);
+  }, [
+    btwActive,
+    finishMessageTriggerPriming,
+    hasComposerContent,
+    onCloseBtwConversation,
+    reviewActive,
+    surfaceMode,
+  ]);
 
   const openExpandedLayerAtTurn = useCallback(
     (targetIndex: number) => {
@@ -1051,11 +1113,14 @@ export function WorkbenchAssistantSurface({
     if (btwActive) {
       onCloseBtwConversation?.();
     }
+    if (reviewActive) {
+      setWorkbenchReviewPanel(null);
+    }
     dispatchAssistantState({
       type: "close-expanded",
-      returnMode: btwActive || hasComposerContent ? "composer" : "capsule",
+      returnMode: secondaryPageActive || hasComposerContent ? "composer" : "capsule",
     });
-  }, [btwActive, hasComposerContent, onCloseBtwConversation, surfaceMode]);
+  }, [btwActive, hasComposerContent, onCloseBtwConversation, reviewActive, secondaryPageActive, surfaceMode]);
 
   const markComposerFileRequestHandled = useCallback((requestId: number) => {
     contextRequestBaselineRef.current.fileRequestId = Math.max(
@@ -1110,11 +1175,11 @@ export function WorkbenchAssistantSurface({
       fileChipRequest={composerFileChipRequest}
       quoteChipRequest={composerQuoteChipRequest}
       contextWindowUsage={displayPanelModel.contextWindowUsage}
-      allowBypassConversationSlashCommand={!btwActive && Boolean(onOpenBtwConversation)}
+      allowBypassConversationSlashCommand={!secondaryPageActive && Boolean(onOpenBtwConversation)}
       autoFocusKey={
         surfaceMode === "capsule"
           ? undefined
-          : `workbench-composer:${composerFocusSeq}:${btwActive ? `btw:${panelSessionId}` : "main"}`
+          : `workbench-composer:${composerFocusSeq}:${secondaryPageActive ? `secondary:${currentSessionTitle}` : "main"}`
       }
       onSelectedFilesChange={setComposerFiles}
       onSelectedQuotesChange={setComposerQuotes}
@@ -1150,6 +1215,18 @@ export function WorkbenchAssistantSurface({
   const stablePanelMode = renderDrawerContent ? "drawer" : renderMorphContent ? "morph" : "prewarm";
   const shouldMountStablePanel = surfaceMode !== "expanded" && (renderMorphContent || renderDrawerContent);
   const stablePanelContentReady = stablePanelMode === "drawer" && (drawerContentReady || panelMessageCount <= 0);
+  const stableReviewPanel =
+    shouldMountStablePanel && stablePanelContentReady && workbenchReviewPanel ? (
+      <div className={styles.drawerReviewPanel} data-testid="workbench-review-panel">
+        <FileReviewPanel
+          files={workbenchReviewPanel.files}
+          focusedPath={workbenchReviewPanel.focusedPath}
+          title={workbenchReviewPanel.title}
+          onFocusPath={() => undefined}
+          onOpenFile={openWorkbenchReviewFile}
+        />
+      </div>
+    ) : null;
   const stablePanelTestId =
     stablePanelMode === "drawer"
       ? "workbench-assistant-drawer"
@@ -1189,6 +1266,18 @@ export function WorkbenchAssistantSurface({
     ) : null;
   const overlayPanelContentReady =
     surfaceMode === "expanded" && dockTransitionPhase === null && (expandedContentReady || panelMessageCount <= 0);
+  const overlayReviewPanel =
+    overlayPanelContentReady && workbenchReviewPanel ? (
+      <div className={styles.overlayReviewPanel} data-testid="workbench-review-panel">
+        <FileReviewPanel
+          files={workbenchReviewPanel.files}
+          focusedPath={workbenchReviewPanel.focusedPath}
+          title={workbenchReviewPanel.title}
+          onFocusPath={() => undefined}
+          onOpenFile={openWorkbenchReviewFile}
+        />
+      </div>
+    ) : null;
   const overlayConversationPanel =
     overlayPanelContentReady ? (
       <ConversationPanel
@@ -1250,12 +1339,12 @@ export function WorkbenchAssistantSurface({
       aria-label={stablePanelMode === "drawer" ? "工作台助手" : "工作台助手过渡面板"}
     >
       <header className={styles.drawerHeader} data-testid={stablePanelHeaderTestId}>
-        {btwActive ? (
+        {secondaryPageActive ? (
           <button
             type="button"
             className={styles.btwBackButton}
             aria-label="返回主对话"
-            onClick={onCloseBtwConversation}
+            onClick={btwActive ? onCloseBtwConversation : closeWorkbenchReviewPanel}
           >
             <ArrowLeft size={14} />
             <span>主对话</span>
@@ -1281,7 +1370,7 @@ export function WorkbenchAssistantSurface({
         data-content-state={stablePanelContentReady ? "ready" : "deferred"}
         data-testid={stablePanelMode === "morph" ? "workbench-assistant-morph-middle" : undefined}
       >
-        {stableConversationPanel ?? drawerLoadingPanel}
+        {stableReviewPanel ?? stableConversationPanel ?? drawerLoadingPanel}
       </div>
     </section>
   ) : null;
@@ -1299,6 +1388,7 @@ export function WorkbenchAssistantSurface({
       data-dock-transition={dockTransitionPhase ?? "idle"}
       data-drawer-resizing={drawerResize.dragging ? "true" : "false"}
       data-btw-active={btwActive ? "true" : "false"}
+      data-review-active={reviewActive ? "true" : "false"}
       data-message-trigger-state={messageTriggerLayoutState}
       data-session-title-visible={bottomSessionTitleVisible ? "true" : "false"}
       data-running={runtimeState === "running" ? "true" : "false"}
@@ -1330,6 +1420,7 @@ export function WorkbenchAssistantSurface({
             <motion.div
               className={styles.expandedPanelFrame}
               data-btw-active={btwActive ? "true" : "false"}
+              data-review-active={reviewActive ? "true" : "false"}
               data-testid="workbench-expanded-panel-frame"
               initial={{ opacity: 0, y: 16, clipPath: "inset(100% 0 0 0 round 18px)" }}
               animate={{ opacity: 1, y: 0, clipPath: "inset(0% 0 0 0 round 18px)" }}
@@ -1337,21 +1428,21 @@ export function WorkbenchAssistantSurface({
               transition={reducedMotion ? { duration: 0 } : WORKBENCH_EXPANDED_PANEL_TRANSITION}
               onClick={(event) => event.stopPropagation()}
             >
-              {btwActive ? (
+              {secondaryPageActive ? (
                 <div className={styles.btwOverlayHeader} data-testid="workbench-btw-overlay-header">
                   <button
                     type="button"
                     className={styles.btwBackButton}
-                    onClick={onCloseBtwConversation}
+                    onClick={btwActive ? onCloseBtwConversation : closeWorkbenchReviewPanel}
                     aria-label="返回主对话"
                   >
                     <ArrowLeft size={14} />
                     <span>主对话</span>
                   </button>
-                  <span>{BTW_CONVERSATION_TITLE}</span>
+                  <span>{currentSessionTitle}</span>
                 </div>
               ) : null}
-              {overlayConversationPanel ?? overlayLoadingPanel}
+              {overlayReviewPanel ?? overlayConversationPanel ?? overlayLoadingPanel}
             </motion.div>
           </motion.div>
         ) : null}
@@ -1517,6 +1608,24 @@ function shouldIgnoreWorkbenchPageEnter(target: EventTarget | null): boolean {
       ].join(","),
     ),
   );
+}
+
+function reviewPanelRequestMatchesWorkbench(
+  request: ReviewPanelRequest,
+  panelSessionId: string,
+  workspaceId: string | undefined,
+): boolean {
+  const context = request.renderContext;
+  if (context?.sessionId) {
+    return context.sessionId === panelSessionId;
+  }
+  if (context?.workspaceId) {
+    return context.workspaceId === workspaceId;
+  }
+  if (panelSessionId && request.scopeKey === `session:${panelSessionId}`) {
+    return true;
+  }
+  return Boolean(workspaceId && request.scopeKey === `workspace:${workspaceId}`);
 }
 
 function WorkbenchMiniTurnNavigator({

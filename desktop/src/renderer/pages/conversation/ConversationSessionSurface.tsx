@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { runtimeBridge, type RuntimeBridge, type WsConnectionStatus } from "@/runtime";
+import { runtimeBridge, type RuntimeBridge } from "@/runtime";
 import {
   selectedQuoteFromText,
   type SendBoxExternalQuoteRequest,
@@ -108,7 +108,6 @@ export function ConversationSessionSurface({
   const selectedSkill = controller.selectedSkill;
   const setSelectedSkill = controller.setSelectedSkill;
   const loading = controller.loading;
-  const wsStatus = controller.wsStatus;
   const session = controller.session;
   const pendingApproval = controller.pendingApproval;
   const agentMessages = controller.agentMessages;
@@ -498,7 +497,6 @@ export function ConversationSessionSurface({
   return (
     <ChatLayout
       title={title}
-      subtitle={conversationSubtitle(wsStatus, session)}
       workspaceLabel={workspaceMeta?.label}
       workspaceTitle={workspaceMeta?.title}
       sourceSessionAction={
@@ -523,17 +521,6 @@ export function ConversationSessionSurface({
       />
     </ChatLayout>
   );
-}
-
-function conversationSubtitle(status: WsConnectionStatus, session: AgentSession | null): string {
-  const base = connectionSubtitle(status);
-  if (session?.fork_source) {
-    return `派生会话 - ${base}`;
-  }
-  if (session?.active_session_id && session.active_session_id !== session.id) {
-    return `已切换到分支 - ${base}`;
-  }
-  return base;
 }
 
 function conversationWorkspaceMeta(session: AgentSession | null): { label: string; title: string } | null {
@@ -586,22 +573,6 @@ function uniqueStrings(values: string[]): string[] {
     result.push(cleaned);
   }
   return result;
-}
-
-function connectionSubtitle(status: WsConnectionStatus): string {
-  switch (status) {
-    case "open":
-      return "已连接";
-    case "connecting":
-    case "reconnecting":
-      return "正在连接";
-    case "error":
-      return "连接异常";
-    case "closed":
-      return "已断开";
-    case "idle":
-      return "等待连接";
-  }
 }
 
 function errorMessage(reason: unknown): string {

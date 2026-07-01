@@ -11,7 +11,7 @@ import type { AgentHistoryResponse, AgentSession } from "@/types/protocol";
 describe("ChatLayout", () => {
   it("renders a centered document layout without persistent workspace panels by default", () => {
     render(
-      <ChatLayout title="对话 thread-1" subtitle="本地运行">
+      <ChatLayout title="对话 thread-1">
         <div data-testid="message-flow">真实消息流</div>
       </ChatLayout>,
     );
@@ -58,6 +58,7 @@ describe("ChatLayout", () => {
     fireEvent.click(screen.getByLabelText("更多对话操作"));
     expect(screen.getAllByRole("menuitem")).toHaveLength(1);
     expect(screen.getByRole("menuitem", { name: "复制标题" })).not.toBeNull();
+    expect(screen.queryByText("已连接")).toBeNull();
     expect(screen.queryByRole("complementary")).toBeNull();
     expect(mounts).toBe(1);
   });

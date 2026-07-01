@@ -146,22 +146,6 @@
   left: auto;
 }
 
-.menuStatus {
-  overflow: hidden;
-  color: var(--color-text-tertiary);
-  font-size: 11px;
-  line-height: 1.45;
-  padding: 5px 7px 4px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.menuDivider {
-  height: 1px;
-  margin: 3px 4px;
-  background: var(--color-border-subtle);
-}
-
 .menuItem {
   display: flex;
   height: 32px;
