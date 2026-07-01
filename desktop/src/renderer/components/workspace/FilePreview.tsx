@@ -88,6 +88,10 @@ import {
   type AppFindShortcutDetail,
 } from "@/renderer/events/findShortcut";
 import {
+  subscribeStartWorkspaceFileAnnotation,
+  type StartWorkspaceFileAnnotationDetail,
+} from "@/renderer/events/workspaceFileContext";
+import {
   useOptionalPreview,
   type PreviewAnnotationChatRequest,
   type PreviewFileRevealTarget,
@@ -218,6 +222,8 @@ export function FilePreview({
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [annotationReloadId, setAnnotationReloadId] = useState(0);
   const [fileAnnotationDraft, setFileAnnotationDraft] = useState("");
+  const [fileAnnotationComposerOpen, setFileAnnotationComposerOpen] = useState(false);
+  const [fileAnnotationComposerFocusRequestId, setFileAnnotationComposerFocusRequestId] = useState(0);
   const [selectionDraft, setSelectionDraft] = useState<SelectionAnnotationDraft | null>(null);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [editingComment, setEditingComment] = useState("");
@@ -368,6 +374,7 @@ export function FilePreview({
       annotationPanelClosingRef.current = false;
       setAnnotationPanelOpen(false);
       setAnnotationPanelClosing(false);
+      setFileAnnotationComposerOpen(false);
     }, ANNOTATION_PANEL_EXIT_MS);
   }, []);
 
@@ -378,6 +385,23 @@ export function FilePreview({
     }
     openAnnotationPanel();
   }, [closeAnnotationPanel, openAnnotationPanel]);
+
+  const openFileAnnotationComposer = useCallback(() => {
+    if (!annotationPath) {
+      return;
+    }
+    setActiveAnnotationPopover(null);
+    setSelectionDraft(null);
+    setSelectionDraftPopover(null);
+    setEditingAnnotationId(null);
+    setEditingComment("");
+    setAnnotationMutationError(null);
+    setSelectionMappingError(null);
+    setLocateError(null);
+    openAnnotationPanel();
+    setFileAnnotationComposerOpen(true);
+    setFileAnnotationComposerFocusRequestId((requestId) => requestId + 1);
+  }, [annotationPath, openAnnotationPanel]);
 
   useEffect(() => {
     if (!annotationPanelOpen || annotationPanelClosing) {
@@ -393,6 +417,18 @@ export function FilePreview({
     document.addEventListener("pointerdown", closePanelOnOutsidePointerDown, true);
     return () => document.removeEventListener("pointerdown", closePanelOnOutsidePointerDown, true);
   }, [annotationPanelClosing, annotationPanelOpen, closeAnnotationPanel]);
+
+  useEffect(() => {
+    if (!annotationPath) {
+      return;
+    }
+    return subscribeStartWorkspaceFileAnnotation((detail) => {
+      if (!isWorkspaceFileAnnotationRequestForPreview(detail, annotationPath, workspaceId, sessionId)) {
+        return;
+      }
+      openFileAnnotationComposer();
+    });
+  }, [annotationPath, openFileAnnotationComposer, sessionId, workspaceId]);
 
   useEffect(() => {
     let active = true;
@@ -486,6 +522,7 @@ export function FilePreview({
     annotationPanelClosingRef.current = false;
     setAnnotationPanelOpen(false);
     setAnnotationPanelClosing(false);
+    setFileAnnotationComposerOpen(false);
   }, [annotationPath]);
 
   useEffect(() => {
@@ -1721,6 +1758,8 @@ export function FilePreview({
               error={annotationError}
               unavailable={!annotationAvailable}
               fileDraft={fileAnnotationDraft}
+              fileComposerOpen={fileAnnotationComposerOpen}
+              fileComposerFocusRequestId={fileAnnotationComposerFocusRequestId}
               editingAnnotationId={editingAnnotationId}
               editingComment={editingComment}
               mutationError={annotationMutationError}
@@ -1729,6 +1768,7 @@ export function FilePreview({
               activeAnnotationId={activeAnnotationId}
               canStartChat={Boolean(onStartChatFromAnnotation)}
               onFileDraftChange={setFileAnnotationDraft}
+              onFileComposerOpenChange={setFileAnnotationComposerOpen}
               onCreateFileAnnotation={createFileAnnotation}
               onBeginEdit={beginEditAnnotation}
               onEditingCommentChange={setEditingComment}
@@ -2180,6 +2220,8 @@ interface AnnotationPanelProps {
   error: string | null;
   unavailable: boolean;
   fileDraft: string;
+  fileComposerOpen: boolean;
+  fileComposerFocusRequestId: number;
   editingAnnotationId: string | null;
   editingComment: string;
   mutationError: string | null;
@@ -2188,6 +2230,7 @@ interface AnnotationPanelProps {
   activeAnnotationId: string | null;
   canStartChat: boolean;
   onFileDraftChange: (value: string) => void;
+  onFileComposerOpenChange: (open: boolean) => void;
   onCreateFileAnnotation: () => void;
   onBeginEdit: (annotation: WorkspaceFileAnnotation) => void;
   onEditingCommentChange: (value: string) => void;
@@ -2530,6 +2573,8 @@ function AnnotationPanel({
   error,
   unavailable,
   fileDraft,
+  fileComposerOpen,
+  fileComposerFocusRequestId,
   editingAnnotationId,
   editingComment,
   mutationError,
@@ -2538,6 +2583,7 @@ function AnnotationPanel({
   activeAnnotationId,
   canStartChat,
   onFileDraftChange,
+  onFileComposerOpenChange,
   onCreateFileAnnotation,
   onBeginEdit,
   onEditingCommentChange,
@@ -2551,7 +2597,14 @@ function AnnotationPanel({
   onClose,
 }: AnnotationPanelProps) {
   const creatingFile = mutatingId === "create-file";
-  const [fileComposerOpen, setFileComposerOpen] = useState(false);
+  const fileDraftInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!fileComposerOpen) {
+      return;
+    }
+    fileDraftInputRef.current?.focus();
+  }, [fileComposerFocusRequestId, fileComposerOpen]);
 
   return (
     <aside
@@ -2712,7 +2765,7 @@ function AnnotationPanel({
           ) : null}
 
           {!fileComposerOpen ? (
-            <button type="button" className={styles.annotationAddButton} onClick={() => setFileComposerOpen(true)}>
+            <button type="button" className={styles.annotationAddButton} onClick={() => onFileComposerOpenChange(true)}>
               <MessageSquarePlus size={13} />
               <span>添加文件批注</span>
             </button>
@@ -2721,6 +2774,7 @@ function AnnotationPanel({
           {fileComposerOpen ? (
             <div className={styles.annotationComposer}>
               <textarea
+                ref={fileDraftInputRef}
                 value={fileDraft}
                 rows={2}
                 placeholder="添加文件级批注"
@@ -2733,13 +2787,13 @@ function AnnotationPanel({
                   disabled={!fileDraft.trim() || creatingFile}
                   onClick={() => {
                     onCreateFileAnnotation();
-                    setFileComposerOpen(false);
+                    onFileComposerOpenChange(false);
                   }}
                 >
                   <MessageSquarePlus size={13} />
                   <span>{creatingFile ? "保存中" : "添加文件批注"}</span>
                 </button>
-                <button type="button" data-variant="ghost" onClick={() => setFileComposerOpen(false)}>
+                <button type="button" data-variant="ghost" onClick={() => onFileComposerOpenChange(false)}>
                   取消
                 </button>
               </div>
@@ -5479,6 +5533,30 @@ function annotationWorkspaceScope({
     return { sessionId };
   }
   return null;
+}
+
+function isWorkspaceFileAnnotationRequestForPreview(
+  detail: StartWorkspaceFileAnnotationDetail,
+  annotationPath: string,
+  workspaceId?: string,
+  sessionId?: string,
+): boolean {
+  return (
+    detail.path === annotationPath &&
+    workspaceContextValueMatches(detail.workspaceId, workspaceId) &&
+    workspaceContextValueMatches(detail.sessionId, sessionId)
+  );
+}
+
+function workspaceContextValueMatches(
+  requestValue: string | null | undefined,
+  previewValue: string | null | undefined,
+): boolean {
+  const normalizedRequestValue = requestValue?.trim() || null;
+  if (!normalizedRequestValue) {
+    return true;
+  }
+  return normalizedRequestValue === (previewValue?.trim() || null);
 }
 
 function annotationWorkspaceRuntime(runtime: RuntimeBridge | undefined): AnnotationWorkspaceRuntime | null {

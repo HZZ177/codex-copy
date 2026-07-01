@@ -2,6 +2,7 @@ import type { SelectedFile } from "@/renderer/components/chat/SendBox";
 
 export const APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT = "keydex:add-workspace-file-to-chat";
 export const APP_EXPAND_WORKSPACE_DIRECTORY_EVENT = "keydex:expand-workspace-directory";
+export const APP_START_WORKSPACE_FILE_ANNOTATION_EVENT = "keydex:start-workspace-file-annotation";
 
 export interface AddWorkspaceFileToChatDetail {
   absolutePath?: string | null;
@@ -12,6 +13,13 @@ export interface AddWorkspaceFileToChatDetail {
 }
 
 export interface ExpandWorkspaceDirectoryDetail {
+  path: string;
+  sessionId?: string | null;
+  workspaceId?: string | null;
+  workspaceRoot?: string | null;
+}
+
+export interface StartWorkspaceFileAnnotationDetail {
   path: string;
   sessionId?: string | null;
   workspaceId?: string | null;
@@ -29,6 +37,14 @@ export function emitAddWorkspaceFileToChat(detail: AddWorkspaceFileToChatDetail)
 export function emitExpandWorkspaceDirectory(detail: ExpandWorkspaceDirectoryDetail): void {
   document.dispatchEvent(
     new CustomEvent<ExpandWorkspaceDirectoryDetail>(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, {
+      detail,
+    }),
+  );
+}
+
+export function emitStartWorkspaceFileAnnotation(detail: StartWorkspaceFileAnnotationDetail): void {
+  document.dispatchEvent(
+    new CustomEvent<StartWorkspaceFileAnnotationDetail>(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, {
       detail,
     }),
   );
@@ -52,4 +68,14 @@ export function subscribeExpandWorkspaceDirectory(
   };
   document.addEventListener(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, handleEvent);
   return () => document.removeEventListener(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, handleEvent);
+}
+
+export function subscribeStartWorkspaceFileAnnotation(
+  listener: (detail: StartWorkspaceFileAnnotationDetail) => void,
+): () => void {
+  const handleEvent = (event: Event) => {
+    listener((event as CustomEvent<StartWorkspaceFileAnnotationDetail>).detail);
+  };
+  document.addEventListener(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, handleEvent);
+  return () => document.removeEventListener(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, handleEvent);
 }

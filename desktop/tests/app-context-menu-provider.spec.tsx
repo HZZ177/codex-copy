@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT,
   APP_EXPAND_WORKSPACE_DIRECTORY_EVENT,
+  APP_START_WORKSPACE_FILE_ANNOTATION_EVENT,
 } from "@/renderer/events/workspaceFileContext";
 import { AppContextMenuProvider } from "@/renderer/providers/AppContextMenuProvider";
 
@@ -263,6 +264,7 @@ describe("AppContextMenuProvider", () => {
       expect(menu.dataset.contextKind).toBe("workspace-document");
       expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
         "对该文档对话",
+        "对该文档新增批注",
         "刷新",
       ]);
 
@@ -282,6 +284,41 @@ describe("AppContextMenuProvider", () => {
       }));
     } finally {
       document.removeEventListener(APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT, handleEvent);
+    }
+  });
+
+  it("dispatches file annotation requests from workspace document context areas", async () => {
+    const listener = vi.fn();
+    const handleEvent = (event: Event) => listener((event as CustomEvent).detail);
+    document.addEventListener(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, handleEvent);
+
+    try {
+      render(
+        <AppContextMenuProvider>
+          <article
+            aria-label="文档区域"
+            data-workspace-document-context="true"
+            data-workspace-document-name="guide.md"
+            data-workspace-document-path="docs/guide.md"
+            data-workspace-id="ws-1"
+            data-workspace-session-id="ses-1"
+          >
+            <p>文档内容</p>
+          </article>
+        </AppContextMenuProvider>,
+      );
+
+      fireEvent.contextMenu(screen.getByText("文档内容"), { clientX: 12, clientY: 18 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "对该文档新增批注" }));
+
+      await waitFor(() => expect(listener).toHaveBeenCalledWith({
+        path: "docs/guide.md",
+        sessionId: "ses-1",
+        workspaceId: "ws-1",
+        workspaceRoot: null,
+      }));
+    } finally {
+      document.removeEventListener(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, handleEvent);
     }
   });
 

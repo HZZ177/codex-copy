@@ -7,6 +7,7 @@ import {
   File as FileIcon,
   FolderOpen,
   MessageSquarePlus,
+  MessageSquareText,
   RefreshCw,
   Route,
   Scissors,
@@ -28,6 +29,7 @@ import { createPortal } from "react-dom";
 import {
   emitAddWorkspaceFileToChat,
   emitExpandWorkspaceDirectory,
+  emitStartWorkspaceFileAnnotation,
 } from "@/renderer/events/workspaceFileContext";
 
 import styles from "./AppContextMenuProvider.module.css";
@@ -361,7 +363,7 @@ function ContextMenuItemView({
 function useMenuItems(context: MenuContext): MenuItem[] {
   return useMemo(() => {
     const hasSelection = context.selectionText.length > 0;
-    const withDocumentAction = (items: MenuItem[]) => addDocumentChatItem(items, context.documentEntry);
+    const withDocumentActions = (items: MenuItem[]) => addDocumentActions(items, context.documentEntry);
     const workspaceEntry = context.workspaceEntry;
 
     if (workspaceEntry?.kind === "directory") {
@@ -418,7 +420,7 @@ function useMenuItems(context: MenuContext): MenuItem[] {
     }
 
     if (context.editable) {
-      return withRefresh(withDocumentAction([
+      return withRefresh(withDocumentActions([
         {
           action: () => cutSelection(context),
           disabled: !context.mutable || !hasSelection,
@@ -450,7 +452,7 @@ function useMenuItems(context: MenuContext): MenuItem[] {
     }
 
     if (hasSelection) {
-      return withRefresh(withDocumentAction([
+      return withRefresh(withDocumentActions([
         {
           action: () => copySelection(context),
           icon: Copy,
@@ -460,11 +462,11 @@ function useMenuItems(context: MenuContext): MenuItem[] {
       ]));
     }
 
-    return withRefresh(withDocumentAction([]));
+    return withRefresh(withDocumentActions([]));
   }, [context]);
 }
 
-function addDocumentChatItem(items: MenuItem[], documentEntry: WorkspaceEntryContext | null): MenuItem[] {
+function addDocumentActions(items: MenuItem[], documentEntry: WorkspaceEntryContext | null): MenuItem[] {
   if (!documentEntry) {
     return items;
   }
@@ -475,6 +477,12 @@ function addDocumentChatItem(items: MenuItem[], documentEntry: WorkspaceEntryCon
       icon: MessageSquarePlus,
       id: "chat-with-workspace-document",
       label: "对该文档对话",
+    },
+    {
+      action: () => startWorkspaceFileAnnotation(documentEntry),
+      icon: MessageSquareText,
+      id: "annotate-workspace-document",
+      label: "对该文档新增批注",
     },
   ];
 }
@@ -562,6 +570,15 @@ function addWorkspaceFileToChat(context: WorkspaceEntryContext) {
 
 function expandWorkspaceDirectory(context: WorkspaceEntryContext) {
   emitExpandWorkspaceDirectory({
+    path: context.path,
+    sessionId: context.sessionId,
+    workspaceId: context.workspaceId,
+    workspaceRoot: context.workspaceRoot,
+  });
+}
+
+function startWorkspaceFileAnnotation(context: WorkspaceEntryContext) {
+  emitStartWorkspaceFileAnnotation({
     path: context.path,
     sessionId: context.sessionId,
     workspaceId: context.workspaceId,

@@ -8,6 +8,7 @@ import type { RuntimeBridge, WorkspaceFileAnnotationAnchorV2 } from "@/runtime";
 import { FilePreview, type MarkdownOutlineItem, type MarkdownOutlineRevealRequest } from "@/renderer/components/workspace";
 import { createSourceRangeAnchor } from "@/renderer/components/workspace/filePreviewAnnotations";
 import { APP_FIND_SHORTCUT_EVENT } from "@/renderer/events/findShortcut";
+import { APP_START_WORKSPACE_FILE_ANNOTATION_EVENT } from "@/renderer/events/workspaceFileContext";
 import { PreviewProvider, usePreview } from "@/renderer/providers/PreviewProvider";
 
 const mermaidParseResult: ParseResult = { diagramType: "flowchart-v2", config: {} };
@@ -2867,6 +2868,44 @@ describe("FilePreview", () => {
     await waitFor(() => {
       expect(runtime.workspace.listAnnotations).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("opens the file annotation composer from workspace document context requests", async () => {
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "guide.md",
+        content: "# Guide\n\nTarget text",
+        encoding: "utf-8",
+      }),
+      listAnnotations: vi.fn().mockResolvedValue([]),
+    });
+
+    render(
+      <FilePreview
+        request={{ type: "file", path: "guide.md" }}
+        workspaceId="ws-1"
+        sessionId="ses-1"
+        runtime={runtime}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Guide" });
+
+    act(() => {
+      document.dispatchEvent(
+        new CustomEvent(APP_START_WORKSPACE_FILE_ANNOTATION_EVENT, {
+          detail: {
+            path: "guide.md",
+            sessionId: "ses-1",
+            workspaceId: "ws-1",
+          },
+        }),
+      );
+    });
+
+    const panel = await screen.findByLabelText("文件批注");
+    const composer = within(panel).getByRole("textbox", { name: "添加文件级批注" });
+    await waitFor(() => expect(document.activeElement).toBe(composer));
   });
 
   it("closes the annotation panel when clicking the preview body", async () => {
