@@ -767,42 +767,38 @@
 }
 
 .table {
-  width: 824px;
+  width: 790px;
   min-width: 100%;
   border-collapse: collapse;
   table-layout: auto;
 }
 
 .timeColumn {
-  width: 126px;
+  width: 118px;
 }
 
 .modelColumn {
-  width: 220px;
+  width: 214px;
 }
 
-.inputColumn {
-  width: 74px;
+.inputCacheColumn {
+  width: 142px;
 }
 
-.cacheColumn {
-  width: 128px;
+.cacheRateColumn {
+  width: 84px;
 }
 
 .outputColumn {
-  width: 58px;
-}
-
-.totalColumn {
-  width: 68px;
+  width: 56px;
 }
 
 .durationColumn {
-  width: 68px;
+  width: 82px;
 }
 
 .statusColumn {
-  width: 82px;
+  width: 72px;
 }
 
 .table th,
@@ -1006,34 +1002,6 @@
   margin: 0;
   padding: 12px;
   white-space: pre-wrap;
-}
-
-.eventList {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-}
-
-.eventList li {
-  display: grid;
-  gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 50%, transparent);
-  border-radius: var(--radius-md);
-  background: transparent;
-  list-style: none;
-  padding: 10px 12px;
-}
-
-.eventList strong {
-  font-size: 11px;
-}
-
-.eventList span,
-.eventList small {
-  color: var(--color-text-tertiary);
-  font-size: 11px;
-  overflow-wrap: anywhere;
 }
 
 .detailState {

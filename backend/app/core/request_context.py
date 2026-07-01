@@ -14,6 +14,7 @@ session_id_var: ContextVar[str] = ContextVar("session_id", default="")
 active_session_id_var: ContextVar[str] = ContextVar("active_session_id", default="")
 user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 turn_index_var: ContextVar[int | None] = ContextVar("turn_index", default=None)
+user_message_var: ContextVar[str | None] = ContextVar("user_message", default=None)
 tool_call_preset_var: ContextVar[Any | None] = ContextVar("tool_call_preset", default=None)
 skill_catalog_var: ContextVar[Any | None] = ContextVar("skill_catalog", default=None)
 keydex_snapshot_var: ContextVar[Any | None] = ContextVar("keydex_snapshot", default=None)
@@ -26,6 +27,7 @@ class RequestContextToken:
     active_session_id: Token[str] | None = None
     user_id: Token[str] | None = None
     turn_index: Token[int | None] | None = None
+    user_message: Token[str | None] | None = None
     tool_call_preset: Token[Any | None] | None = None
     skill_catalog: Token[Any | None] | None = None
     keydex_snapshot: Token[Any | None] | None = None
@@ -44,6 +46,7 @@ def set_request_context(
     active_session_id: str | None = None,
     user_id: str | None = None,
     turn_index: int | None = None,
+    user_message: str | None = None,
     tool_call_preset: ToolCallPreset | None = None,
     skill_catalog: SkillCatalog | None = None,
     keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None,
@@ -56,6 +59,9 @@ def set_request_context(
         else None,
         user_id=user_id_var.set(user_id) if user_id is not None else None,
         turn_index=turn_index_var.set(turn_index) if turn_index is not None else None,
+        user_message=user_message_var.set(user_message)
+        if user_message is not None
+        else None,
         tool_call_preset=tool_call_preset_var.set(_ToolCallPresetSlot(tool_call_preset))
         if tool_call_preset is not None
         else None,
@@ -75,6 +81,8 @@ def reset_request_context(token: RequestContextToken) -> None:
         tool_call_preset_var.reset(token.tool_call_preset)
     if token.user_id is not None:
         user_id_var.reset(token.user_id)
+    if token.user_message is not None:
+        user_message_var.reset(token.user_message)
     if token.turn_index is not None:
         turn_index_var.reset(token.turn_index)
     if token.active_session_id is not None:
@@ -103,6 +111,10 @@ def get_user_id() -> str:
 
 def get_turn_index() -> int | None:
     return turn_index_var.get()
+
+
+def get_user_message() -> str | None:
+    return user_message_var.get()
 
 
 def set_tool_call_preset(preset: ToolCallPreset) -> Token[Any | None]:

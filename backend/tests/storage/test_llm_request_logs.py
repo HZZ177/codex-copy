@@ -57,6 +57,7 @@ def test_llm_request_logs_start_finish_and_get(tmp_path) -> None:
         output_tokens=31,
         response_preview="模型回答",
         duration_ms=245,
+        time_to_first_token=88,
         end_time="2026-06-18T10:00:01Z",
     )
 
@@ -67,6 +68,7 @@ def test_llm_request_logs_start_finish_and_get(tmp_path) -> None:
     assert finished.output_tokens == 31
     assert finished.total_tokens == 131
     assert finished.duration_ms == 245
+    assert finished.time_to_first_token == 88
     assert finished.response_preview == "模型回答"
     assert finished.gateway_thread_id == "trace_usage"
     assert finished.gateway_trace_id == "gateway_trace_1"
@@ -173,6 +175,7 @@ def test_llm_request_logs_cancel_marks_cancelled(tmp_path) -> None:
         error_message="GeneratorExit",
         response_preview="partial",
         duration_ms=33,
+        time_to_first_token=12,
         end_time="2026-06-20T12:00:01Z",
     )
     cancelled_rows, cancelled_total = repositories.llm_request_logs.list(status="cancelled")
@@ -183,6 +186,7 @@ def test_llm_request_logs_cancel_marks_cancelled(tmp_path) -> None:
     assert cancelled.error_message == "GeneratorExit"
     assert cancelled.response_preview == "partial"
     assert cancelled.duration_ms == 33
+    assert cancelled.time_to_first_token == 12
     assert cancelled_total == 1
     assert cancelled_rows[0].id == "llm_req_cancelled"
     assert summary["request_count"] == 1

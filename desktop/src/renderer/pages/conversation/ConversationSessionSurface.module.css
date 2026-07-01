@@ -17,7 +17,6 @@
   display: grid;
   min-width: 0;
   gap: 6px;
-  border-top: 1px solid var(--color-border-2);
   padding: 8px 10px 10px;
   background: color-mix(in srgb, var(--surface-bg) 94%, var(--color-bg-elevated));
 }

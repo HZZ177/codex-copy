@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
 from backend.app.storage import (
     LLMRequestLogRecord,
     StorageRepositories,
-    TraceEventLogRecord,
     TraceRecord,
 )
 
@@ -117,11 +115,10 @@ class UsageService:
         if record is None:
             raise UsageRequestNotFoundError(f"请求日志不存在: {request_id}")
         trace = self.repositories.trace_records.get(record.trace_record_id)
-        events = self.repositories.trace_event_logs.list_by_trace_record(record.trace_record_id)
         return {
             "request": _request_log_to_dict(record, include_previews=True),
             "trace": _trace_to_dict(trace) if trace else None,
-            "events": [_event_to_summary(event) for event in events],
+            "events": [],
         }
 
 
@@ -148,6 +145,7 @@ def _request_log_to_dict(
         "start_time": record.start_time,
         "end_time": record.end_time,
         "duration_ms": record.duration_ms,
+        "time_to_first_token": record.time_to_first_token,
         "input_tokens": record.input_tokens,
         "cache_read_tokens": record.cache_read_tokens,
         "output_tokens": record.output_tokens,
@@ -180,35 +178,3 @@ def _trace_to_dict(record: TraceRecord) -> dict[str, Any]:
         "total_tokens": record.total_tokens,
         "user_message_preview": record.user_message_preview,
     }
-
-
-def _event_to_summary(record: TraceEventLogRecord) -> dict[str, Any]:
-    return {
-        "id": record.id,
-        "event_type": record.event_type,
-        "source": record.source,
-        "occurred_at": record.occurred_at,
-        "sequence_no": record.sequence_no,
-        "run_id": record.run_id,
-        "turn_index": record.turn_index,
-        "payload_summary": _payload_summary(record.payload),
-    }
-
-
-def _payload_summary(payload: dict[str, Any]) -> str:
-    text = json.dumps(_safe_payload(payload), ensure_ascii=False, separators=(",", ":"))
-    return text if len(text) <= 500 else f"{text[:500]}..."
-
-
-def _safe_payload(payload: Any) -> Any:
-    if isinstance(payload, dict):
-        return {
-            str(key): _safe_payload(value)
-            for key, value in payload.items()
-            if str(key).lower() not in {"api_key", "authorization", "headers", "x-api-key"}
-        }
-    if isinstance(payload, list):
-        return [_safe_payload(item) for item in payload[:20]]
-    if payload is None or isinstance(payload, str | int | float | bool):
-        return payload
-    return str(payload)

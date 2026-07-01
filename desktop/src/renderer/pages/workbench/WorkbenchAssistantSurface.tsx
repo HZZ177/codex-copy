@@ -41,7 +41,9 @@ import { ConversationComposer } from "@/renderer/pages/conversation/Conversation
 import { ConversationPanel, ConversationPanelComposerAccessory } from "@/renderer/pages/conversation/ConversationPanel";
 import {
   BTW_CONVERSATION_TITLE,
-  countLoadedConversationTurns,
+  createBtwConversationHistorySnapshot,
+  filterBtwConversationVisibleMessages,
+  type BtwConversationHistorySnapshot,
 } from "@/renderer/pages/conversation/conversationForkSource";
 import {
   buildTurnNavigationItemsFromMessages,
@@ -138,6 +140,7 @@ export interface WorkbenchAssistantSurfaceProps {
   onDockTransitionChange?: (transitioning: boolean) => void;
   onDockTransitionLayoutChange?: (state: WorkbenchAssistantDockTransitionState) => void;
   btwActive?: boolean;
+  btwLoadedHistoryTurnCount?: number | null;
   onOpenBtwConversation?: () => Promise<AgentSession | null> | AgentSession | null;
   onCloseBtwConversation?: () => void;
 }
@@ -156,6 +159,7 @@ export function WorkbenchAssistantSurface({
   onDockTransitionChange,
   onDockTransitionLayoutChange,
   btwActive = false,
+  btwLoadedHistoryTurnCount = null,
   onOpenBtwConversation,
   onCloseBtwConversation,
 }: WorkbenchAssistantSurfaceProps) {
@@ -191,10 +195,7 @@ export function WorkbenchAssistantSurface({
   const [uncontrolledDrawerWidthPreview, setUncontrolledDrawerWidthPreview] = useState<number | null>(null);
   const [overlayTurnNavigationRequest, setOverlayTurnNavigationRequest] =
     useState<MessageListTurnNavigationRequest | null>(null);
-  const [btwHistorySnapshot, setBtwHistorySnapshot] = useState<{
-    sessionId: string;
-    messageIds: Set<string>;
-  } | null>(null);
+  const [btwHistorySnapshot, setBtwHistorySnapshot] = useState<BtwConversationHistorySnapshot | null>(null);
   const [composerFiles, setComposerFiles] = useState<SelectedFile[]>([]);
   const [composerQuotes, setComposerQuotes] = useState<SelectedQuote[]>([]);
   const modelSelection = useRuntimeModelSelection(runtime, null);
@@ -244,33 +245,31 @@ export function WorkbenchAssistantSurface({
     }
     setBtwHistorySnapshot((current) => {
       if (current?.sessionId === panelSessionId) {
+        if (btwLoadedHistoryTurnCount !== null && current.loadedTurnCount !== btwLoadedHistoryTurnCount) {
+          return {
+            ...current,
+            loadedTurnCount: btwLoadedHistoryTurnCount,
+          };
+        }
         return current;
       }
-      return {
-        sessionId: panelSessionId,
-        messageIds: new Set(panelModel.messages.map((message) => message.id)),
-      };
+      return createBtwConversationHistorySnapshot(panelSessionId, panelModel.messages, {
+        loadedTurnCount: btwLoadedHistoryTurnCount,
+      });
     });
-  }, [btwActive, controller.loading, panelModel.messages, panelSessionId]);
-  const btwHiddenHistoryMessageIds =
-    btwActive && btwHistorySnapshot?.sessionId === panelSessionId ? btwHistorySnapshot.messageIds : null;
+  }, [btwActive, btwLoadedHistoryTurnCount, controller.loading, panelModel.messages, panelSessionId]);
+  const activeBtwHistorySnapshot =
+    btwActive && btwHistorySnapshot?.sessionId === panelSessionId ? btwHistorySnapshot : null;
   const displayPanelMessages = useMemo(() => {
     if (!btwActive) {
       return panelModel.messages;
     }
-    if (!btwHiddenHistoryMessageIds) {
+    if (!activeBtwHistorySnapshot) {
       return [];
     }
-    return panelModel.messages.filter((message) => !btwHiddenHistoryMessageIds.has(message.id));
-  }, [btwActive, btwHiddenHistoryMessageIds, panelModel.messages]);
-  const btwLoadedHistoryTurnCount = useMemo(() => {
-    if (!btwActive || !btwHiddenHistoryMessageIds) {
-      return 0;
-    }
-    return countLoadedConversationTurns(
-      panelModel.messages.filter((message) => btwHiddenHistoryMessageIds.has(message.id)),
-    );
-  }, [btwActive, btwHiddenHistoryMessageIds, panelModel.messages]);
+    return filterBtwConversationVisibleMessages(panelModel.messages, activeBtwHistorySnapshot);
+  }, [activeBtwHistorySnapshot, btwActive, panelModel.messages]);
+  const resolvedBtwLoadedHistoryTurnCount = activeBtwHistorySnapshot?.loadedTurnCount ?? 0;
   const displayPanelModel = useMemo(() => {
     if (!btwActive) {
       return panelModel;
@@ -316,15 +315,15 @@ export function WorkbenchAssistantSurface({
   );
   const btwHistoryNotice = useMemo(
     () =>
-      btwActive
+      btwActive && activeBtwHistorySnapshot
         ? {
-            content: `该会话前置${btwLoadedHistoryTurnCount}轮历史消息已加载`,
+            content: `该会话前置${resolvedBtwLoadedHistoryTurnCount}轮历史消息已加载`,
             tone: "success" as const,
             testId: "btw-conversation-history-notice",
-            title: `该会话前置${btwLoadedHistoryTurnCount}轮历史消息已加载`,
+            title: `该会话前置${resolvedBtwLoadedHistoryTurnCount}轮历史消息已加载`,
           }
         : null,
-    [btwActive, btwLoadedHistoryTurnCount],
+    [activeBtwHistorySnapshot, btwActive, resolvedBtwLoadedHistoryTurnCount],
   );
   const panelMessageCount = displayPanelModel.messages.length;
   panelMessageCountRef.current = panelMessageCount;
@@ -1112,7 +1111,11 @@ export function WorkbenchAssistantSurface({
       quoteChipRequest={composerQuoteChipRequest}
       contextWindowUsage={displayPanelModel.contextWindowUsage}
       allowBypassConversationSlashCommand={!btwActive && Boolean(onOpenBtwConversation)}
-      autoFocusKey={surfaceMode === "capsule" ? undefined : `workbench-composer:${composerFocusSeq}`}
+      autoFocusKey={
+        surfaceMode === "capsule"
+          ? undefined
+          : `workbench-composer:${composerFocusSeq}:${btwActive ? `btw:${panelSessionId}` : "main"}`
+      }
       onSelectedFilesChange={setComposerFiles}
       onSelectedQuotesChange={setComposerQuotes}
       onChange={controller.setDraft}

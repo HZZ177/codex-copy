@@ -1803,18 +1803,31 @@ describe("ConversationPage", () => {
         target_message_event_id: "evt-btw-ai-1",
       }),
     });
-    const history = [
-      historyMessage("user", "历史问题", { messageEventId: "evt-user-1", turnIndex: 1 }),
-      historyMessage("assistant", "可以旁路追问的回答", { messageEventId: "evt-ai-1", turnIndex: 1 }),
+    const sourceHistory = [
+      historyMessage("user", "历史问题 1", { messageEventId: "evt-user-1", turnIndex: 1 }),
+      historyMessage("assistant", "历史回答 1", { messageEventId: "evt-ai-1", turnIndex: 1 }),
+      historyMessage("user", "历史问题 2", { messageEventId: "evt-user-2", turnIndex: 2 }),
+      historyMessage("assistant", "历史回答 2", { messageEventId: "evt-ai-2", turnIndex: 2 }),
+      historyMessage("user", "历史问题 3", { messageEventId: "evt-user-3", turnIndex: 3 }),
+      historyMessage("assistant", "可以旁路追问的回答", { messageEventId: "evt-ai-3", turnIndex: 3 }),
     ];
+    const sidecarHistory = sourceHistory.slice(2);
     const loadHistory = vi.fn((sessionId: string) =>
-      Promise.resolve(historyResponse(sessionId === "ses-btw" ? forkedSession : sourceSession, history)),
+      Promise.resolve(
+        historyResponse(
+          sessionId === "ses-btw" ? forkedSession : sourceSession,
+          sessionId === "ses-btw" ? sidecarHistory : sourceHistory,
+        ),
+      ),
     );
-    const forkSession = vi.fn().mockResolvedValue({
-      session: forkedSession,
-      source: branchSource(),
-    });
-    const { runtime } = fakeRuntime({ session: sourceSession, history, loadHistory, forkSession });
+    let resolveFork: ((response: { session: AgentSession; source: AgentSessionBranchSource }) => void) | null = null;
+    const forkSession = vi.fn(
+      () =>
+        new Promise<{ session: AgentSession; source: AgentSessionBranchSource }>((resolve) => {
+          resolveFork = resolve;
+        }),
+    );
+    const { runtime } = fakeRuntime({ session: sourceSession, history: sourceHistory, loadHistory, forkSession });
 
     renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />, runtime);
 
@@ -1836,14 +1849,32 @@ describe("ConversationPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "在旁路对话中询问选中文本" }));
 
+    expect(await screen.findByRole("status", { name: "正在打开旁路对话" })).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "旁路对话" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByTestId("btw-conversation-panel")).toBeNull();
     await waitFor(() => {
       expect(forkSession).toHaveBeenCalledWith("ses-1", {
-        messageEventId: "evt-ai-1",
+        messageEventId: "evt-ai-3",
         sessionTag: "btw",
         title: "旁路对话",
       });
     });
+    await act(async () => {
+      resolveFork?.({
+        session: forkedSession,
+        source: branchSource(),
+      });
+    });
     const panel = await screen.findByTestId("btw-conversation-panel");
+    await waitFor(() => {
+      expect(within(panel).getByTestId("btw-conversation-history-notice").textContent).toContain(
+        "该会话前置3轮历史消息已加载",
+      );
+    });
+    const sidecarInput = within(panel).getByLabelText("继续输入");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(sidecarInput);
+    });
     await waitFor(() => {
       expect(within(panel).getByLabelText("已添加上下文").textContent).toContain("引用片段");
     });
@@ -2067,6 +2098,67 @@ describe("ConversationPage", () => {
       expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
       expect(screen.getByRole("button", { name: "旁路对话" })).not.toBeNull();
     });
+  });
+
+  it("shows bypass conversation loading immediately from the right sidebar initial page", async () => {
+    const sourceSession = agentSession({ id: "ses-1" });
+    const forkedSession = agentSession({
+      id: "ses-btw",
+      title: "旁路对话",
+      session_tag: "btw",
+    });
+    const sourceHistory = [
+      historyMessage("user", "历史问题", { messageEventId: "evt-user-1", turnIndex: 1 }),
+      historyMessage("assistant", "历史回答", { messageEventId: "evt-ai-1", turnIndex: 1 }),
+    ];
+    let resolveFork: ((response: { session: AgentSession; source: AgentSessionBranchSource }) => void) | null = null;
+    const forkSession = vi.fn(
+      () =>
+        new Promise<{ session: AgentSession; source: AgentSessionBranchSource }>((resolve) => {
+          resolveFork = resolve;
+        }),
+    );
+    const loadHistory = vi.fn((sessionId: string) =>
+      Promise.resolve(
+        historyResponse(
+          sessionId === "ses-btw" ? forkedSession : sourceSession,
+          sessionId === "ses-btw" ? [] : sourceHistory,
+        ),
+      ),
+    );
+    const { runtime } = fakeRuntime({
+      session: sourceSession,
+      history: sourceHistory,
+      loadHistory,
+      forkSession,
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />, runtime);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    fireEvent.click(await screen.findByRole("button", { name: "旁路对话" }));
+
+    expect(await screen.findByRole("status", { name: "正在打开旁路对话" })).not.toBeNull();
+    expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+    expect(screen.getByRole("tab", { name: "旁路对话" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByTestId("btw-conversation-panel")).toBeNull();
+    await waitFor(() => {
+      expect(forkSession).toHaveBeenCalledWith("ses-1", {
+        messageEventId: "evt-ai-1",
+        sessionTag: "btw",
+        title: "旁路对话",
+      });
+    });
+
+    await act(async () => {
+      resolveFork?.({
+        session: forkedSession,
+        source: branchSource(),
+      });
+    });
+
+    expect(await screen.findByTestId("btw-conversation-panel")).not.toBeNull();
   });
 
   it("opens the current project file tree from the right sidebar initial page", async () => {
@@ -2758,6 +2850,7 @@ async function showSelectionToolbar(container: Element, text: string) {
 }
 
 function mockSelection(container: Element, text: string) {
+  const addRange = vi.fn();
   const removeAllRanges = vi.fn();
   const range = {
     commonAncestorContainer: container,
@@ -2777,10 +2870,12 @@ function mockSelection(container: Element, text: string) {
     toString: () => text,
     rangeCount: 1,
     getRangeAt: () => range,
+    addRange,
     removeAllRanges,
   } as unknown as Selection);
 
   return {
+    addRange,
     removeAllRanges,
     restore: () => spy.mockRestore(),
   };

@@ -1,4 +1,12 @@
 .root {
+  --loading-skeleton-line-base-default: color-mix(in srgb, var(--surface-muted) 78%, var(--color-text-4));
+  --loading-skeleton-line-highlight-default: color-mix(in srgb, var(--surface-hover) 68%, var(--color-text-4));
+  --loading-skeleton-line-base-color: var(--loading-skeleton-line-base, var(--loading-skeleton-line-base-default));
+  --loading-skeleton-line-highlight-color: var(
+    --loading-skeleton-line-highlight,
+    var(--loading-skeleton-line-highlight-default)
+  );
+
   display: grid;
   min-width: 0;
   box-sizing: border-box;
@@ -23,17 +31,14 @@
 }
 
 .line {
-  --loading-skeleton-line-base: color-mix(in srgb, var(--surface-muted) 78%, var(--color-text-4));
-  --loading-skeleton-line-highlight: color-mix(in srgb, var(--surface-hover) 68%, var(--color-text-4));
-
   display: block;
   height: 12px;
   border-radius: var(--radius-pill);
   background: linear-gradient(
     90deg,
-    var(--loading-skeleton-line-base) 0%,
-    var(--loading-skeleton-line-highlight) 42%,
-    var(--loading-skeleton-line-base) 84%
+    var(--loading-skeleton-line-base-color) 0%,
+    var(--loading-skeleton-line-highlight-color) 42%,
+    var(--loading-skeleton-line-base-color) 84%
   );
   background-size: 220% 100%;
   animation: loadingSkeleton 1.2s ease-in-out infinite;
@@ -55,6 +60,36 @@
   width: 54%;
 }
 
+.inlineStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: min(320px, 80%);
+  gap: 7px;
+  color: color-mix(in srgb, var(--color-text-3) 84%, transparent);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.inlineDot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-text-3) 58%, transparent);
+  animation: loadingStatusPulse 1.2s ease-in-out infinite;
+}
+
+.inlineLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @keyframes loadingSkeleton {
   0% {
     background-position: 120% 0;
@@ -65,8 +100,22 @@
   }
 }
 
+@keyframes loadingStatusPulse {
+  0%,
+  100% {
+    opacity: 0.36;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .line {
+  .line,
+  .inlineDot {
     animation: none;
   }
 }

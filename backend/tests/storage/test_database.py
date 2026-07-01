@@ -290,6 +290,7 @@ def test_init_database_creates_llm_request_log_columns_and_indexes(tmp_path) -> 
         "start_time",
         "end_time",
         "duration_ms",
+        "time_to_first_token",
         "input_tokens",
         "cache_read_tokens",
         "output_tokens",

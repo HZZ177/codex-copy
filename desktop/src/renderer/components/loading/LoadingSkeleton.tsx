@@ -20,9 +20,20 @@ export function LoadingSkeleton({
   width = "default",
 }: LoadingSkeletonProps) {
   return (
-    <div className={joinClassNames(styles.root, className)} data-testid={testId} role="status" aria-label={ariaLabel ?? label}>
-      <LoadingSkeletonStack className={stackClassName} lineCount={lineCount} width={width} />
-      {label ? <span>{label}</span> : null}
+    <div
+      className={joinClassNames(styles.root, className)}
+      data-testid={testId}
+      role="status"
+      aria-label={ariaLabel ?? label}
+    >
+      {label ? (
+        <span className={styles.inlineStatus} aria-hidden="true">
+          <span className={styles.inlineDot} />
+          <span className={styles.inlineLabel}>{label}</span>
+        </span>
+      ) : (
+        <LoadingSkeletonStack className={stackClassName} lineCount={lineCount} width={width} />
+      )}
     </div>
   );
 }
@@ -51,4 +62,3 @@ function joinClassNames(...classNames: Array<string | undefined>): string | unde
   const value = classNames.filter(Boolean).join(" ");
   return value || undefined;
 }
-

@@ -22,6 +22,7 @@ from backend.app.core.request_context import (
     get_trace_id,
     get_turn_index,
     get_user_id,
+    get_user_message,
 )
 from backend.app.model import ModelSettings
 
@@ -61,6 +62,7 @@ class _LLMRequestLogContext:
     request_id: str
     run_id: str
     started_at: float
+    call_kind: str
     gateway_thread_id: str | None
     gateway_trace_id: str | None
 
@@ -138,6 +140,7 @@ class PatchedChatOpenAI(ChatOpenAI):
             request_id=request_id,
             run_id=run_id,
             started_at=time.perf_counter(),
+            call_kind=call_kind,
             gateway_thread_id=gateway_thread_id,
             gateway_trace_id=gateway_trace_id,
         )
@@ -154,7 +157,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 provider_id=self._llm_provider_id,
                 provider_name=self._llm_provider_name or self.__class__.__name__,
                 model=_model_name(self),
-                request_preview=_preview_value(messages),
+                request_preview=_request_preview(messages),
                 metadata={
                     "run_id": run_id,
                     "call_kind": call_kind,
@@ -174,10 +177,15 @@ class PatchedChatOpenAI(ChatOpenAI):
         response: Any,
         response_preview: str | None = None,
         usage: dict[str, int] | None = None,
+        time_to_first_token: int | None = None,
     ) -> None:
         if self._llm_request_logs is None or context is None:
             return
         resolved_usage = usage or _extract_token_usage(response)
+        duration_ms = _duration_ms(context.started_at)
+        resolved_time_to_first_token = time_to_first_token
+        if resolved_time_to_first_token is None and context.call_kind in {"agenerate", "generate"}:
+            resolved_time_to_first_token = duration_ms
         try:
             self._llm_request_logs.finish(
                 context.request_id,
@@ -188,7 +196,8 @@ class PatchedChatOpenAI(ChatOpenAI):
                 response_preview=response_preview
                 if response_preview is not None
                 else _response_preview(response),
-                duration_ms=_duration_ms(context.started_at),
+                duration_ms=duration_ms,
+                time_to_first_token=resolved_time_to_first_token,
                 gateway_thread_id=context.gateway_thread_id,
                 gateway_trace_id=context.gateway_trace_id,
             )
@@ -203,6 +212,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         *,
         error: BaseException,
         response_preview: str | None = None,
+        time_to_first_token: int | None = None,
     ) -> None:
         if self._llm_request_logs is None or context is None:
             return
@@ -212,6 +222,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 error_message=str(error) or type(error).__name__,
                 response_preview=response_preview,
                 duration_ms=_duration_ms(context.started_at),
+                time_to_first_token=time_to_first_token,
                 gateway_thread_id=context.gateway_thread_id,
                 gateway_trace_id=context.gateway_trace_id,
             )
@@ -227,6 +238,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         *,
         error: BaseException,
         response_preview: str | None = None,
+        time_to_first_token: int | None = None,
     ) -> None:
         if self._llm_request_logs is None or context is None:
             return
@@ -236,6 +248,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 error_message=str(error) or type(error).__name__,
                 response_preview=response_preview,
                 duration_ms=_duration_ms(context.started_at),
+                time_to_first_token=time_to_first_token,
                 gateway_thread_id=context.gateway_thread_id,
                 gateway_trace_id=context.gateway_trace_id,
             )
@@ -345,6 +358,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         seen_cache_read_tokens: int | None = None
         stream_usage = _empty_token_usage()
         response_parts: list[str] = []
+        time_to_first_token: int | None = None
         try:
             async for chunk in super()._astream(
                 messages,
@@ -377,6 +391,8 @@ class PatchedChatOpenAI(ChatOpenAI):
                     _merge_token_usage(stream_usage, _extract_token_usage_from_metadata(usage))
                 text = _message_text(chunk_msg)
                 if text:
+                    if time_to_first_token is None and request_log is not None:
+                        time_to_first_token = _duration_ms(request_log.started_at)
                     response_parts.append(text)
                 yield chunk
         except (asyncio.CancelledError, GeneratorExit) as exc:
@@ -384,6 +400,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 request_log,
                 error=exc,
                 response_preview="".join(response_parts),
+                time_to_first_token=time_to_first_token,
             )
             logger.info(
                 f"[LLM] astream 已取消 | run_id={run_id} | "
@@ -395,6 +412,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 request_log,
                 error=exc,
                 response_preview="".join(response_parts),
+                time_to_first_token=time_to_first_token,
             )
             logger.opt(exception=True).error(
                 f"[LLM] astream 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
@@ -406,6 +424,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 response=None,
                 response_preview="".join(response_parts),
                 usage=stream_usage,
+                time_to_first_token=time_to_first_token,
             )
         finally:
             pop_llm_gateway_trace_id(run_id)
@@ -471,6 +490,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         seen_cache_read_tokens: int | None = None
         stream_usage = _empty_token_usage()
         response_parts: list[str] = []
+        time_to_first_token: int | None = None
         try:
             for chunk in super()._stream(
                 messages,
@@ -503,6 +523,8 @@ class PatchedChatOpenAI(ChatOpenAI):
                     _merge_token_usage(stream_usage, _extract_token_usage_from_metadata(usage))
                 text = _message_text(chunk_msg)
                 if text:
+                    if time_to_first_token is None and request_log is not None:
+                        time_to_first_token = _duration_ms(request_log.started_at)
                     response_parts.append(text)
                 yield chunk
         except (asyncio.CancelledError, GeneratorExit) as exc:
@@ -510,6 +532,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 request_log,
                 error=exc,
                 response_preview="".join(response_parts),
+                time_to_first_token=time_to_first_token,
             )
             logger.info(
                 f"[LLM] stream 已取消 | run_id={run_id} | "
@@ -521,6 +544,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 request_log,
                 error=exc,
                 response_preview="".join(response_parts),
+                time_to_first_token=time_to_first_token,
             )
             logger.opt(exception=True).error(
                 f"[LLM] stream 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
@@ -532,6 +556,7 @@ class PatchedChatOpenAI(ChatOpenAI):
                 response=None,
                 response_preview="".join(response_parts),
                 usage=stream_usage,
+                time_to_first_token=time_to_first_token,
             )
         finally:
             pop_llm_gateway_trace_id(run_id)
@@ -662,6 +687,13 @@ def _response_preview(value: Any) -> str:
                 if text:
                     return text
     return _message_text(value) or _preview_value(value)
+
+
+def _request_preview(messages: list[Any]) -> str:
+    user_message = get_user_message()
+    if user_message is not None:
+        return _preview_value(user_message)
+    return _preview_value(messages)
 
 
 def _message_text(message: Any) -> str:

@@ -37,12 +37,21 @@ describe("UsageStatsPage", () => {
     expect(screen.getByText("非缓存命中输入 Token")).not.toBeNull();
     expect(screen.getByText("命中缓存 Token")).not.toBeNull();
     expect(screen.getByLabelText("平均缓存命中率 72.4%")).not.toBeNull();
-    expect(screen.getByText("72.4%")).not.toBeNull();
-    expect(screen.getAllByText("18,445")).toHaveLength(1);
-    expect(screen.getAllByText("17,907")).toHaveLength(1);
+    expect(screen.getAllByText("72.4%")).toHaveLength(2);
+    expect(screen.queryByText("18,445")).toBeNull();
+    expect(screen.queryByText("17,907")).toBeNull();
     expect(screen.getAllByText("4,947")).toHaveLength(1);
     expect(screen.getAllByText("12,960")).toHaveLength(1);
-    expect(screen.getByText("12,960 (72.4%)")).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "总输入/命中缓存" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "缓存命中率" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "用时/首字" })).not.toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "耗时" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "首字时长" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "总量" })).toBeNull();
+    expect(screen.getByText("17,907 / 12,960")).not.toBeNull();
+    expect(screen.queryByText("12,960 (72.4%)")).toBeNull();
+    expect(screen.getByText("640ms")).not.toBeNull();
+    expect(screen.queryByText("2.4s / 640ms")).toBeNull();
     expect(screen.getAllByText("538")).toHaveLength(2);
     expect(screen.getByTestId("usage-token-heatwall")).not.toBeNull();
     expect(screen.getByTestId("usage-trend-chart")).not.toBeNull();
@@ -266,8 +275,11 @@ describe("UsageStatsPage", () => {
     expect(runtime.usage.getRequestDetail).toHaveBeenCalledWith("llm_req_1");
     expect(screen.getByText("trace-1")).not.toBeNull();
     expect(screen.getByText("ses-1234567890")).not.toBeNull();
+    expect(screen.getAllByText("640ms").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("2.4s / 640ms")).toBeNull();
     expect(screen.getByText("命中缓存 12,960 (72.4%)")).not.toBeNull();
-    expect(screen.getByText("on_chat_model_end")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "事件摘要" })).toBeNull();
+    expect(screen.queryByText("on_chat_model_end")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "跳转对话" }));
     expect(onNavigateToConversationTurn).toHaveBeenCalledWith({
@@ -564,6 +576,7 @@ function defaultRequests(): UsageRequestListResponse {
         start_time: "2026-06-19T23:12:00Z",
         end_time: "2026-06-19T23:12:02Z",
         duration_ms: 2400,
+        time_to_first_token: 640,
         input_tokens: 17_907,
         cache_read_tokens: 12_960,
         output_tokens: 538,

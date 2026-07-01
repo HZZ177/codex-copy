@@ -1111,10 +1111,9 @@ function UsageRequestTable({
         <colgroup>
           <col className={styles.timeColumn} />
           <col className={styles.modelColumn} />
-          <col className={styles.inputColumn} />
-          <col className={styles.cacheColumn} />
+          <col className={styles.inputCacheColumn} />
+          <col className={styles.cacheRateColumn} />
           <col className={styles.outputColumn} />
-          <col className={styles.totalColumn} />
           <col className={styles.durationColumn} />
           <col className={styles.statusColumn} />
         </colgroup>
@@ -1122,11 +1121,10 @@ function UsageRequestTable({
           <tr>
             <th>时间</th>
             <th>模型</th>
-            <th>总输入</th>
-            <th>命中缓存</th>
+            <th>总输入/命中缓存</th>
+            <th>缓存命中率</th>
             <th>输出</th>
-            <th>总量</th>
-            <th>耗时</th>
+            <th>用时/首字</th>
             <th>状态</th>
           </tr>
         </thead>
@@ -1135,11 +1133,10 @@ function UsageRequestTable({
             <tr key={row.id} onClick={() => onOpen(row.id)} tabIndex={0}>
               <td>{formatDateTime(row.start_time)}</td>
               <td title={row.model}>{row.model}</td>
-              <td>{formatNumber(row.input_tokens)}</td>
-              <td>{formatCacheHitTokens(row)}</td>
+              <td>{formatInputCacheTokens(row)}</td>
+              <td>{formatCacheHitPercent(row)}</td>
               <td>{formatNumber(row.output_tokens)}</td>
-              <td>{formatNumber(row.total_tokens)}</td>
-              <td>{formatDuration(row.duration_ms)}</td>
+              <td>{formatUsageLatency(row)}</td>
               <td>
                 <span className={styles.status} data-status={row.status}>
                   {statusLabel(row.status)}
@@ -1149,7 +1146,7 @@ function UsageRequestTable({
           ))}
           {loading ? (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={7}>
                 <span className={styles.loadingLine}>
                   <Loader2 className={styles.spin} size={15} />
                   正在读取请求日志
@@ -1272,8 +1269,8 @@ function UsageDetailContent({
           <dd>{request.model}</dd>
           <dt>状态</dt>
           <dd>{statusLabel(request.status)}</dd>
-          <dt>耗时</dt>
-          <dd>{formatDuration(request.duration_ms)}</dd>
+          <dt>用时/首字</dt>
+          <dd>{formatUsageLatency(request)}</dd>
           <dt>Trace</dt>
           <dd>{request.trace_id}</dd>
           <dt>网关 Thread</dt>
@@ -1307,22 +1304,6 @@ function UsageDetailContent({
       <section>
         <h3>响应摘要</h3>
         <pre>{request.response_preview || "无响应摘要"}</pre>
-      </section>
-      <section>
-        <h3>事件摘要</h3>
-        {detail.events.length ? (
-          <ul className={styles.eventList}>
-            {detail.events.map((event) => (
-              <li key={event.id}>
-                <strong>{event.event_type}</strong>
-                <span>{event.source}</span>
-                <small>{event.payload_summary}</small>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className={styles.detailState}>暂无事件摘要</div>
-        )}
       </section>
     </div>
   );
@@ -1516,9 +1497,16 @@ function cacheHitRate(cacheReadTokens: number | null | undefined, inputTokens: n
 }
 
 function formatCacheHitTokens(value: TokenInputLike) {
+  return `${formatNumber(value.cache_read_tokens)} (${formatCacheHitPercent(value)})`;
+}
+
+function formatInputCacheTokens(value: TokenInputLike) {
+  return `${formatNumber(value.input_tokens)} / ${formatNumber(value.cache_read_tokens)}`;
+}
+
+function formatCacheHitPercent(value: TokenInputLike) {
   const inputTokens = value.input_tokens ?? 0;
-  const percent = inputTokens > 0 ? formatPercent(cacheHitRate(value.cache_read_tokens, inputTokens)) : "-";
-  return `${formatNumber(value.cache_read_tokens)} (${percent})`;
+  return inputTokens > 0 ? formatPercent(cacheHitRate(value.cache_read_tokens, inputTokens)) : "-";
 }
 
 function formatPercent(value: number) {
@@ -1531,6 +1519,14 @@ function formatDuration(value: number | null | undefined) {
     return `${ms}ms`;
   }
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+}
+
+function formatNullableDuration(value: number | null | undefined) {
+  return value == null ? "-" : formatDuration(value);
+}
+
+function formatUsageLatency(value: Pick<UsageRequestLog, "time_to_first_token">) {
+  return formatNullableDuration(value.time_to_first_token);
 }
 
 function statusLabel(status: string) {

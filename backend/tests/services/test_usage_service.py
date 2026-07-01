@@ -46,6 +46,7 @@ def _seed_request(repositories: StorageRepositories) -> None:
         cache_read_tokens=6,
         output_tokens=9,
         duration_ms=321,
+        time_to_first_token=97,
         response_preview="统计结果",
         end_time="2026-06-18T10:00:01Z",
     )
@@ -111,11 +112,12 @@ def test_usage_service_summarizes_trend_and_request_list(tmp_path) -> None:
     assert listed["list"][0]["id"] == "llm_req_service"
     assert listed["list"][0]["request_preview"] == "统计一下"
     assert listed["list"][0]["model"] == "deepseek-v4-flash"
+    assert listed["list"][0]["time_to_first_token"] == 97
     assert listed["list"][0]["gateway_thread_id"] == "trace_usage_service"
     assert listed["list"][0]["gateway_trace_id"] == "gateway_trace_service"
 
 
-def test_usage_service_returns_request_detail_with_trace_and_event_summary(tmp_path) -> None:
+def test_usage_service_returns_request_detail_without_event_summary(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     _seed_request(repositories)
     service = UsageService(repositories)
@@ -123,12 +125,11 @@ def test_usage_service_returns_request_detail_with_trace_and_event_summary(tmp_p
     detail = service.get_request_detail("llm_req_service")
 
     assert detail["request"]["response_preview"] == "统计结果"
+    assert detail["request"]["time_to_first_token"] == 97
     assert detail["request"]["gateway_thread_id"] == "trace_usage_service"
     assert detail["request"]["gateway_trace_id"] == "gateway_trace_service"
     assert detail["trace"]["user_message_preview"] == "统计一下"
-    assert detail["events"][0]["event_type"] == "turn.completed"
-    assert detail["events"][0]["run_id"] == "run_1"
-    assert "authorization" not in detail["events"][0]["payload_summary"]
+    assert detail["events"] == []
 
 
 def test_usage_service_raises_for_missing_request(tmp_path) -> None:

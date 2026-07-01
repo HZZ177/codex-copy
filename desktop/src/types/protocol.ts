@@ -355,6 +355,7 @@ export interface UsageRequestLog {
   start_time: string;
   end_time?: string | null;
   duration_ms?: number | null;
+  time_to_first_token?: number | null;
   input_tokens: number;
   cache_read_tokens: number;
   output_tokens: number;

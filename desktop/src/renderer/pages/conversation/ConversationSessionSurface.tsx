@@ -21,7 +21,11 @@ import { ConversationComposer } from "./ConversationComposer";
 import { ConversationPanel, ConversationPanelComposerAccessory } from "./ConversationPanel";
 import { useConversationPanelModel } from "./useConversationPanelModel";
 import { ComposerApprovalCard } from "./ComposerApprovalCard";
-import { countLoadedConversationTurns } from "./conversationForkSource";
+import {
+  createBtwConversationHistorySnapshot,
+  filterBtwConversationVisibleMessages,
+  type BtwConversationHistorySnapshot,
+} from "./conversationForkSource";
 import { consumeQuickChatSend } from "./quickSend";
 import styles from "./ConversationSessionSurface.module.css";
 
@@ -37,15 +41,11 @@ export interface ConversationSessionSurfaceProps {
   mode?: ConversationSessionSurfaceMode;
   previewPanelScopeKey?: string | null;
   sidecarQuoteRequest?: SendBoxExternalQuoteRequest | null;
+  sidecarLoadedHistoryTurnCount?: number | null;
   onOpenModelSettings?: () => void;
   onSidecarQuoteRequestHandled?: (requestId: number) => void;
   onQuickSendConsumed?: () => void;
   onNavigateToConversation?: (threadId: string) => void;
-}
-
-interface SidecarHistorySnapshot {
-  sessionId: string;
-  messageIds: Set<string>;
 }
 
 export function ConversationSessionSurface({
@@ -58,6 +58,7 @@ export function ConversationSessionSurface({
   mode = "main",
   previewPanelScopeKey = null,
   sidecarQuoteRequest = null,
+  sidecarLoadedHistoryTurnCount = null,
   onOpenModelSettings,
   onSidecarQuoteRequestHandled,
   onQuickSendConsumed,
@@ -70,7 +71,7 @@ export function ConversationSessionSurface({
   const scrollToBottomAfterSendRef = useRef<(() => void) | null>(null);
   const runtimeEventSideEffectsRef = useRef<(event: AgentActionEnvelope) => void>(() => undefined);
   const runtimeErrorRef = useRef<(reason: unknown) => boolean | void>(() => false);
-  const [sidecarHistorySnapshot, setSidecarHistorySnapshot] = useState<SidecarHistorySnapshot | null>(null);
+  const [sidecarHistorySnapshot, setSidecarHistorySnapshot] = useState<BtwConversationHistorySnapshot | null>(null);
   const notifications = useNotifications();
   const rightSidebarConversation = useOptionalRightSidebarConversation();
   const modelSelection = useRuntimeModelSelection(runtime, initialModel);
@@ -141,25 +142,18 @@ export function ConversationSessionSurface({
     onNavigateToForkSource: onNavigateToConversation ? navigateToForkSource : undefined,
   });
   const runtimeState = panelModel.runtimeState;
-  const sidecarHiddenHistoryMessageIds =
-    isSidecar && sidecarHistorySnapshot?.sessionId === threadId ? sidecarHistorySnapshot.messageIds : null;
+  const activeSidecarHistorySnapshot =
+    isSidecar && sidecarHistorySnapshot?.sessionId === threadId ? sidecarHistorySnapshot : null;
   const sidecarMessages = useMemo(() => {
     if (!isSidecar) {
       return panelModel.messages;
     }
-    if (!sidecarHiddenHistoryMessageIds) {
+    if (!activeSidecarHistorySnapshot) {
       return [];
     }
-    return panelModel.messages.filter((message) => !sidecarHiddenHistoryMessageIds.has(message.id));
-  }, [isSidecar, panelModel.messages, sidecarHiddenHistoryMessageIds]);
-  const sidecarLoadedHistoryTurnCount = useMemo(() => {
-    if (!isSidecar || !sidecarHiddenHistoryMessageIds) {
-      return 0;
-    }
-    return countLoadedConversationTurns(
-      panelModel.messages.filter((message) => sidecarHiddenHistoryMessageIds.has(message.id)),
-    );
-  }, [isSidecar, panelModel.messages, sidecarHiddenHistoryMessageIds]);
+    return filterBtwConversationVisibleMessages(panelModel.messages, activeSidecarHistorySnapshot);
+  }, [activeSidecarHistorySnapshot, isSidecar, panelModel.messages]);
+  const resolvedSidecarLoadedHistoryTurnCount = activeSidecarHistorySnapshot?.loadedTurnCount ?? 0;
   const sidecarPanelModel = useMemo(() => {
     if (!isSidecar) {
       return panelModel;
@@ -189,15 +183,15 @@ export function ConversationSessionSurface({
   }, [focusTurnIndex, focusTurnRequestId]);
   const sidecarHistoryNotice = useMemo(
     () =>
-      isSidecar
+      isSidecar && activeSidecarHistorySnapshot
         ? {
-            content: `该会话前置${sidecarLoadedHistoryTurnCount}轮历史消息已加载`,
+            content: `该会话前置${resolvedSidecarLoadedHistoryTurnCount}轮历史消息已加载`,
             tone: "success" as const,
             testId: "btw-conversation-history-notice",
-            title: `该会话前置${sidecarLoadedHistoryTurnCount}轮历史消息已加载`,
+            title: `该会话前置${resolvedSidecarLoadedHistoryTurnCount}轮历史消息已加载`,
           }
         : null,
-    [isSidecar, sidecarLoadedHistoryTurnCount],
+    [activeSidecarHistorySnapshot, isSidecar, resolvedSidecarLoadedHistoryTurnCount],
   );
   const title = session?.title || (threadId ? `对话 ${threadId}` : "对话");
   const workspaceMeta = conversationWorkspaceMeta(session);
@@ -228,14 +222,22 @@ export function ConversationSessionSurface({
     }
     setSidecarHistorySnapshot((current) => {
       if (current?.sessionId === threadId) {
+        if (
+          sidecarLoadedHistoryTurnCount !== null &&
+          current.loadedTurnCount !== sidecarLoadedHistoryTurnCount
+        ) {
+          return {
+            ...current,
+            loadedTurnCount: sidecarLoadedHistoryTurnCount,
+          };
+        }
         return current;
       }
-      return {
-        sessionId: threadId,
-        messageIds: new Set(panelModel.messages.map((message) => message.id)),
-      };
+      return createBtwConversationHistorySnapshot(threadId, panelModel.messages, {
+        loadedTurnCount: sidecarLoadedHistoryTurnCount,
+      });
     });
-  }, [isSidecar, loading, panelModel.messages, threadId]);
+  }, [isSidecar, loading, panelModel.messages, sidecarLoadedHistoryTurnCount, threadId]);
 
   const changeModel = useCallback(
     (selection: RuntimeSelectedModel | null) => {
@@ -434,6 +436,7 @@ export function ConversationSessionSurface({
       onExternalQuoteRequestHandled={handleExternalQuoteRequestHandled}
       contextWindowUsage={panelModel.contextWindowUsage}
       modelSelectorPlacement={isSidecar ? "bottom" : "top"}
+      autoFocusKey={isSidecar ? `sidecar:${threadId}` : undefined}
     />
   );
 

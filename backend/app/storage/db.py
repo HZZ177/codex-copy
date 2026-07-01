@@ -359,6 +359,7 @@ create table if not exists llm_request_logs (
   start_time text not null,
   end_time text,
   duration_ms integer,
+  time_to_first_token integer,
   input_tokens integer not null default 0,
   cache_read_tokens integer not null default 0,
   output_tokens integer not null default 0,
@@ -546,6 +547,7 @@ class Database:
             self._migrate_model_default_scopes(conn)
             self._ensure_column(conn, "llm_request_logs", "gateway_thread_id", "text")
             self._ensure_column(conn, "llm_request_logs", "gateway_trace_id", "text")
+            self._ensure_column(conn, "llm_request_logs", "time_to_first_token", "integer")
             self._ensure_column(conn, "workspace_file_annotations", "anchor_json", "text")
             self._ensure_column(conn, "trace_record", "input_checkpoint_id", "text")
             self._ensure_column(conn, "trace_record", "input_checkpoint_ns", "text")

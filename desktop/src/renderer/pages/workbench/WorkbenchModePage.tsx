@@ -62,6 +62,7 @@ export function WorkbenchModePage({
   const handledFilePanelRequestIdRef = useRef(previewContext?.filePanelRequest?.requestId ?? 0);
   const [creatingSession, setCreatingSession] = useState(false);
   const [btwSession, setBtwSession] = useState<AgentSession | null>(null);
+  const [btwLoadedHistoryTurnCount, setBtwLoadedHistoryTurnCount] = useState<number | null>(null);
   const [dockTransitioning, setDockTransitioning] = useState(false);
   const [dockTransitionLayout, setDockTransitionLayout] = useState<WorkbenchAssistantDockTransitionState>({
     phase: "idle",
@@ -168,6 +169,7 @@ export function WorkbenchModePage({
         return null;
       }
       setBtwSession(result.session);
+      setBtwLoadedHistoryTurnCount(result.loadedHistoryTurnCount);
       notifications.success("已打开旁路对话");
       return result.session;
     } catch (reason) {
@@ -178,12 +180,14 @@ export function WorkbenchModePage({
 
   const closeWorkbenchBtwConversation = useCallback(() => {
     setBtwSession(null);
+    setBtwLoadedHistoryTurnCount(null);
   }, []);
 
   useEffect(() => {
     handledFilePanelRequestIdRef.current = previewContext?.filePanelRequest?.requestId ?? 0;
     setWorkspacePreviewRequest({ path: null, requestId: 0, revealTarget: null });
     setBtwSession(null);
+    setBtwLoadedHistoryTurnCount(null);
   }, [selectedSessionId, workspaceId]);
 
   useEffect(() => {
@@ -297,6 +301,7 @@ export function WorkbenchModePage({
             drawerInlineWidth={drawerInlineWidth}
             drawerWidth={drawerWidth}
             btwActive={btwActive}
+            btwLoadedHistoryTurnCount={btwLoadedHistoryTurnCount}
             onOpenBtwConversation={openWorkbenchBtwConversation}
             onCloseBtwConversation={closeWorkbenchBtwConversation}
             onRequestNewSession={!btwActive && onRequestNewSession ? requestNewWorkbenchSession : undefined}

@@ -9,6 +9,7 @@ export interface OpenRightSidebarConversationRequest {
   sourceSessionId?: string | null;
   title?: string | null;
   quote?: SelectedQuote | null;
+  loadedHistoryTurnCount?: number | null;
 }
 
 export interface OpenBtwConversationRequest {

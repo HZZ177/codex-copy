@@ -106,6 +106,7 @@ describe("WorkbenchAssistantSurface", () => {
             ],
           })}
           btwActive
+          btwLoadedHistoryTurnCount={3}
           onCloseBtwConversation={onCloseBtwConversation}
         />
       </WorkbenchSurfaceTestProviders>,
@@ -115,14 +116,131 @@ describe("WorkbenchAssistantSurface", () => {
     await waitForSurfaceMode("drawer", 8000);
 
     const notice = await screen.findByTestId("btw-conversation-history-notice");
-    expect(notice.textContent).toContain("该会话前置1轮历史消息已加载");
+    expect(notice.textContent).toContain("该会话前置3轮历史消息已加载");
     expect(notice.querySelector("svg")).toBeNull();
     expect(screen.queryByText("历史用户消息")).toBeNull();
     expect(screen.queryByText("历史助手消息")).toBeNull();
+    const input = screen.getByRole("textbox", { name: "工作台助手输入" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
+    });
 
     const header = screen.getByTestId("workbench-assistant-drawer-header");
     fireEvent.click(within(header).getByRole("button", { name: "返回主对话" }));
     expect(onCloseBtwConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the workbench bypass drawer pinned to new turns after history refreshes", async () => {
+    const btwSession = session("btw-1", { title: "旁路对话", session_tag: "btw" });
+    const initialHistory = [
+      agentMessage({
+        id: "history-user-1",
+        sessionId: "btw-1",
+        role: "user",
+        content: "历史用户消息 1",
+        turnIndex: 1,
+      }),
+      agentMessage({
+        id: "history-assistant-1",
+        sessionId: "btw-1",
+        role: "assistant",
+        content: "历史助手消息 1",
+        turnIndex: 1,
+      }),
+      agentMessage({
+        id: "history-user-2",
+        sessionId: "btw-1",
+        role: "user",
+        content: "历史用户消息 2",
+        turnIndex: 2,
+      }),
+      agentMessage({
+        id: "history-assistant-2",
+        sessionId: "btw-1",
+        role: "assistant",
+        content: "历史助手消息 2",
+        turnIndex: 2,
+      }),
+    ];
+    const { rerender } = render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController({ session: btwSession, agentMessages: initialHistory })}
+          btwActive
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "将工作台助手展开到右侧" }));
+    await waitForSurfaceMode("drawer", 8000);
+
+    const notice = await screen.findByTestId("btw-conversation-history-notice");
+    expect(notice.textContent).toContain("该会话前置2轮历史消息已加载");
+    expect(screen.queryByText("历史用户消息 1")).toBeNull();
+    expect(screen.queryByText("历史助手消息 2")).toBeNull();
+
+    rerender(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchAssistantSurface
+          runtime={fakeRuntime()}
+          workspaceId="ws-1"
+          workspace={workspace()}
+          controller={fakeController({
+            session: btwSession,
+            agentMessages: [
+              agentMessage({
+                id: "history-user-1-refresh",
+                sessionId: "btw-1",
+                role: "user",
+                content: "历史用户消息 1",
+                turnIndex: 1,
+              }),
+              agentMessage({
+                id: "history-assistant-1-refresh",
+                sessionId: "btw-1",
+                role: "assistant",
+                content: "历史助手消息 1",
+                turnIndex: 1,
+              }),
+              agentMessage({
+                id: "history-user-2-refresh",
+                sessionId: "btw-1",
+                role: "user",
+                content: "历史用户消息 2",
+                turnIndex: 2,
+              }),
+              agentMessage({
+                id: "history-assistant-2-refresh",
+                sessionId: "btw-1",
+                role: "assistant",
+                content: "历史助手消息 2",
+                turnIndex: 2,
+              }),
+              agentMessage({ id: "new-user", sessionId: "btw-1", role: "user", content: "新的旁路问题", turnIndex: 3 }),
+              agentMessage({
+                id: "new-assistant",
+                sessionId: "btw-1",
+                role: "assistant",
+                content: "新的旁路回答",
+                turnIndex: 3,
+              }),
+            ],
+          })}
+          btwActive
+        />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    expect(screen.getByTestId("btw-conversation-history-notice").textContent).toContain(
+      "该会话前置2轮历史消息已加载",
+    );
+    expect(screen.queryByText("历史用户消息 1")).toBeNull();
+    expect(screen.queryByText("历史助手消息 2")).toBeNull();
+    expect(await screen.findByText("新的旁路问题")).not.toBeNull();
+    expect(screen.getByText("新的旁路回答")).not.toBeNull();
   });
 
   it("updates context window usage in the workbench composer from live runtime snapshots", async () => {

@@ -577,6 +577,7 @@ class ChatService:
             active_session_id=active_session_id,
             user_id=request.user_id or session.user_id,
             turn_index=turn_index,
+            user_message=request.message,
         )
         runtime_metadata = {"runtime": "desktop", "agent_runtime": "langchain"}
         if request.runtime_params:
@@ -944,6 +945,7 @@ class ChatService:
         agent_context_token = self._set_agent_runtime_context(
             tool_context=tool_context,
             skill_activation=skill_activation,
+            user_message=request.message,
         )
         try:
             agent = self.agent_runner.create_agent(
@@ -1103,6 +1105,7 @@ class ChatService:
         *,
         tool_context: ToolExecutionContext,
         skill_activation: SkillActivationRequest | None,
+        user_message: str | None = None,
     ):
         skill_catalog = tool_context.metadata.get("skill_catalog")
         if not isinstance(skill_catalog, SkillCatalog):
@@ -1112,6 +1115,7 @@ class ChatService:
             keydex_snapshot = None
         return set_request_context(
             tool_call_preset=_build_skill_activation_preset(skill_activation),
+            user_message=user_message,
             skill_catalog=skill_catalog,
             keydex_snapshot=keydex_snapshot,
         )

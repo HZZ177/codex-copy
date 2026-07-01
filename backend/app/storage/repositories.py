@@ -294,6 +294,7 @@ class LLMRequestLogRecord:
     provider_name: str | None = None
     end_time: str | None = None
     duration_ms: int | None = None
+    time_to_first_token: int | None = None
     input_tokens: int = 0
     cache_read_tokens: int = 0
     output_tokens: int = 0
@@ -2607,6 +2608,7 @@ class LLMRequestLogsRepository:
         response_preview: str | None = None,
         metadata: dict[str, Any] | None = None,
         duration_ms: int | None = None,
+        time_to_first_token: int | None = None,
         end_time: str | None = None,
         gateway_thread_id: str | None = None,
         gateway_trace_id: str | None = None,
@@ -2621,6 +2623,7 @@ class LLMRequestLogsRepository:
             response_preview=response_preview,
             metadata=metadata,
             duration_ms=duration_ms,
+            time_to_first_token=time_to_first_token,
             end_time=end_time,
             gateway_thread_id=gateway_thread_id,
             gateway_trace_id=gateway_trace_id,
@@ -2638,6 +2641,7 @@ class LLMRequestLogsRepository:
         response_preview: str | None = None,
         metadata: dict[str, Any] | None = None,
         duration_ms: int | None = None,
+        time_to_first_token: int | None = None,
         end_time: str | None = None,
         gateway_thread_id: str | None = None,
         gateway_trace_id: str | None = None,
@@ -2653,6 +2657,7 @@ class LLMRequestLogsRepository:
             error_message=error_message,
             metadata=metadata,
             duration_ms=duration_ms,
+            time_to_first_token=time_to_first_token,
             end_time=end_time,
             gateway_thread_id=gateway_thread_id,
             gateway_trace_id=gateway_trace_id,
@@ -2670,6 +2675,7 @@ class LLMRequestLogsRepository:
         response_preview: str | None = None,
         metadata: dict[str, Any] | None = None,
         duration_ms: int | None = None,
+        time_to_first_token: int | None = None,
         end_time: str | None = None,
         gateway_thread_id: str | None = None,
         gateway_trace_id: str | None = None,
@@ -2685,6 +2691,7 @@ class LLMRequestLogsRepository:
             error_message=error_message,
             metadata=metadata,
             duration_ms=duration_ms,
+            time_to_first_token=time_to_first_token,
             end_time=end_time,
             gateway_thread_id=gateway_thread_id,
             gateway_trace_id=gateway_trace_id,
@@ -2895,6 +2902,7 @@ class LLMRequestLogsRepository:
         error_message: str | None = None,
         metadata: dict[str, Any] | None = None,
         duration_ms: int | None = None,
+        time_to_first_token: int | None = None,
         end_time: str | None = None,
         gateway_thread_id: str | None = None,
         gateway_trace_id: str | None = None,
@@ -2915,6 +2923,7 @@ class LLMRequestLogsRepository:
                   status = ?,
                   end_time = ?,
                   duration_ms = coalesce(?, duration_ms),
+                  time_to_first_token = coalesce(?, time_to_first_token),
                   gateway_thread_id = coalesce(?, gateway_thread_id),
                   gateway_trace_id = coalesce(?, gateway_trace_id),
                   input_tokens = ?,
@@ -2931,6 +2940,7 @@ class LLMRequestLogsRepository:
                     status,
                     resolved_end_time,
                     duration_ms,
+                    time_to_first_token,
                     gateway_thread_id,
                     gateway_trace_id,
                     max(0, int(input_tokens or 0)),
@@ -2993,6 +3003,7 @@ class LLMRequestLogsRepository:
             start_time=row["start_time"],
             end_time=row["end_time"],
             duration_ms=row["duration_ms"],
+            time_to_first_token=row["time_to_first_token"],
             input_tokens=int(row["input_tokens"]),
             cache_read_tokens=int(row["cache_read_tokens"]),
             output_tokens=int(row["output_tokens"]),

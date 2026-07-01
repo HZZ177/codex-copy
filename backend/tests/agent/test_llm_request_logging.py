@@ -58,11 +58,13 @@ async def test_patched_chat_openai_logs_non_streaming_completion(tmp_path) -> No
     assert record.provider_id == "provider-1"
     assert record.provider_name == "测试供应商"
     assert record.model == "logged-model"
+    assert record.request_preview == "这一轮用户消息"
     assert record.input_tokens == 12
     assert record.cache_read_tokens == 3
     assert record.output_tokens == 5
     assert record.total_tokens == 17
     assert record.response_preview == "完成"
+    assert record.time_to_first_token == record.duration_ms
     assert captured_headers["ah-thread-id"] == "trace_llm"
     assert captured_headers["ah-trace-id"] == record.gateway_trace_id
 
@@ -155,6 +157,9 @@ async def test_patched_chat_openai_logs_agent_stream_close_as_cancelled(tmp_path
     assert records[0].status == "cancelled"
     assert records[0].error_message == "GeneratorExit"
     assert records[0].response_preview
+    assert records[0].time_to_first_token is not None
+    assert records[0].duration_ms is not None
+    assert records[0].time_to_first_token <= records[0].duration_ms
 
 
 @pytest.mark.asyncio
@@ -184,6 +189,10 @@ async def test_patched_chat_openai_logs_streaming_completion_usage(tmp_path) -> 
     assert record.output_tokens == 38
     assert record.total_tokens == 49
     assert record.response_preview.startswith("# 流式 Markdown 验收")
+    assert record.time_to_first_token is not None
+    assert record.time_to_first_token >= 0
+    assert record.duration_ms is not None
+    assert record.time_to_first_token <= record.duration_ms
 
 
 def _repositories(tmp_path) -> StorageRepositories:
@@ -205,13 +214,14 @@ def _repositories(tmp_path) -> StorageRepositories:
     return repositories
 
 
-def _request_context():
+def _request_context(user_message: str = "这一轮用户消息"):
     return set_request_context(
         trace_id="trace_llm",
         session_id="ses_llm",
         active_session_id="ses_llm",
         user_id="local-user",
         turn_index=3,
+        user_message=user_message,
     )
 
 

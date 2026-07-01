@@ -102,10 +102,12 @@ interface RightSidebarFilePanelState {
 
 interface RightSidebarConversationPanelState {
   id: string;
+  status: "opening" | "ready";
   sessionId: string;
   title: string;
   sourceSessionId: string | null;
   quoteRequest: RightSidebarConversationQuoteRequest | null;
+  loadedHistoryTurnCount: number | null;
 }
 
 interface RightSidebarConversationQuoteRequest {
@@ -501,6 +503,7 @@ export function Layout({
           title: request.title,
           sourceSessionId: request.sourceSessionId,
           quote: request.quote,
+          loadedHistoryTurnCount: request.loadedHistoryTurnCount,
         });
         if (sameRightSidebarScopePanelState(previous, next)) {
           return current;
@@ -512,6 +515,17 @@ export function Layout({
     [openRightSidebar, previewContext?.activeScopeKey],
   );
 
+  const removeConversationPanel = useCallback((scopeKey: string, panelId: string) => {
+    setRightSidebarPanelStateByScope((current) => {
+      const previous = normalizeRightSidebarScopePanelState(current[scopeKey]);
+      const next = removeConversationPanelFromState(previous, panelId);
+      if (sameRightSidebarScopePanelState(previous, next)) {
+        return current;
+      }
+      return { ...current, [scopeKey]: next };
+    });
+  }, []);
+
   const openBtwConversationFromSession = useCallback(
     async ({ sessionId, runtime: requestRuntime, quote }: OpenBtwConversationRequest) => {
       const cleanedSessionId = sessionId.trim();
@@ -519,26 +533,63 @@ export function Layout({
         notifications.warning("当前会话无法开启旁路对话");
         return null;
       }
+      const scopeKey = previewContext?.activeScopeKey ?? GLOBAL_RIGHT_SIDEBAR_SCOPE;
+      let openingPanelId: string | null = null;
+      flushSync(() => {
+        setRightSidebarPanelStateByScope((current) => {
+          const previous = normalizeRightSidebarScopePanelState(current[scopeKey]);
+          const { panelId, state: next } = activateOrCreateOpeningConversationPanel(previous, {
+            sourceSessionId: cleanedSessionId,
+            quote,
+          });
+          openingPanelId = panelId;
+          if (sameRightSidebarScopePanelState(previous, next)) {
+            return current;
+          }
+          return { ...current, [scopeKey]: next };
+        });
+        openRightSidebar();
+      });
       try {
         const result = await createBtwConversationFromSession(requestRuntime, cleanedSessionId);
         if ("error" in result) {
+          if (openingPanelId) {
+            removeConversationPanel(scopeKey, openingPanelId);
+          }
           notifications.warning(result.message);
           return null;
         }
-        openConversationPanel({
-          session: result.session,
-          sourceSessionId: cleanedSessionId,
-          title: result.session.title || BTW_CONVERSATION_TITLE,
-          quote,
-        });
-        notifications.success("已打开旁路对话");
+        let resolvedPanel = false;
+        const panelId = openingPanelId;
+        if (panelId) {
+          setRightSidebarPanelStateByScope((current) => {
+            const previous = normalizeRightSidebarScopePanelState(current[scopeKey]);
+            const next = resolveOpeningConversationPanel(previous, panelId, {
+              session: result.session,
+              sourceSessionId: cleanedSessionId,
+              title: result.session.title || BTW_CONVERSATION_TITLE,
+              loadedHistoryTurnCount: result.loadedHistoryTurnCount,
+            });
+            resolvedPanel = !sameRightSidebarScopePanelState(previous, next);
+            if (!resolvedPanel) {
+              return current;
+            }
+            return { ...current, [scopeKey]: next };
+          });
+        }
+        if (resolvedPanel) {
+          notifications.success("已打开旁路对话");
+        }
         return result.session;
       } catch (reason) {
+        if (openingPanelId) {
+          removeConversationPanel(scopeKey, openingPanelId);
+        }
         notifications.error(`旁路对话创建失败：${errorMessage(reason)}`);
         return null;
       }
     },
-    [notifications, openConversationPanel],
+    [notifications, openRightSidebar, previewContext?.activeScopeKey, removeConversationPanel],
   );
 
   const rightSidebarConversationValue = useMemo(
@@ -1445,20 +1496,25 @@ function RightSidebarPanel({
                 hidden={resolvedActivePanelId !== panelId}
                 key={panelId}
               >
-                <Suspense fallback={<RightSidebarLoading label="正在加载旁路对话" />}>
-                  <LazyConversationSessionSurface
-                    threadId={conversationPanel.sessionId}
-                    runtime={runtime}
-                    mode="sidecar"
-                    previewPanelScopeKey={activeScopeKey}
-                    sidecarQuoteRequest={conversationPanel.quoteRequest}
-                    onSidecarQuoteRequestHandled={(requestId) =>
-                      handleConversationQuoteRequestHandled(panelId, requestId)
-                    }
-                    onNavigateToConversation={onNavigateToConversation}
-                    onOpenModelSettings={onOpenModelSettings}
-                  />
-                </Suspense>
+                {conversationPanel.status === "opening" ? (
+                  <RightSidebarLoading label="正在打开旁路对话" />
+                ) : (
+                  <Suspense fallback={<RightSidebarLoading label="正在加载旁路对话" />}>
+                    <LazyConversationSessionSurface
+                      threadId={conversationPanel.sessionId}
+                      runtime={runtime}
+                      mode="sidecar"
+                      previewPanelScopeKey={activeScopeKey}
+                      sidecarQuoteRequest={conversationPanel.quoteRequest}
+                      sidecarLoadedHistoryTurnCount={conversationPanel.loadedHistoryTurnCount}
+                      onSidecarQuoteRequestHandled={(requestId) =>
+                        handleConversationQuoteRequestHandled(panelId, requestId)
+                      }
+                      onNavigateToConversation={onNavigateToConversation}
+                      onOpenModelSettings={onOpenModelSettings}
+                    />
+                  </Suspense>
+                )}
               </div>
             );
           })}
@@ -1578,7 +1634,9 @@ function normalizeRightSidebarScopePanelState(
       panelId,
       {
         ...panel,
+        status: panel.status ?? "ready",
         quoteRequest: panel.quoteRequest ?? null,
+        loadedHistoryTurnCount: panel.loadedHistoryTurnCount ?? null,
       },
     ]),
   );
@@ -1691,6 +1749,7 @@ function activateOrCreateConversationPanel(
     title?: string | null;
     sourceSessionId?: string | null;
     quote?: SelectedQuote | null;
+    loadedHistoryTurnCount?: number | null;
   },
 ): RightSidebarScopePanelState {
   const sessionId = options.session.id.trim();
@@ -1730,6 +1789,7 @@ function activateExistingConversationPanel(
     title?: string | null;
     sourceSessionId?: string | null;
     quote?: SelectedQuote | null;
+    loadedHistoryTurnCount?: number | null;
   },
 ): RightSidebarScopePanelState {
   const panel = state.conversationPanels[panelId];
@@ -1743,9 +1803,11 @@ function activateExistingConversationPanel(
       ...state.conversationPanels,
       [panelId]: {
         ...panel,
+        status: "ready",
         title: conversationPanelTitle(options),
         sourceSessionId: options.sourceSessionId ?? panel.sourceSessionId,
         quoteRequest: options.quote ? nextConversationQuoteRequest(options.quote, panel.quoteRequest) : panel.quoteRequest,
+        loadedHistoryTurnCount: options.loadedHistoryTurnCount ?? panel.loadedHistoryTurnCount,
       },
     },
   };
@@ -1758,14 +1820,115 @@ function conversationPanelState(
     title?: string | null;
     sourceSessionId?: string | null;
     quote?: SelectedQuote | null;
+    loadedHistoryTurnCount?: number | null;
   },
 ): RightSidebarConversationPanelState {
   return {
     id: panelId,
+    status: "ready",
     sessionId: options.session.id,
     title: conversationPanelTitle(options),
     sourceSessionId: options.sourceSessionId ?? null,
     quoteRequest: options.quote ? nextConversationQuoteRequest(options.quote, null) : null,
+    loadedHistoryTurnCount: options.loadedHistoryTurnCount ?? null,
+  };
+}
+
+function activateOrCreateOpeningConversationPanel(
+  state: RightSidebarScopePanelState,
+  options: {
+    sourceSessionId: string;
+    quote?: SelectedQuote | null;
+  },
+): { panelId: string; state: RightSidebarScopePanelState } {
+  const activeInitialPanelId = activeInitialPanelIdForState(state);
+  const nextPanelSeq = activeInitialPanelId ? state.nextPanelSeq : state.nextPanelSeq + 1;
+  const panelId = activeInitialPanelId ?? `${CONVERSATION_PANEL_ID_PREFIX}${nextPanelSeq}`;
+  return {
+    panelId,
+    state: {
+      ...state,
+      activePanelId: panelId,
+      panelOrder: activeInitialPanelId ? state.panelOrder : [...state.panelOrder, panelId],
+      conversationPanelIds: [...state.conversationPanelIds, panelId],
+      conversationPanels: {
+        ...state.conversationPanels,
+        [panelId]: openingConversationPanelState(panelId, options),
+      },
+      initialPanelIds: activeInitialPanelId
+        ? state.initialPanelIds.filter((id) => id !== activeInitialPanelId)
+        : state.initialPanelIds,
+      nextPanelSeq,
+    },
+  };
+}
+
+function openingConversationPanelState(
+  panelId: string,
+  options: {
+    sourceSessionId: string;
+    quote?: SelectedQuote | null;
+  },
+): RightSidebarConversationPanelState {
+  return {
+    id: panelId,
+    status: "opening",
+    sessionId: "",
+    title: BTW_CONVERSATION_TITLE,
+    sourceSessionId: options.sourceSessionId,
+    quoteRequest: options.quote ? nextConversationQuoteRequest(options.quote, null) : null,
+    loadedHistoryTurnCount: null,
+  };
+}
+
+function resolveOpeningConversationPanel(
+  state: RightSidebarScopePanelState,
+  panelId: string,
+  options: {
+    session: AgentSession;
+    title?: string | null;
+    sourceSessionId?: string | null;
+    loadedHistoryTurnCount?: number | null;
+  },
+): RightSidebarScopePanelState {
+  const panel = state.conversationPanels[panelId];
+  if (!panel || panel.status !== "opening") {
+    return state;
+  }
+  return {
+    ...state,
+    activePanelId: state.activePanelId ?? panelId,
+    conversationPanels: {
+      ...state.conversationPanels,
+      [panelId]: {
+        ...panel,
+        status: "ready",
+        sessionId: options.session.id,
+        title: conversationPanelTitle(options),
+        sourceSessionId: options.sourceSessionId ?? panel.sourceSessionId,
+        loadedHistoryTurnCount: options.loadedHistoryTurnCount ?? panel.loadedHistoryTurnCount,
+      },
+    },
+  };
+}
+
+function removeConversationPanelFromState(
+  state: RightSidebarScopePanelState,
+  panelId: string,
+): RightSidebarScopePanelState {
+  if (!state.conversationPanels[panelId]) {
+    return state;
+  }
+  const nextConversationPanelIds = state.conversationPanelIds.filter((id) => id !== panelId);
+  const nextConversationPanels = { ...state.conversationPanels };
+  delete nextConversationPanels[panelId];
+  const nextPanelOrder = state.panelOrder.filter((id) => id !== panelId);
+  return {
+    ...state,
+    activePanelId: state.activePanelId === panelId ? nextPanelIdAfterRemoval(state.panelOrder, panelId) : state.activePanelId,
+    panelOrder: nextPanelOrder,
+    conversationPanelIds: nextConversationPanelIds,
+    conversationPanels: nextConversationPanels,
   };
 }
 
@@ -1864,9 +2027,11 @@ function sameConversationPanels(left: RightSidebarScopePanelState, right: RightS
     return (
       Boolean(leftPanel) &&
       Boolean(rightPanel) &&
+      leftPanel.status === rightPanel.status &&
       leftPanel.sessionId === rightPanel.sessionId &&
       leftPanel.title === rightPanel.title &&
       leftPanel.sourceSessionId === rightPanel.sourceSessionId &&
+      leftPanel.loadedHistoryTurnCount === rightPanel.loadedHistoryTurnCount &&
       sameConversationQuoteRequest(leftPanel.quoteRequest, rightPanel.quoteRequest)
     );
   });

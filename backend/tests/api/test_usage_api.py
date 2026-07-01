@@ -46,6 +46,7 @@ def _seed_usage(client: TestClient) -> None:
         cache_read_tokens=12,
         output_tokens=6,
         duration_ms=2400,
+        time_to_first_token=118,
         response_preview="统计完成",
         end_time="2026-06-18T10:00:03Z",
     )
@@ -99,14 +100,16 @@ def test_usage_api_returns_summary_trend_list_and_detail(tmp_path) -> None:
     assert requests.status_code == 200
     assert requests.json()["total"] == 1
     assert requests.json()["list"][0]["model"] == "deepseek-v4-flash"
+    assert requests.json()["list"][0]["time_to_first_token"] == 118
     assert requests.json()["list"][0]["gateway_thread_id"] == "trace_usage_api"
     assert requests.json()["list"][0]["gateway_trace_id"] == "gateway_trace_api"
     assert detail.status_code == 200
     assert detail.json()["request"]["request_preview"] == "生成统计"
+    assert detail.json()["request"]["time_to_first_token"] == 118
     assert detail.json()["request"]["gateway_thread_id"] == "trace_usage_api"
     assert detail.json()["request"]["gateway_trace_id"] == "gateway_trace_api"
     assert detail.json()["trace"]["user_message_preview"] == "生成统计"
-    assert detail.json()["events"][0]["event_type"] == "turn.completed"
+    assert detail.json()["events"] == []
 
 
 def test_usage_api_trend_supports_cursor_pagination(tmp_path) -> None:
