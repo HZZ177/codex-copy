@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { SendBox, selectedQuoteFromText } from "@/renderer/components/chat/SendBox";
+import { SendBox, selectedQuoteFromText, type SelectedFile, type SelectedQuote } from "@/renderer/components/chat/SendBox";
 import { NotificationProvider } from "@/renderer/providers/NotificationProvider";
 import type { RuntimeBridge } from "@/runtime";
 
@@ -690,6 +691,111 @@ describe("SendBox", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("renders batched external quote requests as separate context chips", () => {
+    const firstQuote = selectedQuoteFromText("first selected text", {
+      source: "annotation",
+      annotationId: "ann-first",
+      annotationComment: "First note",
+      file: {
+        path: "README.md",
+        name: "README.md",
+        lineStart: 1,
+        lineEnd: 1,
+      },
+    });
+    const secondQuote = selectedQuoteFromText("second selected text", {
+      source: "annotation",
+      annotationId: "ann-second",
+      annotationComment: "Second note",
+      file: {
+        path: "README.md",
+        name: "README.md",
+        lineStart: 2,
+        lineEnd: 2,
+      },
+    });
+    if (!firstQuote || !secondQuote) {
+      throw new Error("quotes not created");
+    }
+
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalQuoteRequest={{ requestId: 1, quotes: [firstQuote, secondQuote] }}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("README.md · L1")).not.toBeNull();
+    expect(screen.getByText("README.md · L2")).not.toBeNull();
+  });
+
+  it("removes only the clicked same-label annotation quote chip after a controlled batched request", async () => {
+    const firstQuote = selectedQuoteFromText("same selected text", {
+      source: "annotation",
+      annotationId: "ann-quote-1",
+      annotationComment: "First note",
+      file: {
+        path: "README.md",
+        name: "README.md",
+        lineStart: 3,
+        lineEnd: 3,
+      },
+    });
+    const secondQuote = selectedQuoteFromText("same selected text", {
+      source: "annotation",
+      annotationId: "ann-quote-2",
+      annotationComment: "Second note",
+      file: {
+        path: "README.md",
+        name: "README.md",
+        lineStart: 3,
+        lineEnd: 3,
+      },
+    });
+    if (!firstQuote || !secondQuote) {
+      throw new Error("quotes not created");
+    }
+    const quotes: SelectedQuote[] = [firstQuote, secondQuote];
+
+    function ControlledBatchedQuotes() {
+      const [selectedQuotes, setSelectedQuotes] = useState<SelectedQuote[]>([]);
+      return (
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          selectedQuotes={selectedQuotes}
+          externalQuoteRequest={{ requestId: 1, quotes }}
+          onSelectedQuotesChange={setSelectedQuotes}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      );
+    }
+
+    render(<ControlledBatchedQuotes />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("README.md · L3")).toHaveLength(2);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "删除README.md · L3 same selected text" })[1]);
+    await waitFor(() => {
+      expect(screen.getAllByText("README.md · L3")).toHaveLength(1);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "删除README.md · L3 same selected text" })[0]);
+    await waitFor(() => {
+      expect(screen.queryByText("README.md · L3")).toBeNull();
+    });
+  });
+
   it("keeps quote hover cards inside a narrowed composer", () => {
     const quote = selectedQuoteFromText(
       "README.md 引用片段在窄输入框里需要自动换行并保持可见",
@@ -966,6 +1072,191 @@ describe("SendBox", () => {
 
     expect(screen.getAllByText("main.ts")).toHaveLength(1);
     expect(screen.queryByText("src/main.ts")).toBeNull();
+  });
+
+  it("keeps same-path annotation file requests as separate chips", () => {
+    render(
+      <SendBox
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        externalFileRequest={{
+          requestId: 1,
+          files: [
+            {
+              id: "annotation:ann-file-1",
+              path: "README.md",
+              name: "README.md",
+              type: "file",
+              source: "workspace",
+              annotationId: "ann-file-1",
+              annotationComment: "First file note",
+            },
+            {
+              id: "annotation:ann-file-2",
+              path: "README.md",
+              name: "README.md",
+              type: "file",
+              source: "workspace",
+              annotationId: "ann-file-2",
+              annotationComment: "Second file note",
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(2);
+  });
+
+  it("removes only the clicked same-path annotation file chip after a controlled batched request", async () => {
+    const files: SelectedFile[] = [
+      {
+        id: "annotation:ann-file-1",
+        path: "README.md",
+        name: "README.md",
+        type: "file",
+        source: "workspace",
+        annotationId: "ann-file-1",
+        annotationComment: "First file note",
+      },
+      {
+        id: "annotation:ann-file-2",
+        path: "README.md",
+        name: "README.md",
+        type: "file",
+        source: "workspace",
+        annotationId: "ann-file-2",
+        annotationComment: "Second file note",
+      },
+    ];
+
+    function ControlledBatchedFiles() {
+      const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
+      return (
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          selectedFiles={selectedFiles}
+          externalFileRequest={{ requestId: 1, files }}
+          onSelectedFilesChange={setSelectedFiles}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      );
+    }
+
+    render(<ControlledBatchedFiles />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(2);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[1]);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(1);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[0]);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "打开文件引用 README.md" })).toBeNull();
+    });
+  });
+
+  it("removes only the clicked same-path annotation file chip in controlled mode", () => {
+    function ControlledSamePathFiles() {
+      const [files, setFiles] = useState<SelectedFile[]>([
+        {
+          id: "annotation:ann-file-1",
+          path: "README.md",
+          name: "README.md",
+          type: "file" as const,
+          source: "workspace" as const,
+          annotationId: "ann-file-1",
+          annotationComment: "First file note",
+        },
+        {
+          id: "annotation:ann-file-2",
+          path: "README.md",
+          name: "README.md",
+          type: "file" as const,
+          source: "workspace" as const,
+          annotationId: "ann-file-2",
+          annotationComment: "Second file note",
+        },
+      ]);
+      return (
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          selectedFiles={files}
+          onSelectedFilesChange={setFiles}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      );
+    }
+
+    render(<ControlledSamePathFiles />);
+
+    expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[1]);
+    expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[0]);
+    expect(screen.queryByRole("button", { name: "打开文件引用 README.md" })).toBeNull();
+  });
+
+  it("removes a remaining same-path annotation file chip after deleting the first one", () => {
+    function ControlledSamePathFiles() {
+      const [files, setFiles] = useState<SelectedFile[]>([
+        {
+          id: "annotation:ann-file-1",
+          path: "README.md",
+          name: "README.md",
+          type: "file" as const,
+          source: "workspace" as const,
+          annotationId: "ann-file-1",
+          annotationComment: "First file note",
+        },
+        {
+          id: "annotation:ann-file-2",
+          path: "README.md",
+          name: "README.md",
+          type: "file" as const,
+          source: "workspace" as const,
+          annotationId: "ann-file-2",
+          annotationComment: "Second file note",
+        },
+      ]);
+      return (
+        <SendBox
+          value=""
+          runtimeState="idle"
+          canSend={false}
+          canStop={false}
+          selectedFiles={files}
+          onSelectedFilesChange={setFiles}
+          onChange={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      );
+    }
+
+    render(<ControlledSamePathFiles />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[0]);
+    expect(screen.getAllByRole("button", { name: "打开文件引用 README.md" })).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "移除文件引用 README.md" })[0]);
+    expect(screen.queryByRole("button", { name: "打开文件引用 README.md" })).toBeNull();
   });
 
   it("shows the full file path in a hover card for top file chips", () => {

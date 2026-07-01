@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT } from "@/renderer/events/workspaceFileContext";
+import {
+  APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT,
+  APP_EXPAND_WORKSPACE_DIRECTORY_EVENT,
+} from "@/renderer/events/workspaceFileContext";
 import { AppContextMenuProvider } from "@/renderer/providers/AppContextMenuProvider";
 
 describe("AppContextMenuProvider", () => {
@@ -42,7 +45,8 @@ describe("AppContextMenuProvider", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(screen.getByRole("menu", { name: "页面右键菜单" })).not.toBeNull();
-    expect((screen.getByRole("menuitem", { name: "暂无可用操作" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "刷新" })).not.toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "暂无可用操作" })).toBeNull();
   });
 
   it("copies selected text from an input", async () => {
@@ -102,6 +106,7 @@ describe("AppContextMenuProvider", () => {
     expect(screen.getByRole("menu", { name: "页面右键菜单" }).dataset.contextKind).toBe("editable");
     expect(screen.getByRole("menuitem", { name: "粘贴" })).not.toBeNull();
     expect(screen.getByRole("menuitem", { name: "全选" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "刷新" })).not.toBeNull();
   });
 
   it("copies selected page text", async () => {
@@ -177,6 +182,7 @@ describe("AppContextMenuProvider", () => {
       "复制绝对路径",
       "复制工作区相对路径",
       "添加到聊天",
+      "刷新",
     ]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: "复制绝对路径" }));
@@ -230,26 +236,50 @@ describe("AppContextMenuProvider", () => {
     }
   });
 
-  it("shows no actions for workspace directories", () => {
-    render(
-      <AppContextMenuProvider>
-        <button
-          type="button"
-          data-workspace-entry-absolute-path={String.raw`D:\repo\src`}
-          data-workspace-entry-kind="directory"
-          data-workspace-entry-name="src"
-          data-workspace-entry-path="src"
-          data-workspace-root={String.raw`D:\repo`}
-        >
-          src
-        </button>
-      </AppContextMenuProvider>,
-    );
+  it("shows directory actions for workspace directories", async () => {
+    const listener = vi.fn();
+    const handleEvent = (event: Event) => listener((event as CustomEvent).detail);
+    document.addEventListener(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, handleEvent);
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: "src" }), { clientX: 12, clientY: 18 });
+    try {
+      render(
+        <AppContextMenuProvider>
+          <button
+            type="button"
+            data-workspace-entry-absolute-path={String.raw`D:\repo\src`}
+            data-workspace-entry-kind="directory"
+            data-workspace-entry-name="src"
+            data-workspace-entry-path="src"
+            data-workspace-id="ws-1"
+            data-workspace-root={String.raw`D:\repo`}
+            data-workspace-session-id="ses-1"
+          >
+            src
+          </button>
+        </AppContextMenuProvider>,
+      );
 
-    expect(screen.getByRole("menu", { name: "页面右键菜单" }).dataset.contextKind).toBe("workspace-directory");
-    expect((screen.getByRole("menuitem", { name: "暂无可用操作" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByRole("menuitem", { name: "复制绝对路径" })).toBeNull();
+      fireEvent.contextMenu(screen.getByRole("button", { name: "src" }), { clientX: 12, clientY: 18 });
+
+      const menu = screen.getByRole("menu", { name: "页面右键菜单" });
+      expect(menu.dataset.contextKind).toBe("workspace-directory");
+      expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+        "展开所有下级菜单",
+        "刷新",
+      ]);
+      expect(screen.queryByRole("menuitem", { name: "暂无可用操作" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "复制绝对路径" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "展开所有下级菜单" }));
+
+      await waitFor(() => expect(listener).toHaveBeenCalledWith({
+        path: "src",
+        sessionId: "ses-1",
+        workspaceId: "ws-1",
+        workspaceRoot: String.raw`D:\repo`,
+      }));
+    } finally {
+      document.removeEventListener(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, handleEvent);
+    }
   });
 });

@@ -1,0 +1,216 @@
+{
+  "skill_name": "prototype-generator",
+  "evals": [
+    {
+      "id": 1,
+      "name": "根据需求文档生成用户管理原型",
+      "prompt": "我有一个需求文档 docs/requirement/REQ-20240325-001-user-management.md，需要根据这个文档生成用户管理模块的原型页面。文档里描述了用户列表、用户详情和用户编辑三个页面。",
+      "expected_output": "生成三个HTML原型文件，分别对应用户列表、用户详情、用户编辑页面，存储在docs/prototype目录下。每个页面全屏展示，右下角有浮动按钮可打开需求说明抽屉。同时生成index.html目录页。",
+      "files": ["docs/requirement/REQ-20240325-001-user-management.md"],
+      "assertions": [
+        {
+          "name": "生成文件数量正确",
+          "description": "应该生成3个HTML原型文件 + 1个index.html目录页",
+          "type": "file_count",
+          "params": {
+            "pattern": "docs/prototype/*.html",
+            "min_count": 4
+          }
+        },
+        {
+          "name": "文件名符合规范",
+          "description": "文件名应该使用 prototype-{日期}-{页面名}.html 格式",
+          "type": "file_pattern",
+          "params": {
+            "pattern": "docs/prototype/prototype-*-user-*.html"
+          }
+        },
+        {
+          "name": "文件包含Ant Design样式",
+          "description": "HTML应该引入antd.min.css",
+          "type": "file_content",
+          "params": {
+            "pattern": "antd.min.css",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "页面全屏展示无固定宽度",
+          "description": "HTML不应包含1200px固定宽度容器",
+          "type": "file_content_absent",
+          "params": {
+            "pattern": "width:\\s*1200px|w-\\[1200px\\]",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "包含浮动按钮",
+          "description": "每个原型页面应包含右下角浮动按钮",
+          "type": "file_content",
+          "params": {
+            "pattern": "fab-btn|浮动按钮",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "包含需求说明抽屉",
+          "description": "每个原型页面应包含需求说明抽屉组件",
+          "type": "file_content",
+          "params": {
+            "pattern": "drawer-panel|drawerPanel",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "目录页使用浮动按钮导航",
+          "description": "index.html应使用左上角浮动按钮+抽屉导航而非左侧固定栏",
+          "type": "file_content",
+          "params": {
+            "pattern": "nav-fab|nav-drawer",
+            "file_pattern": "docs/prototype/index.html"
+          }
+        },
+        {
+          "name": "需求确认环节已执行",
+          "description": "在生成前应与用户进行需求确认对话",
+          "type": "conversation_contains",
+          "params": {
+            "pattern": "确认|可以开始生成|澄清"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "生成订单管理原型（无需求文档）",
+      "prompt": "请帮我生成一个订单管理页面的原型，需求包括订单列表展示、订单状态筛选、查看订单详情、订单导出功能。",
+      "expected_output": "先与用户确认需求细节，然后生成订单列表页和订单详情页的全屏原型HTML文件。每个页面由独立subagent生成并经审查验收。",
+      "files": [],
+      "assertions": [
+        {
+          "name": "生成文件数量至少2个",
+          "description": "至少生成列表页和详情页",
+          "type": "file_count",
+          "params": {
+            "pattern": "docs/prototype/prototype-*.html",
+            "min_count": 2
+          }
+        },
+        {
+          "name": "页面全屏展示",
+          "description": "页面应为全屏布局，主内容区flex:1自适应",
+          "type": "file_content",
+          "params": {
+            "pattern": "flex:\\s*1|flex-1",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "包含浮动按钮和抽屉",
+          "description": "每个页面应包含浮动按钮和需求说明抽屉",
+          "type": "file_content",
+          "params": {
+            "pattern": "fab-btn|toggleDrawer",
+            "file_pattern": "docs/prototype/prototype-*.html"
+          }
+        },
+        {
+          "name": "Mock数据充足",
+          "description": "表格应包含至少5条mock数据",
+          "type": "file_content",
+          "params": {
+            "pattern": "ant-table-row",
+            "min_count": 5,
+            "file_pattern": "docs/prototype/prototype-*list*.html"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "使用命令快捷方式生成原型",
+      "prompt": "/prototype 根据这个需求生成原型：docs/requirement/REQ-20240325-002-product.md",
+      "expected_output": "读取需求文档，评估页面清单并与用户确认，需求确认后逐页生成原型HTML文件",
+      "files": ["docs/requirement/REQ-20240325-002-product.md"],
+      "assertions": [
+        {
+          "name": "读取需求文档",
+          "description": "应该尝试读取指定的需求文档",
+          "type": "tool_usage",
+          "params": {
+            "tool": "Read",
+            "file_pattern": "docs/requirement/REQ-20240325-002-product.md"
+          }
+        },
+        {
+          "name": "执行需求确认",
+          "description": "应该在生成前与用户确认需求细节",
+          "type": "conversation_contains",
+          "params": {
+            "pattern": "确认|澄清|清单"
+          }
+        },
+        {
+          "name": "生成HTML文件",
+          "description": "应该生成至少一个HTML原型文件",
+          "type": "file_count",
+          "params": {
+            "pattern": "docs/prototype/prototype-*.html",
+            "min_count": 1
+          }
+        },
+        {
+          "name": "生成目录页",
+          "description": "应该生成index.html目录页",
+          "type": "file_exists",
+          "params": {
+            "path": "docs/prototype/index.html"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "旧原型改造",
+      "prompt": "请帮我改造 docs/prototype/prototype-20240320-user-list.html 这个旧原型，需要增加编辑功能和删除功能，表格里增加状态列。",
+      "expected_output": "读取旧原型，分析现有结构，与用户确认改造需求，生成新版本的全屏HTML文件，保留旧文件",
+      "files": ["docs/prototype/prototype-20240320-user-list.html"],
+      "assertions": [
+        {
+          "name": "读取旧原型文件",
+          "description": "应该读取用户指定的旧原型文件",
+          "type": "tool_usage",
+          "params": {
+            "tool": "Read",
+            "file_pattern": "docs/prototype/prototype-20240320-user-list.html"
+          }
+        },
+        {
+          "name": "保留旧文件",
+          "description": "旧文件应该被保留，不被修改",
+          "type": "file_exists",
+          "params": {
+            "path": "docs/prototype/prototype-20240320-user-list.html"
+          }
+        },
+        {
+          "name": "生成新文件（带版本号）",
+          "description": "应该生成带新版本号的文件",
+          "type": "file_pattern",
+          "params": {
+            "pattern": "docs/prototype/prototype-*-user-list-v*.html"
+          }
+        },
+        {
+          "name": "新文件为全屏布局",
+          "description": "新生成的文件应为全屏布局，包含浮动按钮和抽屉",
+          "type": "file_content",
+          "params": {
+            "pattern": "fab-btn|toggleDrawer",
+            "file_pattern": "docs/prototype/prototype-*-v*.html"
+          }
+        }
+      ]
+    }
+  ]
+}

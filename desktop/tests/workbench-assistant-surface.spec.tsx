@@ -1208,6 +1208,31 @@ describe("WorkbenchAssistantSurface", () => {
     expect(await screen.findByText("guide.md · L3")).not.toBeNull();
   });
 
+  it("does not replay a deleted external quote chip after collapsing and reopening the composer", async () => {
+    render(
+      <WorkbenchSurfaceTestProviders>
+        <WorkbenchQuoteInjectionHarness />
+      </WorkbenchSurfaceTestProviders>,
+    );
+
+    const surface = screen.getByTestId("workbench-assistant-surface");
+    fireEvent.click(screen.getByRole("button", { name: "注入引用片段" }));
+
+    const input = await screen.findByLabelText("工作台助手输入");
+    expect(await screen.findByText("guide.md · L3")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /删除guide\.md · L3/ }));
+    expect(screen.queryByText("guide.md · L3")).toBeNull();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => {
+      expect(surface.getAttribute("data-surface-mode")).toBe("capsule");
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开工作台输入框" }));
+    expect(await screen.findByLabelText("工作台助手输入")).not.toBeNull();
+    expect(screen.queryByText("guide.md · L3")).toBeNull();
+  });
+
   it("resets temporary shell state on session switch without replaying old context requests", async () => {
     const quote = selectedQuoteFromText("旧会话引用", {
       source: "annotation",

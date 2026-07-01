@@ -83,7 +83,7 @@ export function HomePage({
     () => (selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : null),
     [selectedWorkspaceId],
   );
-  const { state: workspaceSkillsState } = useWorkspaceSkills({
+  const { state: workspaceSkillsState, refresh: refreshWorkspaceSkills } = useWorkspaceSkills({
     runtime,
     scope: workspaceSkillScope,
     enabled: backendReady && Boolean(selectedWorkspaceId),
@@ -471,6 +471,7 @@ export function HomePage({
           }
           onChange={setDraft}
           onSkillChange={setSelectedSkill}
+          onRefreshWorkspaceSkills={() => refreshWorkspaceSkills({ forceReload: true })}
           onSend={submit}
           onStop={() => undefined}
           runtime={runtime}

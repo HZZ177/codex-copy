@@ -1,0 +1,20 @@
+CREATE TABLE `memory_record` (
+  `id` varchar(64) NOT NULL COMMENT '主键',
+  `user_id` varchar(64) NOT NULL COMMENT '用户 ID',
+  `scene_id` varchar(64) NOT NULL COMMENT '应用/场景 ID（filter_scope=user 时用约定常量如 global）',
+  `type_id` varchar(64) NOT NULL COMMENT '记忆类型标识',
+  `type_name` varchar(64) DEFAULT NULL COMMENT '类型名称，冗余',
+  `content` text DEFAULT NULL COMMENT '记忆内容',
+  `confidence` float DEFAULT NULL COMMENT '置信度 0~1',
+  `embedding_model` varchar(128) DEFAULT NULL COMMENT '嵌入模型名',
+  `embedding` VECTOR(1536) DEFAULT NULL COMMENT '向量，DB 实际为 VECTOR(1536)，应用层存 [f1,f2,...] 字符串',
+  `metadata` json DEFAULT NULL COMMENT '元数据',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_scene_id` (`scene_id`),
+  KEY `idx_type_id` (`type_id`),
+  KEY `idx_user_scene` (`user_id`, `scene_id`),
+  KEY `idx_updated_at` (`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆记录表';

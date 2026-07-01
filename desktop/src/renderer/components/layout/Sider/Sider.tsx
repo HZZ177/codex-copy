@@ -13,6 +13,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  RefreshCw,
   Search,
   Settings,
   ShieldCheck,
@@ -82,6 +83,7 @@ const WORKSPACE_SESSION_HISTORY_PAGE_SIZE = 100;
 const SESSION_FORK_HISTORY_PAGE_SIZE = 100;
 const SESSION_ACTION_MENU_WIDTH = 112;
 const SESSION_ACTION_MENU_HEIGHT = 98;
+const SESSION_CONTEXT_ACTION_MENU_HEIGHT = 132;
 const SESSION_ACTION_MENU_GAP = 10;
 const SESSION_ACTION_MENU_EDGE = 8;
 const SESSION_ACTION_MENU_CLOSE_MS = 120;
@@ -262,37 +264,49 @@ export function Sider({
     };
   }, [collapsed, confirmDeleteId, editing, historyGroups, loadingHistory, updateFooterFeather]);
 
+  const reloadSessions = useCallback(
+    async (isActive: () => boolean = () => true) => {
+      if (controlled) {
+        window.location.reload();
+        return;
+      }
+      if (!backendReady) {
+        setLoadingHistory(false);
+        return;
+      }
+      setLoadingHistory(true);
+      try {
+        const response = await runtime.conversation.listSessions({ pageSize: 50 });
+        if (isActive()) {
+          setLoadedSessions(response.list);
+        }
+      } catch (reason) {
+        if (isActive()) {
+          notifications.error(errorMessage(reason));
+        }
+      } finally {
+        if (isActive()) {
+          setLoadingHistory(false);
+        }
+      }
+    },
+    [backendReady, controlled, notifications, runtime],
+  );
+
   useEffect(() => {
     if (controlled) {
       return;
     }
-    if (!backendReady) {
-      setLoadingHistory(false);
-      return;
-    }
     let active = true;
-    setLoadingHistory(true);
-    void runtime.conversation
-      .listSessions({ pageSize: 50 })
-      .then((response) => {
-        if (active) {
-          setLoadedSessions(response.list);
-        }
-      })
-      .catch((reason) => {
-        if (active) {
-          notifications.error(errorMessage(reason));
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoadingHistory(false);
-        }
-      });
+    void reloadSessions(() => active);
     return () => {
       active = false;
     };
-  }, [backendReady, controlled, notifications, runtime]);
+  }, [reloadSessions]);
+
+  const refreshSessionList = useCallback(() => {
+    void reloadSessions();
+  }, [reloadSessions]);
 
   useEffect(() => {
     if (controlled) {
@@ -534,6 +548,7 @@ export function Sider({
                   onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                  onRefresh={refreshSessionList}
                   onNavigate={navigateTo}
                 />
                 <SiderSection
@@ -559,6 +574,7 @@ export function Sider({
                   onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                  onRefresh={refreshSessionList}
                   onNavigate={navigateTo}
                 />
               </>
@@ -599,6 +615,7 @@ export function Sider({
                 onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                 onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                onRefresh={refreshSessionList}
                 onNavigate={navigateTo}
               />
               {displayHistoryGroups.length === 0 && pinnedItems.length === 0 ? (
@@ -638,6 +655,7 @@ export function Sider({
                   onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                   onStartRename={startRenameConversation}
                   onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                  onRefresh={refreshSessionList}
                   onNavigate={navigateTo}
                 />
               ))}
@@ -664,6 +682,7 @@ export function Sider({
                 onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                 onStartRename={startRenameConversation}
                 onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                onRefresh={refreshSessionList}
                 onNavigate={navigateTo}
               />
               <HistoryBucket
@@ -708,6 +727,7 @@ export function Sider({
                     onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                     onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                    onRefresh={refreshSessionList}
                     onNavigate={navigateTo}
                   />
                 ))}
@@ -741,6 +761,7 @@ export function Sider({
                     onForkSession={(item) => void forkConversationFromLatestTurn(item)}
                     onStartRename={startRenameConversation}
                     onTogglePinned={(item, pinned) => void togglePinnedConversation(item, pinned)}
+                    onRefresh={refreshSessionList}
                     onNavigate={navigateTo}
                   />
                 </HistoryBucket>
@@ -989,6 +1010,7 @@ interface SiderSectionProps {
   onForkSession?: (item: SiderEntry) => void;
   onLoadHistoryExpansion?: () => Promise<void> | void;
   onNavigate?: (path: string) => void;
+  onRefresh?: () => Promise<void> | void;
   onStartRename?: (item: SiderEntry) => void;
   onTogglePinned?: (item: SiderEntry, pinned: boolean) => void;
 }
@@ -1086,12 +1108,14 @@ function SiderSection({
   onForkSession,
   onLoadHistoryExpansion,
   onNavigate,
+  onRefresh,
   onStartRename,
   onTogglePinned,
 }: SiderSectionProps) {
   const [hoveredSession, setHoveredSession] = useState<SessionHoverCard | null>(null);
   const [hoveredProject, setHoveredProject] = useState<ProjectHoverCard | null>(null);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const [actionMenuSource, setActionMenuSource] = useState<"button" | "context">("button");
   const [closingActionMenuId, setClosingActionMenuId] = useState<string | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState<CSSProperties | null>(null);
   const [sectionExpanded, setSectionExpanded] = useState(true);
@@ -1187,14 +1211,14 @@ function SiderSection({
     };
   }, []);
 
-  const getActionMenuPositionFromPoint = useCallback((clientX: number, clientY: number): CSSProperties => {
+  const getActionMenuPositionFromPoint = useCallback((clientX: number, clientY: number, menuHeight: number): CSSProperties => {
     const maxLeft = Math.max(
       SESSION_ACTION_MENU_EDGE,
       window.innerWidth - SESSION_ACTION_MENU_WIDTH - SESSION_ACTION_MENU_EDGE,
     );
     const maxTop = Math.max(
       SESSION_ACTION_MENU_EDGE,
-      window.innerHeight - SESSION_ACTION_MENU_HEIGHT - SESSION_ACTION_MENU_EDGE,
+      window.innerHeight - menuHeight - SESSION_ACTION_MENU_EDGE,
     );
     return {
       left: Math.round(clamp(clientX, SESSION_ACTION_MENU_EDGE, maxLeft)),
@@ -1202,13 +1226,14 @@ function SiderSection({
     };
   }, []);
 
-  const openActionMenu = useCallback((id: string, position: CSSProperties) => {
+  const openActionMenu = useCallback((id: string, position: CSSProperties, source: "button" | "context" = "button") => {
     if (actionMenuCloseTimerRef.current) {
       window.clearTimeout(actionMenuCloseTimerRef.current);
       actionMenuCloseTimerRef.current = null;
     }
     setClosingActionMenuId(null);
     setActionMenuPosition(position);
+    setActionMenuSource(source);
     setActionMenuId(id);
   }, []);
 
@@ -1301,6 +1326,7 @@ function SiderSection({
     const menuVisible = menuOpen || closingActionMenuId === item.id;
     const canShowHoverCard = editing?.id !== item.id && confirmDeleteId !== item.id && !menuVisible;
     const isForking = forkingSessionId === item.id;
+    const showContextRefresh = menuVisible && actionMenuSource === "context" && Boolean(onRefresh);
     const openContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
       if (!canOpenActionMenu) {
         return;
@@ -1308,7 +1334,11 @@ function SiderSection({
       event.preventDefault();
       event.stopPropagation();
       setHoveredSession(null);
-      openActionMenu(item.id, getActionMenuPositionFromPoint(event.clientX, event.clientY));
+      openActionMenu(
+        item.id,
+        getActionMenuPositionFromPoint(event.clientX, event.clientY, SESSION_CONTEXT_ACTION_MENU_HEIGHT),
+        "context",
+      );
     };
     return (
       <div
@@ -1395,7 +1425,7 @@ function SiderSection({
                       closeActionMenu();
                       return;
                     }
-                    openActionMenu(item.id, getActionMenuPosition(event.currentTarget));
+                    openActionMenu(item.id, getActionMenuPosition(event.currentTarget), "button");
                   }}
                   type="button"
                 >
@@ -1453,6 +1483,20 @@ function SiderSection({
                               <span>删除</span>
                             </button>
                           </>
+                        ) : null}
+                        {showContextRefresh ? (
+                          <button
+                            role="menuitem"
+                            type="button"
+                            onClick={() => {
+                              setHoveredSession(null);
+                              closeActionMenu();
+                              void onRefresh?.();
+                            }}
+                          >
+                            <RefreshCw size={13} aria-hidden="true" />
+                            <span>刷新</span>
+                          </button>
                         ) : null}
                       </div>,
                       document.body,

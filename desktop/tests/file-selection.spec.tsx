@@ -6,6 +6,7 @@ import {
   composeMessageWithSelectedFiles,
   fileSelectionReducer,
   initialFileSelectionState,
+  selectedFileKey,
   selectedFileFromFile,
 } from "@/renderer/components/chat/SendBox/fileSelection";
 import type { RuntimeBridge } from "@/runtime";
@@ -21,7 +22,7 @@ describe("SendBox file selection", () => {
     expect(
       fileSelectionReducer(state, {
         type: "remove",
-        path: "src/main.ts",
+        id: selectedFileKey(state.files[0]),
       }).files,
     ).toEqual([]);
   });
@@ -32,6 +33,45 @@ describe("SendBox file selection", () => {
         { path: "src/main.ts", name: "main.ts", type: "file", source: "workspace" },
       ]),
     ).toBe("analyze this");
+  });
+
+  it("keeps same-path annotation files separate while preserving normal file dedupe", () => {
+    const first = {
+      id: "annotation:ann-1",
+      path: "README.md",
+      name: "README.md",
+      type: "file" as const,
+      source: "workspace" as const,
+      annotationId: "ann-1",
+      annotationComment: "First note",
+    };
+    const second = {
+      id: "annotation:ann-2",
+      path: "README.md",
+      name: "README.md",
+      type: "file" as const,
+      source: "workspace" as const,
+      annotationId: "ann-2",
+      annotationComment: "Second note",
+    };
+    const state = fileSelectionReducer(initialFileSelectionState, {
+      type: "addMany",
+      files: [first, second],
+    });
+
+    expect(state.files).toHaveLength(2);
+    expect(
+      fileSelectionReducer(state, {
+        type: "add",
+        file: first,
+      }).files,
+    ).toHaveLength(2);
+    expect(
+      fileSelectionReducer(state, {
+        type: "remove",
+        id: selectedFileKey(first),
+      }).files,
+    ).toEqual([second]);
   });
 
   it("extracts file references without reading file content", () => {

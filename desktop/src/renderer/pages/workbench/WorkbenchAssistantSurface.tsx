@@ -199,7 +199,7 @@ export function WorkbenchAssistantSurface({
   const [composerQuotes, setComposerQuotes] = useState<SelectedQuote[]>([]);
   const modelSelection = useRuntimeModelSelection(runtime, null);
   const workspaceSkillScope = useMemo(() => ({ workspaceId }), [workspaceId]);
-  const { state: workspaceSkillsState } = useWorkspaceSkills({
+  const { state: workspaceSkillsState, refresh: refreshWorkspaceSkills } = useWorkspaceSkills({
     runtime,
     scope: workspaceSkillScope,
     enabled: Boolean(workspaceId),
@@ -1058,6 +1058,20 @@ export function WorkbenchAssistantSurface({
     });
   }, [btwActive, hasComposerContent, onCloseBtwConversation, surfaceMode]);
 
+  const markComposerFileRequestHandled = useCallback((requestId: number) => {
+    contextRequestBaselineRef.current.fileRequestId = Math.max(
+      contextRequestBaselineRef.current.fileRequestId,
+      requestId,
+    );
+  }, []);
+
+  const markComposerQuoteRequestHandled = useCallback((requestId: number) => {
+    contextRequestBaselineRef.current.quoteRequestId = Math.max(
+      contextRequestBaselineRef.current.quoteRequestId,
+      requestId,
+    );
+  }, []);
+
   useEffect(() => {
     if (surfaceMode !== "expanded") {
       return;
@@ -1111,6 +1125,9 @@ export function WorkbenchAssistantSurface({
       onListWorkspaceDirectory={listWorkspaceDirectory}
       onOpenFileReference={openWorkbenchFileReference}
       onSlashCommand={handleSlashCommand}
+      onRefreshWorkspaceSkills={() => refreshWorkspaceSkills({ forceReload: true })}
+      onExternalFileRequestHandled={markComposerFileRequestHandled}
+      onExternalQuoteRequestHandled={markComposerQuoteRequestHandled}
     />
   );
 
@@ -2312,6 +2329,9 @@ function WorkbenchComposer({
   onListWorkspaceDirectory,
   onOpenFileReference,
   onSlashCommand,
+  onRefreshWorkspaceSkills,
+  onExternalFileRequestHandled,
+  onExternalQuoteRequestHandled,
 }: {
   value: string;
   runtimeState: ConversationRuntimeState;
@@ -2352,6 +2372,9 @@ function WorkbenchComposer({
   onListWorkspaceDirectory: (path: string) => Promise<WorkspaceSearchResult[]>;
   onOpenFileReference: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
+  onRefreshWorkspaceSkills?: () => void | Promise<void>;
+  onExternalFileRequestHandled?: (requestId: number) => void;
+  onExternalQuoteRequestHandled?: (requestId: number) => void;
 }) {
   if (pendingApproval) {
     return (
@@ -2404,6 +2427,9 @@ function WorkbenchComposer({
       onListWorkspaceDirectory={onListWorkspaceDirectory}
       onOpenFileReference={onOpenFileReference}
       onSlashCommand={onSlashCommand}
+      onRefreshWorkspaceSkills={onRefreshWorkspaceSkills}
+      onExternalFileRequestHandled={onExternalFileRequestHandled}
+      onExternalQuoteRequestHandled={onExternalQuoteRequestHandled}
     />
   );
 }

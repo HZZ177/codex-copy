@@ -149,7 +149,7 @@ export interface FilePreviewProps {
   request: FilePreviewRequest;
   runtime?: RuntimeBridge;
   onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
-  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
+  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest | PreviewAnnotationChatRequest[]) => void;
   onMarkdownOutlineChange?: (outline: MarkdownOutlineItem[]) => void;
   outlineRevealRequest?: MarkdownOutlineRevealRequest | null;
   sourceRevealRequest?: FilePreviewRevealRequest | null;
@@ -203,12 +203,13 @@ export function FilePreview({
   const activePreviewId = previewContext?.activeEntryId ?? null;
   const showPreviewTabs = previewEntries.length > 1;
   const scope = useMemo(() => workspaceScope({ workspaceId, sessionId }), [workspaceId, sessionId]);
+  const annotationScope = useMemo(() => annotationWorkspaceScope({ workspaceId, sessionId }), [workspaceId, sessionId]);
   const annotationPath = request.type === "file" ? request.path : null;
   const annotationRuntime = useMemo(() => annotationWorkspaceRuntime(runtime), [runtime]);
   const quoteSelectionAvailable = Boolean(onQuoteSelection && annotationPath);
   const annotationAvailable = Boolean(
     annotationPath &&
-      scope &&
+      annotationScope &&
       annotationRuntime,
   );
   const [annotations, setAnnotations] = useState<WorkspaceFileAnnotation[]>([]);
@@ -492,7 +493,7 @@ export function FilePreview({
     setAnnotations([]);
     setAnnotationError(null);
 
-    if (!annotationAvailable || !annotationPath || !scope || !annotationRuntime) {
+    if (!annotationAvailable || !annotationPath || !annotationScope || !annotationRuntime) {
       setAnnotationsLoading(false);
       return () => {
         active = false;
@@ -502,7 +503,7 @@ export function FilePreview({
 
     setAnnotationsLoading(true);
     void annotationRuntime
-      .listAnnotations(scope, annotationPath, { signal: controller.signal })
+      .listAnnotations(annotationScope, annotationPath, { signal: controller.signal })
       .then((records) => {
         if (active) {
           setAnnotations(records);
@@ -523,7 +524,7 @@ export function FilePreview({
       active = false;
       controller.abort();
     };
-  }, [annotationAvailable, annotationPath, annotationReloadId, annotationRuntime, scope]);
+  }, [annotationAvailable, annotationPath, annotationReloadId, annotationRuntime, annotationScope]);
 
   const title = previewTitle(request);
   const canPreview = kind === "markdown" || kind === "html" || kind === "mermaid";
@@ -671,13 +672,13 @@ export function FilePreview({
 
   const createFileAnnotation = useCallback(async () => {
     const comment = fileAnnotationDraft.trim();
-    if (!annotationAvailable || !annotationPath || !scope || !annotationRuntime || !comment) {
+    if (!annotationAvailable || !annotationPath || !annotationScope || !annotationRuntime || !comment) {
       return;
     }
     setAnnotationMutationError(null);
     setAnnotationMutatingId("create-file");
     try {
-      const created = await annotationRuntime.createAnnotation(scope, {
+      const created = await annotationRuntime.createAnnotation(annotationScope, {
         path: annotationPath,
         anchor_type: "file",
         comment,
@@ -690,7 +691,7 @@ export function FilePreview({
     } finally {
       setAnnotationMutatingId(null);
     }
-  }, [annotationAvailable, annotationPath, annotationRuntime, currentContentHash, fileAnnotationDraft, scope]);
+  }, [annotationAvailable, annotationPath, annotationRuntime, annotationScope, currentContentHash, fileAnnotationDraft]);
 
   const startSelectionAnnotation = useCallback(
     (selectionSnapshot: FilePreviewSelectionSnapshot) => {
@@ -768,13 +769,13 @@ export function FilePreview({
 
   const createSelectionAnnotation = useCallback(async () => {
     const comment = selectionDraft?.comment.trim() ?? "";
-    if (!annotationAvailable || !annotationPath || !scope || !annotationRuntime || !selectionDraft || !comment) {
+    if (!annotationAvailable || !annotationPath || !annotationScope || !annotationRuntime || !selectionDraft || !comment) {
       return;
     }
     setAnnotationMutationError(null);
     setAnnotationMutatingId("create-selection");
     try {
-      const created = await annotationRuntime.createAnnotation(scope, {
+      const created = await annotationRuntime.createAnnotation(annotationScope, {
         path: annotationPath,
         anchor_type: "selection",
         comment,
@@ -795,7 +796,7 @@ export function FilePreview({
     } finally {
       setAnnotationMutatingId(null);
     }
-  }, [annotationAvailable, annotationPath, annotationRuntime, currentContentHash, scope, selectionDraft]);
+  }, [annotationAvailable, annotationPath, annotationRuntime, annotationScope, selectionDraft]);
 
   const beginEditAnnotation = useCallback(
     (annotation: WorkspaceFileAnnotation) => {
@@ -821,13 +822,13 @@ export function FilePreview({
   const saveAnnotationComment = useCallback(
     async (annotation: WorkspaceFileAnnotation, value: string) => {
       const comment = value.trim();
-      if (!annotationAvailable || !scope || !annotationRuntime || !comment) {
+      if (!annotationAvailable || !annotationScope || !annotationRuntime || !comment) {
         return false;
       }
       setAnnotationMutationError(null);
       setAnnotationMutatingId(`edit:${annotation.id}`);
       try {
-        const updated = await annotationRuntime.updateAnnotation(scope, annotation.id, { comment });
+        const updated = await annotationRuntime.updateAnnotation(annotationScope, annotation.id, { comment });
         setAnnotations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
         return true;
       } catch (reason) {
@@ -837,7 +838,7 @@ export function FilePreview({
         setAnnotationMutatingId(null);
       }
     },
-    [annotationAvailable, annotationRuntime, scope],
+    [annotationAvailable, annotationRuntime, annotationScope],
   );
 
   const saveAnnotationEdit = useCallback(
@@ -853,13 +854,13 @@ export function FilePreview({
 
   const deleteAnnotation = useCallback(
     async (annotation: WorkspaceFileAnnotation) => {
-      if (!annotationAvailable || !scope || !annotationRuntime) {
+      if (!annotationAvailable || !annotationScope || !annotationRuntime) {
         return;
       }
       setAnnotationMutationError(null);
       setAnnotationMutatingId(`delete:${annotation.id}`);
       try {
-        await annotationRuntime.deleteAnnotation(scope, annotation.id);
+        await annotationRuntime.deleteAnnotation(annotationScope, annotation.id);
         setAnnotations((current) => current.filter((item) => item.id !== annotation.id));
         setActiveAnnotationPopover((current) =>
           current?.annotationId === annotation.id ? null : current,
@@ -871,23 +872,29 @@ export function FilePreview({
         setAnnotationMutatingId(null);
       }
     },
-    [annotationAvailable, annotationRuntime, scope],
+    [annotationAvailable, annotationRuntime, annotationScope],
   );
 
   const startChatFromAnnotation = useCallback(
     (annotation: WorkspaceFileAnnotation) => {
-      onStartChatFromAnnotation?.({
-        path: annotation.path,
-        comment: annotation.comment,
-        selectedText: annotation.selected_text,
-        lineStart: annotation.line_start,
-        lineEnd: annotation.line_end,
-        sourceStart: annotation.anchor_json?.sourceStart ?? null,
-        sourceEnd: annotation.anchor_json?.sourceEnd ?? null,
-      });
+      onStartChatFromAnnotation?.(annotationChatRequest(annotation));
       setActiveAnnotationPopover((current) =>
         current?.annotationId === annotation.id ? null : current,
       );
+    },
+    [onStartChatFromAnnotation],
+  );
+
+  const startChatFromAllAnnotations = useCallback(
+    (items: WorkspaceFileAnnotation[]) => {
+      const requests = items
+        .map(annotationChatRequest)
+        .filter((request) => request.path.trim() && request.comment.trim());
+      if (!requests.length) {
+        return;
+      }
+      onStartChatFromAnnotation?.(requests);
+      setActiveAnnotationPopover(null);
     },
     [onStartChatFromAnnotation],
   );
@@ -1013,7 +1020,7 @@ export function FilePreview({
       formattedSource,
       annotationPath,
       sourceRevealRequest,
-      scope,
+      annotationScope,
     );
     handledSourceRevealRequestIdRef.current = sourceRevealRequest.requestId;
     if (!annotation) {
@@ -1030,8 +1037,8 @@ export function FilePreview({
     error,
     flashAnnotation,
     formattedSource,
+    annotationScope,
     previewBusy,
-    scope,
     sourceRevealRequest,
   ]);
 
@@ -1721,6 +1728,7 @@ export function FilePreview({
               }}
               onDelete={deleteAnnotation}
               onStartChat={startChatFromAnnotation}
+              onStartAllChats={startChatFromAllAnnotations}
               onReveal={revealAnnotation}
               onRetry={() => setAnnotationReloadId((current) => current + 1)}
               onClose={closeAnnotationPanel}
@@ -2176,6 +2184,7 @@ interface AnnotationPanelProps {
   onCancelEdit: () => void;
   onDelete: (annotation: WorkspaceFileAnnotation) => void;
   onStartChat: (annotation: WorkspaceFileAnnotation) => void;
+  onStartAllChats: (annotations: WorkspaceFileAnnotation[]) => void;
   onReveal: (annotation: WorkspaceFileAnnotation) => void;
   onRetry: () => void;
   onClose: () => void;
@@ -2384,6 +2393,19 @@ function shouldConfirmAnnotationTextarea(event: ReactKeyboardEvent<HTMLTextAreaE
   return !nativeEvent.isComposing && nativeEvent.keyCode !== 229;
 }
 
+function annotationChatRequest(annotation: WorkspaceFileAnnotation): PreviewAnnotationChatRequest {
+  return {
+    path: annotation.path,
+    comment: annotation.comment,
+    annotationId: annotation.id,
+    selectedText: annotation.selected_text,
+    lineStart: annotation.line_start,
+    lineEnd: annotation.line_end,
+    sourceStart: annotation.anchor_json?.sourceStart ?? null,
+    sourceEnd: annotation.anchor_json?.sourceEnd ?? null,
+  };
+}
+
 function createPopoverState(
   position: Pick<AnnotationPopoverState, "x" | "y" | "width" | "height">,
   anchorElement: HTMLElement | null,
@@ -2512,6 +2534,7 @@ function AnnotationPanel({
   onCancelEdit,
   onDelete,
   onStartChat,
+  onStartAllChats,
   onReveal,
   onRetry,
   onClose,
@@ -2660,38 +2683,57 @@ function AnnotationPanel({
         })}
       </div>
 
-      {!unavailable && !fileComposerOpen ? (
-        <button type="button" className={styles.annotationAddButton} onClick={() => setFileComposerOpen(true)}>
-          <MessageSquarePlus size={13} />
-          <span>添加文件批注</span>
-        </button>
-      ) : null}
-
-      {!unavailable && fileComposerOpen ? (
-        <div className={styles.annotationComposer}>
-          <textarea
-            value={fileDraft}
-            rows={2}
-            placeholder="添加文件级批注"
-            aria-label="添加文件级批注"
-            onChange={(event) => onFileDraftChange(event.currentTarget.value)}
-          />
-          <div className={styles.annotationComposerActions}>
+      {!unavailable ? (
+        <div className={styles.annotationFooter}>
+          {annotations.length ? (
             <button
               type="button"
-              disabled={!fileDraft.trim() || creatingFile}
+              className={styles.annotationBulkChatButton}
+              disabled={!canStartChat}
               onClick={() => {
-                onCreateFileAnnotation();
-                setFileComposerOpen(false);
+                onStartAllChats(annotations);
+                onClose();
               }}
             >
+              <Send size={13} />
+              <span>全部添加到对话</span>
+            </button>
+          ) : null}
+
+          {!fileComposerOpen ? (
+            <button type="button" className={styles.annotationAddButton} onClick={() => setFileComposerOpen(true)}>
               <MessageSquarePlus size={13} />
-              <span>{creatingFile ? "保存中" : "添加文件批注"}</span>
+              <span>添加文件批注</span>
             </button>
-            <button type="button" data-variant="ghost" onClick={() => setFileComposerOpen(false)}>
-              取消
-            </button>
-          </div>
+          ) : null}
+
+          {fileComposerOpen ? (
+            <div className={styles.annotationComposer}>
+              <textarea
+                value={fileDraft}
+                rows={2}
+                placeholder="添加文件级批注"
+                aria-label="添加文件级批注"
+                onChange={(event) => onFileDraftChange(event.currentTarget.value)}
+              />
+              <div className={styles.annotationComposerActions}>
+                <button
+                  type="button"
+                  disabled={!fileDraft.trim() || creatingFile}
+                  onClick={() => {
+                    onCreateFileAnnotation();
+                    setFileComposerOpen(false);
+                  }}
+                >
+                  <MessageSquarePlus size={13} />
+                  <span>{creatingFile ? "保存中" : "添加文件批注"}</span>
+                </button>
+                <button type="button" data-variant="ghost" onClick={() => setFileComposerOpen(false)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </aside>
@@ -5416,6 +5458,22 @@ function workspaceScope({
   }
   if (workspaceId) {
     return { workspaceId };
+  }
+  return null;
+}
+
+function annotationWorkspaceScope({
+  workspaceId,
+  sessionId,
+}: {
+  workspaceId?: string;
+  sessionId?: string;
+}): WorkspaceScope | null {
+  if (workspaceId) {
+    return { workspaceId };
+  }
+  if (sessionId) {
+    return { sessionId };
   }
   return null;
 }

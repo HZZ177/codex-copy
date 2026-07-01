@@ -126,6 +126,7 @@ describe("message injection composer helpers", () => {
   it("keeps annotation comments as structured source quote context", () => {
     const quote = selectedQuoteFromText("selected text", {
       source: "annotation",
+      annotationId: "ann-source",
       annotationComment: "Explain this paragraph",
       file: {
         path: "README.md",
@@ -146,6 +147,7 @@ describe("message injection composer helpers", () => {
       content: "selected text",
       description: expect.stringContaining("批注：Explain this paragraph"),
       metadata: {
+        annotation_id: "ann-source",
         annotation_comment: "Explain this paragraph",
       },
     });
@@ -154,6 +156,7 @@ describe("message injection composer helpers", () => {
     expect(injection?.content).toContain("批注内容：\nExplain this paragraph");
     expect(injection?.metadata).toMatchObject({
       kind: "source_quote",
+      annotation_id: "ann-source",
       annotation_comment: "Explain this paragraph",
     });
   });

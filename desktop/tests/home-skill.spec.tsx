@@ -26,8 +26,9 @@ describe("HomePage skill activation", () => {
       expect(workspaceListSkills).toHaveBeenCalledWith({ workspaceId: "ws-1" }, { forceReload: false });
     });
     typePrompt("/");
-    await screen.findByRole("option", { name: /Skill/ });
+    await screen.findByRole("option", { name: /^Skill\b/ });
     const input = screen.getByLabelText("输入需求");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     await screen.findByRole("option", { name: /dev-plan/ });
     fireEvent.keyDown(input, { key: "Enter" });

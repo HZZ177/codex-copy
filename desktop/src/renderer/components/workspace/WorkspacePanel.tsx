@@ -21,6 +21,7 @@ import type {
   WorkspaceSearchResult,
 } from "@/runtime";
 import { APP_FIND_SHORTCUT_EVENT, type AppFindShortcutDetail } from "@/renderer/events/findShortcut";
+import { subscribeExpandWorkspaceDirectory } from "@/renderer/events/workspaceFileContext";
 import { useWorkspaceFileSearch } from "@/renderer/hooks/useWorkspaceFileSearch";
 import { WORKSPACE_FILE_SEARCH_BUDGET_HINT } from "@/renderer/utils/workspaceFileSearchBudget";
 import { LoadingSkeleton } from "@/renderer/components/loading";
@@ -268,6 +269,18 @@ export function WorkspacePanel({
 
     await loadDirectorySubtree(path);
   }, [entriesByPath, loadDirectorySubtree]);
+
+  useEffect(() => {
+    return subscribeExpandWorkspaceDirectory((detail) => {
+      if (detail.sessionId && detail.sessionId !== sessionId) {
+        return;
+      }
+      if (detail.workspaceId && detail.workspaceId !== workspaceId) {
+        return;
+      }
+      void toggleDirectorySubtree(detail.path, false);
+    });
+  }, [sessionId, toggleDirectorySubtree, workspaceId]);
 
   const selectFile = useCallback((path: string) => {
     setSelectedPath(path);

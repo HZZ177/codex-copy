@@ -1,12 +1,13 @@
 import {
   CheckSquare,
   ChevronRight,
+  ChevronsUpDown,
   ClipboardPaste,
   Copy,
   File as FileIcon,
   FolderOpen,
   MessageSquarePlus,
-  MinusCircle,
+  RefreshCw,
   Route,
   Scissors,
   type LucideIcon,
@@ -24,7 +25,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { emitAddWorkspaceFileToChat } from "@/renderer/events/workspaceFileContext";
+import {
+  emitAddWorkspaceFileToChat,
+  emitExpandWorkspaceDirectory,
+} from "@/renderer/events/workspaceFileContext";
 
 import styles from "./AppContextMenuProvider.module.css";
 
@@ -358,11 +362,18 @@ function useMenuItems(context: MenuContext): MenuItem[] {
     const workspaceEntry = context.workspaceEntry;
 
     if (workspaceEntry?.kind === "directory") {
-      return [emptyMenuItem()];
+      return withRefresh([
+        {
+          action: () => expandWorkspaceDirectory(workspaceEntry),
+          icon: ChevronsUpDown,
+          id: "expand-workspace-directory",
+          label: "展开所有下级菜单",
+        },
+      ]);
     }
 
     if (workspaceEntry?.kind === "file") {
-      return [
+      return withRefresh([
         {
           action: () => copyWorkspaceFile(workspaceEntry),
           icon: FileIcon,
@@ -400,11 +411,11 @@ function useMenuItems(context: MenuContext): MenuItem[] {
           id: "add-workspace-file-to-chat",
           label: "添加到聊天",
         },
-      ];
+      ]);
     }
 
     if (context.editable) {
-      return [
+      return withRefresh([
         {
           action: () => cutSelection(context),
           disabled: !context.mutable || !hasSelection,
@@ -432,31 +443,34 @@ function useMenuItems(context: MenuContext): MenuItem[] {
           id: "select-all",
           label: "全选",
         },
-      ];
+      ]);
     }
 
     if (hasSelection) {
-      return [
+      return withRefresh([
         {
           action: () => copySelection(context),
           icon: Copy,
           id: "copy-selection",
           label: "复制",
         },
-      ];
+      ]);
     }
 
-    return [emptyMenuItem()];
+    return withRefresh([]);
   }, [context]);
 }
 
-function emptyMenuItem(): MenuItem {
-  return {
-    disabled: true,
-    icon: MinusCircle,
-    id: "empty",
-    label: "暂无可用操作",
-  };
+function withRefresh(items: MenuItem[]): MenuItem[] {
+  return [
+    ...items,
+    {
+      action: refreshPage,
+      icon: RefreshCw,
+      id: "refresh-page",
+      label: "刷新",
+    },
+  ];
 }
 
 async function copySelection(context: MenuContext) {
@@ -526,6 +540,19 @@ function addWorkspaceFileToChat(context: WorkspaceEntryContext) {
     workspaceId: context.workspaceId,
     workspaceRoot: context.workspaceRoot,
   });
+}
+
+function expandWorkspaceDirectory(context: WorkspaceEntryContext) {
+  emitExpandWorkspaceDirectory({
+    path: context.path,
+    sessionId: context.sessionId,
+    workspaceId: context.workspaceId,
+    workspaceRoot: context.workspaceRoot,
+  });
+}
+
+function refreshPage() {
+  window.location.reload();
 }
 
 async function invokeDesktopCommand(command: string, args: Record<string, unknown>) {

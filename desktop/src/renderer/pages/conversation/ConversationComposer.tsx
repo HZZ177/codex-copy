@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import {
   SendBox,
+  type SendBoxExternalFileRequest,
+  type SendBoxExternalQuoteRequest,
   type SelectedFile,
   type SelectedImageAttachment,
   type SelectedQuote,
@@ -47,8 +49,11 @@ export interface ConversationComposerProps {
   onEscape?: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
-  externalFileRequest: { requestId: number; file: SelectedFile } | null;
-  externalQuoteRequest: { requestId: number; quote: SelectedQuote } | null;
+  onRefreshWorkspaceSkills?: () => void | Promise<void>;
+  onExternalFileRequestHandled?: (requestId: number) => void;
+  onExternalQuoteRequestHandled?: (requestId: number) => void;
+  externalFileRequest: SendBoxExternalFileRequest | null;
+  externalQuoteRequest: SendBoxExternalQuoteRequest | null;
   controls?: ReactNode;
   className?: string;
   placeholder?: string;
@@ -87,6 +92,9 @@ export function ConversationComposer({
   onEscape,
   onOpenFileReference,
   onSlashCommand,
+  onRefreshWorkspaceSkills,
+  onExternalFileRequestHandled,
+  onExternalQuoteRequestHandled,
   externalFileRequest,
   externalQuoteRequest,
   controls,
@@ -145,6 +153,9 @@ export function ConversationComposer({
       onEscape={onEscape}
       onOpenFileReference={onOpenFileReference}
       onSlashCommand={onSlashCommand}
+      onRefreshWorkspaceSkills={onRefreshWorkspaceSkills}
+      onExternalFileRequestHandled={onExternalFileRequestHandled}
+      onExternalQuoteRequestHandled={onExternalQuoteRequestHandled}
       externalFileRequest={externalFileRequest}
       externalQuoteRequest={externalQuoteRequest}
       allowFileSelection={Boolean(onSearchWorkspace || onListWorkspaceDirectory)}

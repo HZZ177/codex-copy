@@ -1738,6 +1738,70 @@ describe("FilePreview", () => {
     });
   });
 
+  it("uses workspace scope for annotations when a workspace session preview has both ids", async () => {
+    const annotation = fileAnnotation({
+      id: "ann-workspace",
+      scope_type: "workspace",
+      scope_id: "ws-1",
+      path: "README.md",
+      comment: "Workspace annotation",
+    });
+    const created = fileAnnotation({
+      id: "ann-created",
+      scope_type: "workspace",
+      scope_id: "ws-1",
+      path: "README.md",
+      comment: "New workspace annotation",
+    });
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "README.md",
+        content: "# Hello\n",
+        encoding: "utf-8",
+      }),
+      listAnnotations: vi.fn().mockResolvedValue([annotation]),
+      createAnnotation: vi.fn().mockResolvedValue(created),
+    });
+
+    render(
+      <FilePreview
+        request={{ type: "file", path: "README.md" }}
+        sessionId="ses-1"
+        workspaceId="ws-1"
+        runtime={runtime}
+      />,
+    );
+
+    await screen.findByLabelText("预览内容");
+    expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
+    await waitFor(() => {
+      expect(runtime.workspace.listAnnotations).toHaveBeenCalledWith(
+        { workspaceId: "ws-1" },
+        "README.md",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /文件批注/ }));
+    expect(await screen.findByText("Workspace annotation")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "添加文件批注" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "添加文件级批注" }), {
+      target: { value: "New workspace annotation" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加文件批注" }));
+
+    await waitFor(() => {
+      expect(runtime.workspace.createAnnotation).toHaveBeenCalledWith(
+        { workspaceId: "ws-1" },
+        expect.objectContaining({
+          path: "README.md",
+          anchor_type: "file",
+          comment: "New workspace annotation",
+        }),
+      );
+    });
+  });
+
   it("creates selected rendered-text annotations with inferred source line numbers", async () => {
     const content = "# Guide\n\nTarget text";
     const anchor = sourceAnchor(content, "Target text", "Target text", "preview");
@@ -2724,6 +2788,7 @@ describe("FilePreview", () => {
     expect(onStartChatFromAnnotation).toHaveBeenCalledWith({
       path: "guide.md",
       comment: "Explain this paragraph",
+      annotationId: "ann-selection",
       selectedText: "Target text",
       lineStart: 3,
       lineEnd: 3,
@@ -2839,6 +2904,83 @@ describe("FilePreview", () => {
     });
   });
 
+  it("adds all visible panel annotations to chat in one request", async () => {
+    const onStartChatFromAnnotation = vi.fn();
+    const content = "# Guide\n\nTarget text";
+    const anchor = sourceAnchor(content, "Target text", "Target text", "preview");
+    const annotations = [
+      fileAnnotation({
+        id: "ann-file",
+        path: "guide.md",
+        anchor_type: "file",
+        comment: "File-level note",
+      }),
+      fileAnnotation({
+        id: "ann-selection",
+        path: "guide.md",
+        anchor_type: "selection",
+        selected_text: "Target text",
+        line_start: anchor.lineStart,
+        line_end: anchor.lineEnd,
+        column_start: anchor.columnStart,
+        column_end: anchor.columnEnd,
+        content_hash: anchor.contentHash,
+        anchor_json: anchor,
+        comment: "Selection note",
+      }),
+    ];
+    const runtime = fakeRuntime({
+      readFile: vi.fn().mockResolvedValue({
+        path: "guide.md",
+        content,
+        encoding: "utf-8",
+      }),
+      listAnnotations: vi.fn().mockResolvedValue(annotations),
+    });
+
+    render(
+      <FilePreview
+        request={{ type: "file", path: "guide.md" }}
+        sessionId="ses-1"
+        runtime={runtime}
+        onStartChatFromAnnotation={onStartChatFromAnnotation}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /文件批注/ }));
+    const panel = await screen.findByLabelText("文件批注");
+    expect(within(panel).getByText("File-level note")).not.toBeNull();
+    expect(within(panel).getByText("Selection note")).not.toBeNull();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "全部添加到对话" }));
+
+    expect(onStartChatFromAnnotation).toHaveBeenCalledWith([
+      {
+        path: "guide.md",
+        comment: "File-level note",
+        annotationId: "ann-file",
+        selectedText: null,
+        lineStart: null,
+        lineEnd: null,
+        sourceStart: null,
+        sourceEnd: null,
+      },
+      {
+        path: "guide.md",
+        comment: "Selection note",
+        annotationId: "ann-selection",
+        selectedText: "Target text",
+        lineStart: 3,
+        lineEnd: 3,
+        sourceStart: anchor.sourceStart,
+        sourceEnd: anchor.sourceEnd,
+      },
+    ]);
+    await waitFor(() => {
+      expect(screen.queryByLabelText("文件批注")).toBeNull();
+    });
+  });
+
   it("starts chat from a line-backed annotation without sending automatically", async () => {
     const onStartChatFromAnnotation = vi.fn();
     const annotation = fileAnnotation({
@@ -2876,6 +3018,7 @@ describe("FilePreview", () => {
     expect(onStartChatFromAnnotation).toHaveBeenCalledWith({
       path: "src/main.ts",
       comment: "Check this value",
+      annotationId: "ann-line",
       selectedText: "const value = 1",
       lineStart: 2,
       lineEnd: 2,

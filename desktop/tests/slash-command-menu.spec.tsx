@@ -165,7 +165,7 @@ describe("SlashCommandMenu", () => {
     );
 
     expect(screen.getByTestId("slash-command-menu")).not.toBeNull();
-    expect(screen.getByText("Skill")).not.toBeNull();
+    expect(screen.getByRole("option", { name: /^Skill\b/ })).not.toBeNull();
 
     const input = screen.getByLabelText("继续输入");
     fireEvent.keyDown(input, { key: "ArrowDown" });

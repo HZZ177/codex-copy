@@ -931,6 +931,7 @@ describe("Sider", () => {
     await screen.findByText("旧标题");
     const menu = openSessionMenu("旧标题");
     expect(menu.parentElement).toBe(document.body);
+    expect(within(menu).queryByRole("menuitem", { name: "刷新" })).toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
       expect(screen.queryByRole("menu", { name: "会话操作 旧标题" })).toBeNull();
@@ -973,9 +974,26 @@ describe("Sider", () => {
     expect(within(menu).getByRole("menuitem", { name: "从对话派生" })).not.toBeNull();
     expect(within(menu).getByRole("menuitem", { name: "重命名" })).not.toBeNull();
     expect(within(menu).getByRole("menuitem", { name: "删除" })).not.toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "刷新" })).not.toBeNull();
 
     fireEvent.click(within(menu).getByRole("menuitem", { name: "重命名" }));
     expect(screen.getByRole("dialog", { name: "重命名会话" })).not.toBeNull();
+  });
+
+  it("refreshes the session list from the session right-click menu", async () => {
+    const runtime = fakeRuntime([thread({ id: "thread-a", title: "可刷新会话" })]);
+    renderSider(<Sider runtime={runtime} />);
+
+    await screen.findByText("可刷新会话");
+    expect(runtime.conversation.listSessions).toHaveBeenCalledTimes(1);
+
+    const sessionButton = screen.getByRole("button", { name: "可刷新会话" });
+    fireEvent.contextMenu(sessionButton, { clientX: 80, clientY: 96 });
+    fireEvent.click(within(screen.getByRole("menu", { name: "会话操作 可刷新会话" })).getByRole("menuitem", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(runtime.conversation.listSessions).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("forks a session from the latest complete turn in the action menu", async () => {

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RuntimeBridge, WorkspaceEntry, WorkspaceSubtreeResponse, WorkspaceTreeResponse } from "@/runtime";
 import { WorkspaceFileBrowser, WorkspacePanel } from "@/renderer/components/workspace";
 import { APP_FIND_SHORTCUT_EVENT } from "@/renderer/events/findShortcut";
+import { APP_EXPAND_WORKSPACE_DIRECTORY_EVENT } from "@/renderer/events/workspaceFileContext";
 
 describe("WorkspacePanel", () => {
   it("renders cwd, expands directories and selects files", async () => {
@@ -189,6 +190,43 @@ describe("WorkspacePanel", () => {
     expect(screen.getByRole("button", { name: "展开 src" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "展开 src 的目录树" }).querySelector(".lucide-chevrons-up-down")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "选择文件 src/components/ui/Button.tsx" })).toBeNull();
+  });
+
+  it("expands descendant directories from the workspace directory context event", async () => {
+    const runtime = fakeRuntime({
+      "": [entry("src", "src", "directory")],
+      src: [
+        entry("components", "src/components", "directory"),
+        entry("index.ts", "src/index.ts", "file", 12),
+      ],
+      "src/components": [entry("ui", "src/components/ui", "directory")],
+      "src/components/ui": [entry("Button.tsx", "src/components/ui/Button.tsx", "file", 24)],
+    });
+
+    render(<WorkspacePanel sessionId="ses-1" label="D:/repo" runtime={runtime} />);
+
+    expect(await screen.findByRole("button", { name: "展开 src" })).not.toBeNull();
+
+    act(() => {
+      document.dispatchEvent(
+        new CustomEvent(APP_EXPAND_WORKSPACE_DIRECTORY_EVENT, {
+          detail: {
+            path: "src",
+            sessionId: "ses-1",
+            workspaceRoot: "D:/repo",
+          },
+        }),
+      );
+    });
+
+    expect(await screen.findByRole("button", { name: "选择文件 src/components/ui/Button.tsx" })).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.listDirectorySubtree).toHaveBeenCalledWith(
+        { sessionId: "ses-1" },
+        "src",
+        expect.objectContaining({ maxDepth: 6, maxDirs: 300, maxEntries: 1500, timeoutMs: 700 }),
+      );
+    });
   });
 
   it("shows backend workspace errors", async () => {

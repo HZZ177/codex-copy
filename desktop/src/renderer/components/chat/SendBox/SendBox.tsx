@@ -47,6 +47,7 @@ import {
   type FileSelectionAction,
   type SelectedFile,
   type SelectedFileSource,
+  selectedFileKey,
   selectedFileFromFile,
   selectedFileFromPath,
   selectedFileFromWorkspace,
@@ -119,18 +120,23 @@ export interface SendBoxProps {
   onEscape?: () => void;
   onOpenFileReference?: (file: SelectedFile) => void;
   onSlashCommand?: (command: SlashCommand) => void;
+  onRefreshWorkspaceSkills?: () => void | Promise<void>;
+  onExternalFileRequestHandled?: (requestId: number) => void;
+  onExternalQuoteRequestHandled?: (requestId: number) => void;
   onListWorkspaceDirectory?: (path: string) => Promise<WorkspaceSearchResult[]>;
   onSearchWorkspace?: WorkspaceFileSearchFn;
 }
 
 export interface SendBoxExternalFileRequest {
   requestId: number;
-  file: SelectedFile;
+  file?: SelectedFile | null;
+  files?: SelectedFile[];
 }
 
 export interface SendBoxExternalQuoteRequest {
   requestId: number;
-  quote: SelectedQuote;
+  quote?: SelectedQuote | null;
+  quotes?: SelectedQuote[];
 }
 
 type SlashMenuItem =
@@ -176,6 +182,9 @@ export function SendBox({
   onEscape,
   onOpenFileReference,
   onSlashCommand,
+  onRefreshWorkspaceSkills,
+  onExternalFileRequestHandled,
+  onExternalQuoteRequestHandled,
   onListWorkspaceDirectory,
   onSearchWorkspace,
 }: SendBoxProps) {
@@ -194,6 +203,7 @@ export function SendBox({
   const [dismissedAtValue, setDismissedAtValue] = useState<string | null>(null);
   const [atBrowseState, setAtBrowseState] = useState<{ path: string; value: string } | null>(null);
   const hadAtDirectoryRequestRef = useRef(false);
+  const refreshedSlashSessionRef = useRef(false);
   const [atDirectoryResults, setAtDirectoryResults] = useState<WorkspaceSearchResult[]>([]);
   const [atDirectoryLoading, setAtDirectoryLoading] = useState(false);
   const [atDirectoryError, setAtDirectoryError] = useState<string | null>(null);
@@ -438,6 +448,18 @@ export function SendBox({
   }, [dismissedSlashValue, slashMode, slashQuery]);
 
   useEffect(() => {
+    if (!slashOpen) {
+      refreshedSlashSessionRef.current = false;
+      return;
+    }
+    if (refreshedSlashSessionRef.current || !onRefreshWorkspaceSkills) {
+      return;
+    }
+    refreshedSlashSessionRef.current = true;
+    void onRefreshWorkspaceSkills();
+  }, [onRefreshWorkspaceSkills, slashOpen]);
+
+  useEffect(() => {
     setAtActiveIndex(0);
   }, [atDirectoryPath, atQuery]);
 
@@ -473,9 +495,16 @@ export function SendBox({
       return;
     }
     handledExternalFileRequestIdRef.current = externalFileRequest.requestId;
-    dispatchFileSelection({ type: "add", file: externalFileRequest.file });
+    const files = externalFileRequestFiles(externalFileRequest);
+    if (files.length === 0) {
+      return;
+    }
+    dispatchFileSelection(
+      files.length === 1 ? { type: "add", file: files[0] } : { type: "addMany", files },
+    );
+    onExternalFileRequestHandled?.(externalFileRequest.requestId);
     inputRef.current?.focus();
-  }, [canUseFileContext, externalFileRequest]);
+  }, [canUseFileContext, externalFileRequest, onExternalFileRequestHandled]);
 
   useEffect(() => {
     if (!externalQuoteRequest) {
@@ -485,9 +514,16 @@ export function SendBox({
       return;
     }
     handledExternalQuoteRequestIdRef.current = externalQuoteRequest.requestId;
-    dispatchQuoteSelection({ type: "add", quote: externalQuoteRequest.quote });
+    const quotes = externalQuoteRequestQuotes(externalQuoteRequest);
+    if (quotes.length === 0) {
+      return;
+    }
+    dispatchQuoteSelection(
+      quotes.length === 1 ? { type: "add", quote: quotes[0] } : { type: "addMany", quotes },
+    );
+    onExternalQuoteRequestHandled?.(externalQuoteRequest.requestId);
     inputRef.current?.focus();
-  }, [externalQuoteRequest]);
+  }, [externalQuoteRequest, onExternalQuoteRequestHandled]);
 
   useEffect(() => {
     let active = true;
@@ -601,8 +637,8 @@ export function SendBox({
     setAtBrowseState({ path, value: editorValue });
   };
 
-  const removeFile = (path: string) => {
-    dispatchFileSelection({ type: "remove", path });
+  const removeFile = (file: SelectedFile) => {
+    dispatchFileSelection({ type: "remove", id: selectedFileKey(file) });
   };
 
   const addImagePath = useCallback(
@@ -982,7 +1018,7 @@ export function SendBox({
     (quoteId: string) => {
       dispatchQuoteSelection({ type: "remove", id: quoteId });
     },
-    [],
+    [dispatchQuoteSelection],
   );
 
   return (
@@ -1063,10 +1099,10 @@ export function SendBox({
           ))}
           {fileSelection.files.map((file) => (
             <FileContextChip
-              key={file.path}
+              key={selectedFileKey(file)}
               file={file}
               onOpen={onOpenFileReference}
-              onRemove={() => removeFile(file.path)}
+              onRemove={() => removeFile(file)}
             />
           ))}
         </div>
@@ -1467,12 +1503,14 @@ function selectedFileFromQuote(quote: SelectedQuote): SelectedFile | null {
     return null;
   }
   const annotationComment = quote.annotationComment?.trim();
+  const annotationId = quote.annotationId?.trim();
   return {
     path: quote.file.path,
     name: quote.file.name || fileName(quote.file.path),
     type: "file",
     source: "workspace",
     selectedText: quote.text,
+    ...(annotationId ? { annotationId } : {}),
     ...(annotationComment ? { annotationComment } : {}),
     lineStart: quote.file.lineStart ?? null,
     lineEnd: quote.file.lineEnd ?? null,
@@ -1499,6 +1537,20 @@ function quoteLineLabel(start?: number | null, end?: number | null): string | nu
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function externalFileRequestFiles(request: SendBoxExternalFileRequest): SelectedFile[] {
+  if (request.files?.length) {
+    return request.files;
+  }
+  return request.file ? [request.file] : [];
+}
+
+function externalQuoteRequestQuotes(request: SendBoxExternalQuoteRequest): SelectedQuote[] {
+  if (request.quotes?.length) {
+    return request.quotes;
+  }
+  return request.quote ? [request.quote] : [];
 }
 
 function FileContextChip({

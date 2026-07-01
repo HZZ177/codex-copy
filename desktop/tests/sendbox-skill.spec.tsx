@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SendBox } from "@/renderer/components/chat/SendBox";
@@ -41,11 +41,12 @@ describe("SendBox skill capsule", () => {
     );
 
     const input = screen.getByLabelText("继续输入");
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(screen.getByText("dev-plan")).not.toBeNull();
-    expect(screen.queryByText("Plan work from a design doc")).toBeNull();
+    expect(screen.getByLabelText("删除 Skill /dev-plan")).not.toBeNull();
     expect(onSkillChange).toHaveBeenCalledWith(skills[0]);
     expect(onChange).toHaveBeenCalledWith("");
     expect(onSend).not.toHaveBeenCalled();
@@ -136,5 +137,29 @@ describe("SendBox skill capsule", () => {
       source: "workspace",
     });
     expect(document.querySelector('[data-context-chip-icon="skill"]')).not.toBeNull();
+  });
+
+  it("refreshes workspace skills when a new slash menu session opens", async () => {
+    const onRefreshWorkspaceSkills = vi.fn();
+    const baseProps = {
+      runtimeState: "idle" as const,
+      canSend: true,
+      canStop: false,
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+      onRefreshWorkspaceSkills,
+    };
+    const { rerender } = render(<SendBox value="" {...baseProps} />);
+
+    rerender(<SendBox value="/" {...baseProps} />);
+    await waitFor(() => expect(onRefreshWorkspaceSkills).toHaveBeenCalledTimes(1));
+
+    rerender(<SendBox value="/dev" {...baseProps} />);
+    expect(onRefreshWorkspaceSkills).toHaveBeenCalledTimes(1);
+
+    rerender(<SendBox value="" {...baseProps} />);
+    rerender(<SendBox value="/" {...baseProps} />);
+    await waitFor(() => expect(onRefreshWorkspaceSkills).toHaveBeenCalledTimes(2));
   });
 });

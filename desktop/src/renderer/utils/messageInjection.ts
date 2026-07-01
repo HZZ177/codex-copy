@@ -96,6 +96,7 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
     }
     const id = quote.id || `quote:${index}:${hashText(content)}`;
     const preview = quote.preview || selectedQuotePreview(content);
+    const annotationId = normalizedOptionalText(quote.annotationId);
     const annotationComment = normalizedOptionalText(quote.annotationComment);
     if (quote.file) {
       const description = sourceQuoteDescription(quote, annotationComment);
@@ -124,6 +125,7 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
             line_end: quote.file.lineEnd ?? null,
             source_start: quote.file.sourceStart ?? null,
             source_end: quote.file.sourceEnd ?? null,
+            annotation_id: annotationId,
             annotation_comment: annotationComment,
             description,
           },
@@ -144,6 +146,7 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
           label: "引用片段",
           preview,
           source: quote.source,
+          annotation_id: annotationId,
           annotation_comment: annotationComment,
         },
       },
@@ -153,6 +156,7 @@ function quoteContextItems(quotes: SelectedQuote[]): AgentContextItem[] {
 
 function fileContextItem(file: SelectedFile, index: number): AgentContextItem {
   const id = `file:${index}:${hashText(file.path)}`;
+  const annotationId = normalizedOptionalText(file.annotationId);
   const annotationComment = normalizedOptionalText(file.annotationComment);
   const description = [file.path, annotationComment ? `批注：${annotationComment}` : ""].filter(Boolean).join("\n\n");
   const kindLabel = selectedFileKindLabel(file);
@@ -175,6 +179,7 @@ function fileContextItem(file: SelectedFile, index: number): AgentContextItem {
       name: file.name,
       fileType: file.type,
       source: file.source,
+      annotation_id: annotationId,
       annotation_comment: annotationComment,
       description,
     },

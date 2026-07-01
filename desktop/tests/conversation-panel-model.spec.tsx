@@ -40,6 +40,26 @@ describe("useConversationPanelModel", () => {
     expect(entries).toEqual([{ path: "README.md", name: "README.md", type: "file" }]);
   });
 
+  it("includes workspace id in existing workspace session preview context", () => {
+    const runtime = fakeRuntime();
+    const controller = fakeController({
+      session: agentSession({
+        session_type: "workspace",
+        workspace_id: "ws-1",
+        workspace: workspace(),
+        cwd: "D:/repo/keydex",
+      }),
+    });
+
+    const { result } = renderHook(
+      () => useConversationPanelModel({ runtime, sessionId: "ses-1", controller }),
+      { wrapper: Providers },
+    );
+
+    expect(result.current.previewRenderContext.sessionId).toBe("ses-1");
+    expect(result.current.previewRenderContext.workspaceId).toBe("ws-1");
+  });
+
   it("keeps pure chat and unavailable workspace sessions out of workspace file search", () => {
     const runtime = fakeRuntime();
     const pureChat = renderHook(

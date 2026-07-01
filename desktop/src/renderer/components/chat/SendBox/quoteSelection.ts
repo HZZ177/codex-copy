@@ -3,6 +3,7 @@ export interface SelectedQuote {
   text: string;
   preview: string;
   source: "selection" | "annotation";
+  annotationId?: string | null;
   annotationComment?: string | null;
   file?: SelectedQuoteFileSource | null;
 }
@@ -18,6 +19,7 @@ export interface SelectedQuoteFileSource {
 
 export interface SelectedQuoteOptions {
   source?: SelectedQuote["source"];
+  annotationId?: string | null;
   annotationComment?: string | null;
   file?: SelectedQuoteFileSource | null;
 }
@@ -28,6 +30,7 @@ export interface QuoteSelectionState {
 
 export type QuoteSelectionAction =
   | { type: "add"; quote: SelectedQuote }
+  | { type: "addMany"; quotes: SelectedQuote[] }
   | { type: "remove"; id: string }
   | { type: "clear" };
 
@@ -41,18 +44,24 @@ export function quoteSelectionReducer(
 ): QuoteSelectionState {
   switch (action.type) {
     case "add":
-      if (!action.quote.text.trim()) {
-        return state;
-      }
-      if (state.quotes.some((quote) => quote.id === action.quote.id)) {
-        return state;
-      }
-      return { quotes: [...state.quotes, action.quote] };
+      return addQuoteToSelection(state, action.quote);
+    case "addMany":
+      return action.quotes.reduce(addQuoteToSelection, state);
     case "remove":
       return { quotes: state.quotes.filter((quote) => quote.id !== action.id) };
     case "clear":
       return initialQuoteSelectionState;
   }
+}
+
+function addQuoteToSelection(state: QuoteSelectionState, quote: SelectedQuote): QuoteSelectionState {
+  if (!quote.text.trim()) {
+    return state;
+  }
+  if (state.quotes.some((item) => item.id === quote.id)) {
+    return state;
+  }
+  return { quotes: [...state.quotes, quote] };
 }
 
 export function selectedQuoteFromText(
@@ -69,8 +78,12 @@ export function selectedQuoteFromText(
       : sourceOrOptions;
   const source = options.source ?? "selection";
   const file = normalizeSelectedQuoteFileSource(options.file ?? null);
+  const annotationId = normalizeQuoteText(options.annotationId ?? "");
   const annotationComment = normalizeQuoteText(options.annotationComment ?? "");
   const idParts = ["quote", source, normalized];
+  if (annotationId) {
+    idParts.push(annotationId);
+  }
   if (file) {
     idParts.push(
       file.path,
@@ -84,10 +97,11 @@ export function selectedQuoteFromText(
     idParts.push(annotationComment);
   }
   return {
-    id: `quote:${source}:${hashText(idParts.join("\n"))}`,
+    id: annotationId ? `annotation:${annotationId}` : `quote:${source}:${hashText(idParts.join("\n"))}`,
     text: normalized,
     preview: selectedQuotePreview(normalized),
     source,
+    annotationId: annotationId || null,
     annotationComment: annotationComment || null,
     file,
   };

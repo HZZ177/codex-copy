@@ -3,10 +3,12 @@ import type { WorkspaceSearchResult } from "@/runtime";
 export type SelectedFileSource = "workspace" | "dropped" | "pasted" | "picker";
 
 export interface SelectedFile {
+  id?: string | null;
   path: string;
   name: string;
   type: "file" | "directory";
   source: SelectedFileSource;
+  annotationId?: string | null;
   selectedText?: string | null;
   annotationComment?: string | null;
   lineStart?: number | null;
@@ -23,7 +25,8 @@ export interface FileSelectionState {
 
 export type FileSelectionAction =
   | { type: "add"; file: SelectedFile }
-  | { type: "remove"; path: string }
+  | { type: "addMany"; files: SelectedFile[] }
+  | { type: "remove"; id: string }
   | { type: "dragging"; dragging: boolean }
   | { type: "error"; error: string | null }
   | { type: "clear" };
@@ -40,15 +43,15 @@ export function fileSelectionReducer(
 ): FileSelectionState {
   switch (action.type) {
     case "add":
-      if (!action.file.path.trim()) {
-        return { ...state, error: "无法添加没有路径的文件" };
-      }
-      if (state.files.some((file) => file.path === action.file.path)) {
-        return { ...state, error: null };
-      }
-      return { ...state, files: [...state.files, action.file], error: null };
+      return addFileToSelection(state, action.file);
+    case "addMany":
+      return action.files.reduce(addFileToSelection, state);
     case "remove":
-      return { ...state, files: state.files.filter((file) => file.path !== action.path), error: null };
+      return {
+        ...state,
+        files: state.files.filter((file) => selectedFileKey(file) !== action.id),
+        error: null,
+      };
     case "dragging":
       return { ...state, dragging: action.dragging };
     case "error":
@@ -56,6 +59,30 @@ export function fileSelectionReducer(
     case "clear":
       return initialFileSelectionState;
   }
+}
+
+function addFileToSelection(state: FileSelectionState, file: SelectedFile): FileSelectionState {
+  if (!file.path.trim()) {
+    return { ...state, error: "无法添加没有路径的文件" };
+  }
+  const key = selectedFileKey(file);
+  if (state.files.some((item) => selectedFileKey(item) === key)) {
+    return { ...state, error: null };
+  }
+  return { ...state, files: [...state.files, file], error: null };
+}
+
+export function selectedFileKey(file: SelectedFile): string {
+  const path = file.path.trim();
+  const id = normalizedOptionalText(file.id);
+  if (id) {
+    return id;
+  }
+  const annotationId = normalizedOptionalText(file.annotationId);
+  if (annotationId) {
+    return `annotation:${annotationId}`;
+  }
+  return `path:${path}`;
 }
 
 export function selectedFileFromWorkspace(result: WorkspaceSearchResult): SelectedFile {
@@ -100,4 +127,8 @@ export function composeMessageWithSelectedFiles(message: string, files: Selected
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function normalizedOptionalText(value: string | null | undefined): string {
+  return (value ?? "").trim();
 }

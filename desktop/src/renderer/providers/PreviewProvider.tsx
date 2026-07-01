@@ -16,7 +16,7 @@ export interface PreviewRenderContext {
   workspaceLabel?: string;
   runtime?: RuntimeBridge;
   onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
-  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
+  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest | PreviewAnnotationChatRequest[]) => void;
 }
 
 export interface PreviewQuoteSelectionRequest {
@@ -39,6 +39,7 @@ export interface PreviewFileRevealTarget {
 export interface PreviewAnnotationChatRequest {
   path: string;
   comment: string;
+  annotationId?: string | null;
   selectedText?: string | null;
   lineStart?: number | null;
   lineEnd?: number | null;

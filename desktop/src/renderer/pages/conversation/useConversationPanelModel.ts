@@ -102,6 +102,7 @@ export function useConversationPanelModel({
   const workspaceUnavailable = Boolean(session && session.session_type === "workspace" && !session.workspace);
   const workspaceAvailable = Boolean(session?.session_type === "workspace" && session.workspace && !workspaceUnavailable);
   const workspaceLabel = session?.workspace?.root_path ?? session?.workspace?.name ?? session?.cwd ?? undefined;
+  const workspaceId = workspaceAvailable ? (session?.workspace?.id ?? session?.workspace_id ?? undefined) : undefined;
   const workspaceSkillScope = useMemo(
     () => (workspaceAvailable ? { sessionId } : null),
     [sessionId, workspaceAvailable],
@@ -293,19 +294,30 @@ export function useConversationPanelModel({
   }, []);
 
   const quoteSelection: (request: string | PreviewQuoteSelectionRequest) => void = controller.quoteSelection;
-  const startChatFromAnnotation: (request: PreviewAnnotationChatRequest) => void = controller.startChatFromAnnotation;
+  const startChatFromAnnotation: (request: PreviewAnnotationChatRequest | PreviewAnnotationChatRequest[]) => void =
+    controller.startChatFromAnnotation;
 
   const previewRenderContext = useMemo<PreviewRenderContext>(
     () => ({
       panelScopeKey: previewPanelScopeKey ?? undefined,
       sessionId,
+      workspaceId,
       workspaceAvailable,
       workspaceLabel,
       runtime,
       onQuoteSelection: quoteSelection,
       onStartChatFromAnnotation: startChatFromAnnotation,
     }),
-    [previewPanelScopeKey, quoteSelection, runtime, sessionId, startChatFromAnnotation, workspaceAvailable, workspaceLabel],
+    [
+      previewPanelScopeKey,
+      quoteSelection,
+      runtime,
+      sessionId,
+      startChatFromAnnotation,
+      workspaceAvailable,
+      workspaceId,
+      workspaceLabel,
+    ],
   );
 
   useEffect(() => {
@@ -478,6 +490,7 @@ export function useConversationPanelModel({
     workspaceUnavailable,
     workspaceLabel,
     workspaceSkills,
+    refreshWorkspaceSkills,
     searchWorkspace,
     listWorkspaceDirectory,
     showScrollToBottom,

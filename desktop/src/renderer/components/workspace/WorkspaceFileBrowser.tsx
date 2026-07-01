@@ -34,7 +34,7 @@ export interface WorkspaceFileBrowserProps {
   previewRequestId?: number;
   previewRevealTarget?: PreviewFileRevealTarget | null;
   onQuoteSelection?: (request: PreviewQuoteSelectionRequest) => void;
-  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest) => void;
+  onStartChatFromAnnotation?: (request: PreviewAnnotationChatRequest | PreviewAnnotationChatRequest[]) => void;
   onPreviewPathChange?: (path: string | null) => void;
 }
 

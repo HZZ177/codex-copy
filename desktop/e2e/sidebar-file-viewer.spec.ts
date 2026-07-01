@@ -210,11 +210,11 @@ test("file preview annotations can be created edited deleted and used as structu
   await expect(panel).toContainText("Selected E2E note");
   await expect(panel).toContainText("This file is rendered");
 
-  const selectionAnnotation = panel.locator("article").filter({ hasText: "Selected E2E note" });
-  await selectionAnnotation.getByRole("button", { name: "基于此批注发起对话" }).click();
+  await panel.getByRole("button", { name: "全部添加到对话" }).click();
   const quoteChip = page.locator("[data-quote-index='0'][data-source-quote='true']");
   await expect(quoteChip).toBeVisible();
   await expect(quoteChip).toContainText("README.md · L3");
+  await expect(page.getByRole("button", { name: "打开文件引用 README.md" })).toBeVisible();
   await expect(input).toHaveText("");
 
   const chatCount = await page.evaluate(() => {

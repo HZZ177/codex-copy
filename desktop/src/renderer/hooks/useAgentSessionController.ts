@@ -10,6 +10,8 @@ import {
 import {
   agentAttachmentFromSelected,
   selectedQuoteFromText,
+  type SendBoxExternalFileRequest,
+  type SendBoxExternalQuoteRequest,
   type SelectedFile,
   type SelectedImageAttachment,
   type SelectedQuote,
@@ -61,6 +63,7 @@ export interface AgentSessionControllerQuoteSelectionRequest {
 export interface AgentSessionControllerAnnotationRequest {
   path: string;
   comment: string;
+  annotationId?: string | null;
   selectedText?: string | null;
   lineStart?: number | null;
   lineEnd?: number | null;
@@ -93,8 +96,8 @@ export interface AgentSessionController {
   setDraft: (value: string | ((current: string) => string)) => void;
   selectedSkill: WorkspaceSkillSummary | null;
   setSelectedSkill: (skill: WorkspaceSkillSummary | null) => void;
-  fileChipRequest: { requestId: number; file: SelectedFile } | null;
-  quoteChipRequest: { requestId: number; quote: SelectedQuote } | null;
+  fileChipRequest: SendBoxExternalFileRequest | null;
+  quoteChipRequest: SendBoxExternalQuoteRequest | null;
   loading: boolean;
   loadingOlderHistory: boolean;
   wsStatus: WsConnectionStatus;
@@ -105,7 +108,7 @@ export interface AgentSessionController {
   canStop: boolean;
   usingSharedRuntime: boolean;
   quoteSelection: (request: string | AgentSessionControllerQuoteSelectionRequest) => void;
-  startChatFromAnnotation: (request: AgentSessionControllerAnnotationRequest) => void;
+  startChatFromAnnotation: (request: AgentSessionControllerAnnotationRequest | AgentSessionControllerAnnotationRequest[]) => void;
   reloadHistory: () => Promise<void>;
   loadOlderHistory: () => Promise<void>;
   sendText: (
@@ -146,8 +149,8 @@ export function useAgentSessionController({
   const sharedRuntimeContext = optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime : null;
   const [localState, localDispatch] = useReducer(agentConversationReducer, createInitialAgentConversationState());
   const [draft, setDraft] = useState("");
-  const [fileChipRequest, setFileChipRequest] = useState<{ requestId: number; file: SelectedFile } | null>(null);
-  const [quoteChipRequest, setQuoteChipRequest] = useState<{ requestId: number; quote: SelectedQuote } | null>(null);
+  const [fileChipRequest, setFileChipRequest] = useState<SendBoxExternalFileRequest | null>(null);
+  const [quoteChipRequest, setQuoteChipRequest] = useState<SendBoxExternalQuoteRequest | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<WorkspaceSkillSummary | null>(null);
   const [requestState, setRequestState] = useState<AgentSessionRuntimeState | null>(null);
   const [localRuntimeDetail, setLocalRuntimeDetail] = useState<string | null>(null);
@@ -412,42 +415,61 @@ export function useAgentSessionController({
     }));
   }, []);
 
-  const startChatFromAnnotation = useCallback((request: AgentSessionControllerAnnotationRequest) => {
-    const path = request.path.trim();
-    const comment = request.comment.trim();
-    if (!path || !comment) {
-      return;
-    }
-    const selectedText = request.selectedText?.trim() ?? "";
-    const quote = selectedText
-      ? selectedQuoteFromText(selectedText, {
-          source: "annotation",
-          annotationComment: comment,
-          file: {
-            path,
-            name: fileName(path),
-            lineStart: request.lineStart ?? null,
-            lineEnd: request.lineEnd ?? null,
-            sourceStart: request.sourceStart ?? null,
-            sourceEnd: request.sourceEnd ?? null,
-          },
-        })
-      : null;
-    if (quote) {
+  const startChatFromAnnotation = useCallback((
+    requestOrRequests: AgentSessionControllerAnnotationRequest | AgentSessionControllerAnnotationRequest[],
+  ) => {
+    const requests = Array.isArray(requestOrRequests) ? requestOrRequests : [requestOrRequests];
+    const files: SelectedFile[] = [];
+    const quotes: SelectedQuote[] = [];
+
+    requests.forEach((request) => {
+      const path = request.path.trim();
+      const comment = request.comment.trim();
+      if (!path || !comment) {
+        return;
+      }
+      const annotationId = request.annotationId?.trim() ?? "";
+      const selectedText = request.selectedText?.trim() ?? "";
+      const quote = selectedText
+        ? selectedQuoteFromText(selectedText, {
+            source: "annotation",
+            annotationId,
+            annotationComment: comment,
+            file: {
+              path,
+              name: fileName(path),
+              lineStart: request.lineStart ?? null,
+              lineEnd: request.lineEnd ?? null,
+              sourceStart: request.sourceStart ?? null,
+              sourceEnd: request.sourceEnd ?? null,
+            },
+          })
+        : null;
+      if (quote) {
+        quotes.push(quote);
+        return;
+      }
+      files.push({
+        id: annotationId ? `annotation:${annotationId}` : null,
+        path,
+        name: fileName(path),
+        type: "file",
+        source: "workspace",
+        annotationId: annotationId || null,
+        annotationComment: comment,
+      });
+    });
+
+    if (quotes.length) {
       setQuoteChipRequest((current) => ({
         requestId: (current?.requestId ?? 0) + 1,
-        quote,
+        quotes,
       }));
-    } else {
+    }
+    if (files.length) {
       setFileChipRequest((current) => ({
         requestId: (current?.requestId ?? 0) + 1,
-        file: {
-          path,
-          name: fileName(path),
-          type: "file",
-          source: "workspace",
-          annotationComment: comment,
-        },
+        files,
       }));
     }
   }, []);

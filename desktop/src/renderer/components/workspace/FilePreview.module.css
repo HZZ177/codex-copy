@@ -660,6 +660,7 @@
 .annotationActions,
 .annotationSelectionMeta,
 .annotationAddButton,
+.annotationBulkChatButton,
 .annotationClose {
   display: flex;
   align-items: center;
@@ -715,23 +716,70 @@
   color: var(--color-text-primary);
 }
 
-.annotationAddButton {
+.annotationFooter {
+  display: grid;
   flex: 0 0 auto;
-  height: 28px;
+  gap: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-bg-elevated) 18%, transparent),
+    color-mix(in srgb, var(--surface-muted) 28%, transparent)
+  );
+  padding-top: 8px;
+}
+
+.annotationAddButton,
+.annotationBulkChatButton {
+  flex: 0 0 auto;
+  height: 30px;
   justify-content: center;
   gap: 6px;
-  border: 1px dashed var(--color-border-subtle);
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 70%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-muted) 60%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 86%, var(--surface-muted));
   color: var(--color-text-secondary);
   font: inherit;
   font-size: 11px;
+  line-height: var(--ui-line-height-tight);
+  box-shadow:
+    0 1px 1px rgb(15 23 42 / 5%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 80%, transparent);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-standard),
+    background var(--motion-fast) var(--motion-ease-standard),
+    color var(--motion-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-fast) var(--motion-ease-standard);
 }
 
-.annotationAddButton:hover {
-  border-color: var(--color-border-default);
-  background: var(--surface-hover);
+.annotationBulkChatButton {
+  border-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-border-default));
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-elevated));
+  color: color-mix(in srgb, var(--color-accent) 78%, var(--color-text-primary));
+  font-weight: 600;
+}
+
+.annotationAddButton {
+  border-style: dashed;
+}
+
+.annotationAddButton:hover,
+.annotationBulkChatButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-border-default) 92%, var(--color-text-tertiary));
+  background: color-mix(in srgb, var(--surface-hover) 78%, var(--color-bg-elevated));
   color: var(--color-text-primary);
+  box-shadow:
+    0 2px 6px rgb(15 23 42 / 8%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
+}
+
+.annotationBulkChatButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 52%, var(--color-border-default));
+}
+
+.annotationBulkChatButton:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .annotationComposer,

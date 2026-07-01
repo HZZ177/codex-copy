@@ -365,6 +365,7 @@ export function ConversationSessionSurface({
       onStop={controller.stop}
       onOpenFileReference={panelModel.openFileReference}
       onSlashCommand={handleSlashCommand}
+      onRefreshWorkspaceSkills={() => panelModel.refreshWorkspaceSkills({ forceReload: true })}
       externalFileRequest={fileChipRequest}
       externalQuoteRequest={quoteChipRequest}
       contextWindowUsage={panelModel.contextWindowUsage}
