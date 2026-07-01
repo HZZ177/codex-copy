@@ -1866,6 +1866,7 @@ describe("WorkbenchAssistantSurface", () => {
     expect(await screen.findByTestId("workbench-review-panel")).not.toBeNull();
     expect(screen.getByTestId("workbench-review-panel").textContent).toContain("src/main.ts");
     expect(screen.getByLabelText("文件 diff").textContent).toContain("+const value = 2;");
+    expect(screen.getByLabelText("文件 diff").getAttribute("data-wrap")).toBe("true");
     expect(screen.getByRole("button", { name: "返回主对话" })).not.toBeNull();
     expect(screen.queryByTestId("workbench-assistant-drawer-input-surface")).toBeNull();
     expect(screen.queryByRole("textbox", { name: "工作台助手输入" })).toBeNull();

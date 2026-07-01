@@ -10,7 +10,7 @@
   --ghost-row-height: 20px;
 
   display: inline-flex;
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
   align-items: flex-start;
   gap: 6px;
@@ -68,7 +68,8 @@
   display: inline-flex;
   min-height: var(--ghost-row-height);
   min-width: 0;
-  flex: 1 1 auto;
+  max-width: 100%;
+  flex: 0 1 auto;
   align-items: flex-start;
   gap: 6px;
 }
@@ -78,7 +79,8 @@
   min-height: var(--ghost-row-height);
   align-items: center;
   min-width: 0;
-  flex: 1 1 auto;
+  max-width: 100%;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   overflow: visible;
   color: currentColor;

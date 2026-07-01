@@ -87,7 +87,7 @@ export function FileReviewPanel({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() =>
     defaultExpandedPath ? new Set([defaultExpandedPath]) : new Set(),
   );
-  const [lineWrapping, setLineWrapping] = useState(false);
+  const [lineWrapping, setLineWrapping] = useState(true);
 
   useEffect(() => {
     setExpandedPaths(defaultExpandedPath ? new Set([defaultExpandedPath]) : new Set());
