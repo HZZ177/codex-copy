@@ -1145,7 +1145,7 @@ function UsageRequestTable({
               <td>{formatCacheHitPercent(row)}</td>
               <td>{formatNumber(row.output_tokens)}</td>
               <td>{formatUsageLatency(row)}</td>
-              <td>{formatOutputTokenRate(row.output_tokens_per_second)}</td>
+              <td>{formatOutputTokenRate(row)}</td>
               <td>
                 <span className={styles.status} data-status={row.status}>
                   {statusLabel(row.status)}
@@ -1281,7 +1281,7 @@ function UsageDetailContent({
           <dt>用时/首字</dt>
           <dd>{formatUsageLatency(request)}</dd>
           <dt>输出速率</dt>
-          <dd>{formatOutputTokenRate(request.output_tokens_per_second)}</dd>
+          <dd>{formatOutputTokenRate(request)}</dd>
           <dt>Trace</dt>
           <dd>{request.trace_id}</dd>
           <dt>网关 Thread</dt>
@@ -1540,11 +1540,19 @@ function formatUsageLatency(value: Pick<UsageRequestLog, "time_to_first_token">)
   return formatNullableDuration(value.time_to_first_token);
 }
 
-function formatOutputTokenRate(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) {
+function formatOutputTokenRate(value: Pick<UsageRequestLog, "call_kind" | "output_tokens_per_second">) {
+  if (isNonStreamingCall(value.call_kind)) {
+    return "非流式不统计";
+  }
+  const rate = value.output_tokens_per_second;
+  if (rate == null || !Number.isFinite(rate)) {
     return "-";
   }
-  return `${Math.max(0, value).toFixed(1)} tok/s`;
+  return `${Math.max(0, rate).toFixed(1)} tok/s`;
+}
+
+function isNonStreamingCall(callKind: string | null | undefined) {
+  return callKind === "agenerate" || callKind === "generate";
 }
 
 function statusLabel(status: string) {

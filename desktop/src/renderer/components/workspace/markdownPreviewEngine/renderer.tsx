@@ -14,6 +14,7 @@ import mermaid from "mermaid";
 import katex from "katex";
 
 import { copyText } from "@/renderer/pages/conversation/messages/markdown";
+import { getMermaidConfig } from "@/renderer/utils/mermaidConfig";
 import styles from "../FilePreview.module.css";
 import type { MarkdownAnnotationIndexItem } from "./annotationIndex";
 import type { MarkdownFindIndex } from "./findIndex";
@@ -341,7 +342,7 @@ function MermaidBlockRenderer({
 
     async function renderMermaid() {
       try {
-        mermaid.initialize({ securityLevel: "strict", startOnLoad: false });
+        mermaid.initialize(getMermaidConfig(getTheme()));
         await mermaid.parse(code);
         const result = await mermaid.render(`markdown-preview-mermaid-${Date.now()}`, code, host);
         if (active) {
@@ -399,6 +400,10 @@ function MermaidBlockRenderer({
       ) : null}
     </div>
   );
+}
+
+function getTheme(): "light" | "dark" {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
 }
 
 function highlightCodeText(

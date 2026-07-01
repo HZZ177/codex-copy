@@ -360,7 +360,8 @@ function loadHistory(
   let next = upsertSession(state, history.session, { select: true });
   next = cloneState(next);
   const view = ensureSessionState(next, sessionId, metaFromSession(history.session));
-  view.messages = history.list.map((payload, index) => historyMessageFromPayload(sessionId, payload, index));
+  const hydratedMessages = history.list.map((payload, index) => historyMessageFromPayload(sessionId, payload, index));
+  view.messages = mergeActiveLocalMessages(hydratedMessages, previousView);
   view.hydrated = true;
   view.historyLoading = false;
   view.historyCursor = history.next_cursor ?? null;
@@ -391,6 +392,71 @@ function prependHistory(
   view.stale = false;
   applyHydratedRuntimeState(view, previousView);
   return next;
+}
+
+function mergeActiveLocalMessages(
+  hydratedMessages: AgentChatMessage[],
+  previousView?: AgentSessionViewState,
+): AgentChatMessage[] {
+  if (!previousView || !isActiveRuntimeState(previousView.runtimeState)) {
+    return hydratedMessages;
+  }
+
+  const merged = [...hydratedMessages];
+  for (const message of previousView.messages) {
+    if (!shouldPreserveActiveLocalMessage(message)) {
+      continue;
+    }
+    if (merged.some((candidate) => isEquivalentHydratedMessage(candidate, message))) {
+      continue;
+    }
+    merged.push(cloneMessage(message));
+  }
+  return merged;
+}
+
+function shouldPreserveActiveLocalMessage(message: AgentChatMessage): boolean {
+  if (message.id.startsWith("hist:")) {
+    return false;
+  }
+  if (message.role === "user") {
+    return true;
+  }
+  return Boolean(
+    message.streaming ||
+      message.status === "running" ||
+      message.status === "streaming" ||
+      message.status === "pending",
+  );
+}
+
+function isEquivalentHydratedMessage(candidate: AgentChatMessage, localMessage: AgentChatMessage): boolean {
+  if (candidate.id === localMessage.id) {
+    return true;
+  }
+  if (
+    localMessage.messageEventId &&
+    candidate.messageEventId &&
+    candidate.messageEventId === localMessage.messageEventId
+  ) {
+    return true;
+  }
+  if (candidate.role !== localMessage.role) {
+    return false;
+  }
+  if (localMessage.role === "user") {
+    return (
+      candidate.content === localMessage.content &&
+      Boolean(candidate.messageEventId || candidate.id.startsWith("hist:"))
+    );
+  }
+  if (localMessage.runId && candidate.runId === localMessage.runId) {
+    return true;
+  }
+  if (localMessage.toolCallId && candidate.toolCallId === localMessage.toolCallId) {
+    return true;
+  }
+  return false;
 }
 
 function applyHydratedRuntimeState(view: AgentSessionViewState, previousView?: AgentSessionViewState): void {

@@ -15,6 +15,7 @@ import type {
   AgentHistoryResponse,
   AgentSession,
   AgentSessionBranchResponse,
+  AgentSessionListResponse,
   CommandApprovalRequest,
   Workspace,
 } from "@/types/protocol";
@@ -321,6 +322,56 @@ describe("Sider", () => {
 
     fireEvent.click(within(dialog).getByText("修复按钮"));
     expect(onNavigate).toHaveBeenCalledWith("/conversation/thread-b");
+  });
+
+  it("keeps loaded session history across sidebar remounts and local session inserts", async () => {
+    const runtime = fakeRuntime([thread({ id: "thread-a", title: "已有会话" })]);
+
+    const view = renderSider(<Sider runtime={runtime} />);
+
+    expect(await screen.findByRole("button", { name: "已有会话" })).not.toBeNull();
+    expect(runtime.conversation.listSessions).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitSessionCreated(thread({ id: "thread-new", title: "新会话", updated_at: "2026-06-17T11:00:00Z" }));
+    });
+
+    expect(screen.getByRole("button", { name: "新会话" })).not.toBeNull();
+    view.unmount();
+
+    renderSider(<Sider runtime={runtime} />);
+
+    expect(screen.getByRole("button", { name: "新会话" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "已有会话" })).not.toBeNull();
+    expect(screen.queryByTestId("sidebar-session-skeleton")).toBeNull();
+    expect(runtime.conversation.listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves locally inserted sessions when the initial history request resolves late", async () => {
+    const deferred = createDeferred<AgentSessionListResponse>();
+    const runtime = fakeRuntime([]);
+    runtime.conversation.listSessions = vi.fn(() => deferred.promise);
+
+    renderSider(<Sider runtime={runtime} />);
+
+    act(() => {
+      emitSessionCreated(thread({ id: "thread-new", title: "新会话", updated_at: "2026-06-17T11:00:00Z" }));
+    });
+
+    expect(screen.getByRole("button", { name: "新会话" })).not.toBeNull();
+
+    await act(async () => {
+      deferred.resolve({
+        list: [thread({ id: "thread-a", title: "已有会话" })],
+        total: 1,
+        page: 1,
+        page_size: 50,
+      });
+      await deferred.promise;
+    });
+
+    expect(screen.getByRole("button", { name: "新会话" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "已有会话" })).not.toBeNull();
   });
 
   it("does not load backend history before the runtime connection is ready", async () => {

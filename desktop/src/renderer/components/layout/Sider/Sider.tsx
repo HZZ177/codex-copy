@@ -22,7 +22,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -87,6 +87,7 @@ const SESSION_CONTEXT_ACTION_MENU_HEIGHT = 132;
 const SESSION_ACTION_MENU_GAP = 10;
 const SESSION_ACTION_MENU_EDGE = 8;
 const SESSION_ACTION_MENU_CLOSE_MS = 120;
+const sessionHistoryCacheByRuntime = new WeakMap<RuntimeBridge, AgentSession[]>();
 
 export interface SiderProps {
   collapsed?: boolean;
@@ -128,10 +129,14 @@ export function Sider({
   const sharedSessionState =
     optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime.state.sessionStateById : {};
   const ThemeIcon = theme === "dark" ? Sun : Moon;
-  const [loadedSessions, setLoadedSessions] = useState<AgentSession[]>([]);
+  const controlled = conversations !== undefined;
+  const cachedSessions = controlled ? null : readSessionHistoryCache(runtime);
+  const [loadedSessions, setLoadedSessions] = useState<AgentSession[]>(() => cachedSessions ?? []);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(() => conversations === undefined && backendReady && !backendError);
+  const [loadingHistory, setLoadingHistory] = useState(
+    () => !controlled && cachedSessions === null && backendReady && !backendError,
+  );
   const [loadingWorkspaceHistoryIds, setLoadingWorkspaceHistoryIds] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -144,7 +149,6 @@ export function Sider({
   const canForkConversations =
     typeof runtime.conversation.loadHistory === "function" && typeof runtime.conversation.forkSession === "function";
 
-  const controlled = conversations !== undefined;
   const loadedGroups = useMemo(() => buildSessionGroups(loadedSessions), [loadedSessions]);
   const loadedPinnedItems = useMemo(() => buildPinnedEntries(loadedSessions), [loadedSessions]);
   const historyGroups = useMemo(
@@ -233,6 +237,31 @@ export function Sider({
     onNavigate?.(path);
   };
 
+  const setLoadedSessionsAndCache = useCallback(
+    (nextValue: SetStateAction<AgentSession[]>) => {
+      setLoadedSessions((current) => {
+        const next =
+          typeof nextValue === "function" ? (nextValue as (items: AgentSession[]) => AgentSession[])(current) : nextValue;
+        writeSessionHistoryCache(runtime, next);
+        return next;
+      });
+    },
+    [runtime],
+  );
+
+  useEffect(() => {
+    if (controlled) {
+      return;
+    }
+    const cached = readSessionHistoryCache(runtime);
+    if (cached !== null) {
+      setLoadedSessions(cached);
+      setLoadingHistory(false);
+      return;
+    }
+    setLoadedSessions([]);
+  }, [controlled, runtime]);
+
   const updateFooterFeather = useCallback(() => {
     const history = historyRef.current;
     if (!history) {
@@ -265,9 +294,13 @@ export function Sider({
   }, [collapsed, confirmDeleteId, editing, historyGroups, loadingHistory, updateFooterFeather]);
 
   const reloadSessions = useCallback(
-    async (isActive: () => boolean = () => true) => {
+    async (isActive: () => boolean = () => true, options: { force?: boolean } = {}) => {
       if (controlled) {
         window.location.reload();
+        return;
+      }
+      if (!options.force && readSessionHistoryCache(runtime) !== null) {
+        setLoadingHistory(false);
         return;
       }
       if (!backendReady) {
@@ -278,7 +311,10 @@ export function Sider({
       try {
         const response = await runtime.conversation.listSessions({ pageSize: 50 });
         if (isActive()) {
-          setLoadedSessions(response.list);
+          const sessionsCreatedDuringLoad = options.force ? null : readSessionHistoryCache(runtime);
+          setLoadedSessionsAndCache(
+            sessionsCreatedDuringLoad === null ? response.list : mergeSessions(response.list, sessionsCreatedDuringLoad),
+          );
         }
       } catch (reason) {
         if (isActive()) {
@@ -290,7 +326,7 @@ export function Sider({
         }
       }
     },
-    [backendReady, controlled, notifications, runtime],
+    [backendReady, controlled, notifications, runtime, setLoadedSessionsAndCache],
   );
 
   useEffect(() => {
@@ -305,7 +341,7 @@ export function Sider({
   }, [reloadSessions]);
 
   const refreshSessionList = useCallback(() => {
-    void reloadSessions();
+    void reloadSessions(undefined, { force: true });
   }, [reloadSessions]);
 
   useEffect(() => {
@@ -313,18 +349,18 @@ export function Sider({
       return;
     }
     return subscribeSessionCreated((session) => {
-      setLoadedSessions((items) => upsertSession(items, session));
+      setLoadedSessionsAndCache((items) => upsertSession(items, session));
     });
-  }, [controlled]);
+  }, [controlled, setLoadedSessionsAndCache]);
 
   useEffect(() => {
     if (controlled) {
       return;
     }
     return subscribeSessionUpdated((session) => {
-      setLoadedSessions((items) => mergeSessionUpdate(items, session));
+      setLoadedSessionsAndCache((items) => mergeSessionUpdate(items, session));
     });
-  }, [controlled]);
+  }, [controlled, setLoadedSessionsAndCache]);
 
   async function renameConversation(id: string, title: string) {
     const cleaned = title.trim();
@@ -338,7 +374,7 @@ export function Sider({
     }
     try {
       const updated = await runtime.conversation.updateSession(id, { title: cleaned });
-      setLoadedSessions((items) => upsertSession(items, updated));
+      setLoadedSessionsAndCache((items) => upsertSession(items, updated));
       emitSessionUpdated(updated);
       setEditing(null);
       notifications.success("已重命名会话");
@@ -366,7 +402,7 @@ export function Sider({
     }
     try {
       await runtime.conversation.deleteSession(id);
-      setLoadedSessions((items) => items.filter((item) => item.id !== id));
+      setLoadedSessionsAndCache((items) => items.filter((item) => item.id !== id));
       setConfirmDeleteId(null);
       notifications.success("已删除会话");
       if (isActivePath(activePath, getSessionPath(id))) {
@@ -384,7 +420,7 @@ export function Sider({
     }
     try {
       const updated = await runtime.conversation.updateSession(item.id, { pinned });
-      setLoadedSessions((items) => upsertSession(items, updated));
+      setLoadedSessionsAndCache((items) => upsertSession(items, updated));
       emitSessionUpdated(updated);
       notifications.success(pinned ? "已置顶会话" : "已取消置顶");
     } catch (reason) {
@@ -412,7 +448,7 @@ export function Sider({
         return;
       }
       const response = await runtime.conversation.forkSession(item.id, source);
-      setLoadedSessions((items) => upsertSession(items, response.session));
+      setLoadedSessionsAndCache((items) => upsertSession(items, response.session));
       emitSessionCreated(response.session);
       notifications.success("已创建派生会话");
       onNavigate?.(getSessionPath(response.session.id));
@@ -449,7 +485,7 @@ export function Sider({
           }
           page += 1;
         }
-        setLoadedSessions((items) => mergeSessions(items, sessions));
+        setLoadedSessionsAndCache((items) => mergeSessions(items, sessions));
         loadedWorkspaceHistoryIdsRef.current.add(workspaceId);
       } catch (reason) {
         notifications.error(errorMessage(reason));
@@ -1918,6 +1954,15 @@ function sessionGroupMeta(session: AgentSession): Pick<SiderGroup, "id" | "title
     title: "对话",
     kind: "chat",
   };
+}
+
+function readSessionHistoryCache(runtime: RuntimeBridge): AgentSession[] | null {
+  const cached = sessionHistoryCacheByRuntime.get(runtime);
+  return cached ? [...cached] : cached ?? null;
+}
+
+function writeSessionHistoryCache(runtime: RuntimeBridge, sessions: AgentSession[]) {
+  sessionHistoryCacheByRuntime.set(runtime, [...sessions]);
 }
 
 function upsertSession(sessions: AgentSession[], session: AgentSession): AgentSession[] {

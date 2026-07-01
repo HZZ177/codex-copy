@@ -26,7 +26,7 @@ import {
   filterBtwConversationVisibleMessages,
   type BtwConversationHistorySnapshot,
 } from "./conversationForkSource";
-import { consumeQuickChatSend } from "./quickSend";
+import { consumeQuickChatSend, type QueuedQuickChatSend } from "./quickSend";
 import styles from "./ConversationSessionSurface.module.css";
 
 export type ConversationSessionSurfaceMode = "main" | "sidecar";
@@ -68,6 +68,7 @@ export function ConversationSessionSurface({
   const [allowPersistentTrust, setAllowPersistentTrust] = useState(true);
   const [fileAccessMode, setFileAccessMode] = useState<FileAccessMode>("workspace_trusted");
   const quickSendConsumedRef = useRef<string | null>(null);
+  const pendingQuickSendRef = useRef<QueuedQuickChatSend | null>(null);
   const scrollToBottomAfterSendRef = useRef<(() => void) | null>(null);
   const runtimeEventSideEffectsRef = useRef<(event: AgentActionEnvelope) => void>(() => undefined);
   const runtimeErrorRef = useRef<(reason: unknown) => boolean | void>(() => false);
@@ -356,12 +357,41 @@ export function ConversationSessionSurface({
   );
 
   useEffect(() => {
-    if (!quickSendId || !threadId || loading || quickSendConsumedRef.current === quickSendId) {
+    if (!quickSendId || !threadId || quickSendConsumedRef.current === quickSendId) {
       return;
     }
-    if (agentMessages.length > 0) {
+    let pending = pendingQuickSendRef.current;
+    if (pending && pending.id !== quickSendId) {
+      pendingQuickSendRef.current = null;
+      pending = null;
+    }
+    if (!pending) {
+      pending = consumeQuickChatSend(quickSendId, threadId);
+      pendingQuickSendRef.current = pending;
+      if (!pending) {
+        quickSendConsumedRef.current = quickSendId;
+        onQuickSendConsumed?.();
+        return;
+      }
+      if (agentMessages.length === 0) {
+        controller.dispatch({
+          type: "message/addUser",
+          sessionId: threadId,
+          content: pending.message,
+          contextItems: pending.contextItems,
+          attachments: pending.attachments,
+          id: `${pending.id}:user`,
+        });
+        controller.dispatch({ type: "runtime/setState", sessionId: threadId, runtimeState: "running" });
+      }
+    }
+
+    if (loading) {
+      return;
+    }
+    if (agentMessages.some(isPersistedAgentMessage)) {
+      pendingQuickSendRef.current = null;
       quickSendConsumedRef.current = quickSendId;
-      consumeQuickChatSend(quickSendId, threadId);
       onQuickSendConsumed?.();
       return;
     }
@@ -369,25 +399,25 @@ export function ConversationSessionSurface({
       return;
     }
 
+    pendingQuickSendRef.current = null;
     quickSendConsumedRef.current = quickSendId;
-    const pending = consumeQuickChatSend(quickSendId, threadId);
     onQuickSendConsumed?.();
-    if (!pending) {
-      return;
-    }
     void controller
       .sendText(pending.message, pending.model || modelSelection.selectedModel, {
         contextItems: pending.contextItems,
         runtimeParams: pending.runtimeParams,
         attachments: pending.attachments,
+        skipOptimistic: true,
+        allowWhileBusy: true,
       })
       .then((sent) => {
         if (!sent) {
+          controller.dispatch({ type: "runtime/setState", sessionId: threadId, runtimeState: "idle" });
           setDraft((current) => (current.trim() ? current : pending.message));
         }
       });
   }, [
-    agentMessages.length,
+    agentMessages,
     connectionReady,
     controller,
     loading,
@@ -582,4 +612,8 @@ function errorMessage(reason: unknown): string {
     return (reason as { message: string }).message;
   }
   return "操作失败";
+}
+
+function isPersistedAgentMessage(message: { id: string; messageEventId?: string }): boolean {
+  return Boolean(message.messageEventId || message.id.startsWith("hist:"));
 }

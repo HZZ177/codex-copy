@@ -732,7 +732,7 @@ export function MessageList({
       data-turn-navigator={showTurnNavigator ? "true" : "false"}
       data-testid="message-list"
     >
-      {loading ? (
+      {loading && !visibleMessages.length ? (
         <div className={styles.scroller} data-message-list-variant={variant} data-testid="message-list-scroll">
           <MessageSkeleton />
         </div>

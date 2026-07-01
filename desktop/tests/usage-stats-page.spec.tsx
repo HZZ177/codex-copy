@@ -303,6 +303,26 @@ describe("UsageStatsPage", () => {
     });
   });
 
+  it("shows non-streaming request output rate as not counted", async () => {
+    const requests = defaultRequests();
+    requests.list[0] = {
+      ...requests.list[0],
+      call_kind: "agenerate",
+      output_tokens_per_second: null,
+    };
+    const runtime = fakeRuntime({ requests });
+
+    render(<UsageStatsPage runtime={runtime} />);
+
+    expect(await screen.findByText("非流式不统计")).not.toBeNull();
+    expect(screen.queryByText("305.7 tok/s")).toBeNull();
+
+    fireEvent.click(await screen.findByText("deepseek-v4-flash"));
+
+    expect(await screen.findByRole("dialog", { name: "请求详情" })).not.toBeNull();
+    expect(screen.getAllByText("非流式不统计").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("builds localized ECharts option from trend points", () => {
     const option = buildUsageTrendOption([
       {
@@ -586,6 +606,7 @@ function defaultRequests(): UsageRequestListResponse {
         end_time: "2026-06-19T23:12:02Z",
         duration_ms: 2400,
         time_to_first_token: 640,
+        call_kind: "astream",
         output_tokens_per_second: 305.7,
         input_tokens: 17_907,
         cache_read_tokens: 12_960,

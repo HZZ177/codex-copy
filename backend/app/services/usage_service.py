@@ -146,6 +146,7 @@ def _request_log_to_dict(
         "end_time": record.end_time,
         "duration_ms": record.duration_ms,
         "time_to_first_token": record.time_to_first_token,
+        "call_kind": _call_kind(record),
         "output_tokens_per_second": _output_tokens_per_second(record),
         "input_tokens": record.input_tokens,
         "cache_read_tokens": record.cache_read_tokens,
@@ -161,22 +162,26 @@ def _request_log_to_dict(
 
 
 def _output_tokens_per_second(record: LLMRequestLogRecord) -> float | None:
+    if not _is_stream_call(record):
+        return None
     duration_ms = record.duration_ms
     if duration_ms is None or duration_ms < 0:
         return None
     output_tokens = max(0, int(record.output_tokens or 0))
-    effective_duration_ms = duration_ms
-    if _is_stream_call(record):
-        if record.time_to_first_token is None:
-            return None
-        effective_duration_ms = duration_ms - record.time_to_first_token
+    if record.time_to_first_token is None:
+        return None
+    effective_duration_ms = duration_ms - record.time_to_first_token
     effective_duration_ms = max(1, int(effective_duration_ms or 0))
     return round((output_tokens * 1000) / effective_duration_ms, 1)
 
 
 def _is_stream_call(record: LLMRequestLogRecord) -> bool:
+    return _call_kind(record) in {"astream", "stream"}
+
+
+def _call_kind(record: LLMRequestLogRecord) -> str | None:
     call_kind = (record.metadata or {}).get("call_kind")
-    return call_kind in {"astream", "stream"}
+    return call_kind if isinstance(call_kind, str) and call_kind else None
 
 
 def _trace_to_dict(record: TraceRecord) -> dict[str, Any]:

@@ -948,7 +948,8 @@ class ChatService:
             user_message=request.message,
         )
         try:
-            agent = self.agent_runner.create_agent(
+            agent = await asyncio.to_thread(
+                self.agent_runner.create_agent,
                 model=request.model.strip(),
                 model_settings=model_selection.settings,
                 system_prompt=request.system_prompt,

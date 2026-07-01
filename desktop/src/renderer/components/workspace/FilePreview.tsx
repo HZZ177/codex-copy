@@ -103,6 +103,7 @@ import {
   syncMermaidCanvasPadding,
   type SvgDimensions,
 } from "@/renderer/utils/mermaidSvg";
+import { getMermaidConfig } from "@/renderer/utils/mermaidConfig";
 import { parseUnifiedDiffDisplayLines } from "@/renderer/utils/unifiedDiff";
 
 import { createSourceRangeAnchor, validateSourceRangeAnchor } from "./filePreviewAnnotations";
@@ -4985,15 +4986,7 @@ function NativeMermaidPreview({
 
     void import("mermaid")
       .then(async ({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: theme === "dark" ? "dark" : "default",
-          securityLevel: "strict",
-          suppressErrorRendering: true,
-          flowchart: {
-            useMaxWidth: false,
-          },
-        });
+        mermaid.initialize(getMermaidConfig(theme));
         await mermaid.parse(trimmedCode, { suppressErrors: false });
         const renderHost = document.createElement("div");
         renderHost.setAttribute("data-mermaid-render-host", "true");

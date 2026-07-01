@@ -1597,6 +1597,55 @@ describe("ConversationPage", () => {
     expect(screen.getByText("从快速对话发送")).not.toBeNull();
   });
 
+  it("shows the queued quick chat message before initial history resolves", async () => {
+    const session = agentSession();
+    let resolveHistory: ((response: AgentHistoryResponse) => void) | null = null;
+    const loadHistory = vi.fn(
+      () =>
+        new Promise<AgentHistoryResponse>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+    const { runtime, channel } = fakeRuntime({ session, loadHistory });
+    const queued = queueQuickChatSend({
+      sessionId: "ses-1",
+      model: { providerId: "provider-1", model: "deepseek-coder" },
+      message: "冷启动快速对话",
+    });
+
+    renderConversation(
+      <ConversationPage
+        threadId="ses-1"
+        runtime={runtime}
+        initialModel={{ providerId: "provider-1", model: "deepseek-coder" }}
+        quickSendId={queued.id}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("冷启动快速对话")).not.toBeNull();
+    });
+    expect(screen.queryByTestId("conversation-empty")).toBeNull();
+    expect(screen.queryByTestId("message-skeleton")).toBeNull();
+    expect(screen.getByTestId("streaming-cursor")).not.toBeNull();
+    expect(channel.chat).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveHistory?.(historyResponse(session, []));
+    });
+
+    await waitFor(() => {
+      expect(channel.chat).toHaveBeenCalledWith({
+        session_id: "ses-1",
+        message: "冷启动快速对话",
+        provider_id: "provider-1",
+        model: "deepseek-coder",
+      });
+    });
+    expect(screen.queryByTestId("conversation-empty")).toBeNull();
+    expect(screen.getByText("冷启动快速对话")).not.toBeNull();
+  });
+
   it("does not resend the queued quick chat message when history already has messages", async () => {
     const { runtime, channel } = fakeRuntime({
       history: [historyMessage("user", "从快速对话发送")],

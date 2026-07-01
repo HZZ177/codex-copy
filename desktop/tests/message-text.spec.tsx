@@ -286,24 +286,24 @@ describe("MessageText", () => {
     expect(screen.getByText("\\(not math\\)")).not.toBeNull();
   });
 
-  it("shows fenced latex source by default and switches to a KaTeX block", async () => {
+  it("shows fenced latex preview by default and switches back to source", async () => {
     const { container } = render(<MessageText message={message("assistant", "```latex\nx^2+y^2=z^2\n```", "completed")} />);
 
-    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("x^2+y^2=z^2");
-    expect(screen.queryByTestId("math-preview")).toBeNull();
-    expect(screen.getByRole("button", { name: "预览 公式" })).not.toBeNull();
+    expect(screen.getByTestId("math-preview")).not.toBeNull();
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+    expect(screen.queryByTestId("markdown-code-viewport")).toBeNull();
+    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "预览 公式" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
     expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
 
     await waitFor(
       () => {
-        expect(screen.getByTestId("math-preview")).not.toBeNull();
+        expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("x^2+y^2=z^2");
       },
       { timeout: 5000 },
     );
-    expect(container.querySelector(".katex-display")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
+    expect(screen.queryByTestId("math-preview")).toBeNull();
   });
 
   it("repairs unfinished fenced code while assistant content is streaming", () => {
@@ -312,6 +312,14 @@ describe("MessageText", () => {
     expect(screen.getByText("ts")).not.toBeNull();
     expect(screen.getByRole("button", { name: "复制代码" })).not.toBeNull();
     expect(screen.getByTestId("message-text").textContent).toContain("const streaming = true");
+  });
+
+  it("keeps renderable streaming code fences in source view", () => {
+    render(<MessageText message={message("assistant", "```html\n<main><h1>生成中</h1>", "running")} />);
+
+    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("生成中");
+    expect(screen.queryByTitle("HTML 预览")).toBeNull();
+    expect(screen.getByRole("button", { name: "预览 HTML" })).not.toBeNull();
   });
 
   it("shows a generating line ticker instead of expand controls for streaming long code blocks", () => {
@@ -764,7 +772,7 @@ describe("MessageText", () => {
     }
   });
 
-  it("shows fenced html source by default and switches to a sandboxed preview", async () => {
+  it("shows fenced html preview by default and switches back to source", async () => {
     render(
       <MessageText
         message={message(
@@ -776,19 +784,13 @@ describe("MessageText", () => {
     );
 
     expect(document.querySelector("script")).toBeNull();
-    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("预览标题");
-    expect(screen.queryByTitle("HTML 预览")).toBeNull();
-    expect(screen.getByRole("button", { name: "全屏显示 HTML" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "预览 HTML" })).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "预览 HTML" }));
-    expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
-
-    const frame = await screen.findByTitle("HTML 预览") as HTMLIFrameElement;
-
+    const frame = screen.getByTitle("HTML 预览") as HTMLIFrameElement;
     expect(frame).not.toBeNull();
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.getAttribute("srcdoc")).toContain("预览标题");
+    expect(screen.queryByTestId("markdown-code-viewport")).toBeNull();
+    expect(screen.getByRole("button", { name: "全屏显示 HTML" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
     expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
@@ -799,7 +801,7 @@ describe("MessageText", () => {
     expect(screen.queryByTitle("HTML 预览")).toBeNull();
   });
 
-  it("shows fenced json source by default and switches to a searchable tree preview", async () => {
+  it("shows fenced json preview by default and switches back to source", async () => {
     render(
       <MessageText
         message={message(
@@ -810,19 +812,23 @@ describe("MessageText", () => {
       />,
     );
 
-    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain('"users"');
-    expect(screen.queryByTestId("json-tree-viewer")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "预览 JSON" }));
-
     const viewer = await screen.findByTestId("json-tree-viewer", undefined, { timeout: 15000 });
     expect(viewer).not.toBeNull();
     expect(screen.getByRole("searchbox", { name: "查找 JSON" })).not.toBeNull();
+    expect(screen.queryByTestId("markdown-code-viewport")).toBeNull();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "查找 JSON" }), { target: { value: "Ada" } });
 
     expect(screen.getByText("1 / 1")).not.toBeNull();
     expect(screen.getByRole("button", { name: /\$\.users\[0\]\.name/ })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("markdown-code-viewport").textContent).toContain('"users"');
+    });
+    expect(screen.queryByTestId("json-tree-viewer")).toBeNull();
   }, 20000);
 
   it("opens rendered html code in a fullscreen preview dialog", () => {
@@ -843,24 +849,30 @@ describe("MessageText", () => {
     expect(screen.queryByRole("dialog", { name: "HTML 预览" })).toBeNull();
   });
 
-  it("shows fenced Mermaid source by default and switches to preview", async () => {
+  it("shows fenced Mermaid preview by default and switches back to source", async () => {
     render(
       <MessageText
         message={message("assistant", "```mermaid\ngraph TD\nA[开始] --> B[结束]\n```", "completed")}
       />,
     );
 
-    expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("graph TD");
-    expect(screen.queryByTestId("mermaid-preview")).toBeNull();
+    expect(screen.getByTestId("mermaid-preview")).not.toBeNull();
+    expect(screen.queryByTestId("markdown-code-viewport")).toBeNull();
     expect(screen.getByRole("button", { name: "全屏显示 Mermaid" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "预览 Mermaid" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "预览 Mermaid" }));
     expect(screen.queryByText("正在渲染 Mermaid...")).toBeNull();
     await waitFor(() => {
       expect(screen.getByLabelText("Mermaid 图表")).not.toBeNull();
     });
-    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(screen.getByLabelText("正在切换代码视图")).not.toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("graph TD");
+    });
+    expect(screen.queryByTestId("mermaid-preview")).toBeNull();
   });
 
   it("opens Mermaid code fullscreen with zoom and reset controls", async () => {
@@ -891,7 +903,7 @@ describe("MessageText", () => {
   it("normalizes fullscreen Mermaid SVG dimensions before zooming", async () => {
     let renderHostParent: Element | null = null;
     let renderHostWasInsidePreview = false;
-    vi.mocked(mermaid.render).mockImplementationOnce(async (_id, _definition, renderHost) => {
+    vi.mocked(mermaid.render).mockImplementation(async (_id, _definition, renderHost) => {
       expect(renderHost).toBeInstanceOf(Element);
       const host = renderHost as Element;
       renderHostParent = host.parentElement;
@@ -908,6 +920,7 @@ describe("MessageText", () => {
       />,
     );
 
+    await screen.findByLabelText("Mermaid 图表");
     const fullscreenButton = screen
       .getAllByRole("button")
       .find((button) => button.querySelector(".lucide-maximize2"));
@@ -942,7 +955,7 @@ describe("MessageText", () => {
   });
 
   it("auto-fits fullscreen Mermaid previews and centers oversized minimum zoom", async () => {
-    vi.mocked(mermaid.render).mockResolvedValueOnce({
+    vi.mocked(mermaid.render).mockResolvedValue({
       diagramType: "flowchart-v2",
       svg: '<svg role="img" aria-label="oversized chart" width="100%" style="max-width: 320px;" viewBox="0 0 20000 10000"></svg>',
     });
@@ -953,6 +966,7 @@ describe("MessageText", () => {
       />,
     );
 
+    await screen.findByLabelText("Mermaid 图表");
     const fullscreenButton = screen
       .getAllByRole("button")
       .find((button) => button.querySelector(".lucide-maximize2"));
@@ -995,7 +1009,7 @@ describe("MessageText", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "预览 Mermaid" }));
+    expect(screen.getByRole("button", { name: "查看源码" })).not.toBeNull();
     const preview = await screen.findByTestId("mermaid-preview");
     const alert = await within(preview).findByRole("alert");
     expect(alert.textContent).toContain("Mermaid 语法错误");
@@ -1010,6 +1024,7 @@ describe("MessageText", () => {
       />,
     );
 
+    await screen.findByLabelText("Mermaid 图表");
     fireEvent.click(screen.getByRole("button", { name: "全屏显示 Mermaid" }));
 
     await waitFor(() => {

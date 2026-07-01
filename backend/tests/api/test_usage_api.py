@@ -38,6 +38,7 @@ def _seed_usage(client: TestClient) -> None:
         turn_index=1,
         model="deepseek-v4-flash",
         request_preview="生成统计",
+        metadata={"call_kind": "agenerate"},
         start_time="2026-06-18T10:00:00Z",
     )
     repositories.llm_request_logs.finish(
@@ -101,13 +102,15 @@ def test_usage_api_returns_summary_trend_list_and_detail(tmp_path) -> None:
     assert requests.json()["total"] == 1
     assert requests.json()["list"][0]["model"] == "deepseek-v4-flash"
     assert requests.json()["list"][0]["time_to_first_token"] == 118
-    assert requests.json()["list"][0]["output_tokens_per_second"] == 2.5
+    assert requests.json()["list"][0]["call_kind"] == "agenerate"
+    assert requests.json()["list"][0]["output_tokens_per_second"] is None
     assert requests.json()["list"][0]["gateway_thread_id"] == "trace_usage_api"
     assert requests.json()["list"][0]["gateway_trace_id"] == "gateway_trace_api"
     assert detail.status_code == 200
     assert detail.json()["request"]["request_preview"] == "生成统计"
     assert detail.json()["request"]["time_to_first_token"] == 118
-    assert detail.json()["request"]["output_tokens_per_second"] == 2.5
+    assert detail.json()["request"]["call_kind"] == "agenerate"
+    assert detail.json()["request"]["output_tokens_per_second"] is None
     assert detail.json()["request"]["gateway_thread_id"] == "trace_usage_api"
     assert detail.json()["request"]["gateway_trace_id"] == "gateway_trace_api"
     assert detail.json()["trace"]["user_message_preview"] == "生成统计"

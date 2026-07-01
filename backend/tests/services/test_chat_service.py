@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -148,6 +150,36 @@ class CancellableStreamingRunner:
         }
 
 
+class SingleResponseAgent:
+    async def astream_events(self, *_args: Any, **_kwargs: Any):
+        yield {
+            "event": "on_chat_model_end",
+            "run_id": "run_single_response",
+            "data": {"output": AIMessage(content="完成")},
+        }
+
+
+class BlockingAssemblyRunner:
+    def __init__(self, delay_seconds: float = 0.3) -> None:
+        self.delay_seconds = delay_seconds
+        self.started = threading.Event()
+        self.finished = threading.Event()
+
+    def create_agent(self, **_kwargs: Any) -> SingleResponseAgent:
+        self.started.set()
+        time.sleep(self.delay_seconds)
+        self.finished.set()
+        return SingleResponseAgent()
+
+    async def get_latest_checkpoint_config(
+        self,
+        *,
+        thread_id: str,
+        checkpoint_ns: str = "",
+    ) -> dict[str, str | None]:
+        return {"checkpoint_id": None, "checkpoint_ns": checkpoint_ns}
+
+
 def _service(
     tmp_path: Path,
     model: ToolFriendlyFakeModel,
@@ -246,6 +278,35 @@ async def test_chat_service_uses_langchain_agent_and_persists_history(tmp_path) 
     session = repositories.sessions.get(result.session_id)
     assert session.current_model_provider_id == "provider-1"
     assert session.current_model == "qwen-coder"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_agent_assembly_does_not_block_event_loop(tmp_path) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
+    service, _repositories, _checkpointer, _factory = _service(tmp_path, model)
+    runner = BlockingAssemblyRunner(delay_seconds=0.5)
+    service.agent_runner = runner  # type: ignore[assignment]
+    chat_adapter = RecordingChatAdapter()
+
+    started_at = time.perf_counter()
+    task = asyncio.create_task(
+        service.handle_chat(
+            ChatRequest(message="测试冷启动", provider_id="provider-1", model="qwen-coder"),
+            chat_adapter=chat_adapter,
+        )
+    )
+
+    await asyncio.sleep(0.05)
+    elapsed = time.perf_counter() - started_at
+
+    assert elapsed < 0.35
+    assert runner.started.is_set()
+    assert not runner.finished.is_set()
+
+    result = await task
+
+    assert result.status == "completed"
+    assert result.final_content == "完成"
 
 
 @pytest.mark.asyncio

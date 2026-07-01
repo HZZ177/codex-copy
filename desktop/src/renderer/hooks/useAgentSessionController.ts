@@ -119,6 +119,8 @@ export interface AgentSessionController {
       contextItems?: ChatPayload["contextItems"];
       runtimeParams?: ChatPayload["runtime_params"];
       attachments?: ChatPayload["attachments"];
+      skipOptimistic?: boolean;
+      allowWhileBusy?: boolean;
     },
   ) => Promise<boolean>;
   send: (
@@ -527,6 +529,8 @@ export function useAgentSessionController({
         contextItems?: ChatPayload["contextItems"];
         runtimeParams?: ChatPayload["runtime_params"];
         attachments?: ChatPayload["attachments"];
+        skipOptimistic?: boolean;
+        allowWhileBusy?: boolean;
       } = {},
     ) => {
       const trimmedText = text.trim();
@@ -534,7 +538,7 @@ export function useAgentSessionController({
       const trimmedModel = model?.model.trim() ?? "";
       const contextItems = options.contextItems ?? [];
       const attachments = options.attachments ?? [];
-      if ((!trimmedText && !contextItems.length && !attachments.length) || isBusy(runtimeState)) {
+      if ((!trimmedText && !contextItems.length && !attachments.length) || (!options.allowWhileBusy && isBusy(runtimeState))) {
         return false;
       }
       if (!providerId || !trimmedModel) {
@@ -568,13 +572,15 @@ export function useAgentSessionController({
 
       setRuntimeDetail(null);
       try {
-        dispatch({
-          type: "message/addUser",
-          sessionId: targetSessionId,
-          content: trimmedText,
-          contextItems,
-          attachments,
-        });
+        if (!options.skipOptimistic) {
+          dispatch({
+            type: "message/addUser",
+            sessionId: targetSessionId,
+            content: trimmedText,
+            contextItems,
+            attachments,
+          });
+        }
         dispatch({ type: "runtime/setState", sessionId: targetSessionId, runtimeState: "running" });
         const payload: ChatPayload = {
           session_id: targetSessionId,

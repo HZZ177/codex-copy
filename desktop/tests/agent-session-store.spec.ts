@@ -196,6 +196,55 @@ describe("agentSessionStore reducer", () => {
     expect(selectAgentSessionState(state, "ses-1")?.isStreaming).toBe(true);
   });
 
+  it("keeps active local messages when initial history hydrates during a send", () => {
+    let state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "sessions/set",
+      sessions: [session("ses-1", "2026-06-18T08:00:00Z")],
+    });
+    state = agentConversationReducer(state, {
+      type: "message/addUser",
+      sessionId: "ses-1",
+      content: "冷启动请求",
+      id: "quick:send-1:user",
+      timestamp: 1_782_600_000_000,
+    });
+    state = agentConversationReducer(state, {
+      type: "runtime/setState",
+      sessionId: "ses-1",
+      runtimeState: "running",
+    });
+
+    state = agentConversationReducer(state, {
+      type: "history/loaded",
+      sessionId: "ses-1",
+      history: history([]),
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      { id: "quick:send-1:user", role: "user", content: "冷启动请求" },
+    ]);
+    expect(selectAgentRuntimeState(state, "ses-1")).toBe("running");
+
+    state = agentConversationReducer(state, {
+      type: "history/loaded",
+      sessionId: "ses-1",
+      history: history([
+        {
+          role: "user",
+          content: "冷启动请求",
+          messageEventId: "evt-user-1",
+          turnIndex: 1,
+          timestamp: 1_782_600_000_010,
+        },
+      ]),
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      { role: "user", content: "冷启动请求", messageEventId: "evt-user-1" },
+    ]);
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(1);
+  });
+
   it("restores pending command approval from history", () => {
     const approval = commandApproval("approval-history");
     const state = agentConversationReducer(createInitialAgentConversationState(), {

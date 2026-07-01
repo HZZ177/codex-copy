@@ -43,6 +43,7 @@ import {
   syncMermaidCanvasPadding,
   type SvgDimensions,
 } from "@/renderer/utils/mermaidSvg";
+import { getMermaidConfig } from "@/renderer/utils/mermaidConfig";
 
 import { LineChangeTicker } from "./LineChangeTicker";
 import { copyText, normalizeMarkdownContent } from "./markdown";
@@ -150,7 +151,7 @@ export interface MarkdownCodeBlockProps {
   streaming?: boolean;
 }
 
-export function MarkdownCodeBlock({ children, defaultViewMode = "source", streaming = false }: MarkdownCodeBlockProps) {
+export function MarkdownCodeBlock({ children, defaultViewMode, streaming = false }: MarkdownCodeBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [viewModeOverride, setViewModeOverride] = useState<"source" | "preview" | null>(null);
@@ -197,7 +198,7 @@ export function MarkdownCodeBlock({ children, defaultViewMode = "source", stream
   const panelPreviewActive = Boolean(
     panelPreviewEntryId && previewContext?.panelOpen && previewContext.panelActiveEntryId === panelPreviewEntryId,
   );
-  const preferredViewMode = defaultViewMode;
+  const preferredViewMode = defaultViewMode ?? (previewLabel && !streaming ? "preview" : "source");
   const viewMode = viewModeOverride ?? preferredViewMode;
   const isSwitchingView = pendingViewMode !== null;
   const switchViewMode = pendingViewMode ?? viewMode;
@@ -801,15 +802,7 @@ function MermaidPreview({
 
     void import("mermaid")
       .then(async ({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: theme === "dark" ? "dark" : "default",
-          securityLevel: "strict",
-          suppressErrorRendering: true,
-          flowchart: {
-            useMaxWidth: false,
-          },
-        });
+        mermaid.initialize(getMermaidConfig(theme));
         await mermaid.parse(code, { suppressErrors: false });
         const renderHost = document.createElement("div");
         renderHost.setAttribute("data-mermaid-render-host", "true");
