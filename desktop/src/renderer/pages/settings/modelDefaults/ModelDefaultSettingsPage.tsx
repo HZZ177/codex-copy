@@ -143,7 +143,7 @@ export function ModelDefaultSettingsPage({
               modelOptions={modelOptions}
               scope="fast"
               title="快速模型"
-              description="轻量辅助任务默认使用的模型"
+              description="旁路/快速任务使用的模型，如压缩，标题生成等"
               optional
               onOpenProviderSettings={onOpenProviderSettings}
               onModelChange={(scope, selection) =>
