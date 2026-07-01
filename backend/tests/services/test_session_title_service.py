@@ -41,7 +41,7 @@ def _configure_fast_model(repositories: StorageRepositories) -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_title_service_generates_clean_title_with_fast_model(tmp_path) -> None:
+async def test_session_title_service_prompts_expected_length_with_fast_model(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     _configure_fast_model(repositories)
     factory = FakeFactory(FakeLLM("《一个特别长的自动标题输出。》\n解释不应保留"))
@@ -55,9 +55,31 @@ async def test_session_title_service_generates_clean_title_with_fast_model(tmp_p
         max_title_length=8,
     )
 
-    assert title == "一个特别长的自动"
+    assert title == "一个特别长的自动标题输出"
     assert factory.calls[0]["model"] == "fast-title"
     assert factory.calls[0]["streaming"] is False
+    assert factory.calls[0]["max_tokens"] == 80
+    assert "标题期望不超过 8 个中文字符" in factory.llm.messages[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_session_title_service_falls_back_to_fixed_fifty_character_limit(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    _configure_fast_model(repositories)
+    raw_title = (
+        "这是一个超过五十个字符的自动标题输出用于验证代码侧只保留固定兜底截断"
+        "而不是按照配置长度截断并且继续补充更多内容"
+    )
+    factory = FakeFactory(FakeLLM(raw_title))
+    service = SessionTitleService(repositories, factory=factory, retry_delays=())
+
+    title = await service.generate_title(
+        [HumanMessage(content="问题"), AIMessage(content="回答")],
+        max_title_length=8,
+    )
+
+    assert title == raw_title[:50]
+    assert len(title) == 50
 
 
 @pytest.mark.asyncio

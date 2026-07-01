@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from backend.app.agent.factory import AgentFactory
 from backend.app.model import ModelSettings, OpenAICompatibleProviderClient
@@ -48,6 +49,198 @@ async def test_e2e_transport_can_drive_langchain_chat_completions_stream() -> No
 
     assert text.startswith("# 流式 Markdown 验收")
     assert "最终检查点：Markdown、代码块和长文本已经完整显示。" in text
+
+
+@pytest.mark.asyncio
+async def test_e2e_transport_preserves_reasoning_chunks_for_langchain_stream() -> None:
+    llm = AgentFactory().get_or_create_llm(
+        ModelSettings(
+            base_url="http://e2e-model.test/v1",
+            api_key="sk-test",
+            model=E2E_MODEL_ID,
+        ),
+        model=E2E_MODEL_ID,
+        http_transport=create_e2e_model_transport(delay_ms=0),
+    )
+
+    reasoning_parts: list[str] = []
+    async for chunk in llm.astream("命令审批 exact"):
+        additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+        reasoning = additional_kwargs.get("reasoning_content")
+        if isinstance(reasoning, str):
+            reasoning_parts.append(reasoning)
+
+    assert "".join(reasoning_parts) == "准备执行命令审批 E2E 场景。"
+
+
+@pytest.mark.asyncio
+async def test_chat_openai_preserves_non_stream_reasoning_message() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-non-stream-reasoning",
+                "object": "chat.completion",
+                "model": "non-stream-reasoning-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "最终回答",
+                            "reasoning_content": "先分析问题",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    llm = AgentFactory().get_or_create_llm(
+        ModelSettings(
+            base_url="http://non-stream-reasoning.test/v1",
+            api_key="sk-test",
+            model="non-stream-reasoning-model",
+        ),
+        model="non-stream-reasoning-model",
+        streaming=False,
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    result = await llm.ainvoke([HumanMessage(content="请回答")])
+
+    assert result.content == "最终回答"
+    assert result.additional_kwargs["reasoning_content"] == "先分析问题"
+
+
+@pytest.mark.asyncio
+async def test_chat_openai_round_trips_original_reasoning_field_without_duplicate_alias() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-duplicate-reasoning",
+                "object": "chat.completion",
+                "model": "duplicate-reasoning-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "reasoning": "需要先看目录结构",
+                            "reasoning_content": "需要先看目录结构",
+                            "tool_calls": [
+                                {
+                                    "id": "call_list_dir",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "list_dir",
+                                        "arguments": "{\"depth\":2}",
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            },
+        )
+
+    llm = AgentFactory().get_or_create_llm(
+        ModelSettings(
+            base_url="http://duplicate-reasoning.test/v1",
+            api_key="sk-test",
+            model="duplicate-reasoning-model",
+        ),
+        model="duplicate-reasoning-model",
+        streaming=False,
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    result = await llm.ainvoke([HumanMessage(content="查项目")])
+    payload = llm._get_request_payload([HumanMessage(content="查项目"), result])
+    request_message = payload["messages"][1]
+
+    assert result.additional_kwargs["reasoning"] == "需要先看目录结构"
+    assert result.additional_kwargs["reasoning_content"] == "需要先看目录结构"
+    assert request_message["reasoning"] == "需要先看目录结构"
+    assert "reasoning_content" not in request_message
+    assert "__keydex_reasoning_keys__" not in request_message
+    assert "__keydex_reasoning_text__" not in request_message
+
+
+def test_chat_openai_round_trips_reasoning_payload_in_chat_messages() -> None:
+    llm = AgentFactory().get_or_create_llm(
+        ModelSettings(
+            base_url="http://roundtrip-reasoning.test/v1",
+            api_key="sk-test",
+            model="roundtrip-reasoning-model",
+        ),
+        model="roundtrip-reasoning-model",
+        http_transport=create_e2e_model_transport(delay_ms=0),
+    )
+    assistant_message = AIMessage(
+        content="",
+        additional_kwargs={
+            "reasoning_content": "准备读取文件",
+            "reasoning_details": [{"text": "detail"}],
+        },
+        tool_calls=[
+            {
+                "name": "read_file",
+                "args": {"path": "README.md"},
+                "id": "call_read",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+    payload = llm._get_request_payload(
+        [
+            HumanMessage(content="读取 README"),
+            assistant_message,
+            HumanMessage(content="继续"),
+            AIMessage(
+                content="普通回答",
+                additional_kwargs={"reasoning_content": "普通回答前的思考"},
+            ),
+        ]
+    )
+
+    request_message = payload["messages"][1]
+    assert request_message["role"] == "assistant"
+    assert request_message["reasoning_content"] == "准备读取文件"
+    assert request_message["reasoning_details"] == [{"text": "detail"}]
+    assert request_message["tool_calls"][0]["id"] == "call_read"
+    assert payload["messages"][3]["reasoning_content"] == "普通回答前的思考"
+
+
+def test_chat_openai_deduplicates_reasoning_aliases_without_capture_metadata() -> None:
+    llm = AgentFactory().get_or_create_llm(
+        ModelSettings(
+            base_url="http://roundtrip-reasoning.test/v1",
+            api_key="sk-test",
+            model="roundtrip-reasoning-model",
+        ),
+        model="roundtrip-reasoning-model",
+        http_transport=create_e2e_model_transport(delay_ms=0),
+    )
+    assistant_message = AIMessage(
+        content="",
+        additional_kwargs={
+            "reasoning": "同一段思考",
+            "reasoning_content": "同一段思考",
+        },
+    )
+
+    payload = llm._get_request_payload(
+        [HumanMessage(content="继续"), assistant_message]
+    )
+    request_message = payload["messages"][1]
+
+    assert request_message["reasoning"] == "同一段思考"
+    assert "reasoning_content" not in request_message
 
 
 @pytest.mark.asyncio

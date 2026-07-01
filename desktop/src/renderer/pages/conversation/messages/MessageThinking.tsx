@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
 import styles from "./MessageThinking.module.css";
+import { useDeferredUnmount } from "./useDeferredUnmount";
 
 export interface MessageThinkingProps {
   message: ConversationMessage;
@@ -13,11 +14,12 @@ export function MessageThinking({ message }: MessageThinkingProps) {
   const status = message.status ?? "running";
   const running = status === "running" || status === "pending";
   const failed = status === "failed";
-  const defaultExpanded = false;
+  const defaultExpanded = running;
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [touched, setTouched] = useState(false);
   const duration = useMemo(() => formatDuration(message), [message]);
   const title = useMemo(() => titleFromMessage(message, running, failed), [failed, message, running]);
+  const contentMotion = useDeferredUnmount<HTMLDivElement>(expanded, 180, 220);
 
   useEffect(() => {
     if (!touched) {
@@ -45,13 +47,30 @@ export function MessageThinking({ message }: MessageThinkingProps) {
         <ChevronDown size={15} className={styles.chevron} data-expanded={expanded ? "true" : "false"} />
       </button>
 
-      {expanded ? <div className={styles.content}>{message.content || "等待模型返回推理内容"}</div> : null}
+      {contentMotion.shouldRender ? (
+        <div
+          className={styles.contentShell}
+          data-motion={contentMotion.phase}
+          ref={contentMotion.ref}
+          style={contentMotion.style}
+          aria-hidden={!expanded}
+          data-testid="message-thinking-content"
+        >
+          <div className={styles.content}>{message.content || "等待模型返回思考内容"}</div>
+        </div>
+      ) : null}
     </article>
   );
 }
 
 function titleFromMessage(message: ConversationMessage, running: boolean, failed: boolean): string {
   const reasoningKind = stringPayload(message.payload.reasoning_kind) || stringPayload(message.payload.reasoningKind);
+  if (reasoningKind === "reasoning") {
+    if (running) {
+      return "正在思考";
+    }
+    return failed ? "思考失败" : "已完成思考";
+  }
   if (reasoningKind) {
     const label = reasoningKindLabel(reasoningKind);
     if (running) {
@@ -73,8 +92,6 @@ function reasoningKindLabel(kind: string): string {
       return "状态更新";
     case "progress_fact":
       return "进展事实";
-    case "reasoning":
-      return "推理";
     case "subagent":
       return "子任务";
     default:

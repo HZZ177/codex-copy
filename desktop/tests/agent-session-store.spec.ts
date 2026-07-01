@@ -489,6 +489,28 @@ describe("agentSessionStore reducer", () => {
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("running");
   });
 
+  it("keeps assistant and reasoning chunks in arrival order", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "stream",
+      data: { session_id: "ses-1", content: "先给结论。" },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "reasoning",
+      data: { session_id: "ses-1", kind: "reasoning", content: "中途思考" },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "stream",
+      data: { session_id: "ses-1", content: "继续回答。" },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      { role: "assistant", content: "先给结论。", streaming: false },
+      { role: "reasoning", content: "中途思考", streaming: false },
+      { role: "assistant", content: "继续回答。", streaming: true },
+    ]);
+  });
+
   it("marks reasoning streams completed when the turn completes", () => {
     let state = createInitialAgentConversationState();
     state = reduceAgentWsEvent(state, {
@@ -507,6 +529,7 @@ describe("agentSessionStore reducer", () => {
 
     expect(selectAgentMessages(state, "ses-1")).toMatchObject([
       { role: "reasoning", content: "先分析工具调用", streaming: false, status: "completed" },
+      { role: "assistant", content: "完成", streaming: false },
     ]);
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
   });

@@ -17,6 +17,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
 import { AppDialog } from "@/renderer/components/dialog";
+import { AppTooltipLayer } from "@/renderer/components/tooltip";
 import type {
   UsageRequestDetail,
   UsageRequestListResponse,
@@ -252,7 +253,8 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
   }
 
   return (
-    <main className={styles.page} data-testid="usage-stats-page">
+    <main className={styles.page} data-testid="usage-stats-page" data-usage-tooltips="true">
+      <AppTooltipLayer scopeSelector="[data-usage-tooltips='true']" defaultPlacement="top" />
       <header className={styles.header}>
         <div>
           <h1>用量统计</h1>
@@ -1115,6 +1117,7 @@ function UsageRequestTable({
           <col className={styles.cacheRateColumn} />
           <col className={styles.outputColumn} />
           <col className={styles.durationColumn} />
+          <col className={styles.rateColumn} />
           <col className={styles.statusColumn} />
         </colgroup>
         <thead>
@@ -1125,6 +1128,7 @@ function UsageRequestTable({
             <th>缓存命中率</th>
             <th>输出</th>
             <th>用时/首字</th>
+            <th>输出速率</th>
             <th>状态</th>
           </tr>
         </thead>
@@ -1132,11 +1136,16 @@ function UsageRequestTable({
           {rows.map((row) => (
             <tr key={row.id} onClick={() => onOpen(row.id)} tabIndex={0}>
               <td>{formatDateTime(row.start_time)}</td>
-              <td title={row.model}>{row.model}</td>
+              <td>
+                <span className={styles.modelCellText} data-tooltip-label={row.model}>
+                  {row.model}
+                </span>
+              </td>
               <td>{formatInputCacheTokens(row)}</td>
               <td>{formatCacheHitPercent(row)}</td>
               <td>{formatNumber(row.output_tokens)}</td>
               <td>{formatUsageLatency(row)}</td>
+              <td>{formatOutputTokenRate(row.output_tokens_per_second)}</td>
               <td>
                 <span className={styles.status} data-status={row.status}>
                   {statusLabel(row.status)}
@@ -1146,7 +1155,7 @@ function UsageRequestTable({
           ))}
           {loading ? (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={8}>
                 <span className={styles.loadingLine}>
                   <Loader2 className={styles.spin} size={15} />
                   正在读取请求日志
@@ -1271,6 +1280,8 @@ function UsageDetailContent({
           <dd>{statusLabel(request.status)}</dd>
           <dt>用时/首字</dt>
           <dd>{formatUsageLatency(request)}</dd>
+          <dt>输出速率</dt>
+          <dd>{formatOutputTokenRate(request.output_tokens_per_second)}</dd>
           <dt>Trace</dt>
           <dd>{request.trace_id}</dd>
           <dt>网关 Thread</dt>
@@ -1527,6 +1538,13 @@ function formatNullableDuration(value: number | null | undefined) {
 
 function formatUsageLatency(value: Pick<UsageRequestLog, "time_to_first_token">) {
   return formatNullableDuration(value.time_to_first_token);
+}
+
+function formatOutputTokenRate(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${Math.max(0, value).toFixed(1)} tok/s`;
 }
 
 function statusLabel(status: string) {

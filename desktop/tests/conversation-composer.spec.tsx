@@ -77,6 +77,44 @@ describe("ConversationComposer", () => {
     expect(onSend).toHaveBeenCalledWith([], [], []);
   });
 
+  it("focuses the model search field when opened from the composer toolbar", async () => {
+    render(
+      <ConversationComposer
+        value=""
+        runtimeState="idle"
+        canSend={false}
+        canStop={false}
+        connectionReady
+        modelSelection={modelSelection()}
+        workspaceSkills={[]}
+        selectedSkill={null}
+        externalFileRequest={null}
+        externalQuoteRequest={null}
+        onChange={vi.fn()}
+        onSkillChange={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox", { name: "继续输入" });
+    fireEvent.click(screen.getByRole("button", { name: "选择模型" }));
+    const search = screen.getByLabelText("筛选模型");
+
+    act(() => {
+      editor.focus();
+    });
+    expect(document.activeElement).toBe(editor);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+
+    expect(document.activeElement).toBe(search);
+  });
+
   it("animates the context window ring toward the latest usage", async () => {
     const { rerender } = render(
       <ConversationComposer

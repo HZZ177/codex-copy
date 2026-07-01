@@ -69,7 +69,7 @@ export function ExtensionSettingsPage({
   const compressionDraft = drafts?.compression ?? null;
   const titleDependencyMissing = Boolean(titleDraft?.enabled && !fastConfigured);
   const compressionDependencyMissing = Boolean(compressionDraft?.enabled && !fastConfigured);
-  const titleLengthInvalid = titleDraft ? titleDraft.max_title_length < 4 || titleDraft.max_title_length > 120 : false;
+  const titleLengthInvalid = titleDraft ? titleDraft.max_title_length < 4 || titleDraft.max_title_length > 50 : false;
   const toolLimitInvalid = toolDraft ? toolDraft.max_tool_calls < 1 || toolDraft.max_tool_calls > 500 : false;
   const duplicateGuardInvalid = duplicateGuardDraft
     ? duplicateGuardDraft.max_repeats < 1 || duplicateGuardDraft.max_repeats > 20
@@ -173,12 +173,12 @@ export function ExtensionSettingsPage({
               <DependencyWarning message="快速模型未配置，标题生成不可用" onOpenModelConfig={onOpenModelConfig} />
             ) : null}
             <SettingRow
-              title="最大标题长度"
-              description="生成标题的最大字符数"
+              title="期望标题最大长度"
+              description="传给标题生成模型的期望字符数，最终标题仍会做 50 字兜底保护"
               control={
                 <NumberInput
-                  label="最大标题长度"
-                  max={120}
+                  label="期望标题最大长度"
+                  max={50}
                   min={4}
                   onChange={(max_title_length) => updateTitleDraft({ max_title_length })}
                   value={titleDraft.max_title_length}
@@ -186,7 +186,7 @@ export function ExtensionSettingsPage({
               }
             />
             {titleLengthInvalid ? (
-              <div className={styles.fieldError}>最大标题长度必须在 4 到 120 之间</div>
+              <div className={styles.fieldError}>期望标题最大长度必须在 4 到 50 之间</div>
             ) : null}
           </div>
 

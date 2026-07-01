@@ -115,6 +115,106 @@ async def test_process_agent_events_collects_usage_without_writing_llm_log(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_process_agent_events_emits_reasoning_from_model_chunks() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    result = await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            additional_kwargs={"reasoning_content": "先分析"},
+                        )
+                    },
+                },
+                {
+                    "event": "on_chat_model_end",
+                    "run_id": "model_run",
+                    "data": {"output": AIMessage(content="最终答案")},
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+    )
+
+    reasoning_events = [
+        event
+        for event in emitted
+        if event.event_type
+        in {
+            DomainEventType.REASONING_STREAM.value,
+            DomainEventType.REASONING_FINISHED.value,
+        }
+    ]
+    assert [event.event_type for event in reasoning_events] == [
+        DomainEventType.REASONING_STREAM.value,
+        DomainEventType.REASONING_FINISHED.value,
+    ]
+    assert reasoning_events[0].payload["text"] == "先分析"
+    assert reasoning_events[0].payload["done"] is False
+    assert reasoning_events[1].payload["text"] == "先分析"
+    assert reasoning_events[1].payload["done"] is True
+    assert result.final_content == "最终答案"
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_emits_reasoning_details_from_model_chunks() -> None:
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    await process_agent_events(
+        _event_stream(
+            [
+                {
+                    "event": "on_chat_model_stream",
+                    "run_id": "model_run",
+                    "data": {
+                        "chunk": AIMessageChunk(
+                            content="",
+                            additional_kwargs={"reasoning_details": [{"text": "结构化思考"}]},
+                        )
+                    },
+                },
+                {
+                    "event": "on_chat_model_end",
+                    "run_id": "model_run",
+                    "data": {"output": AIMessage(content="最终答案")},
+                },
+            ]
+        ),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=NeverCancelled(),
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+    )
+
+    reasoning_streams = [
+        event
+        for event in emitted
+        if event.event_type == DomainEventType.REASONING_STREAM.value
+    ]
+    assert reasoning_streams[0].payload["text"] == "结构化思考"
+
+
+@pytest.mark.asyncio
 async def test_process_agent_events_keeps_partial_output_on_user_task_cancel(tmp_path) -> None:
     _repositories(tmp_path)
     token = ManualCancellation()

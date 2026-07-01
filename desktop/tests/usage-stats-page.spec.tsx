@@ -45,12 +45,14 @@ describe("UsageStatsPage", () => {
     expect(screen.getByRole("columnheader", { name: "总输入/命中缓存" })).not.toBeNull();
     expect(screen.getByRole("columnheader", { name: "缓存命中率" })).not.toBeNull();
     expect(screen.getByRole("columnheader", { name: "用时/首字" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "输出速率" })).not.toBeNull();
     expect(screen.queryByRole("columnheader", { name: "耗时" })).toBeNull();
     expect(screen.queryByRole("columnheader", { name: "首字时长" })).toBeNull();
     expect(screen.queryByRole("columnheader", { name: "总量" })).toBeNull();
     expect(screen.getByText("17,907 / 12,960")).not.toBeNull();
     expect(screen.queryByText("12,960 (72.4%)")).toBeNull();
     expect(screen.getByText("640ms")).not.toBeNull();
+    expect(screen.getByText("305.7 tok/s")).not.toBeNull();
     expect(screen.queryByText("2.4s / 640ms")).toBeNull();
     expect(screen.getAllByText("538")).toHaveLength(2);
     expect(screen.getByTestId("usage-token-heatwall")).not.toBeNull();
@@ -89,7 +91,13 @@ describe("UsageStatsPage", () => {
         }),
       );
     });
-    expect(screen.getByText("deepseek-v4-flash")).not.toBeNull();
+    const modelText = screen.getByText("deepseek-v4-flash");
+    expect(modelText.getAttribute("title")).toBeNull();
+    expect(modelText.getAttribute("data-tooltip-label")).toBe("deepseek-v4-flash");
+    expect(modelText.className).toContain("modelCellText");
+    fireEvent.pointerOver(modelText);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("deepseek-v4-flash");
+    fireEvent.pointerOut(modelText);
     expect(screen.getByText("成功")).not.toBeNull();
     expect(screen.queryByText("来源")).toBeNull();
   });
@@ -276,6 +284,7 @@ describe("UsageStatsPage", () => {
     expect(screen.getByText("trace-1")).not.toBeNull();
     expect(screen.getByText("ses-1234567890")).not.toBeNull();
     expect(screen.getAllByText("640ms").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("305.7 tok/s").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("2.4s / 640ms")).toBeNull();
     expect(screen.getByText("命中缓存 12,960 (72.4%)")).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "事件摘要" })).toBeNull();
@@ -577,6 +586,7 @@ function defaultRequests(): UsageRequestListResponse {
         end_time: "2026-06-19T23:12:02Z",
         duration_ms: 2400,
         time_to_first_token: 640,
+        output_tokens_per_second: 305.7,
         input_tokens: 17_907,
         cache_read_tokens: 12_960,
         output_tokens: 538,

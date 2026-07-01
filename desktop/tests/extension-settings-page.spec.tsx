@@ -23,7 +23,8 @@ describe("ExtensionSettingsPage", () => {
     expect(screen.getByText("标题生成")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "启用标题生成" })).toHaveProperty("checked", true);
     expect(screen.queryByRole("switch", { name: "仅默认标题时生成" })).toBeNull();
-    expect(screen.getByLabelText("最大标题长度")).toHaveProperty("value", "48");
+    expect(screen.getByText("期望标题最大长度")).not.toBeNull();
+    expect(screen.getByLabelText("期望标题最大长度")).toHaveProperty("value", "48");
     expect(screen.queryByText("快速模型未配置，标题生成不可用")).toBeNull();
     expect(screen.getAllByRole("button", { name: "保存" })).toHaveLength(1);
   });
@@ -36,7 +37,7 @@ describe("ExtensionSettingsPage", () => {
 
     await screen.findByText("标题生成");
     fireEvent.click(screen.getByRole("switch", { name: "启用标题生成" }));
-    fireEvent.change(screen.getByLabelText("最大标题长度"), { target: { value: "64" } });
+    fireEvent.change(screen.getByLabelText("期望标题最大长度"), { target: { value: "50" } });
     fireEvent.change(screen.getByLabelText("单轮最多工具调用"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("连续重复阈值"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("switch", { name: "启用上下文压缩" }));
@@ -52,7 +53,7 @@ describe("ExtensionSettingsPage", () => {
         auto_title: {
           enabled: true,
           only_when_default_title: true,
-          max_title_length: 64,
+          max_title_length: 50,
         },
         tool_call_limit: {
           enabled: true,
@@ -149,9 +150,9 @@ describe("ExtensionSettingsPage", () => {
     renderWithNotifications(<ExtensionSettingsPage runtime={runtime} />);
 
     await screen.findByText("标题生成");
-    fireEvent.change(screen.getByLabelText("最大标题长度"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("期望标题最大长度"), { target: { value: "51" } });
 
-    expect(screen.getByText("最大标题长度必须在 4 到 120 之间")).not.toBeNull();
+    expect(screen.getByText("期望标题最大长度必须在 4 到 50 之间")).not.toBeNull();
     expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);
     expect(saveExtensionSettings).not.toHaveBeenCalled();
   });

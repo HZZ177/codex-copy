@@ -113,6 +113,7 @@ def test_usage_service_summarizes_trend_and_request_list(tmp_path) -> None:
     assert listed["list"][0]["request_preview"] == "统计一下"
     assert listed["list"][0]["model"] == "deepseek-v4-flash"
     assert listed["list"][0]["time_to_first_token"] == 97
+    assert listed["list"][0]["output_tokens_per_second"] == 28.0
     assert listed["list"][0]["gateway_thread_id"] == "trace_usage_service"
     assert listed["list"][0]["gateway_trace_id"] == "gateway_trace_service"
 
@@ -126,10 +127,36 @@ def test_usage_service_returns_request_detail_without_event_summary(tmp_path) ->
 
     assert detail["request"]["response_preview"] == "统计结果"
     assert detail["request"]["time_to_first_token"] == 97
+    assert detail["request"]["output_tokens_per_second"] == 28.0
     assert detail["request"]["gateway_thread_id"] == "trace_usage_service"
     assert detail["request"]["gateway_trace_id"] == "gateway_trace_service"
     assert detail["trace"]["user_message_preview"] == "统计一下"
     assert detail["events"] == []
+
+
+def test_usage_service_calculates_stream_output_token_rate(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    repositories.llm_request_logs.start(
+        request_id="llm_req_stream_rate",
+        trace_id="trace_usage_service",
+        trace_record_id="trace_usage_service",
+        session_id="ses_usage_service",
+        model="deepseek-v4-flash",
+        metadata={"call_kind": "astream"},
+        start_time="2026-06-18T10:00:00Z",
+    )
+    repositories.llm_request_logs.finish(
+        "llm_req_stream_rate",
+        output_tokens=80,
+        duration_ms=1000,
+        time_to_first_token=200,
+        end_time="2026-06-18T10:00:01Z",
+    )
+    service = UsageService(repositories)
+
+    listed = service.list_requests(UsageRequestQuery(page=1, page_size=10))
+
+    assert listed["list"][0]["output_tokens_per_second"] == 100.0
 
 
 def test_usage_service_raises_for_missing_request(tmp_path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from collections.abc import AsyncIterator, Iterator
@@ -27,6 +28,17 @@ from backend.app.core.request_context import (
 from backend.app.model import ModelSettings
 
 _llm_gateway_trace_registry: dict[str, str] = {}
+_REASONING_PAYLOAD_KEYS = (
+    "reasoning_content",
+    "reasoning",
+    "reasoning_text",
+    "reasoning_details",
+)
+_REASONING_TEXT_KEYS = ("reasoning_content", "reasoning", "reasoning_text")
+_KEYDEX_REASONING_KEYS = "__keydex_reasoning_keys__"
+_KEYDEX_REASONING_TEXT = "__keydex_reasoning_text__"
+_TOOL_CALL_PREVIEW_ARGS_LIMIT = 800
+_TOOL_CALL_PREVIEW_MAX_CALLS = 5
 
 
 def register_llm_gateway_trace_id(run_id: str, gateway_trace_id: str) -> None:
@@ -119,6 +131,43 @@ class PatchedChatOpenAI(ChatOpenAI):
             f"AH-Trace-Id={gateway_trace_id}"
         )
         return kwargs
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict,
+        default_chunk_class: type,
+        base_generation_info: dict | None,
+    ) -> Any:
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk,
+            default_chunk_class,
+            base_generation_info,
+        )
+        _preserve_reasoning_delta(generation_chunk, chunk)
+        return generation_chunk
+
+    def _create_chat_result(
+        self,
+        response: dict | Any,
+        generation_info: dict | None = None,
+    ) -> Any:
+        chat_result = super()._create_chat_result(response, generation_info)
+        response_dict = _response_to_mapping(response)
+        if response_dict:
+            _preserve_reasoning_chat_result(chat_result, response_dict)
+        return chat_result
+
+    def _get_request_payload(
+        self,
+        input_: Any,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict:
+        source_messages = self._convert_input(input_).to_messages()
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        _restore_reasoning_request_payload(payload, source_messages)
+        return payload
 
     def _start_request_log(
         self,
@@ -357,7 +406,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         seen_total_tokens: int | None = None
         seen_cache_read_tokens: int | None = None
         stream_usage = _empty_token_usage()
-        response_parts: list[str] = []
+        response_preview = _ResponsePreviewCollector()
         time_to_first_token: int | None = None
         try:
             async for chunk in super()._astream(
@@ -389,17 +438,19 @@ class PatchedChatOpenAI(ChatOpenAI):
                         seen_cache_read_tokens,
                     )
                     _merge_token_usage(stream_usage, _extract_token_usage_from_metadata(usage))
-                text = _message_text(chunk_msg)
-                if text:
-                    if time_to_first_token is None and request_log is not None:
-                        time_to_first_token = _duration_ms(request_log.started_at)
-                    response_parts.append(text)
+                if (
+                    time_to_first_token is None
+                    and request_log is not None
+                    and _stream_first_output_text(chunk_msg)
+                ):
+                    time_to_first_token = _duration_ms(request_log.started_at)
+                response_preview.append(chunk_msg)
                 yield chunk
         except (asyncio.CancelledError, GeneratorExit) as exc:
             self._cancel_request_log(
                 request_log,
                 error=exc,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 time_to_first_token=time_to_first_token,
             )
             logger.info(
@@ -411,7 +462,7 @@ class PatchedChatOpenAI(ChatOpenAI):
             self._fail_request_log(
                 request_log,
                 error=exc,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 time_to_first_token=time_to_first_token,
             )
             logger.opt(exception=True).error(
@@ -422,7 +473,7 @@ class PatchedChatOpenAI(ChatOpenAI):
             self._finish_request_log(
                 request_log,
                 response=None,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 usage=stream_usage,
                 time_to_first_token=time_to_first_token,
             )
@@ -489,7 +540,7 @@ class PatchedChatOpenAI(ChatOpenAI):
         seen_total_tokens: int | None = None
         seen_cache_read_tokens: int | None = None
         stream_usage = _empty_token_usage()
-        response_parts: list[str] = []
+        response_preview = _ResponsePreviewCollector()
         time_to_first_token: int | None = None
         try:
             for chunk in super()._stream(
@@ -521,17 +572,19 @@ class PatchedChatOpenAI(ChatOpenAI):
                         seen_cache_read_tokens,
                     )
                     _merge_token_usage(stream_usage, _extract_token_usage_from_metadata(usage))
-                text = _message_text(chunk_msg)
-                if text:
-                    if time_to_first_token is None and request_log is not None:
-                        time_to_first_token = _duration_ms(request_log.started_at)
-                    response_parts.append(text)
+                if (
+                    time_to_first_token is None
+                    and request_log is not None
+                    and _stream_first_output_text(chunk_msg)
+                ):
+                    time_to_first_token = _duration_ms(request_log.started_at)
+                response_preview.append(chunk_msg)
                 yield chunk
         except (asyncio.CancelledError, GeneratorExit) as exc:
             self._cancel_request_log(
                 request_log,
                 error=exc,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 time_to_first_token=time_to_first_token,
             )
             logger.info(
@@ -543,7 +596,7 @@ class PatchedChatOpenAI(ChatOpenAI):
             self._fail_request_log(
                 request_log,
                 error=exc,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 time_to_first_token=time_to_first_token,
             )
             logger.opt(exception=True).error(
@@ -554,7 +607,7 @@ class PatchedChatOpenAI(ChatOpenAI):
             self._finish_request_log(
                 request_log,
                 response=None,
-                response_preview="".join(response_parts),
+                response_preview=response_preview.preview(),
                 usage=stream_usage,
                 time_to_first_token=time_to_first_token,
             )
@@ -563,7 +616,60 @@ class PatchedChatOpenAI(ChatOpenAI):
 
 
 def _duration_ms(started_at: float) -> int:
-    return max(0, int((time.perf_counter() - started_at) * 1000))
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    if elapsed_ms <= 0:
+        return 0
+    return max(1, int(elapsed_ms + 0.999))
+
+
+class _ResponsePreviewCollector:
+    def __init__(self) -> None:
+        self._text_parts: list[str] = []
+        self._tool_call_order: list[str] = []
+        self._tool_calls_by_key: dict[str, dict[str, Any]] = {}
+
+    def append(self, message: Any) -> None:
+        text = _response_content_preview_text(message)
+        if text:
+            self._text_parts.append(text)
+        for tool_call in _message_tool_call_chunks(message):
+            self._merge_tool_call_chunk(tool_call)
+
+    def preview(self) -> str:
+        text = "".join(self._text_parts)
+        tool_call_text = _format_tool_call_preview(
+            [self._tool_calls_by_key[key] for key in self._tool_call_order]
+        )
+        if text and tool_call_text:
+            return f"{text}\n{tool_call_text}"
+        return text or tool_call_text
+
+    def _merge_tool_call_chunk(self, tool_call: dict[str, Any]) -> None:
+        key = _tool_call_key(tool_call, len(self._tool_call_order))
+        current = self._tool_calls_by_key.get(key)
+        if current is None:
+            current = {}
+            self._tool_calls_by_key[key] = current
+            self._tool_call_order.append(key)
+
+        if tool_call.get("name"):
+            current["name"] = tool_call["name"]
+        if tool_call.get("id"):
+            current["id"] = tool_call["id"]
+        if tool_call.get("index") is not None:
+            current["index"] = tool_call["index"]
+
+        args = tool_call.get("args")
+        if args is None:
+            return
+        current_args = current.get("args")
+        if isinstance(args, str) or isinstance(current_args, str):
+            current["args"] = f"{current_args or ''}{args or ''}"
+            return
+        if isinstance(args, dict) and isinstance(current_args, dict):
+            current["args"] = {**current_args, **args}
+            return
+        current["args"] = args
 
 
 def _model_name(model: Any) -> str:
@@ -683,10 +789,10 @@ def _response_preview(value: Any) -> str:
             else:
                 generation_items = [generation_group]
             for generation in generation_items:
-                text = _message_text(getattr(generation, "message", None))
+                text = _response_preview_text(getattr(generation, "message", None))
                 if text:
                     return text
-    return _message_text(value) or _preview_value(value)
+    return _response_preview_text(value) or _preview_value(value)
 
 
 def _request_preview(messages: list[Any]) -> str:
@@ -712,6 +818,360 @@ def _message_text(message: Any) -> str:
                 if isinstance(text, str):
                     parts.append(text)
         return "".join(parts)
+    return ""
+
+
+def _stream_first_output_text(message: Any) -> str:
+    return _response_preview_text(message)
+
+
+def _response_preview_text(message: Any) -> str:
+    content_text = _response_content_preview_text(message)
+    tool_call_text = _tool_call_message_text(message)
+    if content_text and tool_call_text:
+        return f"{content_text}\n{tool_call_text}"
+    return content_text or tool_call_text
+
+
+def _response_content_preview_text(message: Any) -> str:
+    reasoning_text = _reasoning_message_text(message)
+    content_text = _message_text(message)
+    return f"{reasoning_text}{content_text}" if reasoning_text else content_text
+
+
+def _reasoning_message_text(message: Any) -> str:
+    if message is None:
+        return ""
+    additional_kwargs = getattr(message, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict):
+        internal_text = additional_kwargs.get(_KEYDEX_REASONING_TEXT)
+        if isinstance(internal_text, str) and internal_text:
+            return internal_text
+        text = _reasoning_delta_text(additional_kwargs)
+        if text:
+            return text
+    if isinstance(message, dict):
+        return _reasoning_delta_text(message)
+    return ""
+
+
+def _tool_call_message_text(message: Any) -> str:
+    return _format_tool_call_preview(_message_tool_calls(message))
+
+
+def _message_tool_calls(message: Any) -> list[dict[str, Any]]:
+    if message is None:
+        return []
+
+    tool_calls = _normalise_tool_call_list(getattr(message, "tool_calls", None))
+    invalid_tool_calls = _normalise_tool_call_list(
+        getattr(message, "invalid_tool_calls", None)
+    )
+    if tool_calls or invalid_tool_calls:
+        return [*tool_calls, *invalid_tool_calls]
+
+    for mapping in _message_tool_call_mappings(message):
+        calls = _raw_tool_calls_from_mapping(mapping)
+        if calls:
+            return calls
+
+    return _message_tool_call_chunks(message)
+
+
+def _message_tool_call_chunks(message: Any) -> list[dict[str, Any]]:
+    if message is None:
+        return []
+    chunks = _normalise_tool_call_list(getattr(message, "tool_call_chunks", None))
+    if chunks:
+        return chunks
+    for mapping in _message_tool_call_mappings(message):
+        calls = _raw_tool_calls_from_mapping(mapping)
+        if calls:
+            return calls
+    return []
+
+
+def _message_tool_call_mappings(message: Any) -> list[dict[str, Any]]:
+    mappings: list[dict[str, Any]] = []
+    additional_kwargs = getattr(message, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict):
+        mappings.append(additional_kwargs)
+    if isinstance(message, dict):
+        mappings.append(message)
+    return mappings
+
+
+def _raw_tool_calls_from_mapping(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_tool_calls = mapping.get("tool_calls")
+    if isinstance(raw_tool_calls, list):
+        calls = _normalise_tool_call_list(raw_tool_calls)
+        if calls:
+            return calls
+    function_call = mapping.get("function_call")
+    if isinstance(function_call, dict):
+        return [_normalise_tool_call(function_call)]
+    return []
+
+
+def _normalise_tool_call_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_normalise_tool_call(item) for item in value]
+
+
+def _normalise_tool_call(value: Any) -> dict[str, Any]:
+    function = _tool_call_value(value, "function")
+    return {
+        "id": _tool_call_value(value, "id"),
+        "index": _tool_call_value(value, "index"),
+        "name": _tool_call_value(value, "name") or _tool_call_value(function, "name"),
+        "args": _tool_call_value(value, "args")
+        if _tool_call_value(value, "args") is not None
+        else _tool_call_value(function, "arguments"),
+    }
+
+
+def _tool_call_value(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _tool_call_key(tool_call: dict[str, Any], fallback_index: int) -> str:
+    index = tool_call.get("index")
+    if index is not None:
+        return f"index:{index}"
+    call_id = tool_call.get("id")
+    if call_id:
+        return f"id:{call_id}"
+    return f"fallback:{fallback_index}"
+
+
+def _format_tool_call_preview(tool_calls: list[dict[str, Any]]) -> str:
+    if not tool_calls:
+        return ""
+    parts: list[str] = []
+    for tool_call in tool_calls[:_TOOL_CALL_PREVIEW_MAX_CALLS]:
+        name = str(tool_call.get("name") or "unknown_tool")
+        args = _format_tool_call_args(tool_call.get("args"))
+        parts.append(f"{name}({args})" if args else f"{name}()")
+    remaining = len(tool_calls) - _TOOL_CALL_PREVIEW_MAX_CALLS
+    if remaining > 0:
+        parts.append(f"+{remaining} more")
+    return f"工具调用: {'; '.join(parts)}"
+
+
+def _format_tool_call_args(args: Any) -> str:
+    if args is None:
+        return ""
+    if isinstance(args, str):
+        text = args
+    else:
+        try:
+            text = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        except TypeError:
+            text = str(args)
+    text = text.replace("\r", " ").replace("\n", " ")
+    if len(text) <= _TOOL_CALL_PREVIEW_ARGS_LIMIT:
+        return text
+    return f"{text[:_TOOL_CALL_PREVIEW_ARGS_LIMIT]}..."
+
+
+def _response_to_mapping(response: Any) -> dict[str, Any]:
+    if isinstance(response, dict):
+        return response
+    model_dump = getattr(response, "model_dump", None)
+    if callable(model_dump):
+        value = model_dump()
+        return value if isinstance(value, dict) else {}
+    return {}
+
+
+def _preserve_reasoning_chat_result(chat_result: Any, response_dict: dict[str, Any]) -> None:
+    choices = response_dict.get("choices")
+    generations = getattr(chat_result, "generations", None)
+    if not isinstance(choices, list) or not isinstance(generations, list):
+        return
+    for generation, choice in zip(generations, choices, strict=False):
+        if not isinstance(choice, dict):
+            continue
+        raw_message = choice.get("message")
+        if isinstance(raw_message, dict):
+            _preserve_reasoning_message(getattr(generation, "message", None), raw_message)
+
+
+def _preserve_reasoning_message(message: Any, raw_message: dict[str, Any]) -> None:
+    additional_kwargs = getattr(message, "additional_kwargs", None)
+    if not isinstance(additional_kwargs, dict):
+        return
+    reasoning_payload = _reasoning_payload_from_mapping(raw_message)
+    if not reasoning_payload:
+        return
+
+    additional_kwargs.update(reasoning_payload)
+    _remember_reasoning_keys(additional_kwargs, reasoning_payload)
+
+
+def _restore_reasoning_request_payload(payload: dict[str, Any], source_messages: list[Any]) -> None:
+    target_messages = payload.get("messages")
+    if not isinstance(target_messages, list):
+        return
+    for source_message, target_message in zip(source_messages, target_messages, strict=False):
+        if not isinstance(target_message, dict) or target_message.get("role") != "assistant":
+            continue
+        additional_kwargs = getattr(source_message, "additional_kwargs", None)
+        if not isinstance(additional_kwargs, dict):
+            continue
+        reasoning_payload = _reasoning_request_payload(additional_kwargs)
+        for key in (
+            *_REASONING_PAYLOAD_KEYS,
+            _KEYDEX_REASONING_KEYS,
+            _KEYDEX_REASONING_TEXT,
+        ):
+            target_message.pop(key, None)
+        if reasoning_payload:
+            target_message.update(reasoning_payload)
+
+
+def _preserve_reasoning_delta(generation_chunk: Any, raw_chunk: Any) -> None:
+    if generation_chunk is None:
+        return
+    message = getattr(generation_chunk, "message", None)
+    additional_kwargs = getattr(message, "additional_kwargs", None)
+    if not isinstance(additional_kwargs, dict):
+        return
+    delta = _chat_completion_delta(raw_chunk)
+    if not delta:
+        return
+
+    reasoning_payload = _reasoning_payload_from_mapping(delta)
+    if not reasoning_payload:
+        return
+
+    additional_kwargs.update(reasoning_payload)
+    _remember_reasoning_keys(additional_kwargs, reasoning_payload)
+
+
+def _chat_completion_delta(raw_chunk: Any) -> dict[str, Any]:
+    if not isinstance(raw_chunk, dict):
+        return {}
+    choices = raw_chunk.get("choices")
+    if not choices:
+        nested = raw_chunk.get("chunk")
+        if isinstance(nested, dict):
+            choices = nested.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return {}
+    delta = choice.get("delta")
+    return delta if isinstance(delta, dict) else {}
+
+
+def _reasoning_payload_from_mapping(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in value.items()
+        if key in _REASONING_PAYLOAD_KEYS
+    }
+
+
+def _remember_reasoning_keys(
+    additional_kwargs: dict[str, Any],
+    reasoning_payload: dict[str, Any],
+) -> None:
+    existing = additional_kwargs.get(_KEYDEX_REASONING_KEYS)
+    keys = [
+        key
+        for key in existing
+        if isinstance(key, str) and key in _REASONING_PAYLOAD_KEYS
+    ] if isinstance(existing, list) else []
+    for key in reasoning_payload:
+        if key not in keys:
+            keys.append(key)
+    if keys:
+        additional_kwargs[_KEYDEX_REASONING_KEYS] = keys
+
+    reasoning_text = _reasoning_delta_text(reasoning_payload)
+    if reasoning_text:
+        existing_text = additional_kwargs.get(_KEYDEX_REASONING_TEXT)
+        if isinstance(existing_text, str) and existing_text:
+            additional_kwargs[_KEYDEX_REASONING_TEXT] = f"{existing_text}{reasoning_text}"
+        else:
+            additional_kwargs[_KEYDEX_REASONING_TEXT] = reasoning_text
+
+
+def _reasoning_request_payload(additional_kwargs: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = _reasoning_payload_from_mapping(additional_kwargs)
+    if not raw_payload:
+        return {}
+
+    ordered_keys: list[str] = []
+    stored_keys = additional_kwargs.get(_KEYDEX_REASONING_KEYS)
+    if isinstance(stored_keys, list):
+        for key in stored_keys:
+            if isinstance(key, str) and key in raw_payload and key not in ordered_keys:
+                ordered_keys.append(key)
+    for key in raw_payload:
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+
+    result: dict[str, Any] = {}
+    seen_signatures: set[tuple[str, str]] = set()
+    for key in ordered_keys:
+        value = raw_payload[key]
+        signature = _reasoning_value_signature(key, value)
+        if signature is not None:
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+        result[key] = value
+    return result
+
+
+def _reasoning_value_signature(key: str, value: Any) -> tuple[str, str] | None:
+    if key in _REASONING_TEXT_KEYS and isinstance(value, str):
+        return ("text", value)
+    if key == "reasoning_details":
+        text = _reasoning_delta_text({"reasoning_details": value})
+        return ("text", text) if text else None
+    if isinstance(value, dict):
+        text = _reasoning_text_from_mapping(value)
+        return ("text", text) if text else None
+    return None
+
+
+def _reasoning_delta_text(payload: dict[str, Any]) -> str:
+    for key in ("reasoning_content", "reasoning", "reasoning_text"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            nested = _reasoning_text_from_mapping(value)
+            if nested:
+                return nested
+
+    details = payload.get("reasoning_details")
+    if isinstance(details, str):
+        return details
+    if isinstance(details, list):
+        parts = [
+            _reasoning_text_from_mapping(item)
+            for item in details
+            if isinstance(item, dict)
+        ]
+        return "".join(part for part in parts if part)
+    if isinstance(details, dict):
+        return _reasoning_text_from_mapping(details)
+    return ""
+
+
+def _reasoning_text_from_mapping(value: dict[str, Any]) -> str:
+    for key in ("text", "content", "reasoning_content", "reasoning_text", "summary"):
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            return item
     return ""
 
 

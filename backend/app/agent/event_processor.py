@@ -436,10 +436,40 @@ def _reasoning_text(message: Any) -> str:
     if not isinstance(message, AIMessageChunk):
         return ""
     additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+    internal_text = additional_kwargs.get("__keydex_reasoning_text__")
+    if isinstance(internal_text, str) and internal_text:
+        return internal_text
     for key in ("reasoning_content", "reasoning", "reasoning_text"):
         value = additional_kwargs.get(key)
         if isinstance(value, str) and value:
             return value
+        if isinstance(value, dict):
+            nested = _reasoning_text_from_mapping(value)
+            if nested:
+                return nested
+    details = additional_kwargs.get("reasoning_details")
+    if isinstance(details, str):
+        return details
+    if isinstance(details, list):
+        return "".join(
+            part
+            for part in (
+                _reasoning_text_from_mapping(item)
+                for item in details
+                if isinstance(item, dict)
+            )
+            if part
+        )
+    if isinstance(details, dict):
+        return _reasoning_text_from_mapping(details)
+    return ""
+
+
+def _reasoning_text_from_mapping(value: dict[str, Any]) -> str:
+    for key in ("text", "content", "reasoning_content", "reasoning_text", "summary"):
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            return item
     return ""
 
 

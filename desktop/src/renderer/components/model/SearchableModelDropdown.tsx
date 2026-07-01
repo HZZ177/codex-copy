@@ -60,8 +60,11 @@ export function SearchableModelDropdown({
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const menuCloseTimerRef = useRef<number | null>(null);
+  const searchFocusFrameRef = useRef<number | null>(null);
+  const searchFocusTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
   const [query, setQuery] = useState("");
@@ -93,6 +96,21 @@ export function SearchableModelDropdown({
     }
   };
 
+  const clearSearchFocusTimers = () => {
+    if (searchFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(searchFocusFrameRef.current);
+      searchFocusFrameRef.current = null;
+    }
+    if (searchFocusTimerRef.current !== null) {
+      window.clearTimeout(searchFocusTimerRef.current);
+      searchFocusTimerRef.current = null;
+    }
+  };
+
+  const focusSearchInput = () => {
+    searchInputRef.current?.focus({ preventScroll: true });
+  };
+
   const openMenu = () => {
     clearMenuCloseTimer();
     setMenuClosing(false);
@@ -116,6 +134,24 @@ export function SearchableModelDropdown({
       menuCloseTimerRef.current = null;
     }, MENU_EXIT_ANIMATION_MS);
   };
+
+  useEffect(() => {
+    if (!open) {
+      clearSearchFocusTimers();
+      return;
+    }
+    clearSearchFocusTimers();
+    focusSearchInput();
+    searchFocusFrameRef.current = window.requestAnimationFrame(() => {
+      searchFocusFrameRef.current = null;
+      focusSearchInput();
+    });
+    searchFocusTimerRef.current = window.setTimeout(() => {
+      searchFocusTimerRef.current = null;
+      focusSearchInput();
+    }, 0);
+    return clearSearchFocusTimers;
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -151,7 +187,13 @@ export function SearchableModelDropdown({
     }
   }, [disabledButton]);
 
-  useEffect(() => () => clearMenuCloseTimer(), []);
+  useEffect(
+    () => () => {
+      clearMenuCloseTimer();
+      clearSearchFocusTimers();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -276,6 +318,11 @@ export function SearchableModelDropdown({
           aria-controls={menuVisible ? menuId : undefined}
           title={title ?? ariaLabel}
           disabled={disabledButton}
+          onPointerDown={(event) => {
+            if (!disabledButton) {
+              event.preventDefault();
+            }
+          }}
           onClick={toggleMenu}
         >
           <span className={styles.triggerText}>{displayLabel}</span>
@@ -302,7 +349,7 @@ export function SearchableModelDropdown({
               aria-label="筛选模型"
               aria-activedescendant={activeOptionId}
               aria-controls={menuId}
-              autoFocus
+              ref={searchInputRef}
               placeholder={searchPlaceholder}
               value={query}
               onChange={(event) => setQuery(event.target.value)}

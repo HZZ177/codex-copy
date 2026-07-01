@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any
 
 import httpx
@@ -67,6 +68,62 @@ async def test_patched_chat_openai_logs_non_streaming_completion(tmp_path) -> No
     assert record.time_to_first_token == record.duration_ms
     assert captured_headers["ah-thread-id"] == "trace_llm"
     assert captured_headers["ah-trace-id"] == record.gateway_trace_id
+
+
+@pytest.mark.asyncio
+async def test_patched_chat_openai_logs_non_streaming_tool_call_preview(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_read",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": "{\"path\":\"README.md\"}",
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 2,
+                    "total_tokens": 10,
+                },
+            },
+        )
+
+    llm = _llm(
+        repositories,
+        http_transport=httpx.MockTransport(handler),
+        streaming=False,
+        model="tool-call-model",
+    )
+    token = _request_context()
+    try:
+        response = await llm.ainvoke([HumanMessage(content="读取 README")])
+    finally:
+        reset_request_context(token)
+
+    records, total = repositories.llm_request_logs.list()
+    assert response.tool_calls[0]["name"] == "read_file"
+    assert total == 1
+    record = records[0]
+    assert record.status == "completed"
+    assert record.response_preview == '工具调用: read_file({"path":"README.md"})'
+    assert record.time_to_first_token == record.duration_ms
 
 
 @pytest.mark.asyncio
@@ -195,6 +252,186 @@ async def test_patched_chat_openai_logs_streaming_completion_usage(tmp_path) -> 
     assert record.time_to_first_token <= record.duration_ms
 
 
+@pytest.mark.asyncio
+async def test_patched_chat_openai_uses_reasoning_chunk_for_time_to_first_token(
+    tmp_path,
+) -> None:
+    repositories = _repositories(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        chunks = [
+            _openai_stream_chunk(payload, delta={"reasoning_content": "先想一想"}),
+            _openai_stream_chunk(payload, delta={"content": "正文回答"}),
+            _openai_stream_chunk(
+                payload,
+                delta={},
+                finish_reason="stop",
+                usage={"prompt_tokens": 3, "completion_tokens": 2},
+            ),
+            "data: [DONE]\n\n",
+        ]
+        return httpx.Response(
+            200,
+            stream=_DelayedReasoningStream(chunks),
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+        )
+
+    llm = _llm(
+        repositories,
+        http_transport=httpx.MockTransport(handler),
+        streaming=True,
+        model="reasoning-first-model",
+    )
+    token = _request_context()
+    text = ""
+    try:
+        async for chunk in llm.astream([HumanMessage(content="先思考再回答")]):
+            if isinstance(chunk.content, str):
+                text += chunk.content
+    finally:
+        reset_request_context(token)
+
+    records, total = repositories.llm_request_logs.list()
+    assert text == "正文回答"
+    assert total == 1
+    record = records[0]
+    assert record.status == "completed"
+    assert record.response_preview == "先想一想正文回答"
+    assert record.duration_ms is not None
+    assert record.duration_ms >= 250
+    assert record.time_to_first_token is not None
+    assert record.time_to_first_token < 200
+
+
+@pytest.mark.asyncio
+async def test_patched_chat_openai_logs_reasoning_preview_for_tool_call_only_response(
+    tmp_path,
+) -> None:
+    repositories = _repositories(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        chunks = [
+            _openai_stream_chunk(payload, delta={"reasoning_content": "需要先读取文件"}),
+            _openai_stream_chunk(
+                payload,
+                delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_read",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": "{\"path\":\"README.md\"}",
+                            },
+                        }
+                    ]
+                },
+                finish_reason="tool_calls",
+                usage={
+                    "prompt_tokens": 12,
+                    "completion_tokens": 4,
+                    "prompt_tokens_details": {"cached_tokens": 8},
+                },
+            ),
+            "data: [DONE]\n\n",
+        ]
+        return httpx.Response(
+            200,
+            stream=_DelayedReasoningStream(chunks),
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+        )
+
+    llm = _llm(
+        repositories,
+        http_transport=httpx.MockTransport(handler),
+        streaming=True,
+        model="reasoning-tool-call-model",
+    )
+    token = _request_context()
+    try:
+        async for _chunk in llm.astream([HumanMessage(content="读取 README")]):
+            pass
+    finally:
+        reset_request_context(token)
+
+    records, total = repositories.llm_request_logs.list()
+    assert total == 1
+    record = records[0]
+    assert record.status == "completed"
+    assert record.input_tokens == 12
+    assert record.cache_read_tokens == 8
+    assert record.output_tokens == 4
+    assert record.response_preview == '需要先读取文件\n工具调用: read_file({"path":"README.md"})'
+    assert record.duration_ms is not None
+    assert record.duration_ms >= 1
+    assert record.time_to_first_token is not None
+    assert record.time_to_first_token >= 1
+    assert record.time_to_first_token <= record.duration_ms
+
+
+@pytest.mark.asyncio
+async def test_patched_chat_openai_logs_streaming_tool_call_preview_without_reasoning(
+    tmp_path,
+) -> None:
+    repositories = _repositories(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        chunks = [
+            _openai_stream_chunk(
+                payload,
+                delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_search",
+                            "type": "function",
+                            "function": {
+                                "name": "search_docs",
+                                "arguments": "{\"query\":\"缓存命中率\"}",
+                            },
+                        }
+                    ]
+                },
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 10, "completion_tokens": 3},
+            ),
+            "data: [DONE]\n\n",
+        ]
+        return httpx.Response(
+            200,
+            stream=_DelayedReasoningStream(chunks),
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+        )
+
+    llm = _llm(
+        repositories,
+        http_transport=httpx.MockTransport(handler),
+        streaming=True,
+        model="tool-call-stream-model",
+    )
+    token = _request_context()
+    try:
+        async for _chunk in llm.astream([HumanMessage(content="搜索缓存命中率")]):
+            pass
+    finally:
+        reset_request_context(token)
+
+    records, total = repositories.llm_request_logs.list()
+    assert total == 1
+    record = records[0]
+    assert record.status == "completed"
+    assert record.input_tokens == 10
+    assert record.output_tokens == 3
+    assert record.response_preview == '工具调用: search_docs({"query":"缓存命中率"})'
+    assert record.time_to_first_token is not None
+    assert record.duration_ms is not None
+    assert record.time_to_first_token <= record.duration_ms
+
+
 def _repositories(tmp_path) -> StorageRepositories:
     repositories = StorageRepositories(init_database(tmp_path / "app.db"))
     repositories.sessions.create(
@@ -246,3 +483,33 @@ def _llm(
         provider_id="provider-1",
         provider_name="测试供应商",
     )
+
+
+class _DelayedReasoningStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[str]) -> None:
+        self.chunks = chunks
+
+    async def __aiter__(self):
+        for index, chunk in enumerate(self.chunks):
+            if index == 1:
+                await asyncio.sleep(0.3)
+            yield chunk.encode("utf-8")
+
+
+def _openai_stream_chunk(
+    request_payload: dict[str, Any],
+    *,
+    delta: dict[str, Any],
+    finish_reason: str | None = None,
+    usage: dict[str, int] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "id": "chatcmpl-reasoning-first",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": str(request_payload.get("model") or "reasoning-first-model"),
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+    if usage is not None:
+        payload["usage"] = usage
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"

@@ -46,7 +46,7 @@ def test_load_agent_runtime_settings_returns_hard_defaults_when_missing(tmp_path
 def test_save_and_load_agent_runtime_settings_round_trip(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     settings = AgentRuntimeSettings(
-        auto_title={"enabled": True, "only_when_default_title": False, "max_title_length": 64},
+        auto_title={"enabled": True, "only_when_default_title": False, "max_title_length": 50},
         tool_call_limit={"enabled": True, "max_tool_calls": 9, "exit_behavior": "error"},
         duplicate_tool_call_guard={"enabled": True, "max_repeats": 4},
         context_compression={
@@ -62,7 +62,7 @@ def test_save_and_load_agent_runtime_settings_round_trip(tmp_path) -> None:
     loaded = load_agent_runtime_settings(repositories)
 
     assert loaded == saved
-    assert loaded.auto_title.max_title_length == 64
+    assert loaded.auto_title.max_title_length == 50
     assert loaded.tool_call_limit.max_tool_calls == 9
     assert loaded.duplicate_tool_call_guard.max_repeats == 4
     assert loaded.context_compression.context_window_tokens == 64000
@@ -81,6 +81,9 @@ def test_agent_runtime_settings_reject_invalid_boundaries() -> None:
 
     with pytest.raises(ValidationError):
         AgentRuntimeSettings(auto_title={"enabled": True, "max_title_length": 2})
+
+    with pytest.raises(ValidationError):
+        AgentRuntimeSettings(auto_title={"enabled": True, "max_title_length": 51})
 
 
 def test_agent_runtime_settings_reject_unknown_and_coerced_values() -> None:

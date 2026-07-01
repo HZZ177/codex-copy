@@ -146,6 +146,7 @@ def _request_log_to_dict(
         "end_time": record.end_time,
         "duration_ms": record.duration_ms,
         "time_to_first_token": record.time_to_first_token,
+        "output_tokens_per_second": _output_tokens_per_second(record),
         "input_tokens": record.input_tokens,
         "cache_read_tokens": record.cache_read_tokens,
         "output_tokens": record.output_tokens,
@@ -157,6 +158,25 @@ def _request_log_to_dict(
         data["response_preview"] = record.response_preview
         data["metadata"] = record.metadata or {}
     return data
+
+
+def _output_tokens_per_second(record: LLMRequestLogRecord) -> float | None:
+    duration_ms = record.duration_ms
+    if duration_ms is None or duration_ms < 0:
+        return None
+    output_tokens = max(0, int(record.output_tokens or 0))
+    effective_duration_ms = duration_ms
+    if _is_stream_call(record):
+        if record.time_to_first_token is None:
+            return None
+        effective_duration_ms = duration_ms - record.time_to_first_token
+    effective_duration_ms = max(1, int(effective_duration_ms or 0))
+    return round((output_tokens * 1000) / effective_duration_ms, 1)
+
+
+def _is_stream_call(record: LLMRequestLogRecord) -> bool:
+    call_kind = (record.metadata or {}).get("call_kind")
+    return call_kind in {"astream", "stream"}
 
 
 def _trace_to_dict(record: TraceRecord) -> dict[str, Any]:

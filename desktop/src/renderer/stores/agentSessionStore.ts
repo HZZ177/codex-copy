@@ -494,10 +494,12 @@ function handleStream(state: AgentConversationState, data: AgentStreamActionData
     message.content += content;
     appendSubagentTextItem(next, message, content, eventTimestamp);
   } else {
-    const message = latestStreamingMessage(view, "assistant");
+    const last = view.messages[view.messages.length - 1];
+    const message = last?.role === "assistant" && last.streaming ? last : undefined;
     if (message) {
       message.content += content;
     } else {
+      closeTopLevelTextStreams(view);
       view.messages.push({
         id: nextMessageId(next, "assistant", sessionId),
         sessionId,
@@ -684,7 +686,7 @@ function handleReasoning(
   if (last?.role === "reasoning" && last.reasoningKind === kind && last.streaming) {
     last.content += content;
   } else {
-    closeReasoningStream(view, kind);
+    closeTopLevelTextStreams(view);
     view.messages.push({
       id: nextMessageId(next, "reasoning", sessionId),
       sessionId,
@@ -887,7 +889,7 @@ function handleCompleted(state: AgentConversationState, payload: AgentCompletedP
       .reverse()
       .find(
         (message) =>
-          (message.role === "assistant" || message.role === "reasoning") &&
+          message.role === "assistant" &&
           !message.cancelled &&
           message.status !== "cancelled" &&
           message.content.trim(),
@@ -896,7 +898,7 @@ function handleCompleted(state: AgentConversationState, payload: AgentCompletedP
       .reverse()
       .find(
         (message) =>
-          (message.role === "assistant" || message.role === "reasoning") &&
+          message.role === "assistant" &&
           !message.cancelled &&
           message.status !== "cancelled",
       );

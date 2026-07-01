@@ -1,39 +1,46 @@
 .thinking {
   display: grid;
-  gap: 8px;
-  width: min(100%, 720px);
-  border: 1px solid color-mix(in srgb, var(--inline-block-border) 72%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-muted) 44%, transparent);
+  gap: 5px;
+  max-width: min(760px, 100%);
   color: var(--color-text-secondary);
-  font-size: 12px;
-  padding: 6px;
 }
 
 .summary {
+  --ghost-row-height: 20px;
+
   display: inline-flex;
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   font: inherit;
-  padding: 5px 7px;
+  padding: 2px 0;
   text-align: left;
+  transition: color 150ms ease;
 }
 
 .summary:hover {
-  background: var(--surface-hover);
-  color: var(--color-text-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.summary:focus-visible {
+  outline: none;
 }
 
 .statusIcon {
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  width: 18px;
+  height: var(--ghost-row-height);
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
   color: currentColor;
+  line-height: 0;
 }
 
 .thinking[data-status="running"] .statusIcon,
@@ -42,34 +49,78 @@
 }
 
 .title {
+  display: inline-flex;
+  height: var(--ghost-row-height);
+  align-items: center;
   min-width: 0;
   overflow: hidden;
+  color: currentColor;
+  font-size: 13px;
+  line-height: var(--ui-line-height-compact);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .duration {
   margin-left: auto;
-  color: var(--color-text-tertiary);
+  color: currentColor;
+  font-size: 13px;
+  line-height: var(--ui-line-height-compact);
+}
+
+.duration::before {
+  content: "\00b7";
+  margin-right: 6px;
 }
 
 .chevron {
-  flex: 0 0 auto;
-  transition: transform 140ms ease;
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: currentColor;
+  transition: transform 220ms var(--motion-ease-out);
 }
 
 .chevron[data-expanded="true"] {
   transform: rotate(180deg);
 }
 
-.content {
+.contentShell {
+  display: grid;
   max-width: 100%;
-  margin: 0 7px 4px 28px;
-  padding: 8px 0 0 10px;
-  color: var(--color-text-secondary);
+  margin: -1px 0 1px 25px;
+  overflow: hidden;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--collapse-open-duration, 220ms) ease-in-out,
+    opacity 180ms ease;
+}
+
+.contentShell[data-motion="closed"],
+.contentShell[data-motion="opening"],
+.contentShell[data-motion="closing"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.contentShell[data-motion="closing"] {
+  transition:
+    grid-template-rows var(--collapse-close-duration, 180ms) ease-in,
+    opacity 120ms ease;
+}
+
+.content {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  color: color-mix(in srgb, var(--color-text-secondary) 84%, transparent);
   font-size: 12px;
   line-height: 1.65;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @keyframes spin {
@@ -81,7 +132,8 @@
 @media (prefers-reduced-motion: reduce) {
   .thinking[data-status="running"] .statusIcon,
   .thinking[data-status="pending"] .statusIcon,
-  .chevron {
+  .chevron,
+  .contentShell {
     animation: none;
     transition: none;
   }

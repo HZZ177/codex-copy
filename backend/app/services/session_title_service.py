@@ -23,6 +23,8 @@ _TITLE_PROMPT = (
     "3. 保持单行；"
     "4. 语义具体，避免使用“问题咨询”“对话记录”这类空泛表达。"
 )
+_TITLE_FALLBACK_MAX_LENGTH = 50
+_TITLE_GENERATION_MAX_TOKENS = 80
 _TITLE_TRAILING_PUNCTUATION = "。．.！!？?；;：:、，,~～-—_"
 _TITLE_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 
@@ -104,7 +106,7 @@ class SessionTitleService:
                 factory=self._factory,
                 http_transport=self._http_transport,
                 temperature=0.3,
-                max_tokens=max(16, min(max_title_length + 16, 80)),
+                max_tokens=_TITLE_GENERATION_MAX_TOKENS,
             )
         except SideTaskModelError as exc:
             logger.warning(
@@ -113,7 +115,10 @@ class SessionTitleService:
             )
             return None
 
-        input_messages = [SystemMessage(content=_TITLE_PROMPT), HumanMessage(content=prompt)]
+        input_messages = [
+            SystemMessage(content=self.title_prompt(max_title_length)),
+            HumanMessage(content=prompt),
+        ]
         response: Any = None
         for attempt_index in range(len(self._retry_delays) + 1):
             try:
@@ -136,7 +141,7 @@ class SessionTitleService:
                 await self._sleep(delay)
 
         raw_title = self.extract_text_content(getattr(response, "content", response))
-        title = self.clean_title(raw_title, max_length=max_title_length)
+        title = self.clean_title(raw_title, max_length=_TITLE_FALLBACK_MAX_LENGTH)
         if not title:
             logger.warning("[SessionTitleService] 标题清洗后为空，跳过写回")
             return None
@@ -205,6 +210,13 @@ class SessionTitleService:
         if max_length > 0 and len(text) > max_length:
             text = text[:max_length].rstrip(_TITLE_TRAILING_PUNCTUATION).strip()
         return text
+
+    @staticmethod
+    def title_prompt(expected_title_length: int) -> str:
+        return (
+            f"{_TITLE_PROMPT}"
+            f"5. 标题期望不超过 {expected_title_length} 个中文字符，优先自然完整表达。"
+        )
 
     @staticmethod
     def _can_auto_update(session: SessionRecord, settings: AutoTitleRuntimeSettings) -> bool:

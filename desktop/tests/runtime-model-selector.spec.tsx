@@ -5,6 +5,36 @@ import { RuntimeModelSelector } from "@/renderer/components/model";
 import type { RuntimeModelOption } from "@/renderer/components/model";
 
 describe("RuntimeModelSelector", () => {
+  it("focuses the search field when the menu opens and reopens", async () => {
+    render(
+      <RuntimeModelSelector
+        model={{ providerId: "provider-a", model: "qwen-coder" }}
+        modelOptions={modelOptions()}
+        modelLoadState="ready"
+        modelError={null}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "选择模型" });
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText("筛选模型");
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(search);
+    });
+
+    fireEvent.click(trigger);
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(search);
+    });
+  });
+
   it("selects models with arrow keys from the search field", async () => {
     const onModelChange = vi.fn();
 

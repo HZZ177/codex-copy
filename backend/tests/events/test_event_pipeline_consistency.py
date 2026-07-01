@@ -436,3 +436,54 @@ async def test_realtime_persistence_and_history_keep_subagent_reasoning_sequence
     assert messages[1]["content"] == "观察完成"
     assert messages[1]["reasoningKind"] == "initial_response"
     assert isinstance(messages[1]["timestamp"], int)
+
+
+@pytest.mark.asyncio
+async def test_persistence_keeps_reasoning_stream_between_assistant_batches(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    chat_adapter = RecordingChatAdapter()
+    base_time = 1_782_905_000_000
+    events = [
+        _event(
+            DomainEventType.LLM_STREAM,
+            {"content": "先给结论。"},
+            timestamp_ms=base_time + 1,
+        ),
+        _event(
+            DomainEventType.REASONING_STREAM,
+            {"kind": "reasoning", "text": "中途思考", "done": False},
+            timestamp_ms=base_time + 2,
+        ),
+        _event(
+            DomainEventType.LLM_STREAM,
+            {"content": "继续回答。"},
+            timestamp_ms=base_time + 3,
+        ),
+        _event(
+            DomainEventType.REASONING_FINISHED,
+            {"kind": "reasoning", "text": "中途思考", "done": True},
+            timestamp_ms=base_time + 4,
+        ),
+    ]
+
+    await _project_events(events, repositories=repositories, chat_adapter=chat_adapter)
+
+    persisted_events = repositories.message_events.list_by_session(SESSION_ID)
+    messages = MessageEventService(repositories.message_events).get_display_messages(SESSION_ID)
+
+    assert [event.action for event in persisted_events] == [
+        "stream_batch",
+        "reasoning",
+        "stream_batch",
+    ]
+    assert [message["role"] for message in messages] == [
+        "assistant",
+        "reasoning",
+        "assistant",
+    ]
+    assert [message["content"] for message in messages] == [
+        "先给结论。",
+        "中途思考",
+        "继续回答。",
+    ]
+    assert messages[1]["timestamp"] == base_time + 2

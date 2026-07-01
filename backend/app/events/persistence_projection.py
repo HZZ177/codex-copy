@@ -56,6 +56,8 @@ class PersistenceProjection:
         self._stream_buffer = ""
         self._stream_buffer_event: DomainEvent | None = None
         self._subagent_stream_buffers: dict[str, dict[str, Any]] = {}
+        self._reasoning_buffers: dict[str, dict[str, Any]] = {}
+        self._flushed_reasoning_text: dict[str, str] = {}
 
     async def handle(self, event: DomainEvent) -> None:
         if not self._session_id:
@@ -63,9 +65,15 @@ class PersistenceProjection:
         event_type = DomainEventType(event.event_type)
 
         if event_type == DomainEventType.REASONING_STREAM:
+            await self._flush_stream_buffers()
+            self._collect_reasoning(event)
             return
         if event_type == DomainEventType.LLM_STREAM:
+            await self._flush_reasoning_buffers()
             self._collect_stream(event)
+            return
+        if event_type == DomainEventType.REASONING_FINISHED:
+            await self._handle_reasoning_finished(event)
             return
 
         action = self.EVENT_TYPE_TO_ACTION.get(event_type)
@@ -76,6 +84,10 @@ class PersistenceProjection:
         await self._save(action.value, self._build_replay_payload(event, action.value), event)
 
     async def flush(self) -> None:
+        await self._flush_stream_buffers()
+        await self._flush_reasoning_buffers()
+
+    async def _flush_stream_buffers(self) -> None:
         if self._stream_buffer:
             event = self._stream_buffer_event
             await self._save(
@@ -121,6 +133,46 @@ class PersistenceProjection:
             )
         self._subagent_stream_buffers.clear()
 
+    async def _flush_reasoning_buffers(self) -> None:
+        for key in list(self._reasoning_buffers):
+            await self._flush_reasoning_buffer(key)
+
+    async def _flush_reasoning_buffer(self, key: str) -> None:
+        buffer_item = self._reasoning_buffers.pop(key, None)
+        if not buffer_item:
+            return
+        content = str(buffer_item.get("content") or "")
+        if not content:
+            return
+        meta = dict(buffer_item.get("meta") or {})
+        event = buffer_item.get("event")
+        payload = {
+            "kind": meta.get("kind", "reasoning"),
+            "text": content,
+            "done": bool(meta.get("done", False)),
+        }
+        if "cancel_main" in meta:
+            payload["cancel_main"] = meta.get("cancel_main")
+        if trace_id := meta.get("trace_id"):
+            payload["trace_id"] = trace_id
+        message_time_ms = meta.get("messageTimeMs") or getattr(event, "timestamp_ms", None)
+        await self._save(
+            ReplayAction.REASONING.value,
+            self._wrap_payload(
+                ReplayAction.REASONING.value,
+                payload,
+                event_type=DomainEventType.REASONING_STREAM.value,
+                source=getattr(event, "source", "persistence_projection"),
+                run_id=getattr(event, "run_id", None),
+                timestamp_ms=getattr(event, "timestamp_ms", None),
+                message_time_ms=message_time_ms,
+            ),
+            event,
+        )
+        self._flushed_reasoning_text[key] = (
+            self._flushed_reasoning_text.get(key, "") + content
+        )
+
     def _collect_stream(self, event: DomainEvent) -> None:
         payload = event.payload or {}
         content = str(payload.get("content") or "")
@@ -140,6 +192,106 @@ class PersistenceProjection:
 
         self._stream_buffer += content
         self._stream_buffer_event = event
+
+    def _collect_reasoning(self, event: DomainEvent) -> None:
+        payload = event.payload or {}
+        content = str(payload.get("text", payload.get("content", "")) or "")
+        if not content:
+            return
+        key = self._reasoning_key(event, payload)
+        buffer_item = self._reasoning_buffers.setdefault(
+            key,
+            {
+                "content": "",
+                "meta": {
+                    "kind": payload.get("kind", "reasoning"),
+                    "messageTimeMs": payload.get("messageTimeMs") or event.timestamp_ms,
+                    "trace_id": payload.get("trace_id") or event.trace_id,
+                },
+                "event": event,
+            },
+        )
+        buffer_item["content"] = str(buffer_item["content"]) + content
+        meta = dict(buffer_item.get("meta") or {})
+        meta.update(
+            {
+                "kind": payload.get("kind", meta.get("kind", "reasoning")),
+                "trace_id": payload.get("trace_id") or meta.get("trace_id") or event.trace_id,
+            }
+        )
+        if "cancel_main" in payload:
+            meta["cancel_main"] = payload.get("cancel_main")
+        buffer_item["meta"] = meta
+        buffer_item["event"] = event
+
+    async def _handle_reasoning_finished(self, event: DomainEvent) -> None:
+        await self._flush_stream_buffers()
+        payload = dict(event.payload or {})
+        final_text = str(payload.get("text", payload.get("content", "")) or "")
+        key = self._reasoning_key(event, payload)
+        already_flushed = self._flushed_reasoning_text.get(key, "")
+        buffer_item = self._reasoning_buffers.get(key)
+        if buffer_item is not None:
+            text = str(buffer_item.get("content") or "")
+            if final_text:
+                if final_text.startswith(already_flushed):
+                    text = final_text[len(already_flushed) :]
+                else:
+                    text = final_text
+            buffer_item["content"] = text
+            meta = dict(buffer_item.get("meta") or {})
+            meta.update(
+                {
+                    "kind": payload.get("kind", meta.get("kind", "reasoning")),
+                    "done": True,
+                    "trace_id": payload.get("trace_id") or meta.get("trace_id") or event.trace_id,
+                }
+            )
+            if "cancel_main" in payload:
+                meta["cancel_main"] = payload.get("cancel_main")
+            if payload.get("messageTimeMs") is not None:
+                meta["messageTimeMs"] = payload.get("messageTimeMs")
+            buffer_item["meta"] = meta
+            buffer_item["event"] = event
+            await self._flush_reasoning_buffer(key)
+            return
+
+        if not final_text:
+            return
+        if already_flushed:
+            if final_text == already_flushed:
+                return
+            if final_text.startswith(already_flushed):
+                final_text = final_text[len(already_flushed) :]
+        if not final_text:
+            return
+        await self._save(
+            ReplayAction.REASONING.value,
+            self._wrap_payload(
+                ReplayAction.REASONING.value,
+                {
+                    **payload,
+                    "text": final_text,
+                    "done": True,
+                },
+                event_type=DomainEventType.REASONING_FINISHED.value,
+                source=event.source,
+                run_id=event.run_id,
+                timestamp_ms=event.timestamp_ms,
+                message_time_ms=(
+                    payload.get("messageTimeMs")
+                    or payload.get("end_time")
+                    or event.timestamp_ms
+                ),
+            ),
+            event,
+        )
+        self._flushed_reasoning_text[key] = already_flushed + final_text
+
+    @staticmethod
+    def _reasoning_key(event: DomainEvent, payload: dict[str, Any]) -> str:
+        kind = str(payload.get("kind") or "reasoning")
+        return f"{event.run_id or 'reasoning'}:{kind}"
 
     def _build_replay_payload(self, event: DomainEvent, action: str) -> dict[str, Any]:
         payload = dict(event.payload or {})

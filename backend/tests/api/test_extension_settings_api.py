@@ -28,7 +28,7 @@ def test_extension_settings_api_saves_and_reads_full_config(tmp_path) -> None:
         "auto_title": {
             "enabled": True,
             "only_when_default_title": False,
-            "max_title_length": 64,
+            "max_title_length": 50,
         },
         "tool_call_limit": {
             "enabled": True,
@@ -61,6 +61,17 @@ def test_extension_settings_api_rejects_invalid_tool_limit(tmp_path) -> None:
     app = create_app(AppSettings(data_dir=tmp_path / "data"))
     payload = _valid_payload()
     payload["tool_call_limit"]["max_tool_calls"] = 0
+
+    with TestClient(app) as client:
+        response = client.put("/api/settings/extensions", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_extension_settings_api_rejects_invalid_title_length(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    payload = _valid_payload()
+    payload["auto_title"]["max_title_length"] = 51
 
     with TestClient(app) as client:
         response = client.put("/api/settings/extensions", json=payload)

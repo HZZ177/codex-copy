@@ -5,14 +5,25 @@ import { MessageList, MessageThinking } from "@/renderer/pages/conversation/mess
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 
 describe("MessageThinking", () => {
-  it("shows running reasoning collapsed by default and expands on demand", () => {
+  it("shows running reasoning expanded by default and collapses on demand", () => {
     render(<MessageThinking message={thinking("running", "正在分析代码路径")} />);
 
-    expect(screen.getByRole("button", { name: /正在思考/ }).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("正在分析代码路径")).toBeNull();
+    expect(screen.getByRole("button", { name: /正在思考/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("正在分析代码路径")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /正在思考/ }));
+    expect(screen.getByRole("button", { name: /正在思考/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("message-thinking-content").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("collapses completed reasoning after live streaming when untouched", () => {
+    const { rerender } = render(<MessageThinking message={thinking("running", "正在分析代码路径")} />);
+
     expect(screen.getByText("正在分析代码路径")).not.toBeNull();
+
+    rerender(<MessageThinking message={thinking("completed", "正在分析代码路径")} />);
+    expect(screen.getByRole("button", { name: /已完成思考/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("message-thinking-content").getAttribute("aria-hidden")).toBe("true");
   });
 
   it("collapses completed reasoning by default and shows duration", () => {
@@ -41,6 +52,10 @@ describe("MessageThinking", () => {
 
     expect(screen.getByRole("button", { name: /进展事实中/ })).not.toBeNull();
 
+    rerender(<MessageThinking message={thinking("running", "正在思考", { reasoning_kind: "reasoning" })} />);
+    expect(screen.getByRole("button", { name: /正在思考/ })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /推理/ })).toBeNull();
+
     rerender(<MessageThinking message={thinking("completed", "")} />);
     expect(screen.queryByTestId("message-thinking")).toBeNull();
   });
@@ -49,8 +64,6 @@ describe("MessageThinking", () => {
     render(<MessageList messages={[thinking("running", "推理增量")]} />);
 
     expect(screen.getByTestId("message-thinking")).not.toBeNull();
-    expect(screen.queryByText("推理增量")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /正在思考/ }));
     expect(screen.getByText("推理增量")).not.toBeNull();
   });
 });

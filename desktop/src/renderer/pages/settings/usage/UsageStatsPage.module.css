@@ -763,50 +763,55 @@
 }
 
 .tableWrap {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .table {
-  width: 790px;
-  min-width: 100%;
+  width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .timeColumn {
-  width: 118px;
+  width: 112px;
 }
 
 .modelColumn {
-  width: 214px;
+  width: 140px;
 }
 
 .inputCacheColumn {
-  width: 142px;
+  width: 132px;
 }
 
 .cacheRateColumn {
-  width: 84px;
+  width: 78px;
 }
 
 .outputColumn {
-  width: 56px;
+  width: 48px;
 }
 
 .durationColumn {
-  width: 82px;
+  width: 76px;
+}
+
+.rateColumn {
+  width: 96px;
 }
 
 .statusColumn {
-  width: 72px;
+  width: 78px;
 }
 
 .table th,
 .table td {
   box-sizing: border-box;
   border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 88%, transparent);
+  overflow: hidden;
   padding: 14px 10px;
   text-align: left;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -824,6 +829,13 @@
 .table td:nth-child(2) {
   color: var(--color-text-primary);
   font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.modelCellText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
