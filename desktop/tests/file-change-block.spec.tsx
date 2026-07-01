@@ -64,10 +64,13 @@ describe("FileChangeBlock", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开文件变更详情" }));
     fireEvent.click(screen.getAllByRole("button", { name: "预览" })[0]);
 
-    expect(onPreviewFile).toHaveBeenCalledWith({
+    expect(onPreviewFile).toHaveBeenCalledWith(expect.objectContaining({
       path: "src/main.py",
       diff: "--- a/src/main.py\n+++ b/src/main.py\n@@\n-print('old')\n+print('new')",
-    });
+      title: "编辑了 2 个文件",
+    }));
+    expect(onPreviewFile.mock.calls[0][0].files).toHaveLength(2);
+    expect(onPreviewFile.mock.calls[0][0].message.id).toBe("file-change-1");
   });
 
   it("renders single-file edit rows with ticker stats and clickable filename", () => {
@@ -85,10 +88,13 @@ describe("FileChangeBlock", () => {
     expect(blockText.indexOf("+4")).toBeLessThan(blockText.indexOf("-2"));
 
     fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
-    expect(onPreviewFile).toHaveBeenCalledWith({
+    expect(onPreviewFile).toHaveBeenCalledWith(expect.objectContaining({
       path: "src/main.py",
       diff: "",
-    });
+      title: "正在编辑文件 1 个文件",
+    }));
+    expect(onPreviewFile.mock.calls[0][0].files).toHaveLength(1);
+    expect(onPreviewFile.mock.calls[0][0].message.id).toBe("file-change-single");
   });
 
   it("uses the whole single-file row for expansion while filename opens preview", () => {
@@ -105,10 +111,12 @@ describe("FileChangeBlock", () => {
     render(<FileChangeBlock message={singleFileChangeMessage("completed")} onPreviewFile={onPreviewFile} />);
 
     fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
-    expect(onPreviewFile).toHaveBeenCalledWith({
+    expect(onPreviewFile).toHaveBeenCalledWith(expect.objectContaining({
       path: "src/main.py",
       diff: "",
-    });
+      title: "编辑了 1 个文件",
+    }));
+    expect(onPreviewFile.mock.calls[0][0].files).toHaveLength(1);
     expect(screen.queryByLabelText("变更文件")).toBeNull();
   });
 

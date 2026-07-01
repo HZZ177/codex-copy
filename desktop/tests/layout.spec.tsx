@@ -127,7 +127,7 @@ describe("Layout", () => {
     expect(screen.getByRole("tablist", { name: "侧边栏窗口" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "新建侧边栏页面" })).not.toBeNull();
     expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
-    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "审阅" })).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "侧边栏" })).toBeNull();
 
     const handle = screen.getByRole("separator", { name: "调整右侧栏宽度" });
@@ -410,6 +410,24 @@ describe("Layout", () => {
     expect(shell.dataset.rightSidebar).toBe("closed");
   });
 
+  it("opens an empty review panel from the right sidebar initial page", () => {
+    renderLayout(
+      <Layout>
+        <div>内容区</div>
+      </Layout>,
+    );
+
+    fireEvent.click(screen.getByLabelText("展开右侧栏"));
+    fireEvent.click(screen.getByRole("button", { name: "审阅" }));
+
+    expect(screen.getByRole("tab", { name: "审阅" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("right-sidebar-review-panel")).not.toBeNull();
+    expect(screen.getByTestId("review-empty-state").textContent).toContain("暂无可审阅的文件变更");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 审阅" }));
+    expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("closed");
+  });
+
   it("collapses the right sidebar when navigating to the new conversation page", () => {
     const onNavigate = vi.fn();
     renderLayout(
@@ -460,6 +478,10 @@ describe("Layout", () => {
 
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "HTML 窗口" }).getAttribute("title")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("title")).toBeNull();
+    expect(screen.getByRole("button", { name: "关闭侧边栏窗口 HTML 窗口" }).getAttribute("title")).toBeNull();
+    expect(screen.getByRole("button", { name: "新建侧边栏页面" }).getAttribute("title")).toBeNull();
     expect(await screen.findByRole("heading", { level: 1, name: "Markdown 窗口" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "新建侧边栏页面" })).not.toBeNull();
 
@@ -470,7 +492,7 @@ describe("Layout", () => {
     expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
-    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "审阅" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Markdown 窗口" }));
 
@@ -497,13 +519,78 @@ describe("Layout", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "新tab" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByTestId("right-sidebar-initial-page")).not.toBeNull();
-    expect(screen.getByText("暂无侧边内容")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "审阅" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭侧边栏窗口 新tab" }));
 
     expect(shell.dataset.rightSidebar).toBe("closed");
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.queryByTestId("right-sidebar-initial-page")).toBeNull();
+  });
+
+  it("closes right sidebar tabs to the left and right from the tab context menu", () => {
+    renderLayoutWithPreview(
+      <>
+        <RightSidebarPreviewHarness />
+        <Layout contentMode="full">
+          <div>内容区</div>
+        </Layout>
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 Markdown 窗口" }));
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Markdown 窗口" }), { clientX: 120, clientY: 80 });
+    expect(screen.getByRole("menu", { name: "侧边栏tab菜单" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "关闭左侧tab" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "关闭右侧tab" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "关闭其他tab" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "关闭所有tab" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭左侧tab" }));
+
+    expect(screen.queryByRole("tab", { name: "HTML 窗口" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Markdown 窗口" }), { clientX: 120, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭右侧tab" }));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tab", { name: "HTML 窗口" })).toBeNull();
+  });
+
+  it("closes other and all right sidebar tabs from the tab context menu", () => {
+    renderLayoutWithPreview(
+      <>
+        <RightSidebarPreviewHarness />
+        <Layout contentMode="full">
+          <div>内容区</div>
+        </Layout>
+      </>,
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    fireEvent.click(screen.getByRole("button", { name: "打开 HTML 窗口" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 Markdown 窗口" }));
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Markdown 窗口" }), { clientX: 120, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭其他tab" }));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "Markdown 窗口" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tab", { name: "HTML 窗口" })).toBeNull();
+    expect(shell.dataset.rightSidebar).toBe("open");
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Markdown 窗口" }), { clientX: 120, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭所有tab" }));
+
+    expect(shell.dataset.rightSidebar).toBe("closed");
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
   it("keeps newly added empty right sidebar pages as duplicate display names", () => {

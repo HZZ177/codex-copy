@@ -485,14 +485,23 @@ def _change_counts(change: PlannedChange) -> tuple[int, int]:
 
 def _patch_diff(change: PlannedChange) -> str:
     if change.kind == "delete":
-        return _operation_diff(change.relative_path, "delete", change.patch_lines)
+        return build_text_diff(
+            path=change.relative_path,
+            before=change.before,
+            after="",
+            operation="delete",
+        )
     if change.kind == "move":
         return build_text_diff(
             path=change.relative_destination,
             before=change.before,
             after=change.after,
         ).replace(f"--- a/{change.relative_destination}", f"--- a/{change.relative_path}", 1)
-    return _operation_diff(change.relative_path, "update", change.patch_lines)
+    return build_text_diff(
+        path=change.relative_path,
+        before=change.before,
+        after=change.after,
+    )
 
 
 def _operation_diff(path: str, operation: str, lines: list[str]) -> str:

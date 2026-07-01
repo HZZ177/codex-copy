@@ -98,4 +98,82 @@ describe("AppTooltipLayer", () => {
 
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
+
+  it("keeps edge tooltips inside the viewport", () => {
+    vi.useFakeTimers();
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const element = this as HTMLElement;
+      if (element.getAttribute("role") === "tooltip") {
+        const left = Number.parseFloat(element.style.left || "0");
+        const top = Number.parseFloat(element.style.top || "0");
+        return domRect({
+          left: left - 60,
+          right: left + 60,
+          top: top - 24,
+          bottom: top - 4,
+          width: 120,
+          height: 20,
+        });
+      }
+      if (element.dataset.edgeTarget === "true") {
+        return domRect({ left: 780, right: 800, top: 100, bottom: 120, width: 20, height: 20 });
+      }
+      return originalRect.call(this);
+    };
+
+    try {
+      render(
+        <div data-tooltip-scope="true">
+          <AppTooltipLayer scopeSelector="[data-tooltip-scope='true']" delayMs={20} />
+          <button type="button" aria-label="打开文件" data-edge-target="true" data-tooltip-label="打开文件">
+            open
+          </button>
+        </div>,
+      );
+
+      fireEvent.pointerOver(screen.getByRole("button", { name: "打开文件" }));
+      act(() => vi.advanceTimersByTime(20));
+
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip.textContent).toBe("打开文件");
+      expect(Number.parseFloat(tooltip.style.left)).toBe(732);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+    }
+  });
 });
+
+function domRect({
+  left,
+  right,
+  top,
+  bottom,
+  width,
+  height,
+}: {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width,
+    height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  };
+}

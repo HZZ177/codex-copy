@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 import type { PropsWithChildren } from "react";
 
 import type { RuntimeBridge } from "@/runtime";
+import type { FileReviewChange } from "@/renderer/utils/fileReview";
 
 import type { PreviewRequest } from "./previewTypes";
 
@@ -65,6 +66,27 @@ export interface FilePanelRequest {
   renderContext: PreviewRenderContext | null;
 }
 
+export interface OpenReviewPanelRequest {
+  files?: FileReviewChange[];
+  focusedPath?: string | null;
+  panelKey?: string | null;
+  sourceMessageId?: string | null;
+  title?: string | null;
+  toolCallId?: string | null;
+}
+
+export interface ReviewPanelRequest {
+  requestId: number;
+  scopeKey: string;
+  files: FileReviewChange[];
+  focusedPath: string | null;
+  panelKey: string;
+  sourceMessageId: string | null;
+  title: string;
+  toolCallId: string | null;
+  renderContext: PreviewRenderContext | null;
+}
+
 export interface PreviewState {
   open: boolean;
   panelOpen: boolean;
@@ -76,6 +98,7 @@ export interface PreviewState {
   activeEntryId: string | null;
   hostContext: PreviewRenderContext | null;
   filePanelRequest: FilePanelRequest | null;
+  reviewPanelRequest: ReviewPanelRequest | null;
 }
 
 export interface PreviewContextValue extends PreviewState {
@@ -84,6 +107,7 @@ export interface PreviewContextValue extends PreviewState {
   activeScopeKey: string;
   openPreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
   openFilePanel(path?: string | null, renderContext?: PreviewRenderContext, revealTarget?: PreviewFileRevealTarget | null): void;
+  openReviewPanel(request?: OpenReviewPanelRequest, renderContext?: PreviewRenderContext): void;
   togglePreview(request: PreviewRequest | string, renderContext?: PreviewRenderContext): void;
   switchPreview(entryId: string): void;
   closePreviewEntry(entryId: string): void;
@@ -105,6 +129,7 @@ interface PreviewStoreState {
   panelActiveEntryId: string | null;
   collapseRequestId: number;
   filePanelRequest: FilePanelRequest | null;
+  reviewPanelRequest: ReviewPanelRequest | null;
 }
 
 const PreviewContext = createContext<PreviewContextValue | null>(null);
@@ -118,6 +143,7 @@ export function PreviewProvider({ children }: PropsWithChildren) {
     panelActiveEntryId: null,
     collapseRequestId: 0,
     filePanelRequest: null,
+    reviewPanelRequest: null,
   });
 
   const openPreview = useCallback((request: PreviewRequest | string, renderContext?: PreviewRenderContext) => {
@@ -141,6 +167,30 @@ export function PreviewProvider({ children }: PropsWithChildren) {
           scopeKey: previewScopeKey(context),
           path: path || null,
           revealTarget,
+          renderContext: context,
+        },
+      };
+    });
+  }, []);
+
+  const openReviewPanel = useCallback((request: OpenReviewPanelRequest = {}, renderContext?: PreviewRenderContext) => {
+    setState((current) => {
+      const context = renderContext ?? current.hostContext;
+      const files = request.files ?? [];
+      const focusedPath = request.focusedPath ?? files[0]?.path ?? null;
+      const panelKey = reviewPanelKey(request, files, focusedPath);
+      return {
+        ...current,
+        hostContext: context ?? current.hostContext,
+        reviewPanelRequest: {
+          requestId: (current.reviewPanelRequest?.requestId ?? 0) + 1,
+          scopeKey: previewScopeKey(context),
+          files,
+          focusedPath,
+          panelKey,
+          sourceMessageId: request.sourceMessageId ?? null,
+          title: request.title?.trim() || "审阅",
+          toolCallId: request.toolCallId ?? null,
           renderContext: context,
         },
       };
@@ -288,11 +338,13 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       activeEntryId,
       hostContext: state.hostContext,
       filePanelRequest: state.filePanelRequest,
+      reviewPanelRequest: state.reviewPanelRequest,
       activeEntry,
       activeRenderContext,
       activeScopeKey,
       openPreview,
       openFilePanel,
+      openReviewPanel,
       togglePreview,
       switchPreview,
       closePreviewEntry,
@@ -311,6 +363,7 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       open,
       openPreview,
       openFilePanel,
+      openReviewPanel,
       togglePreview,
       request,
       setPreviewPanelOpen,
@@ -318,6 +371,7 @@ export function PreviewProvider({ children }: PropsWithChildren) {
       state.collapseRequestId,
       state.hostContext,
       state.filePanelRequest,
+      state.reviewPanelRequest,
       state.panelActiveEntryId,
       state.panelOpen,
       switchPreview,
@@ -456,6 +510,23 @@ function targetPathForRequest(request: PreviewRequest): string | null {
     return request.path;
   }
   return request.sourcePath ?? null;
+}
+
+function reviewPanelKey(
+  request: OpenReviewPanelRequest,
+  files: FileReviewChange[],
+  focusedPath: string | null,
+): string {
+  const explicit = request.panelKey?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const source = request.sourceMessageId?.trim() || request.toolCallId?.trim();
+  if (source) {
+    return source;
+  }
+  const paths = files.map((file) => file.path).filter(Boolean).join("|");
+  return paths || focusedPath || "manual";
 }
 
 function fileName(path: string): string {

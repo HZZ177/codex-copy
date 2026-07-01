@@ -1069,10 +1069,15 @@ describe("MessageList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
 
-    expect(onFilePreview).toHaveBeenCalledWith({
-      path: "src/main.py",
-      diff: "@@\n+hello",
-    });
+    expect(onFilePreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "src/main.py",
+        diff: "@@\n+hello",
+        files: [expect.objectContaining({ path: "src/main.py" })],
+        message: expect.objectContaining({ id: "file-change-1" }),
+        title: "编辑了 1 个文件",
+      }),
+    );
   });
 
   it("follows the bottom when new messages arrive", () => {

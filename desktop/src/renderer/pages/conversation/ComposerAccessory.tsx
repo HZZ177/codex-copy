@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeTypingMetrics } from "@/renderer/hooks/useRuntimeTypingSpeed";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import type { FileReviewChange } from "@/renderer/utils/fileReview";
 
 import { type FileChangePreview } from "./messages";
 import { LineChangeTicker } from "./messages/LineChangeTicker";
@@ -346,7 +347,16 @@ function TurnFileChangeRow({
       <button
         className={styles.fileChangePathButton}
         type="button"
-        onClick={() => onFilePreview({ path: file.path, diff: file.diff })}
+        onClick={() =>
+          onFilePreview({
+            path: file.path,
+            diff: file.diff,
+            files: reviewFilesFromTurnSummaryFile(file),
+            message: file.sourceMessage,
+            messages: file.sourceMessages,
+            title: "本轮文件变更",
+          })
+        }
       >
         {file.path}
       </button>
@@ -359,4 +369,17 @@ function TurnFileChangeRow({
       />
     </li>
   );
+}
+
+function reviewFilesFromTurnSummaryFile(file: TurnFileChangeItem): FileReviewChange[] {
+  return [
+    {
+      path: file.path,
+      additions: file.additions,
+      deletions: file.deletions,
+      diff: file.diff,
+      operation: file.kind === "created" ? "add" : "update",
+      source: "streaming",
+    },
+  ];
 }

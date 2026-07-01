@@ -68,6 +68,15 @@ async def test_apply_patch_updates_file_with_matching_context(tmp_path) -> None:
     assert result.result["changes"][0]["change_type"] == "update"
     assert result.result["changes"][0]["added_lines"] == 1
     assert result.result["changes"][0]["deleted_lines"] == 1
+    assert result.result["changes"][0]["diff"] == (
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " alpha\n"
+        "-old\n"
+        "+new\n"
+        " omega"
+    )
     assert target.read_text(encoding="utf-8") == "alpha\nnew\nomega\n"
 
 
@@ -120,7 +129,14 @@ async def test_apply_patch_deletes_file_with_removed_line_count(tmp_path) -> Non
     assert change["deleted_lines"] == 3
     assert change["additions"] == 0
     assert change["deletions"] == 3
-    assert change["diff"] == "--- a/docs/old.txt\n+++ /dev/null"
+    assert change["diff"] == (
+        "--- a/docs/old.txt\n"
+        "+++ /dev/null\n"
+        "@@ -1,3 +0,0 @@\n"
+        "-one\n"
+        "-two\n"
+        "-three"
+    )
     assert result.result["changes"][0]["removed_bytes"] > 0
     assert not target.exists()
 
@@ -149,6 +165,14 @@ async def test_apply_patch_moves_file_and_updates_content(tmp_path) -> None:
     assert change["old_path"] == "docs/old.md"
     assert change["new_path"] == "docs/new.md"
     assert change["path"] == "docs/new.md"
+    assert change["diff"] == (
+        "--- a/docs/old.md\n"
+        "+++ b/docs/new.md\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-title: old\n"
+        "+title: new\n"
+        " body"
+    )
     assert not target.exists()
     assert (tmp_path / "docs" / "new.md").read_text(encoding="utf-8") == "title: new\nbody\n"
 

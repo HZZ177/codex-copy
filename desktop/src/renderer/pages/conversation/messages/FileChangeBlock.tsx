@@ -1,8 +1,9 @@
 import { ChevronDown, Copy, FileDiff, FilePenLine, FileX2, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { FileReviewCard } from "@/renderer/components/review/FileReviewDiff";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import { parseUnifiedDiffDisplayLines, type UnifiedDiffDisplayLine } from "@/renderer/utils/unifiedDiff";
+import type { FileReviewChange } from "@/renderer/utils/fileReview";
 
 import { formatErrorText, readableErrorText } from "./errorText";
 import styles from "./FileChangeBlock.module.css";
@@ -20,6 +21,10 @@ export interface FileChangeBlockProps {
 export interface FileChangePreview {
   path: string;
   diff: string;
+  files?: FileReviewChange[];
+  message?: ConversationMessage;
+  messages?: ConversationMessage[];
+  title?: string;
 }
 
 export function FileChangeBlock({ message, onPreviewFile, onLoadDetails }: FileChangeBlockProps) {
@@ -84,7 +89,13 @@ export function FileChangeBlock({ message, onPreviewFile, onLoadDetails }: FileC
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onPreviewFile?.({ path: singleFile.path, diff: singleFile.diff });
+                  onPreviewFile?.({
+                    path: singleFile.path,
+                    diff: singleFile.diff,
+                    files: change.files,
+                    message: details.message,
+                    title,
+                  });
                 }}
               >
                 {singleFile.path}
@@ -149,7 +160,15 @@ export function FileChangeBlock({ message, onPreviewFile, onLoadDetails }: FileC
                         <button
                           className={styles.previewButton}
                           type="button"
-                          onClick={() => onPreviewFile?.({ path: file.path, diff: file.diff })}
+                          onClick={() =>
+                            onPreviewFile?.({
+                              path: file.path,
+                              diff: file.diff,
+                              files: change.files,
+                              message: details.message,
+                              title,
+                            })
+                          }
                         >
                           预览
                         </button>
@@ -158,7 +177,7 @@ export function FileChangeBlock({ message, onPreviewFile, onLoadDetails }: FileC
                   })}
                 </ul>
 
-                {expandedFile ? <DiffView diff={expandedFile.diff} /> : null}
+                {expandedFile ? <FileReviewCard file={expandedFile} /> : null}
               </>
             )}
           </div>
@@ -199,35 +218,7 @@ interface FileChangeFile {
 type FileChangeOperation = "add" | "update" | "delete" | "append" | "write" | "unknown";
 
 function FileDiffPreview({ file }: { file: FileChangeFile }) {
-  const lines = useMemo(() => previewLinesForFile(file), [file]);
-  const copySource = file.diff || file.content;
-
-  return (
-    <section className={styles.previewBlock} data-empty={lines.length ? "false" : "true"} aria-label="文件变更预览">
-      <header className={styles.previewHeader}>
-        <span className={styles.previewTitle}>{file.path}</span>
-        <LineChangeTicker
-          className={styles.previewTicker}
-          label=""
-          added={file.additions}
-          removed={file.deletions}
-          unit=""
-        />
-        <button
-          className={styles.copyButton}
-          type="button"
-          aria-label="复制 diff"
-          data-tooltip-label="复制 diff"
-          title="复制 diff"
-          disabled={!copySource}
-          onClick={() => void navigator.clipboard?.writeText(copySource)}
-        >
-          <Copy size={14} />
-        </button>
-      </header>
-      {lines.length ? <DiffRows className={styles.diffPreview} lines={lines} /> : null}
-    </section>
-  );
+  return <FileReviewCard file={file} />;
 }
 
 function FileChangeErrorPanel({
@@ -278,28 +269,6 @@ function FileChangeErrorPanel({
         </ul>
       ) : null}
     </section>
-  );
-}
-
-function DiffView({ diff }: { diff: string }) {
-  const lines = parseRenderableDiffLines(diff);
-  if (!lines.length) {
-    return null;
-  }
-  return <DiffRows className={styles.diff} lines={lines} />;
-}
-
-function DiffRows({ className, lines }: { className: string; lines: UnifiedDiffDisplayLine[] }) {
-  return (
-    <div className={className} aria-label="文件 diff">
-      {lines.map((line) => (
-        <div className={styles.diffRow} data-kind={line.kind} key={line.key}>
-          <span className={styles.diffLineNo}>{line.lineNumber ?? ""}</span>
-          <span className={styles.diffSign}>{line.sign}</span>
-          <code>{line.content || " "}</code>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -359,46 +328,6 @@ function fileFromRecord(
     content: stringValue(record.new_content) || stringValue(record.newContent) || stringValue(record.content),
     operation: forcedOperation ?? operationFromRecord(record, fallbackOperation),
   };
-}
-
-function previewLinesForFile(file: FileChangeFile): UnifiedDiffDisplayLine[] {
-  const diffLines = parseRenderableDiffLines(file.diff);
-  if (diffLines.length) {
-    return diffLines;
-  }
-  if (!isCreateLikeOperation(file.operation)) {
-    return [];
-  }
-  return contentAsAddedLines(file.content);
-}
-
-function parseRenderableDiffLines(diff: string): UnifiedDiffDisplayLine[] {
-  if (!diff.trim()) {
-    return [];
-  }
-  const lines = parseUnifiedDiffDisplayLines(diff);
-  return lines.length === 1 && lines[0]?.key === "empty" ? [] : lines;
-}
-
-function contentAsAddedLines(content: string): UnifiedDiffDisplayLine[] {
-  if (!content) {
-    return [];
-  }
-  const normalizedLineEndings = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const normalized = normalizedLineEndings.endsWith("\n")
-    ? normalizedLineEndings.slice(0, -1)
-    : normalizedLineEndings;
-  return normalized.split("\n").map((line, index) => ({
-    key: `content:add:${index + 1}`,
-    kind: "add",
-    lineNumber: index + 1,
-    sign: "+",
-    content: line,
-  }));
-}
-
-function isCreateLikeOperation(operation: FileChangeOperation): boolean {
-  return operation === "add";
 }
 
 function changeStatus(message: ConversationMessage, result: Record<string, unknown> | null): ParsedFileChange["status"] {

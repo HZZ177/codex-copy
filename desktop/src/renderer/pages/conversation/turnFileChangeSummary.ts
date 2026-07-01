@@ -8,6 +8,8 @@ export interface TurnFileChangeItem {
   diff: string;
   kind: TurnFileChangeKind;
   path: string;
+  sourceMessage?: ConversationMessage;
+  sourceMessages: ConversationMessage[];
 }
 
 export interface TurnFileChangeSummary {
@@ -41,7 +43,7 @@ export function buildTurnFileChangeSummary(messages: ConversationMessage[]): Tur
       return;
     }
     fileChangeItemsFromMessage(message, messageIndex).forEach((file) => {
-      filesByKey.set(`${file.kind}:${file.path}`, file);
+      filesByKey.set(file.path, mergeTurnFileChangeItem(filesByKey.get(file.path), file));
     });
   });
 
@@ -88,11 +90,17 @@ function fileChangeItemsFromMessage(message: ConversationMessage, messageIndex: 
   const fallbackOperation = forcedOperation ?? operationFromRecord(result ?? message.payload, "unknown");
   const files = new Map<string, TurnFileChangeItem>();
 
-  fileChangeItemsFromPayload(message.payload, messageIndex, fallbackOperation, forcedOperation).forEach((file) => {
+  fileChangeItemsFromPayload(message.payload, messageIndex, fallbackOperation, forcedOperation, message).forEach((file) => {
     files.set(`${file.kind}:${file.path}`, file);
   });
   if (result) {
-    fileChangeItemsFromPayload(result, messageIndex, operationFromRecord(result, fallbackOperation), forcedOperation).forEach((file) => {
+    fileChangeItemsFromPayload(
+      result,
+      messageIndex,
+      operationFromRecord(result, fallbackOperation),
+      forcedOperation,
+      message,
+    ).forEach((file) => {
       files.set(`${file.kind}:${file.path}`, file);
     });
   }
@@ -107,6 +115,8 @@ function fileChangeItemsFromMessage(message: ConversationMessage, messageIndex: 
         diff: "",
         kind,
         path,
+        sourceMessage: message,
+        sourceMessages: [message],
       });
     }
   }
@@ -119,12 +129,13 @@ function fileChangeItemsFromPayload(
   messageIndex: number,
   fallbackOperation: FileChangeOperation,
   forcedOperation: FileChangeOperation | null,
+  sourceMessage: ConversationMessage,
 ): TurnFileChangeItem[] {
   const files = new Map<string, TurnFileChangeItem>();
   const parentOperation = forcedOperation ?? operationFromRecord(payload, fallbackOperation);
   const directPath = stringValue(payload.path);
   if (directPath) {
-    const direct = fileChangeItemFromRecord(payload, directPath, parentOperation, forcedOperation);
+    const direct = fileChangeItemFromRecord(payload, directPath, parentOperation, forcedOperation, sourceMessage);
     if (direct) {
       files.set(`${direct.kind}:${direct.path}`, direct);
     }
@@ -132,7 +143,7 @@ function fileChangeItemsFromPayload(
 
   fileRecordsFromPayload(payload).forEach((record, fileIndex) => {
     const path = stringValue(record?.path) || `file-${messageIndex}-${fileIndex}`;
-    const item = fileChangeItemFromRecord(record ?? {}, path, parentOperation, forcedOperation);
+    const item = fileChangeItemFromRecord(record ?? {}, path, parentOperation, forcedOperation, sourceMessage);
     if (item) {
       files.set(`${item.kind}:${item.path}`, item);
     }
@@ -156,6 +167,7 @@ function fileChangeItemFromRecord(
   path: string,
   fallbackOperation: FileChangeOperation,
   forcedOperation: FileChangeOperation | null,
+  sourceMessage: ConversationMessage,
 ): TurnFileChangeItem | null {
   const operation = forcedOperation ?? operationFromRecord(record, fallbackOperation);
   const kind = summaryKindForOperation(operation);
@@ -173,7 +185,52 @@ function fileChangeItemFromRecord(
     diff,
     kind,
     path,
+    sourceMessage,
+    sourceMessages: [sourceMessage],
   };
+}
+
+function mergeTurnFileChangeItem(
+  existing: TurnFileChangeItem | undefined,
+  next: TurnFileChangeItem,
+): TurnFileChangeItem {
+  if (!existing) {
+    return next;
+  }
+  return {
+    path: existing.path,
+    kind: existing.kind === "created" || next.kind === "created" ? "created" : "edited",
+    additions: existing.additions + next.additions,
+    deletions: existing.deletions + next.deletions,
+    diff: joinDiffs(existing.diff, next.diff),
+    sourceMessage: next.sourceMessage ?? existing.sourceMessage,
+    sourceMessages: appendUniqueMessages(existing.sourceMessages, next.sourceMessages),
+  };
+}
+
+function joinDiffs(...diffs: string[]): string {
+  return diffs.map((diff) => diff.trim()).filter(Boolean).join("\n");
+}
+
+function appendUniqueMessages(
+  existing: ConversationMessage[],
+  next: ConversationMessage[],
+): ConversationMessage[] {
+  const messages = [...existing];
+  const keys = new Set(messages.map(messageIdentity));
+  next.forEach((message) => {
+    const key = messageIdentity(message);
+    if (keys.has(key)) {
+      return;
+    }
+    keys.add(key);
+    messages.push(message);
+  });
+  return messages;
+}
+
+function messageIdentity(message: ConversationMessage): string {
+  return message.id || message.itemId || `${message.kind}:${message.createdAt}`;
 }
 
 function summaryKindForOperation(operation: FileChangeOperation): TurnFileChangeKind | null {

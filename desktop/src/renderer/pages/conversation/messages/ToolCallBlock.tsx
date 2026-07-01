@@ -12,7 +12,13 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { FileReviewCard } from "@/renderer/components/review/FileReviewDiff";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import {
+  fileReviewChangesFromMessage,
+  isFileMutationToolName,
+  type FileReviewChange,
+} from "@/renderer/utils/fileReview";
 
 import { formatErrorText, readableErrorText } from "./errorText";
 import type { FileChangePreview } from "./FileChangeBlock";
@@ -36,6 +42,7 @@ type CopyStatus = "idle" | "copied" | "failed";
 
 export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCallBlockProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [expandedReviewPath, setExpandedReviewPath] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<{ target: CopyTarget; status: Exclude<CopyStatus, "idle"> } | null>(null);
   const details = useLazyToolDetails(message, onLoadDetails);
   const tool = useMemo(() => parseToolPayload(details.message), [details.message]);
@@ -111,14 +118,17 @@ export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCal
             {tool.fileTarget && tool.target ? (
               <>
                 <span>{tool.actionLabel}</span>
-                <span> </span>
-                <FileTarget
-                  diff={tool.fileChange?.diff ?? ""}
-                  onPreviewFile={onPreviewFile}
-                  path={tool.target}
-                />
-              </>
-            ) : (
+                  <span> </span>
+                  <FileTarget
+                    diff={tool.fileChange?.diff ?? ""}
+                    files={tool.fileChanges}
+                    message={details.message}
+                    onPreviewFile={onPreviewFile}
+                    path={tool.target}
+                    title={tool.title}
+                  />
+                </>
+              ) : (
               tool.title
             )}
           </div>
@@ -151,67 +161,84 @@ export function ToolCallBlock({ message, onPreviewFile, onLoadDetails }: ToolCal
           aria-hidden={!detailsOpen}
           aria-label="工具详情"
         >
-          <div className={styles.detailsInner}>
-            <section className={styles.detailSection} aria-label="工具入参">
-              <div className={styles.toolNameRow}>
-                <span className={styles.toolNameLabel}>工具</span>
-                <code className={styles.toolNameValue}>{tool.name}</code>
-              </div>
-              <div className={styles.sectionHeader} data-kind="input">
-                <div className={styles.outputHeader}>入参</div>
-                <button
-                  className={styles.copyButton}
-                  type="button"
-                  aria-label={copyAriaLabel("入参", inputCopyStatus)}
-                  data-tooltip-label={copyAriaLabel("入参", inputCopyStatus)}
-                  title={copyAriaLabel("入参", inputCopyStatus)}
-                  onClick={() => void handleCopy("input", tool.argsText)}
-                  disabled={details.loading}
-                >
-                  {inputCopyStatus === "copied" ? <Check size={13} /> : <Clipboard size={13} />}
-                </button>
-              </div>
-              <div className={styles.codeViewport}>
-                <pre className={styles.args}>{details.loading ? "正在加载工具详情" : tool.argsText}</pre>
-              </div>
-            </section>
+          <div className={styles.detailsInner} data-kind={tool.fileTarget ? "file-review" : "raw"}>
+            {tool.fileTarget ? (
+              <FileMutationDetails
+                detailsError={Boolean(details.error)}
+                detailsLoading={details.loading}
+                errorText={tool.errorPreview || readableErrorText(tool.resultText)}
+                expandedPath={expandedReviewPath}
+                failed={failed}
+                footerLabel={footerLabel}
+                footerState={footerState}
+                running={running}
+                tool={tool}
+                onExpandedPathChange={setExpandedReviewPath}
+              />
+            ) : (
+              <>
+                <section className={styles.detailSection} aria-label="工具入参">
+                  <div className={styles.toolNameRow}>
+                    <span className={styles.toolNameLabel}>工具</span>
+                    <code className={styles.toolNameValue}>{tool.name}</code>
+                  </div>
+                  <div className={styles.sectionHeader} data-kind="input">
+                    <div className={styles.outputHeader}>入参</div>
+                    <button
+                      className={styles.copyButton}
+                      type="button"
+                      aria-label={copyAriaLabel("入参", inputCopyStatus)}
+                      data-tooltip-label={copyAriaLabel("入参", inputCopyStatus)}
+                      title={copyAriaLabel("入参", inputCopyStatus)}
+                      onClick={() => void handleCopy("input", tool.argsText)}
+                      disabled={details.loading}
+                    >
+                      {inputCopyStatus === "copied" ? <Check size={13} /> : <Clipboard size={13} />}
+                    </button>
+                  </div>
+                  <div className={styles.codeViewport}>
+                    <pre className={styles.args}>{details.loading ? "正在加载工具详情" : tool.argsText}</pre>
+                  </div>
+                </section>
 
-            <section className={styles.detailSection} aria-label={failed ? "工具错误" : "工具输出"}>
-              <div className={styles.sectionHeader} data-kind="output">
-                <div className={styles.outputHeader}>输出</div>
-                <button
-                  className={styles.copyButton}
-                  type="button"
-                  aria-label={copyAriaLabel("输出", outputCopyStatus)}
-                  data-tooltip-label={copyAriaLabel("输出", outputCopyStatus)}
-                  title={copyAriaLabel("输出", outputCopyStatus)}
-                  onClick={() => void handleCopy("output", tool.resultText)}
-                  disabled={!tool.resultText || details.loading}
-                >
-                  {outputCopyStatus === "copied" ? <Check size={13} /> : <Clipboard size={13} />}
-                </button>
-              </div>
-              {details.loading ? (
-                <div className={styles.codeViewport}>
-                  <p className={styles.emptyResult}>正在加载工具详情</p>
-                </div>
-              ) : details.error ? (
-                <div className={styles.codeViewport}>
-                  <p className={styles.emptyResult}>工具详情加载失败</p>
-                </div>
-              ) : tool.resultText ? (
-                <div className={styles.codeViewport}>
-                  <pre data-kind={failed ? "error" : "result"}>{tool.resultText}</pre>
-                </div>
-              ) : (
-                <div className={styles.codeViewport}>
-                  <p className={styles.emptyResult}>{running ? "工具正在执行" : "暂无输出"}</p>
-                </div>
-              )}
-              <div className={styles.panelFooter} data-state={footerState}>
-                {footerLabel}
-              </div>
-            </section>
+                <section className={styles.detailSection} aria-label={failed ? "工具错误" : "工具输出"}>
+                  <div className={styles.sectionHeader} data-kind="output">
+                    <div className={styles.outputHeader}>输出</div>
+                    <button
+                      className={styles.copyButton}
+                      type="button"
+                      aria-label={copyAriaLabel("输出", outputCopyStatus)}
+                      data-tooltip-label={copyAriaLabel("输出", outputCopyStatus)}
+                      title={copyAriaLabel("输出", outputCopyStatus)}
+                      onClick={() => void handleCopy("output", tool.resultText)}
+                      disabled={!tool.resultText || details.loading}
+                    >
+                      {outputCopyStatus === "copied" ? <Check size={13} /> : <Clipboard size={13} />}
+                    </button>
+                  </div>
+                  {details.loading ? (
+                    <div className={styles.codeViewport}>
+                      <p className={styles.emptyResult}>正在加载工具详情</p>
+                    </div>
+                  ) : details.error ? (
+                    <div className={styles.codeViewport}>
+                      <p className={styles.emptyResult}>工具详情加载失败</p>
+                    </div>
+                  ) : tool.resultText ? (
+                    <div className={styles.codeViewport}>
+                      <pre data-kind={failed ? "error" : "result"}>{tool.resultText}</pre>
+                    </div>
+                  ) : (
+                    <div className={styles.codeViewport}>
+                      <p className={styles.emptyResult}>{running ? "工具正在执行" : "暂无输出"}</p>
+                    </div>
+                  )}
+                  <div className={styles.panelFooter} data-state={footerState}>
+                    {footerLabel}
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -225,12 +252,18 @@ function hasLineDeltas(file: ToolFileChange): boolean {
 
 function FileTarget({
   diff,
+  files,
+  message,
   onPreviewFile,
   path,
+  title,
 }: {
   diff: string;
+  files: ToolFileChange[];
+  message: ConversationMessage;
   onPreviewFile?: (file: FileChangePreview) => void;
   path: string;
+  title: string;
 }) {
   if (!onPreviewFile) {
     return <span className={styles.fileTarget}>{path}</span>;
@@ -241,12 +274,153 @@ function FileTarget({
       type="button"
       onClick={(event) => {
         event.stopPropagation();
-        onPreviewFile({ path, diff });
+        onPreviewFile({ path, diff, files, message, title });
       }}
     >
       {path}
     </button>
   );
+}
+
+function FileMutationDetails({
+  detailsError,
+  detailsLoading,
+  errorText,
+  expandedPath,
+  failed,
+  footerLabel,
+  footerState,
+  running,
+  tool,
+  onExpandedPathChange,
+}: {
+  detailsError: boolean;
+  detailsLoading: boolean;
+  errorText: string;
+  expandedPath: string | null;
+  failed: boolean;
+  footerLabel: string;
+  footerState: "failed" | "running" | "done";
+  running: boolean;
+  tool: ParsedToolPayload;
+  onExpandedPathChange: (path: string | null) => void;
+}) {
+  if (detailsLoading) {
+    return <ToolDetailNotice text="正在加载文件变更详情" state={footerState} footerLabel={footerLabel} />;
+  }
+  if (detailsError) {
+    return <ToolDetailNotice text="文件变更详情加载失败" state="failed" footerLabel={footerLabel} />;
+  }
+  if (failed) {
+    return <FileMutationErrorPanel tool={tool} errorText={errorText} footerLabel={footerLabel} footerState={footerState} />;
+  }
+  if (!tool.fileChanges.length) {
+    return (
+      <ToolDetailNotice
+        text={running ? "正在等待文件变更" : "这次工具调用没有可审阅的文件变更"}
+        state={footerState}
+        footerLabel={footerLabel}
+      />
+    );
+  }
+
+  const selectedFile =
+    tool.fileChanges.find((file) => file.path === expandedPath) ??
+    tool.fileChanges[0];
+
+  return (
+    <section className={styles.fileReviewSection} aria-label={fileReviewHeading(tool)}>
+      {tool.fileChanges.length > 1 ? (
+        <ul className={styles.fileReviewList} aria-label="变更文件">
+          {tool.fileChanges.map((file) => {
+            const active = file.path === selectedFile.path;
+            return (
+              <li key={file.path}>
+                <button
+                  className={styles.fileReviewListButton}
+                  data-active={active ? "true" : "false"}
+                  type="button"
+                  onClick={() => onExpandedPathChange(active ? null : file.path)}
+                >
+                  <span>{file.path}</span>
+                  <span className={styles.fileReviewStats}>+{file.additions} -{file.deletions}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      <FileReviewCard file={selectedFile} />
+      <div className={styles.panelFooter} data-state={footerState}>
+        {footerLabel}
+      </div>
+    </section>
+  );
+}
+
+function ToolDetailNotice({
+  text,
+  state,
+  footerLabel,
+}: {
+  text: string;
+  state: "failed" | "running" | "done";
+  footerLabel: string;
+}) {
+  return (
+    <section className={styles.fileReviewSection} aria-label={text}>
+      <div className={styles.fileReviewNotice}>{text}</div>
+      <div className={styles.panelFooter} data-state={state}>
+        {footerLabel}
+      </div>
+    </section>
+  );
+}
+
+function FileMutationErrorPanel({
+  errorText,
+  footerLabel,
+  footerState,
+  tool,
+}: {
+  errorText: string;
+  footerLabel: string;
+  footerState: "failed" | "running" | "done";
+  tool: ParsedToolPayload;
+}) {
+  return (
+    <section className={styles.fileReviewSection} aria-label="文件编辑错误">
+      <header className={styles.fileReviewHeading}>
+        <span>{fileReviewHeading(tool)}</span>
+      </header>
+      <div className={styles.fileReviewError}>
+        <span>工具执行失败</span>
+        <pre>{errorText || "工具执行失败，未返回详细错误信息"}</pre>
+      </div>
+      {tool.fileChanges.length ? (
+        <ul className={styles.fileReviewList} aria-label="失败文件">
+          {tool.fileChanges.map((file) => (
+            <li key={file.path}>
+              <span className={styles.fileReviewFailedPath}>{file.path}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className={styles.panelFooter} data-state={footerState}>
+        {footerLabel}
+      </div>
+    </section>
+  );
+}
+
+function fileReviewHeading(tool: ParsedToolPayload): string {
+  if (tool.name === "create_file" || tool.name === "write_file") {
+    return "已创建的文件";
+  }
+  if (tool.name === "delete_file") {
+    return "已删除的文件";
+  }
+  return "已编辑的文件";
 }
 
 function copyStatus(
@@ -273,6 +447,7 @@ interface ParsedToolPayload {
   target: string;
   fileTarget: boolean;
   fileChange: ToolFileChange | null;
+  fileChanges: ToolFileChange[];
   argsText: string;
   resultText: string;
   resultStatus: string | null;
@@ -290,7 +465,8 @@ function parseToolPayload(message: ConversationMessage): ParsedToolPayload {
   const target = toolTarget(args, message.payload, summary);
   const actionLabel = toolActionLabel(name, message.status, resultStatus);
   const outputText = resultText(result, message.payload);
-  const fileChange = isFileMutationTool(name) ? singleToolFileChange(message, target) : null;
+  const fileChanges = isFileMutationTool(name) ? fileReviewChangesFromMessage(message, target) : [];
+  const fileChange = fileChanges.length === 1 ? fileChanges[0] : null;
   return {
     name,
     title: target ? `${actionLabel} ${target}` : actionLabel,
@@ -298,6 +474,7 @@ function parseToolPayload(message: ConversationMessage): ParsedToolPayload {
     target,
     fileTarget: isFileMutationTool(name),
     fileChange,
+    fileChanges,
     argsText: stringify(args),
     resultText: outputText,
     resultStatus,
@@ -306,84 +483,7 @@ function parseToolPayload(message: ConversationMessage): ParsedToolPayload {
   };
 }
 
-interface ToolFileChange {
-  path: string;
-  additions: number;
-  deletions: number;
-  diff: string;
-}
-
-function singleToolFileChange(message: ConversationMessage, target: string): ToolFileChange | null {
-  const files = toolFileChanges(message, target);
-  return files.length === 1 ? files[0] : null;
-}
-
-function toolFileChanges(message: ConversationMessage, target: string): ToolFileChange[] {
-  const result = asRecord(message.payload.result);
-  const changes = new Map<string, ToolFileChange>();
-  collectToolFileChanges(message.payload.files, changes);
-  collectToolFileChanges(filesFromUiPayload(asRecord(message.payload.ui_payload)), changes);
-  collectToolFileChanges(result?.files, changes);
-  collectToolFileChanges(filesFromUiPayload(asRecord(result?.ui_payload)), changes);
-  if (!changes.size && target) {
-    changes.set(target, { path: target, additions: 0, deletions: 0, diff: "" });
-  }
-  return [...changes.values()];
-}
-
-function collectToolFileChanges(source: unknown, changes: Map<string, ToolFileChange>) {
-  if (!Array.isArray(source)) {
-    return;
-  }
-  source.forEach((item, index) => {
-    const file = toolFileChangeFromRecord(asRecord(item), index);
-    if (!file) {
-      return;
-    }
-    const existing = changes.get(file.path);
-    changes.set(file.path, {
-      path: file.path,
-      additions: file.additions || existing?.additions || 0,
-      deletions: file.deletions || existing?.deletions || 0,
-      diff: file.diff || existing?.diff || "",
-    });
-  });
-}
-
-function filesFromUiPayload(uiPayload: Record<string, unknown> | null): unknown {
-  if (!uiPayload) {
-    return [];
-  }
-  return Array.isArray(uiPayload.files) ? uiPayload.files : uiPayload.changes;
-}
-
-function toolFileChangeFromRecord(record: Record<string, unknown> | null, index: number): ToolFileChange | null {
-  if (!record) {
-    return null;
-  }
-  const path = stringValue(record.path) || `文件 ${index + 1}`;
-  const diff = stringValue(record.diff);
-  return {
-    path,
-    additions: numberValue(record.additions) ?? numberValue(record.added_lines) ?? countDiff(diff, "+"),
-    deletions:
-      numberValue(record.deletions) ??
-      numberValue(record.deleted_lines) ??
-      numberValue(record.removed_lines) ??
-      countDiff(diff, "-"),
-    diff,
-  };
-}
-
-function countDiff(diff: string, sign: "+" | "-"): number {
-  if (!diff) {
-    return 0;
-  }
-  return diff
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith(sign) && !line.startsWith(`${sign}${sign}${sign}`))
-    .length;
-}
+type ToolFileChange = FileReviewChange;
 
 function errorText(
   result: Record<string, unknown> | null,
@@ -587,7 +687,7 @@ function patchFileTarget(patch: string): string {
 }
 
 function isFileMutationTool(name: string): boolean {
-  return ["write_file", "apply_patch", "edit_file", "create_file", "delete_file"].includes(name);
+  return isFileMutationToolName(name);
 }
 
 function stringValue(value: unknown): string {

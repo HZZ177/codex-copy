@@ -1,4 +1,4 @@
-export type UnifiedDiffLineKind = "add" | "delete" | "context";
+export type UnifiedDiffLineKind = "add" | "delete" | "context" | "separator";
 
 export interface UnifiedDiffDisplayLine {
   key: string;
@@ -26,6 +26,16 @@ export function parseUnifiedDiffDisplayLines(diff: string): UnifiedDiffDisplayLi
 
     const hunk = parseHunkHeader(line);
     if (hunk) {
+      const omittedLineCount = position ? skippedUnmodifiedLineCount(position, hunk) : 0;
+      if (omittedLineCount > 0 && rows.length > 0) {
+        rows.push({
+          key: `${index}:separator:${hunk.newLine}`,
+          kind: "separator",
+          lineNumber: null,
+          sign: "",
+          content: `省略 ${omittedLineCount} 行未修改内容`,
+        });
+      }
       position = hunk;
       return;
     }
@@ -111,6 +121,12 @@ function parseHunkHeader(line: string): HunkPosition | null {
     oldLine: Number(match[1]),
     newLine: Number(match[2]),
   };
+}
+
+function skippedUnmodifiedLineCount(previous: HunkPosition, next: HunkPosition): number {
+  const oldGap = next.oldLine - previous.oldLine;
+  const newGap = next.newLine - previous.newLine;
+  return Math.max(0, Math.max(oldGap, newGap));
 }
 
 function isDiffMetaLine(line: string): boolean {

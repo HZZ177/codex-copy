@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import styles from "./AppTooltipLayer.module.css";
@@ -29,6 +29,7 @@ const TOOLTIP_TARGET_SELECTOR = [
 ].join(",");
 
 const DEFAULT_DELAY_MS = 420;
+const VIEWPORT_MARGIN = 8;
 
 export function AppTooltipLayer({
   scopeSelector,
@@ -37,6 +38,7 @@ export function AppTooltipLayer({
 }: AppTooltipLayerProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const targetRef = useRef<HTMLElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const showTimerRef = useRef<number | null>(null);
   const nativeTitleRef = useRef<NativeTitleSnapshot | null>(null);
 
@@ -157,12 +159,55 @@ export function AppTooltipLayer({
     };
   }, [hideTooltip, scopeSelector, showTooltip]);
 
+  useLayoutEffect(() => {
+    if (!tooltip) {
+      return;
+    }
+    const element = tooltipRef.current;
+    if (!element) {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const deltaLeft =
+      rect.left < VIEWPORT_MARGIN
+        ? VIEWPORT_MARGIN - rect.left
+        : rect.right > viewportWidth - VIEWPORT_MARGIN
+          ? viewportWidth - VIEWPORT_MARGIN - rect.right
+          : 0;
+    const deltaTop =
+      rect.top < VIEWPORT_MARGIN
+        ? VIEWPORT_MARGIN - rect.top
+        : rect.bottom > viewportHeight - VIEWPORT_MARGIN
+          ? viewportHeight - VIEWPORT_MARGIN - rect.bottom
+          : 0;
+
+    if (Math.abs(deltaLeft) < 0.5 && Math.abs(deltaTop) < 0.5) {
+      return;
+    }
+
+    setTooltip((current) =>
+      current
+        ? {
+            ...current,
+            left: Math.round(current.left + deltaLeft),
+            top: Math.round(current.top + deltaTop),
+          }
+        : current,
+    );
+  }, [tooltip]);
+
   if (!tooltip) {
     return null;
   }
 
   return createPortal(
     <div
+      ref={tooltipRef}
       className={styles.tooltip}
       role="tooltip"
       data-placement={tooltip.placement}

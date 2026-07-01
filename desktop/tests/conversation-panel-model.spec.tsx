@@ -1,16 +1,22 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeBridge } from "../src/runtime";
 import type { AgentSessionController } from "../src/renderer/hooks/useAgentSessionController";
 import { useConversationPanelModel } from "../src/renderer/pages/conversation/useConversationPanelModel";
 import { NotificationProvider } from "../src/renderer/providers/NotificationProvider";
-import { PreviewProvider } from "../src/renderer/providers/PreviewProvider";
+import { PreviewProvider, usePreview, type ReviewPanelRequest } from "../src/renderer/providers/PreviewProvider";
 import type { ConversationRuntimeState } from "../src/renderer/stores/conversationStore";
 import type { AgentSession, Workspace } from "../src/types/protocol";
 
+let latestReviewPanelRequest: ReviewPanelRequest | null = null;
+
 describe("useConversationPanelModel", () => {
+  beforeEach(() => {
+    latestReviewPanelRequest = null;
+  });
+
   it("exposes workspace search and directory listing only for available workspace sessions", async () => {
     const runtime = fakeRuntime();
     const controller = fakeController({
@@ -138,6 +144,88 @@ describe("useConversationPanelModel", () => {
     expect(runtime.conversation.loadToolDetails).toHaveBeenCalledTimes(2);
   });
 
+  it("opens file change previews through the review panel request channel", () => {
+    const runtime = fakeRuntime();
+    const controller = fakeController();
+    const { result } = renderHook(
+      () => useConversationPanelModel({ runtime, sessionId: "ses-1", controller }),
+      { wrapper: Providers },
+    );
+
+    act(() => {
+      result.current.openFileChangePreview({
+        path: "src/main.ts",
+        diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new",
+        files: [
+          {
+            path: "src/main.ts",
+            additions: 1,
+            deletions: 1,
+            diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new",
+            operation: "update",
+          },
+        ],
+        title: "已编辑文件",
+      });
+    });
+
+    expect(latestReviewPanelRequest).toMatchObject({
+      focusedPath: "src/main.ts",
+      title: "已编辑文件",
+      files: [
+        expect.objectContaining({
+          path: "src/main.ts",
+          diff: expect.stringContaining("+new"),
+        }),
+      ],
+    });
+    expect(runtime.conversation.loadToolDetails).not.toHaveBeenCalled();
+  });
+
+  it("loads deferred tool details before opening a file change review", async () => {
+    const runtime = fakeRuntime();
+    vi.mocked(runtime.conversation.loadToolDetails).mockResolvedValueOnce({
+      detailRef: { startEventId: "start-file", endEventId: "end-file" },
+      toolName: "apply_patch",
+      toolParams: { path: "src/main.ts" },
+      toolResult: "patched",
+      status: "completed",
+      fileChanges: [
+        {
+          path: "src/main.ts",
+          operation: "update",
+          added_lines: 1,
+          deleted_lines: 1,
+          diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+loaded",
+        },
+      ],
+    });
+    const controller = fakeController();
+    const { result } = renderHook(
+      () => useConversationPanelModel({ runtime, sessionId: "ses-1", controller }),
+      { wrapper: Providers },
+    );
+
+    act(() => {
+      result.current.openFileChangePreview({
+        path: "src/main.ts",
+        diff: "",
+        message: fileEditMessage(),
+      });
+    });
+
+    await waitFor(() => {
+      expect(runtime.conversation.loadToolDetails).toHaveBeenCalledWith("ses-1", {
+        startEventId: "start-file",
+        endEventId: "end-file",
+        runId: "run-file",
+        toolCallId: "call-file",
+      });
+      expect(latestReviewPanelRequest?.files[0]?.diff).toContain("+loaded");
+    });
+  });
+
+
   it("clears a selected skill when runtime reports a skill error", async () => {
     const setSelectedSkill = vi.fn();
     const runtime = fakeRuntime();
@@ -170,9 +258,18 @@ describe("useConversationPanelModel", () => {
 function Providers({ children }: PropsWithChildren) {
   return (
     <NotificationProvider>
-      <PreviewProvider>{children}</PreviewProvider>
+      <PreviewProvider>
+        <PreviewProbe />
+        {children}
+      </PreviewProvider>
     </NotificationProvider>
   );
+}
+
+function PreviewProbe() {
+  const preview = usePreview();
+  latestReviewPanelRequest = preview.reviewPanelRequest;
+  return null;
 }
 
 function fakeController(overrides: Partial<AgentSessionController> = {}): AgentSessionController {
@@ -283,6 +380,35 @@ function toolMessage() {
         endEventId: "end-1",
         runId: "run-1",
         toolCallId: "call-1",
+      },
+      toolDetailsDeferred: true,
+    },
+  } as const;
+}
+
+function fileEditMessage() {
+  return {
+    id: "message-file",
+    threadId: "ses-1",
+    turnId: "turn-1",
+    itemId: "item-file",
+    kind: "tool",
+    status: "completed",
+    content: "apply_patch",
+    createdAt: "2026-06-27T00:00:00.000Z",
+    updatedAt: "2026-06-27T00:00:00.000Z",
+    payload: {
+      call: { id: "call-file", name: "apply_patch", arguments: { path: "src/main.ts" } },
+      result: {
+        status: "success",
+        files: [{ path: "src/main.ts", operation: "update", added_lines: 1, deleted_lines: 1 }],
+      },
+      files: [{ path: "src/main.ts", operation: "update", added_lines: 1, deleted_lines: 1 }],
+      toolDetailRef: {
+        startEventId: "start-file",
+        endEventId: "end-file",
+        runId: "run-file",
+        toolCallId: "call-file",
       },
       toolDetailsDeferred: true,
     },

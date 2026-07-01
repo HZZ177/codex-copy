@@ -141,6 +141,56 @@ export async function mockWorkbenchBackend(page: Page, backend: MockBackendState
       return fulfillJson(route, { models: [{ id: "qwen-coder" }, { id: "deepseek-coder" }], cached: true });
     }
 
+    if (requestPath === "/api/model-providers" && method === "GET") {
+      return fulfillJson(route, {
+        providers: [
+          {
+            id: "provider-1",
+            name: "默认模型服务",
+            base_url: "https://api.example/v1",
+            enabled: true,
+            api_key_set: true,
+            api_key_preview: "sk-***",
+            models: ["qwen-coder", "deepseek-coder"],
+            model_enabled: {
+              "qwen-coder": true,
+              "deepseek-coder": true,
+            },
+            health: {},
+            created_at: "2026-06-27T00:00:00Z",
+            updated_at: "2026-06-27T00:00:00Z",
+          },
+        ],
+      });
+    }
+
+    if (requestPath === "/api/settings/model-defaults" && method === "GET") {
+      return fulfillJson(route, {
+        defaults: {
+          default_chat: {
+            scope: "default_chat",
+            configured: true,
+            provider_id: "provider-1",
+            provider_name: "默认模型服务",
+            model: "qwen-coder",
+            provider_enabled: true,
+            model_enabled: true,
+            missing_reason: null,
+          },
+          fast: {
+            scope: "fast",
+            configured: false,
+            provider_id: null,
+            provider_name: null,
+            model: null,
+            provider_enabled: null,
+            model_enabled: null,
+            missing_reason: "not_configured",
+          },
+        },
+      });
+    }
+
     if (requestPath === "/api/workspaces" && method === "GET") {
       return fulfillJson(route, { list: [workspace(WORKSPACE_A, "keydex"), workspace(WORKSPACE_B, "other")], total: 2 });
     }
@@ -215,6 +265,31 @@ export async function mockWorkbenchBackend(page: Page, backend: MockBackendState
     if (sessionMatch && method === "GET") {
       const sessionId = decodeURIComponent(sessionMatch[1]);
       return fulfillJson(route, { session: sessionResponse(backend.sessions[sessionId] ?? backend.sessions[SESSION_A]) });
+    }
+
+    const sessionWorkspaceMatch = requestPath.match(/^\/api\/sessions\/([^/]+)\/workspace(\/.*)?$/);
+    if (sessionWorkspaceMatch) {
+      const sessionId = decodeURIComponent(sessionWorkspaceMatch[1]);
+      const sessionWorkspaceId = backend.sessions[sessionId]?.workspace_id ?? WORKSPACE_A;
+      const suffix = sessionWorkspaceMatch[2] ?? "";
+      if (suffix === "/tree") {
+        return fulfillJson(route, {
+          root: workspace(sessionWorkspaceId, sessionWorkspaceId).root_path,
+          entries: [
+            { name: "README.md", path: "README.md", type: "file", size: 1024, modified_at: null },
+            { name: "context.md", path: "docs/context.md", type: "file", size: 512, modified_at: null },
+            { name: "src", path: "src", type: "directory", size: null, modified_at: null },
+          ],
+        });
+      }
+      if (suffix === "/read") {
+        const filePath = url.searchParams.get("path") ?? "";
+        backend.workspaceReadRequests.push({ workspaceId: sessionWorkspaceId, path: filePath });
+        return fulfillJson(route, { path: filePath, content: workspaceFileContent(filePath), encoding: "utf-8" });
+      }
+      if (suffix === "/annotations") {
+        return fulfillJson(route, []);
+      }
     }
 
     const workspaceMatch = requestPath.match(/^\/api\/workspaces\/([^/]+)(\/.*)?$/);

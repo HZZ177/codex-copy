@@ -212,10 +212,46 @@ describe("ToolCallBlock", () => {
     expect(screen.getByTestId("line-change-ticker").textContent).not.toContain("行");
 
     fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
-    expect(onPreviewFile).toHaveBeenCalledWith({
+    expect(onPreviewFile).toHaveBeenCalledWith(expect.objectContaining({
       path: "src/main.py",
       diff: "",
-    });
+      title: "正在编辑文件 src/main.py",
+    }));
+    expect(onPreviewFile.mock.calls[0][0].files).toHaveLength(1);
+    expect(onPreviewFile.mock.calls[0][0].message.id).toBe("tool-1");
+  });
+
+  it("renders file mutation tool details as a diff review panel", () => {
+    render(
+      <ToolCallBlock
+        message={toolMessage(
+          "completed",
+          {
+            status: "success",
+            model_content: "patched",
+            files: [
+              {
+                path: "src/main.py",
+                operation: "update",
+                added_lines: 1,
+                deleted_lines: 1,
+                diff: "--- a/src/main.py\n+++ b/src/main.py\n@@ -1 +1 @@\n-old\n+new",
+              },
+            ],
+          },
+          "apply_patch",
+          { path: "src/main.py", patch: "*** Begin Patch" },
+        )}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    expect(screen.queryByText("已编辑的文件")).toBeNull();
+    expect(screen.getByTestId("file-review-card")).not.toBeNull();
+    expect(screen.getByLabelText("文件 diff").textContent).toContain("+new");
+    expect(screen.queryByLabelText("工具入参")).toBeNull();
+    expect(screen.queryByLabelText("工具输出")).toBeNull();
   });
 
   it("passes file mutation preview clicks through MessageList", () => {
@@ -239,10 +275,13 @@ describe("ToolCallBlock", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "src/main.py" }));
-    expect(onPreviewFile).toHaveBeenCalledWith({
+    expect(onPreviewFile).toHaveBeenCalledWith(expect.objectContaining({
       path: "src/main.py",
       diff: "",
-    });
+      title: "正在编辑文件 src/main.py",
+    }));
+    expect(onPreviewFile.mock.calls[0][0].files).toHaveLength(1);
+    expect(onPreviewFile.mock.calls[0][0].message.id).toBe("tool-1");
   });
 
   it("is used by MessageList for tool messages", () => {

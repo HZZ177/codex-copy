@@ -2119,6 +2119,238 @@ describe("ConversationPage", () => {
     expect(frame.getAttribute("srcdoc")).toContain("面板预览");
   }, 10000);
 
+  it("opens file mutation clicks in the right sidebar review panel", async () => {
+    const projectSession = agentSession({
+      session_type: "workspace",
+      workspace_id: "ws-1",
+      workspace: workspace("ws-1", "keydex", "D:/repo/keydex"),
+      cwd: "D:/repo/keydex",
+    });
+    const { runtime } = fakeRuntime({
+      session: projectSession,
+      history: [
+        historyMessage("tool", "src/main.ts", {
+          id: "tool-review",
+          sessionId: "ses-1",
+          timestamp: 1,
+          toolName: "apply_patch",
+          toolCallId: "call-review",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "patched",
+          status: "completed",
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 1,
+              deleted_lines: 1,
+              diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new",
+            },
+          ],
+        }),
+      ],
+      workspaceEntriesByPath: {
+        "": [workspaceEntry("src", "src", "directory")],
+        src: [workspaceEntry("main.ts", "src/main.ts", "file", 64)],
+      },
+      workspaceFilesByPath: {
+        "src/main.ts": "export const value = 'new';",
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(within(await screen.findByTestId("tool-call-block")).getByRole("button", { name: "src/main.ts" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("app-shell").dataset.rightSidebar).toBe("open");
+    });
+    expect(screen.getByRole("tab", { name: "审阅" }).getAttribute("aria-selected")).toBe("true");
+    const reviewPanel = screen.getByTestId("right-sidebar-review-panel");
+    expect(reviewPanel).not.toBeNull();
+    expect(within(reviewPanel).queryByTestId("file-review-card")).toBeNull();
+    expect(screen.getByLabelText("文件 diff").textContent).toContain("+new");
+    expect(screen.queryByRole("tab", { name: "文件" })).toBeNull();
+
+    fireEvent.click(within(reviewPanel).getByRole("button", { name: "打开文件 src/main.ts" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "文件" }).getAttribute("aria-selected")).toBe("true");
+    });
+    expect(await screen.findByTestId("workspace-file-browser-preview")).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "src/main.ts");
+    });
+  });
+
+  it("loads deferred file mutation details before opening the review panel", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("tool", "src/main.ts", {
+          id: "tool-review-deferred",
+          sessionId: "ses-1",
+          timestamp: 1,
+          toolName: "apply_patch",
+          toolCallId: "call-review-deferred",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "",
+          status: "completed",
+          toolDetailsDeferred: true,
+          toolDetailRef: {
+            startEventId: "start-review",
+            endEventId: "end-review",
+            runId: "run-review",
+            toolCallId: "call-review-deferred",
+          },
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 1,
+              deleted_lines: 1,
+            },
+          ],
+        }),
+      ],
+      toolDetails: {
+        "start-review:end-review": {
+          detailRef: {
+            startEventId: "start-review",
+            endEventId: "end-review",
+            runId: "run-review",
+            toolCallId: "call-review-deferred",
+          },
+          toolName: "apply_patch",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "patched",
+          status: "completed",
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 1,
+              deleted_lines: 1,
+              diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+loaded",
+            },
+          ],
+        },
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    fireEvent.click(within(await screen.findByTestId("tool-call-block")).getByRole("button", { name: "src/main.ts" }));
+
+    await waitFor(() => {
+      expect(runtime.conversation.loadToolDetails).toHaveBeenCalledWith("ses-1", {
+        startEventId: "start-review",
+        endEventId: "end-review",
+        runId: "run-review",
+        toolCallId: "call-review-deferred",
+      });
+      expect(screen.getByLabelText("文件 diff").textContent).toContain("+loaded");
+    });
+    expect(screen.getByRole("tab", { name: "审阅" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("merges same-file turn changes from the composer accessory review panel", async () => {
+    const { runtime } = fakeRuntime({
+      history: [
+        historyMessage("user", "连续修改同一个文件"),
+        historyMessage("tool", "src/main.ts", {
+          id: "tool-review-old",
+          sessionId: "ses-1",
+          timestamp: 1,
+          toolName: "apply_patch",
+          toolCallId: "call-review-old",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "patched",
+          status: "completed",
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 1,
+              deleted_lines: 1,
+              diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+stale",
+            },
+          ],
+        }),
+        historyMessage("tool", "src/main.ts", {
+          id: "tool-review-latest",
+          sessionId: "ses-1",
+          timestamp: 2,
+          toolName: "apply_patch",
+          toolCallId: "call-review-latest",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "",
+          status: "completed",
+          toolDetailsDeferred: true,
+          toolDetailRef: {
+            startEventId: "start-review-latest",
+            endEventId: "end-review-latest",
+            runId: "run-review-latest",
+            toolCallId: "call-review-latest",
+          },
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 3,
+              deleted_lines: 2,
+            },
+          ],
+        }),
+      ],
+      toolDetails: {
+        "start-review-latest:end-review-latest": {
+          detailRef: {
+            startEventId: "start-review-latest",
+            endEventId: "end-review-latest",
+            runId: "run-review-latest",
+            toolCallId: "call-review-latest",
+          },
+          toolName: "apply_patch",
+          toolParams: { path: "src/main.ts" },
+          toolResult: "patched latest",
+          status: "completed",
+          fileChanges: [
+            {
+              path: "src/main.ts",
+              operation: "update",
+              added_lines: 3,
+              deleted_lines: 2,
+              diff: "--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+latest",
+            },
+          ],
+        },
+      },
+    });
+
+    renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);
+
+    await screen.findByLabelText("继续输入");
+    const card = await screen.findByTestId("file-change-summary-card");
+    expect(within(card).getAllByRole("button", { name: "src/main.ts" })).toHaveLength(1);
+    expect((await screen.findByTestId("file-change-summary-pill")).textContent).toContain("+4");
+    expect(screen.getByTestId("file-change-summary-pill").textContent).toContain("-3");
+
+    fireEvent.click(within(card).getByRole("button", { name: "src/main.ts" }));
+
+    await waitFor(() => {
+      expect(runtime.conversation.loadToolDetails).toHaveBeenCalledWith("ses-1", {
+        startEventId: "start-review-latest",
+        endEventId: "end-review-latest",
+        runId: "run-review-latest",
+        toolCallId: "call-review-latest",
+      });
+      expect(screen.getByLabelText("文件 diff").textContent).toContain("+latest");
+    });
+    expect(screen.getByLabelText("文件 diff").textContent).toContain("+stale");
+  });
+
   it("does not carry preview drawer content into another session", async () => {
     const { runtime, emit } = fakeRuntime();
     const view = renderConversationInLayout(<ConversationPage threadId="ses-1" runtime={runtime} />);

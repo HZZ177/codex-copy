@@ -16,6 +16,11 @@ import {
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import type { PreviewRequest } from "@/renderer/providers/previewTypes";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import {
+  fileReviewChangesFromMessage,
+  normalizeFileReviewChange,
+  type FileReviewChange,
+} from "@/renderer/utils/fileReview";
 import type {
   AgentActionEnvelope,
   AgentErrorData,
@@ -88,7 +93,12 @@ export function useConversationPanelModel({
   const toolDetailCacheRef = useRef(
     new Map<string, Promise<Partial<ConversationMessage>> | Partial<ConversationMessage>>(),
   );
-  const { openFilePanel, openPreview: openPreviewRequest, setPreviewHostContext } = usePreview();
+  const {
+    openFilePanel,
+    openPreview: openPreviewRequest,
+    openReviewPanel,
+    setPreviewHostContext,
+  } = usePreview();
   const notifications = useNotifications();
   const optionalAgentRuntime = useOptionalAgentSessionRuntime();
   const sharedSubscribeEvent = optionalAgentRuntime?.runtime === runtime ? optionalAgentRuntime.subscribeEvent : null;
@@ -347,16 +357,6 @@ export function useConversationPanelModel({
     [openFilePanel, previewRenderContext, workspaceAvailable],
   );
 
-  const openFileChangePreview = useCallback(
-    (file: FileChangePreview) => {
-      if (!workspaceAvailable || !file.path) {
-        return;
-      }
-      openFilePanel(file.path, previewRenderContext);
-    },
-    [openFilePanel, previewRenderContext, workspaceAvailable],
-  );
-
   useEffect(() => {
     toolDetailCacheRef.current.clear();
   }, [runtime, sessionId]);
@@ -391,6 +391,62 @@ export function useConversationPanelModel({
       }
     },
     [runtime, sessionId],
+  );
+
+  const openFileChangePreview = useCallback(
+    (file: FileChangePreview) => {
+      if (!file.path) {
+        return;
+      }
+
+      const openResolvedReview = (files: FileReviewChange[], title?: string | null) => {
+        const focusedPath = file.path;
+        openReviewPanel(
+          {
+            files,
+            focusedPath,
+            panelKey: file.message?.id ?? file.title ?? focusedPath,
+            sourceMessageId: file.message?.id ?? null,
+            title: title || file.title || "审阅",
+            toolCallId: toolCallIdFromPreviewMessage(file.message),
+          },
+          previewRenderContext,
+        );
+      };
+
+      const initialFiles = reviewFilesFromPreview(file);
+      const targetFile = initialFiles.find((change) => change.path === file.path);
+      const previewMessages = previewMessagesFromFileChangePreview(file);
+      const shouldLoadDetails = previewMessages.some((message) => message.payload.toolDetailsDeferred === true);
+      if (!shouldLoadDetails) {
+        openResolvedReview(initialFiles, file.title);
+        return;
+      }
+
+      void Promise.all(
+        previewMessages.map(async (message) => {
+          if (message.payload.toolDetailsDeferred !== true) {
+            return message;
+          }
+          const patch = await loadToolDetails(message);
+          return mergeConversationPatch(message, patch);
+        }),
+      )
+        .then((hydratedMessages) => {
+          const files = mergeFileReviewChanges(
+            hydratedMessages
+              .flatMap((message) => fileReviewChangesFromMessage(message, file.path))
+              .filter((change) => !file.messages?.length || isTargetReviewChange(change, file.path)),
+          );
+          const targetHasDiff = files.some((change) => change.path === file.path && change.diff);
+          openResolvedReview(files.length && (targetHasDiff || !targetFile?.diff) ? files : initialFiles, file.title);
+        })
+        .catch(() => {
+          notifications.warning("文件变更详情加载失败");
+          openResolvedReview(initialFiles, file.title);
+        });
+    },
+    [loadToolDetails, notifications, openReviewPanel, previewRenderContext],
   );
 
   const branchFromMessage = useCallback(
@@ -718,6 +774,120 @@ function branchActionErrorMessage(mode: "fork" | "reverse", reason: unknown): st
     return message;
   }
   return message === "操作失败" ? "回溯失败" : `回溯失败：${message}`;
+}
+
+function reviewFilesFromPreview(file: FileChangePreview): FileReviewChange[] {
+  const files = file.files?.length
+    ? file.files.map((change) => normalizeFileReviewChange(change))
+    : [];
+  if (!files.length) {
+    return [
+      normalizeFileReviewChange({
+        path: file.path,
+        diff: file.diff,
+        operation: "unknown",
+      }),
+    ];
+  }
+  if (!file.diff) {
+    return files;
+  }
+  return files.map((change) =>
+    change.path === file.path && !change.diff
+      ? normalizeFileReviewChange({ ...change, diff: file.diff })
+      : change,
+  );
+}
+
+function previewMessagesFromFileChangePreview(file: FileChangePreview): ConversationMessage[] {
+  return uniqueConversationMessages([...(file.messages ?? []), file.message].filter(isConversationMessage));
+}
+
+function uniqueConversationMessages(messages: ConversationMessage[]): ConversationMessage[] {
+  const keys = new Set<string>();
+  const unique: ConversationMessage[] = [];
+  messages.forEach((message) => {
+    const key = conversationMessageKey(message);
+    if (keys.has(key)) {
+      return;
+    }
+    keys.add(key);
+    unique.push(message);
+  });
+  return unique;
+}
+
+function conversationMessageKey(message: ConversationMessage): string {
+  return message.id || message.itemId || `${message.kind}:${message.createdAt}`;
+}
+
+function isConversationMessage(value: ConversationMessage | undefined): value is ConversationMessage {
+  return Boolean(value);
+}
+
+function isTargetReviewChange(change: FileReviewChange, path: string): boolean {
+  return change.path === path || change.newPath === path || change.oldPath === path;
+}
+
+function mergeFileReviewChanges(changes: FileReviewChange[]): FileReviewChange[] {
+  const merged = new Map<string, FileReviewChange>();
+  changes.forEach((change) => {
+    const normalized = normalizeFileReviewChange(change);
+    const existing = merged.get(normalized.path);
+    if (!existing) {
+      merged.set(normalized.path, normalized);
+      return;
+    }
+    merged.set(normalized.path, {
+      ...existing,
+      ...normalized,
+      additions: existing.additions + normalized.additions,
+      deletions: existing.deletions + normalized.deletions,
+      diff: joinReviewDiffs(existing.diff, normalized.diff),
+      content: normalized.content || existing.content,
+      operation: mergedReviewOperation(existing.operation, normalized.operation),
+      oldPath: normalized.oldPath ?? existing.oldPath ?? null,
+      newPath: normalized.newPath ?? existing.newPath ?? null,
+      source: normalized.source ?? existing.source ?? "unknown",
+    });
+  });
+  return [...merged.values()];
+}
+
+function joinReviewDiffs(...diffs: string[]): string {
+  return diffs.map((diff) => diff.trim()).filter(Boolean).join("\n");
+}
+
+function mergedReviewOperation(
+  existing: FileReviewChange["operation"],
+  next: FileReviewChange["operation"],
+): FileReviewChange["operation"] {
+  if (existing === "add" || next === "add") {
+    return "add";
+  }
+  return next === "unknown" ? existing : next;
+}
+
+function mergeConversationPatch(
+  message: ConversationMessage,
+  patch: Partial<ConversationMessage>,
+): ConversationMessage {
+  return {
+    ...message,
+    ...patch,
+    payload: {
+      ...message.payload,
+      ...(patch.payload ?? {}),
+    },
+  };
+}
+
+function toolCallIdFromPreviewMessage(message: ConversationMessage | undefined): string | null {
+  if (!message) {
+    return null;
+  }
+  const call = objectRecord(message.payload.call);
+  return stringValue(call?.id) || stringValue(message.payload.toolCallId) || null;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
