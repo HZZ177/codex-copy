@@ -36,8 +36,9 @@ type TextControl = HTMLInputElement | HTMLTextAreaElement;
 type EditableTarget = TextControl | HTMLElement;
 
 interface MenuContext {
+  documentEntry: WorkspaceEntryContext | null;
   editable: EditableTarget | null;
-  kind: "editable" | "selection" | "empty" | "workspace-file" | "workspace-directory";
+  kind: "editable" | "selection" | "empty" | "workspace-document" | "workspace-file" | "workspace-directory";
   mutable: boolean;
   selectionText: string;
   workspaceEntry: WorkspaceEntryContext | null;
@@ -74,6 +75,7 @@ interface MenuItem {
 const MENU_MARGIN = 8;
 const LOCAL_CONTEXT_MENU_SELECTOR = "[data-app-context-menu='local']";
 const NATIVE_CONTEXT_MENU_SELECTOR = "[data-native-context-menu='true']";
+const WORKSPACE_DOCUMENT_CONTEXT_SELECTOR = "[data-workspace-document-context='true'][data-workspace-document-path]";
 const WORKSPACE_ENTRY_CONTEXT_SELECTOR = "[data-workspace-entry-kind][data-workspace-entry-path]";
 const EDITABLE_SELECTOR = [
   "textarea",
@@ -359,6 +361,7 @@ function ContextMenuItemView({
 function useMenuItems(context: MenuContext): MenuItem[] {
   return useMemo(() => {
     const hasSelection = context.selectionText.length > 0;
+    const withDocumentAction = (items: MenuItem[]) => addDocumentChatItem(items, context.documentEntry);
     const workspaceEntry = context.workspaceEntry;
 
     if (workspaceEntry?.kind === "directory") {
@@ -415,7 +418,7 @@ function useMenuItems(context: MenuContext): MenuItem[] {
     }
 
     if (context.editable) {
-      return withRefresh([
+      return withRefresh(withDocumentAction([
         {
           action: () => cutSelection(context),
           disabled: !context.mutable || !hasSelection,
@@ -443,22 +446,37 @@ function useMenuItems(context: MenuContext): MenuItem[] {
           id: "select-all",
           label: "全选",
         },
-      ]);
+      ]));
     }
 
     if (hasSelection) {
-      return withRefresh([
+      return withRefresh(withDocumentAction([
         {
           action: () => copySelection(context),
           icon: Copy,
           id: "copy-selection",
           label: "复制",
         },
-      ]);
+      ]));
     }
 
-    return withRefresh([]);
+    return withRefresh(withDocumentAction([]));
   }, [context]);
+}
+
+function addDocumentChatItem(items: MenuItem[], documentEntry: WorkspaceEntryContext | null): MenuItem[] {
+  if (!documentEntry) {
+    return items;
+  }
+  return [
+    ...items,
+    {
+      action: () => addWorkspaceFileToChat(documentEntry),
+      icon: MessageSquarePlus,
+      id: "chat-with-workspace-document",
+      label: "对该文档对话",
+    },
+  ];
 }
 
 function withRefresh(items: MenuItem[]): MenuItem[] {
@@ -606,6 +624,7 @@ function getMenuContext(target: Element): MenuContext {
   const workspaceEntry = getWorkspaceEntryContext(target);
   if (workspaceEntry) {
     return {
+      documentEntry: null,
       editable: null,
       kind: workspaceEntry.kind === "file" ? "workspace-file" : "workspace-directory",
       mutable: false,
@@ -614,15 +633,41 @@ function getMenuContext(target: Element): MenuContext {
     };
   }
 
+  const documentEntry = getWorkspaceDocumentContext(target);
   const editable = getEditableTarget(target);
   const selectionText = editable ? getEditableSelectionText(editable) : window.getSelection()?.toString() ?? "";
   const mutable = editable ? isEditableMutable(editable) : false;
   return {
+    documentEntry,
     editable,
-    kind: editable ? "editable" : selectionText ? "selection" : "empty",
+    kind: editable ? "editable" : selectionText ? "selection" : documentEntry ? "workspace-document" : "empty",
     mutable,
     selectionText,
     workspaceEntry: null,
+  };
+}
+
+function getWorkspaceDocumentContext(target: Element): WorkspaceEntryContext | null {
+  const candidate = target.closest(WORKSPACE_DOCUMENT_CONTEXT_SELECTOR);
+  if (!(candidate instanceof HTMLElement)) {
+    return null;
+  }
+  const path = candidate.dataset.workspaceDocumentPath?.trim() ?? "";
+  if (!path) {
+    return null;
+  }
+  const workspaceRoot = candidate.dataset.workspaceRoot?.trim() || null;
+  const absolutePath =
+    candidate.dataset.workspaceDocumentAbsolutePath?.trim() ||
+    workspaceAbsolutePath(workspaceRoot ?? "", path);
+  return {
+    absolutePath,
+    kind: "file",
+    name: candidate.dataset.workspaceDocumentName?.trim() || fileName(path),
+    path,
+    sessionId: candidate.dataset.workspaceSessionId?.trim() || null,
+    workspaceId: candidate.dataset.workspaceId?.trim() || null,
+    workspaceRoot,
   };
 }
 

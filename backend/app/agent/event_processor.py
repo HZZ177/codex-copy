@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
@@ -9,19 +10,12 @@ from typing import Any
 from langchain_core.messages import AIMessageChunk, ToolMessage
 from langgraph.types import Command
 
-from backend.app.agent.factory import (
-    get_llm_gateway_trace_id,
-    pop_llm_gateway_trace_id,
-)
 from backend.app.agent.tool_call_progress import (
     ToolCallChunkPipeline,
     finalize_file_change,
 )
-from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.events import DomainEventType, EventDispatcher
-from backend.app.storage import LLMRequestLogRecord
-from backend.app.storage.repositories import LLMRequestLogsRepository
 
 
 @dataclass
@@ -49,13 +43,9 @@ async def process_agent_events(
     user_id: str,
     active_session_id: str,
     turn_index: int,
-    model: str = "",
-    llm_request_logs: LLMRequestLogsRepository | None = None,
 ) -> AgentEventResult:
     result = AgentEventResult()
     tool_start_times: dict[str, float] = {}
-    llm_start_times: dict[str, float] = {}
-    llm_request_ids: dict[str, str] = {}
     reasoning_parts_by_run_id: dict[str, list[str]] = {}
     tool_chunk_pipeline = ToolCallChunkPipeline()
     stream_chunk_count = 0
@@ -75,29 +65,10 @@ async def process_agent_events(
 
             event_type = str(event.get("event") or "")
             data = event.get("data") or {}
-            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
             run_id = str(event.get("run_id") or "")
             name = str(event.get("name") or "")
 
             if event_type == "on_chat_model_start":
-                request_log = _start_llm_request_log(
-                    llm_request_logs=llm_request_logs,
-                    run_id=run_id,
-                    gateway_trace_id=get_llm_gateway_trace_id(run_id),
-                    gateway_thread_id=trace_id,
-                    name=name,
-                    data=data,
-                    metadata=metadata,
-                    session_id=session_id,
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    active_session_id=active_session_id,
-                    turn_index=turn_index,
-                    model=model,
-                )
-                if request_log is not None:
-                    llm_request_ids[run_id] = request_log.id
-                    llm_start_times[run_id] = time.perf_counter()
                 continue
 
             if event_type == "on_chat_model_stream":
@@ -123,14 +94,6 @@ async def process_agent_events(
 
             if event_type == "on_chat_model_end":
                 _collect_usage(data.get("output"), result)
-                _finish_llm_request_log(
-                    llm_request_logs=llm_request_logs,
-                    llm_request_ids=llm_request_ids,
-                    llm_start_times=llm_start_times,
-                    run_id=run_id,
-                    data=data,
-                    usage=result.latest_llm_token_usage,
-                )
                 if result.latest_llm_token_usage:
                     logger.info(
                         f"[AgentEvents] LLM 调用完成 | session_id={session_id} | "
@@ -172,14 +135,6 @@ async def process_agent_events(
                 continue
 
             if event_type == "on_chat_model_error":
-                _fail_llm_request_log(
-                    llm_request_logs=llm_request_logs,
-                    llm_request_ids=llm_request_ids,
-                    llm_start_times=llm_start_times,
-                    run_id=run_id,
-                    data=data,
-                    event=event,
-                )
                 continue
 
             if event_type == "on_tool_start":
@@ -311,6 +266,15 @@ async def process_agent_events(
                     run_id=run_id,
                     turn_index=turn_index,
                 )
+    except asyncio.CancelledError:
+        if not cancellation.is_cancelled():
+            raise
+        logger.info(
+            f"[AgentEvents] 事件流被用户取消中断，保留已收集输出 | session_id={session_id} | "
+            f"turn_index={turn_index} | trace_id={trace_id} | "
+            f"partial_content_len={len(result.final_content)}"
+        )
+        await _close_event_stream(event_stream)
     finally:
         await dispatcher.flush()
         logger.info(
@@ -322,110 +286,6 @@ async def process_agent_events(
         )
 
     return result
-
-
-def _start_llm_request_log(
-    *,
-    llm_request_logs: LLMRequestLogsRepository | None,
-    run_id: str,
-    gateway_trace_id: str | None,
-    gateway_thread_id: str,
-    name: str,
-    data: dict[str, Any],
-    metadata: dict[str, Any],
-    session_id: str,
-    trace_id: str,
-    user_id: str,
-    active_session_id: str,
-    turn_index: int,
-    model: str,
-) -> LLMRequestLogRecord | None:
-    if llm_request_logs is None:
-        return None
-    request_id = run_id or new_id()
-    resolved_model = (
-        _metadata_text(metadata, "ls_model_name") or _metadata_text(metadata, "model") or model
-    )
-    if not resolved_model:
-        resolved_model = "unknown"
-    return llm_request_logs.start(
-        request_id=request_id,
-        trace_id=trace_id,
-        trace_record_id=trace_id,
-        session_id=session_id,
-        active_session_id=active_session_id,
-        gateway_thread_id=gateway_thread_id,
-        gateway_trace_id=gateway_trace_id,
-        turn_index=turn_index,
-        provider_name=_metadata_text(metadata, "ls_provider") or name or None,
-        model=resolved_model,
-        request_preview=_preview_value(data.get("input")),
-        metadata={
-            "run_id": run_id,
-            "event_name": name,
-            "user_id": user_id,
-            "langchain_metadata": metadata,
-        },
-    )
-
-
-def _finish_llm_request_log(
-    *,
-    llm_request_logs: LLMRequestLogsRepository | None,
-    llm_request_ids: dict[str, str],
-    llm_start_times: dict[str, float],
-    run_id: str,
-    data: dict[str, Any],
-    usage: dict[str, Any],
-) -> None:
-    gateway_trace_id = pop_llm_gateway_trace_id(run_id)
-    if llm_request_logs is None:
-        return
-    request_id = llm_request_ids.pop(run_id, "")
-    if not request_id:
-        return
-    started_at = llm_start_times.pop(run_id, time.perf_counter())
-    duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
-    output = data.get("output")
-    llm_request_logs.finish(
-        request_id,
-        input_tokens=int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
-        cache_read_tokens=int(usage.get("cache_read_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
-        total_tokens=int(usage.get("total_tokens") or 0) or None,
-        response_preview=_message_text(output) or _preview_value(output),
-        duration_ms=duration_ms,
-        gateway_thread_id=None,
-        gateway_trace_id=gateway_trace_id,
-    )
-
-
-def _fail_llm_request_log(
-    *,
-    llm_request_logs: LLMRequestLogsRepository | None,
-    llm_request_ids: dict[str, str],
-    llm_start_times: dict[str, float],
-    run_id: str,
-    data: dict[str, Any],
-    event: dict[str, Any],
-) -> None:
-    gateway_trace_id = pop_llm_gateway_trace_id(run_id)
-    if llm_request_logs is None:
-        return
-    request_id = llm_request_ids.pop(run_id, "")
-    if not request_id:
-        return
-    started_at = llm_start_times.pop(run_id, time.perf_counter())
-    duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
-    error_text = str(data.get("error") or event.get("error") or "模型请求失败")
-    llm_request_logs.fail(
-        request_id,
-        error_message=error_text,
-        response_preview=_preview_value(data.get("output")),
-        duration_ms=duration_ms,
-        gateway_thread_id=None,
-        gateway_trace_id=gateway_trace_id,
-    )
 
 
 async def _handle_chat_model_stream(

@@ -1629,7 +1629,17 @@ export function FilePreview({
       {previewBusy ? <FilePreviewLoading label="正在读取文件" /> : null}
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       {!previewBusy && !error ? (
-        <div className={styles.body} data-chrome={chrome} aria-label="预览内容" ref={bodyRef}>
+        <div
+          className={styles.body}
+          data-chrome={chrome}
+          data-workspace-document-context={request.type === "file" ? "true" : undefined}
+          data-workspace-document-name={request.type === "file" ? fileName(request.path) : undefined}
+          data-workspace-document-path={request.type === "file" ? request.path : undefined}
+          data-workspace-id={workspaceId}
+          data-workspace-session-id={sessionId}
+          aria-label="预览内容"
+          ref={bodyRef}
+        >
           {renderBodyContent()}
           {findOpen ? (
             <FilePreviewFindBar

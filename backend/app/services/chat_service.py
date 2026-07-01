@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import RemoveMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from backend.app.agent import AgentRunner
@@ -96,6 +96,7 @@ class AgentLoopOutcome:
 
 
 _SLOT_MESSAGE_ID = "keydex_slot_system_fixed"
+CANCELLED_CHECKPOINT_NOTICE = "[用户在此处取消]"
 MAX_IMAGE_ATTACHMENTS_PER_TURN = 8
 MAX_IMAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024
 SUPPORTED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
@@ -388,6 +389,140 @@ async def _sync_slot_to_checkpoint(graph: Any, config: dict[str, Any], content: 
     return True
 
 
+def _cancelled_checkpoint_content(content: str) -> str:
+    stripped = str(content or "").rstrip()
+    if not stripped:
+        return ""
+    if CANCELLED_CHECKPOINT_NOTICE in stripped:
+        return stripped
+    return f"{stripped}\n\n{CANCELLED_CHECKPOINT_NOTICE}"
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content or "")
+
+
+def _checkpoint_message_role(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("role") or "")
+    message_type = str(getattr(message, "type", "") or "")
+    if message_type == "human":
+        return "user"
+    if message_type == "ai":
+        return "assistant"
+    return message_type
+
+
+def _checkpoint_message_signature(message: Any) -> tuple[str, str]:
+    content = (
+        message.get("content")
+        if isinstance(message, dict)
+        else getattr(message, "content", "")
+    )
+    return _checkpoint_message_role(message), _message_content_text(content)
+
+
+def _state_has_runtime_tail(
+    state_messages: list[Any],
+    runtime_messages: list[dict[str, Any]],
+) -> bool:
+    signatures = [_checkpoint_message_signature(message) for message in runtime_messages]
+    if not signatures:
+        return True
+    if len(state_messages) < len(signatures):
+        return False
+    state_tail = [
+        _checkpoint_message_signature(message)
+        for message in state_messages[-len(signatures) :]
+    ]
+    return state_tail == signatures
+
+
+def _checkpoint_message_from_runtime(message: dict[str, Any]) -> Any:
+    role = str(message.get("role") or "user")
+    content = message.get("content", "")
+    if role == "assistant":
+        return AIMessage(content=content)
+    if role == "system":
+        return SystemMessage(content=content)
+    return HumanMessage(content=content)
+
+
+def _copy_ai_message_with_content(message: Any, content: str) -> Any:
+    model_copy = getattr(message, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update={"content": content})
+    kwargs: dict[str, Any] = {}
+    message_id = getattr(message, "id", None)
+    if message_id:
+        kwargs["id"] = message_id
+    name = getattr(message, "name", None)
+    if name:
+        kwargs["name"] = name
+    return AIMessage(content=content, **kwargs)
+
+
+async def _sync_cancelled_output_to_checkpoint(
+    graph: Any,
+    config: dict[str, Any],
+    *,
+    content: str,
+    runtime_messages: list[dict[str, Any]],
+) -> bool:
+    checkpoint_content = _cancelled_checkpoint_content(content)
+    if not checkpoint_content:
+        return False
+    if not hasattr(graph, "aget_state") or not hasattr(graph, "aupdate_state"):
+        logger.debug("[ChatTurn] graph 不支持 checkpoint 取消补写，跳过")
+        return False
+
+    try:
+        snapshot = await graph.aget_state(config)
+        values = snapshot.values or {}
+        state_messages = list(values.get("messages") or []) if isinstance(values, dict) else []
+        if runtime_messages and not _state_has_runtime_tail(state_messages, runtime_messages):
+            state_messages.extend(
+                _checkpoint_message_from_runtime(message) for message in runtime_messages
+            )
+
+        if state_messages and _checkpoint_message_role(state_messages[-1]) == "assistant":
+            current_content = _message_content_text(getattr(state_messages[-1], "content", ""))
+            if CANCELLED_CHECKPOINT_NOTICE in current_content:
+                return False
+            state_messages[-1] = _copy_ai_message_with_content(
+                state_messages[-1],
+                _cancelled_checkpoint_content(current_content or content),
+            )
+        else:
+            state_messages.append(AIMessage(content=checkpoint_content))
+
+        await graph.aupdate_state(
+            config,
+            {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *state_messages]},
+        )
+    except Exception:
+        logger.opt(exception=True).warning("[ChatTurn] 取消输出补写 checkpoint 失败")
+        return False
+
+    logger.info(
+        "[ChatTurn] 已将取消前 assistant 输出补写到 checkpoint | "
+        f"partial_content_len={len(content)}"
+    )
+    return True
+
+
 class ChatService:
     def __init__(
         self,
@@ -441,6 +576,7 @@ class ChatService:
             session_id=session.id,
             active_session_id=active_session_id,
             user_id=request.user_id or session.user_id,
+            turn_index=turn_index,
         )
         runtime_metadata = {"runtime": "desktop", "agent_runtime": "langchain"}
         if request.runtime_params:
@@ -864,9 +1000,14 @@ class ChatService:
                 user_id=request.user_id or session.user_id,
                 active_session_id=active_session_id,
                 turn_index=turn_index,
-                model=request.model.strip(),
-                llm_request_logs=self.repositories.llm_request_logs,
             )
+            if cancellation.is_cancelled():
+                await _sync_cancelled_output_to_checkpoint(
+                    agent,
+                    run_config,
+                    content=event_result.final_content,
+                    runtime_messages=messages_to_send,
+                )
         finally:
             reset_request_context(agent_context_token)
         checkpoint_config = await self.agent_runner.get_latest_checkpoint_config(

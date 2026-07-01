@@ -88,11 +88,13 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
   const [trend, setTrend] = useState<UsageTrendPoint[]>([]);
   const [heatTrend, setHeatTrend] = useState<UsageTrendPoint[]>([]);
   const [requests, setRequests] = useState<UsageRequestListResponse>(EMPTY_REQUESTS);
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [detailId, setDetailId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [requestsLoading, setRequestsLoading] = useState(true);
   const [heatLoading, setHeatLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [requestsError, setRequestsError] = useState<string | null>(null);
   const timezoneOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
   const heatRange = useMemo(() => computeHeatWallRange(), [refreshNonce]);
 
@@ -106,15 +108,22 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
         : computeRange(rangePreset),
     [customEnd, customStart, rangePreset],
   );
+  const query = useMemo(
+    () => ({
+      ...range,
+      model: selectedModel || undefined,
+    }),
+    [range, selectedModel],
+  );
+  const modelOptions = useMemo(
+    () => collectModelOptions(providers, requests.list, selectedModel),
+    [providers, requests.list, selectedModel],
+  );
+  const error = statsError ?? requestsError;
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
-    const query = {
-      ...range,
-      model: selectedModel || undefined,
-    };
+    setStatsLoading(true);
     void Promise.all([
       runtime.usage.getSummary(query),
       loadUsageTrend({
@@ -129,36 +138,62 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
         runtime,
         timezoneOffsetMinutes,
       }),
-      runtime.usage.listRequests({ ...query, page, pageSize: PAGE_SIZE }),
       runtime.models.listProviders().catch(() => [] as ModelProvider[]),
     ])
-      .then(([nextSummary, nextTrend, nextRequests, providers]) => {
+      .then(([nextSummary, nextTrend, nextProviders]) => {
         if (!active) {
           return;
         }
+        setStatsError(null);
         setSummary(nextSummary);
         setTrend(nextTrend);
-        setRequests(nextRequests);
-        setModelOptions(collectModelOptions(providers, nextRequests.list, selectedModel));
+        setProviders(nextProviders);
       })
       .catch((reason: unknown) => {
         if (!active) {
           return;
         }
-        setError(errorMessage(reason));
+        setStatsError(errorMessage(reason));
         setSummary(EMPTY_SUMMARY);
         setTrend([]);
-        setRequests({ ...EMPTY_REQUESTS, page });
+        setProviders([]);
       })
       .finally(() => {
         if (active) {
-          setLoading(false);
+          setStatsLoading(false);
         }
       });
     return () => {
       active = false;
     };
-  }, [page, range, refreshNonce, runtime, selectedModel, timezoneOffsetMinutes, trendBucket]);
+  }, [query, range, refreshNonce, runtime, timezoneOffsetMinutes, trendBucket]);
+
+  useEffect(() => {
+    let active = true;
+    setRequestsLoading(true);
+    void runtime.usage
+      .listRequests({ ...query, page, pageSize: PAGE_SIZE })
+      .then((nextRequests) => {
+        if (active) {
+          setRequestsError(null);
+          setRequests(nextRequests);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setRequestsError(errorMessage(reason));
+          setRequests({ ...EMPTY_REQUESTS, page });
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setRequestsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [page, query, refreshNonce, runtime]);
 
   useEffect(() => {
     let active = true;
@@ -320,7 +355,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
           </section>
         ) : null}
 
-        <section className={styles.metrics} aria-label="用量指标" data-loading={loading ? "true" : "false"}>
+        <section className={styles.metrics} aria-label="用量指标" data-loading={statsLoading ? "true" : "false"}>
           <MetricCard
             icon={<Zap size={18} />}
             label="请求数量"
@@ -371,7 +406,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
                   按天
                 </button>
               </div>
-              {loading ? <Loader2 className={styles.spin} size={16} /> : null}
+              {statsLoading ? <Loader2 className={styles.spin} size={16} /> : null}
             </div>
           </div>
           <UsageTrendChart points={trend} />
@@ -384,7 +419,7 @@ export function UsageStatsPage({ runtime = runtimeBridge }: UsageStatsPageProps)
               <p>共 {formatNumber(requests.total)} 条记录</p>
             </div>
           </div>
-          <UsageRequestTable rows={requests.list} loading={loading} onOpen={(id) => setDetailId(id)} />
+          <UsageRequestTable rows={requests.list} loading={requestsLoading} onOpen={(id) => setDetailId(id)} />
           <footer className={styles.pagination}>
             <button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
               上一页
@@ -1061,6 +1096,16 @@ function UsageRequestTable({
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>
+        <colgroup>
+          <col className={styles.timeColumn} />
+          <col className={styles.modelColumn} />
+          <col className={styles.inputColumn} />
+          <col className={styles.cacheColumn} />
+          <col className={styles.outputColumn} />
+          <col className={styles.totalColumn} />
+          <col className={styles.durationColumn} />
+          <col className={styles.statusColumn} />
+        </colgroup>
         <thead>
           <tr>
             <th>时间</th>
@@ -1071,7 +1116,6 @@ function UsageRequestTable({
             <th>总量</th>
             <th>耗时</th>
             <th>状态</th>
-            <th>会话</th>
           </tr>
         </thead>
         <tbody>
@@ -1080,7 +1124,7 @@ function UsageRequestTable({
               <td>{formatDateTime(row.start_time)}</td>
               <td title={row.model}>{row.model}</td>
               <td>{formatNumber(row.input_tokens)}</td>
-              <td>{formatNumber(row.cache_read_tokens)}</td>
+              <td>{formatCacheHitTokens(row)}</td>
               <td>{formatNumber(row.output_tokens)}</td>
               <td>{formatNumber(row.total_tokens)}</td>
               <td>{formatDuration(row.duration_ms)}</td>
@@ -1089,12 +1133,11 @@ function UsageRequestTable({
                   {statusLabel(row.status)}
                 </span>
               </td>
-              <td title={row.session_id}>{shortId(row.session_id)}</td>
             </tr>
           ))}
           {loading ? (
             <tr>
-              <td colSpan={9}>
+              <td colSpan={8}>
                 <span className={styles.loadingLine}>
                   <Loader2 className={styles.spin} size={15} />
                   正在读取请求日志
@@ -1206,7 +1249,7 @@ function UsageDetailContent({ detail }: { detail: UsageRequestDetail }) {
         <div className={styles.detailTokens}>
           <span>总输入 {formatNumber(request.input_tokens)}</span>
           <span>非缓存输入 {formatNumber(nonCacheInputTokens(request))}</span>
-          <span>命中缓存 {formatNumber(request.cache_read_tokens)}</span>
+          <span>命中缓存 {formatCacheHitTokens(request)}</span>
           <span>输出 {formatNumber(request.output_tokens)}</span>
           <span>总量 {formatNumber(request.total_tokens)}</span>
         </div>
@@ -1432,6 +1475,12 @@ function cacheHitRate(cacheReadTokens: number | null | undefined, inputTokens: n
   return (cacheReadTokens ?? 0) / totalInput;
 }
 
+function formatCacheHitTokens(value: TokenInputLike) {
+  const inputTokens = value.input_tokens ?? 0;
+  const percent = inputTokens > 0 ? formatPercent(cacheHitRate(value.cache_read_tokens, inputTokens)) : "-";
+  return `${formatNumber(value.cache_read_tokens)} (${percent})`;
+}
+
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
@@ -1458,13 +1507,6 @@ function statusLabel(status: string) {
     return "已取消";
   }
   return status || "未知";
-}
-
-function shortId(value: string) {
-  if (value.length <= 12) {
-    return value;
-  }
-  return `${value.slice(0, 8)}...`;
 }
 
 function errorMessage(reason: unknown) {

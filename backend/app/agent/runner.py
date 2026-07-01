@@ -77,10 +77,12 @@ class AgentRunner:
 
         settings = model_settings or self.model_settings
         model_http_transport = self.model_http_transport()
+        repositories = tool_context.metadata.get("repositories")
         llm = self.factory.get_or_create_llm(
             settings,
             model=model,
             http_transport=model_http_transport,
+            llm_request_logs=getattr(repositories, "llm_request_logs", None),
         )
         tools = (
             registry_to_langchain_tools(
@@ -112,7 +114,7 @@ class AgentRunner:
             checkpointer=self.checkpointer,
             middleware=build_default_middleware(
                 runtime_settings,
-                repositories=tool_context.metadata.get("repositories"),
+                repositories=repositories,
                 dispatcher=tool_context.metadata.get("dispatcher"),
                 checkpointer=self.checkpointer,
                 model_http_transport=model_http_transport,

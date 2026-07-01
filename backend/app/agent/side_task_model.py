@@ -55,6 +55,9 @@ def create_side_task_llm(
             max_tokens=max_tokens,
             streaming=False,
             http_transport=http_transport,
+            llm_request_logs=repositories.llm_request_logs,
+            provider_id=resolved.provider_id,
+            provider_name=resolved.provider_name,
         )
     except Exception as exc:
         raise SideTaskModelError(

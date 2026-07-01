@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -8,7 +9,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langgraph.types import Command
 
 from backend.app.agent.event_processor import process_agent_events
-from backend.app.agent.factory import register_llm_gateway_trace_id
 from backend.app.events import DomainEvent, DomainEventType, EventDispatcher
 from backend.app.storage import StorageRepositories, init_database
 
@@ -18,21 +18,30 @@ class NeverCancelled:
         return False
 
 
+class ManualCancellation:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self.cancelled
+
+
 async def _event_stream(events: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
     for event in events:
         yield event
 
 
-async def _event_stream_with_gateway_trace(
-    events: list[dict[str, Any]],
-    *,
-    run_id: str,
-    gateway_trace_id: str,
-) -> AsyncIterator[dict[str, Any]]:
-    for event in events:
-        yield event
-        if event.get("event") == "on_chat_model_start":
-            register_llm_gateway_trace_id(run_id, gateway_trace_id)
+async def _cancel_after_first_stream(token: ManualCancellation) -> AsyncIterator[dict[str, Any]]:
+    yield {
+        "event": "on_chat_model_stream",
+        "run_id": "run_cancel",
+        "data": {"chunk": AIMessageChunk(content="半截")},
+    }
+    token.cancel()
+    raise asyncio.CancelledError
 
 
 def _repositories(tmp_path) -> StorageRepositories:
@@ -55,11 +64,11 @@ def _repositories(tmp_path) -> StorageRepositories:
 
 
 @pytest.mark.asyncio
-async def test_process_agent_events_writes_llm_request_log_on_model_end(tmp_path) -> None:
+async def test_process_agent_events_collects_usage_without_writing_llm_log(tmp_path) -> None:
     repositories = _repositories(tmp_path)
 
     result = await process_agent_events(
-        _event_stream_with_gateway_trace(
+        _event_stream(
             [
                 {
                     "event": "on_chat_model_start",
@@ -88,8 +97,6 @@ async def test_process_agent_events_writes_llm_request_log_on_model_end(tmp_path
                     },
                 },
             ],
-            run_id="run_1",
-            gateway_trace_id="gateway_trace_run_1",
         ),
         dispatcher=EventDispatcher(),
         cancellation=NeverCancelled(),
@@ -98,33 +105,49 @@ async def test_process_agent_events_writes_llm_request_log_on_model_end(tmp_path
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
-        llm_request_logs=repositories.llm_request_logs,
     )
 
-    record = repositories.llm_request_logs.get("run_1")
-    assert record is not None
-    assert record.status == "completed"
-    assert record.model == "deepseek-v4-flash"
-    assert record.provider_name == "openai"
-    assert record.gateway_thread_id == "trace_agent"
-    assert record.gateway_trace_id == "gateway_trace_run_1"
-    assert record.input_tokens == 12
-    assert record.output_tokens == 8
-    assert record.cache_read_tokens == 5
-    assert record.total_tokens == 20
-    assert record.response_preview == "你好，已收到"
-    assert record.metadata is not None
-    assert "authorization" not in record.metadata["langchain_metadata"]
     assert result.chain_token_usage["llm_call_count"] == 1
+    assert result.chain_token_usage["input_tokens"] == 12
+    assert result.chain_token_usage["output_tokens"] == 8
+    assert result.chain_token_usage["cache_read_tokens"] == 5
+    assert repositories.llm_request_logs.list()[1] == 0
 
 
 @pytest.mark.asyncio
-async def test_process_agent_events_marks_llm_request_log_failed_on_model_error(tmp_path) -> None:
+async def test_process_agent_events_keeps_partial_output_on_user_task_cancel(tmp_path) -> None:
+    _repositories(tmp_path)
+    token = ManualCancellation()
+    emitted: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        emitted.append(event)
+
+    result = await process_agent_events(
+        _cancel_after_first_stream(token),
+        dispatcher=EventDispatcher([capture]),
+        cancellation=token,
+        session_id="ses_agent",
+        trace_id="trace_agent",
+        user_id="local-user",
+        active_session_id="ses_agent",
+        turn_index=1,
+    )
+
+    assert result.final_content == "半截"
+    stream_events = [
+        event for event in emitted if event.event_type == DomainEventType.LLM_STREAM.value
+    ]
+    assert len(stream_events) == 1
+    assert stream_events[0].payload["content"] == "半截"
+
+
+@pytest.mark.asyncio
+async def test_process_agent_events_does_not_write_llm_log_on_model_error(tmp_path) -> None:
     repositories = _repositories(tmp_path)
 
     await process_agent_events(
-        _event_stream_with_gateway_trace(
+        _event_stream(
             [
                 {
                     "event": "on_chat_model_start",
@@ -139,8 +162,6 @@ async def test_process_agent_events_marks_llm_request_log_failed_on_model_error(
                     "data": {"error": "HTTP 400"},
                 },
             ],
-            run_id="run_error",
-            gateway_trace_id="gateway_trace_run_error",
         ),
         dispatcher=EventDispatcher(),
         cancellation=NeverCancelled(),
@@ -149,17 +170,9 @@ async def test_process_agent_events_marks_llm_request_log_failed_on_model_error(
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
-        llm_request_logs=repositories.llm_request_logs,
     )
 
-    record = repositories.llm_request_logs.get("run_error")
-    assert record is not None
-    assert record.status == "failed"
-    assert record.model == "runtime-model"
-    assert record.gateway_thread_id == "trace_agent"
-    assert record.gateway_trace_id == "gateway_trace_run_error"
-    assert record.error_message == "HTTP 400"
+    assert repositories.llm_request_logs.list()[1] == 0
 
 
 @pytest.mark.asyncio
@@ -198,7 +211,6 @@ async def test_process_agent_events_marks_serialized_local_tool_error_failed() -
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     tool_events = [event for event in emitted if event.run_id == "tool_error"]
@@ -251,7 +263,6 @@ async def test_process_agent_events_emits_tool_progress_from_model_chunks() -> N
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     progress_events = [
@@ -306,7 +317,6 @@ async def test_process_agent_events_emits_tool_progress_for_streamed_apply_patch
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     progress_events = [
@@ -358,7 +368,6 @@ async def test_process_agent_events_classifies_streamed_write_file_by_tool_name(
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     progress_events = [
@@ -423,7 +432,6 @@ async def test_process_agent_events_binds_streamed_tool_call_to_real_tool_run() 
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     progress = [
@@ -484,7 +492,6 @@ async def test_process_agent_events_includes_structured_tool_files_on_tool_end()
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     finished = [
@@ -554,7 +561,6 @@ async def test_process_agent_events_projects_command_tool_message_without_privat
         user_id="local-user",
         active_session_id="ses_agent",
         turn_index=1,
-        model="runtime-model",
     )
 
     finished = [

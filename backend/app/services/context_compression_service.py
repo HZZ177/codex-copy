@@ -6,13 +6,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from langchain_core.callbacks import AsyncCallbackHandler
 
 from backend.app.agent.context_compression_utils import (
     CompressionMaterial,
     render_messages_for_compression_input,
 )
-from backend.app.agent.factory import AgentFactory, agent_factory, pop_llm_gateway_trace_id
+from backend.app.agent.factory import AgentFactory, agent_factory
 from backend.app.agent.side_task_model import SideTaskLLM, SideTaskModelError, create_side_task_llm
 from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
@@ -37,35 +36,6 @@ class ContextCompressionOutcome:
     token_count: int = 0
     context_window_tokens: int = 0
     fraction: float = 0.0
-
-
-class _TokenUsageCaptureHandler(AsyncCallbackHandler):
-    def __init__(self) -> None:
-        self.run_id: str | None = None
-        self.token_usage = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cache_read_tokens": 0,
-        }
-
-    async def on_chat_model_start(
-        self,
-        serialized,
-        messages,
-        *,
-        run_id,
-        parent_run_id=None,
-        tags=None,
-        metadata=None,
-        **kwargs,
-    ) -> None:
-        self.run_id = str(run_id) if run_id else None
-
-    async def on_llm_end(self, response, **kwargs) -> None:
-        usage = _response_usage(response)
-        if usage:
-            self.token_usage = _extract_token_usage_from_metadata(usage)
 
 
 class ContextCompressionService:
@@ -199,33 +169,19 @@ class ContextCompressionService:
         level: str,
         prompt_messages: list[Any],
     ) -> str | None:
-        request_id = new_id()
-        started_at = time.perf_counter()
+        side_event_id = new_id()
         started_at_ms = int(time.time() * 1000)
         trace_id = str(material.trace_id or "")
         trace_record_id = str(material.trace_record_id or trace_id)
         session_id = str(material.original_session_id or material.active_session_id or "")
-        capture = _TokenUsageCaptureHandler()
-        gateway_trace_id: str | None = None
         request_preview = _preview_messages(prompt_messages)
         if trace_id and trace_record_id and session_id:
-            self._start_request_log(
-                request_id=request_id,
-                trace_id=trace_id,
-                trace_record_id=trace_record_id,
-                session_id=session_id,
-                active_session_id=material.active_session_id,
-                side_task=side_task,
-                request_preview=request_preview,
-                level=level,
-                material=material,
-            )
             self._append_side_event(
                 trace_id=trace_id,
                 trace_record_id=trace_record_id,
                 event_type="context_compression.llm",
                 status="running",
-                side_event_id=request_id,
+                side_event_id=side_event_id,
                 material=material,
                 level=level,
                 model=side_task.model,
@@ -233,34 +189,22 @@ class ContextCompressionService:
                 started_at_ms=started_at_ms,
             )
         try:
-            response = await side_task.llm.ainvoke(
-                prompt_messages,
-                config={"callbacks": [capture]},
-            )
-            if capture.run_id:
-                gateway_trace_id = pop_llm_gateway_trace_id(capture.run_id)
-            usage = _extract_token_usage(response, capture.token_usage)
+            response = await side_task.llm.ainvoke(prompt_messages)
+            usage = _extract_token_usage(response)
             output_text = _clean_generated_text(getattr(response, "content", response))
             if trace_id and trace_record_id and session_id:
-                self._finish_request_log(
-                    request_id=request_id,
-                    response_preview=output_text or "",
-                    duration_ms=_duration_ms(started_at),
-                    usage=usage,
-                    gateway_trace_id=gateway_trace_id,
-                )
                 self._append_side_event(
                     trace_id=trace_id,
                     trace_record_id=trace_record_id,
                     event_type="context_compression.llm",
                     status="completed" if output_text else "failed",
-                    side_event_id=request_id,
+                    side_event_id=side_event_id,
                     material=material,
                     level=level,
                     model=side_task.model,
                     output_data={"content": output_text or ""},
                     usage=usage,
-                    gateway_trace_id=gateway_trace_id,
+                    gateway_trace_id=None,
                     started_at_ms=started_at_ms,
                     error=None
                     if output_text
@@ -268,108 +212,21 @@ class ContextCompressionService:
                 )
             return output_text
         except Exception as exc:
-            if capture.run_id:
-                gateway_trace_id = pop_llm_gateway_trace_id(capture.run_id)
             if trace_id and trace_record_id and session_id:
-                self._fail_request_log(
-                    request_id=request_id,
-                    response_preview="",
-                    duration_ms=_duration_ms(started_at),
-                    error_message=str(exc),
-                    gateway_trace_id=gateway_trace_id,
-                )
                 self._append_side_event(
                     trace_id=trace_id,
                     trace_record_id=trace_record_id,
                     event_type="context_compression.llm",
                     status="failed",
-                    side_event_id=request_id,
+                    side_event_id=side_event_id,
                     material=material,
                     level=level,
                     model=side_task.model,
-                    gateway_trace_id=gateway_trace_id,
+                    gateway_trace_id=None,
                     started_at_ms=started_at_ms,
                     error={"type": type(exc).__name__, "message": str(exc)},
                 )
             raise
-
-    def _start_request_log(
-        self,
-        *,
-        request_id: str,
-        trace_id: str,
-        trace_record_id: str,
-        session_id: str,
-        active_session_id: str | None,
-        side_task: SideTaskLLM,
-        request_preview: str,
-        level: str,
-        material: CompressionMaterial,
-    ) -> None:
-        try:
-            self.repositories.llm_request_logs.start(
-                request_id=request_id,
-                trace_id=trace_id,
-                trace_record_id=trace_record_id,
-                session_id=session_id,
-                active_session_id=active_session_id,
-                provider_id=side_task.provider_id,
-                provider_name=side_task.provider_name,
-                model=side_task.model,
-                request_preview=request_preview,
-                metadata={
-                    "domain": "context_compression",
-                    "compression_level": level,
-                    "phase": material.phase,
-                    "anchor_message_id": material.anchor_message_id,
-                    **(material.side_event_metadata or {}),
-                },
-            )
-        except Exception as exc:
-            logger.debug(f"[ContextCompressionService] 压缩请求日志开始失败 | 错误={exc}")
-
-    def _finish_request_log(
-        self,
-        *,
-        request_id: str,
-        response_preview: str,
-        duration_ms: int,
-        usage: dict[str, int],
-        gateway_trace_id: str | None,
-    ) -> None:
-        try:
-            self.repositories.llm_request_logs.finish(
-                request_id,
-                input_tokens=usage["input_tokens"],
-                cache_read_tokens=usage["cache_read_tokens"],
-                output_tokens=usage["output_tokens"],
-                total_tokens=usage["total_tokens"] or None,
-                response_preview=response_preview,
-                duration_ms=duration_ms,
-                gateway_trace_id=gateway_trace_id,
-            )
-        except Exception as exc:
-            logger.debug(f"[ContextCompressionService] 压缩请求日志完成失败 | 错误={exc}")
-
-    def _fail_request_log(
-        self,
-        *,
-        request_id: str,
-        response_preview: str,
-        duration_ms: int,
-        error_message: str,
-        gateway_trace_id: str | None,
-    ) -> None:
-        try:
-            self.repositories.llm_request_logs.fail(
-                request_id,
-                error_message=error_message,
-                response_preview=response_preview,
-                duration_ms=duration_ms,
-                gateway_trace_id=gateway_trace_id,
-            )
-        except Exception as exc:
-            logger.debug(f"[ContextCompressionService] 压缩请求日志失败记录失败 | 错误={exc}")
 
     def _append_side_event(
         self,
@@ -434,10 +291,6 @@ class ContextCompressionService:
             )
         except Exception as exc:
             logger.debug(f"[ContextCompressionService] 压缩旁路事件记录失败 | 错误={exc}")
-
-
-def _duration_ms(started_at: float) -> int:
-    return max(0, int((time.perf_counter() - started_at) * 1000))
 
 
 def _preview_messages(messages: list[Any]) -> str:

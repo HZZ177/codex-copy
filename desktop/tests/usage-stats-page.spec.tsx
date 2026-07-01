@@ -41,12 +41,15 @@ describe("UsageStatsPage", () => {
     expect(screen.getAllByText("18,445")).toHaveLength(1);
     expect(screen.getAllByText("17,907")).toHaveLength(1);
     expect(screen.getAllByText("4,947")).toHaveLength(1);
-    expect(screen.getAllByText("12,960")).toHaveLength(2);
+    expect(screen.getAllByText("12,960")).toHaveLength(1);
+    expect(screen.getByText("12,960 (72.4%)")).not.toBeNull();
     expect(screen.getAllByText("538")).toHaveLength(2);
     expect(screen.getByTestId("usage-token-heatwall")).not.toBeNull();
     expect(screen.getByTestId("usage-trend-chart")).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "使用趋势" })).toBeNull();
     expect(screen.queryByText("Token 活动")).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "会话" })).toBeNull();
+    expect(screen.queryByText("ses-1234...")).toBeNull();
     expect(screen.getByRole("button", { name: "按小时" }).getAttribute("data-active")).toBe("true");
     expect(runtime.usage.getTrend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -66,10 +69,9 @@ describe("UsageStatsPage", () => {
     expect(heatCall).toBeTruthy();
     if (heatCall) {
       const [{ startTime, endTime }] = heatCall;
-      const months = (new Date(endTime).getUTCFullYear() - new Date(startTime).getUTCFullYear()) * 12
-        + new Date(endTime).getUTCMonth()
-        - new Date(startTime).getUTCMonth();
-      expect(months).toBe(12);
+      const days = (new Date(endTime).getTime() - new Date(startTime).getTime()) / (24 * 60 * 60 * 1000);
+      expect(days).toBeGreaterThanOrEqual(365);
+      expect(days).toBeLessThanOrEqual(367);
     }
     await waitFor(() => {
       expect(setOption).toHaveBeenCalledWith(
@@ -188,6 +190,36 @@ describe("UsageStatsPage", () => {
     });
   });
 
+  it("paginates request logs without reloading summary or trend data", async () => {
+    const runtime = fakeRuntime({
+      requests: {
+        ...defaultRequests(),
+        total: 24,
+      },
+    });
+
+    render(<UsageStatsPage runtime={runtime} />);
+
+    await screen.findByText("24");
+    await waitFor(() => {
+      expect(runtime.usage.listRequests).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 12 }));
+      expect(runtime.usage.getTrend).toHaveBeenCalledTimes(2);
+    });
+
+    const summaryCalls = runtime.usage.getSummary.mock.calls.length;
+    const trendCalls = runtime.usage.getTrend.mock.calls.length;
+    const providerCalls = runtime.models.listProviders.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    await waitFor(() => {
+      expect(runtime.usage.listRequests).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 12 }));
+    });
+    expect(runtime.usage.getSummary).toHaveBeenCalledTimes(summaryCalls);
+    expect(runtime.usage.getTrend).toHaveBeenCalledTimes(trendCalls);
+    expect(runtime.models.listProviders).toHaveBeenCalledTimes(providerCalls);
+  });
+
   it("shows empty state without mock fallback data", async () => {
     const runtime = fakeRuntime({
       summary: emptySummary(),
@@ -227,11 +259,13 @@ describe("UsageStatsPage", () => {
 
     render(<UsageStatsPage runtime={runtime} />);
 
-    fireEvent.click(await screen.findByText("ses-1234..."));
+    fireEvent.click(await screen.findByText("deepseek-v4-flash"));
 
     expect(await screen.findByRole("dialog", { name: "请求详情" })).not.toBeNull();
     expect(runtime.usage.getRequestDetail).toHaveBeenCalledWith("llm_req_1");
     expect(screen.getByText("trace-1")).not.toBeNull();
+    expect(screen.getByText("ses-1234567890")).not.toBeNull();
+    expect(screen.getByText("命中缓存 12,960 (72.4%)")).not.toBeNull();
     expect(screen.getByText("on_chat_model_end")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭详情" }));
@@ -418,38 +452,7 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
       },
     ],
   };
-  const requests = options.requests ?? {
-    list: [
-      {
-        id: "llm_req_1",
-        created_at: "2026-06-19T23:12:00Z",
-        updated_at: "2026-06-19T23:12:02Z",
-        trace_id: "trace-1",
-        trace_record_id: "trace_record-1",
-        session_id: "ses-1234567890",
-        active_session_id: null,
-        turn_index: 1,
-        provider_id: "provider-1",
-        provider_name: "默认模型服务",
-        model: "deepseek-v4-flash",
-        status: "completed",
-        start_time: "2026-06-19T23:12:00Z",
-        end_time: "2026-06-19T23:12:02Z",
-        duration_ms: 2400,
-        input_tokens: 17_907,
-        cache_read_tokens: 12_960,
-        output_tokens: 538,
-        total_tokens: 18_445,
-        request_preview: "用户消息摘要",
-        response_preview: "模型响应摘要",
-        error_message: null,
-        metadata: {},
-      },
-    ],
-    total: 1,
-    page: 1,
-    page_size: 12,
-  };
+  const requests = options.requests ?? defaultRequests();
   const detail = options.detail ?? {
     request: requests.list[0],
     trace: {
@@ -510,7 +513,13 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
         }
         return Promise.resolve(trend);
       }),
-      listRequests: vi.fn(() => Promise.resolve(requests)),
+      listRequests: vi.fn((query?: { page?: number; pageSize?: number }) =>
+        Promise.resolve({
+          ...requests,
+          page: query?.page ?? requests.page,
+          page_size: query?.pageSize ?? requests.page_size,
+        }),
+      ),
       getRequestDetail: vi.fn(() => Promise.resolve(detail)),
     },
     models: {
@@ -523,6 +532,44 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
       listRequests: ReturnType<typeof vi.fn>;
       getRequestDetail: ReturnType<typeof vi.fn>;
     };
+    models: {
+      listProviders: ReturnType<typeof vi.fn>;
+    };
+  };
+}
+
+function defaultRequests(): UsageRequestListResponse {
+  return {
+    list: [
+      {
+        id: "llm_req_1",
+        created_at: "2026-06-19T23:12:00Z",
+        updated_at: "2026-06-19T23:12:02Z",
+        trace_id: "trace-1",
+        trace_record_id: "trace_record-1",
+        session_id: "ses-1234567890",
+        active_session_id: null,
+        turn_index: 1,
+        provider_id: "provider-1",
+        provider_name: "默认模型服务",
+        model: "deepseek-v4-flash",
+        status: "completed",
+        start_time: "2026-06-19T23:12:00Z",
+        end_time: "2026-06-19T23:12:02Z",
+        duration_ms: 2400,
+        input_tokens: 17_907,
+        cache_read_tokens: 12_960,
+        output_tokens: 538,
+        total_tokens: 18_445,
+        request_preview: "用户消息摘要",
+        response_preview: "模型响应摘要",
+        error_message: null,
+        metadata: {},
+      },
+    ],
+    total: 1,
+    page: 1,
+    page_size: 12,
   };
 }
 

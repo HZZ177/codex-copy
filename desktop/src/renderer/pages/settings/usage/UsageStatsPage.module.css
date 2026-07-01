@@ -767,16 +767,51 @@
 }
 
 .table {
-  width: 100%;
-  min-width: 980px;
+  width: 824px;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
+}
+
+.timeColumn {
+  width: 126px;
+}
+
+.modelColumn {
+  width: 220px;
+}
+
+.inputColumn {
+  width: 74px;
+}
+
+.cacheColumn {
+  width: 128px;
+}
+
+.outputColumn {
+  width: 58px;
+}
+
+.totalColumn {
+  width: 68px;
+}
+
+.durationColumn {
+  width: 68px;
+}
+
+.statusColumn {
+  width: 82px;
 }
 
 .table th,
 .table td {
+  box-sizing: border-box;
   border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 88%, transparent);
-  padding: 14px 16px;
+  padding: 14px 10px;
   text-align: left;
+  white-space: nowrap;
 }
 
 .table th {
@@ -791,12 +826,19 @@
 }
 
 .table td:nth-child(2) {
-  max-width: 250px;
-  overflow: hidden;
   color: var(--color-text-primary);
   font-family: var(--font-mono);
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: 16px;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: 12px;
 }
 
 .table tbody tr {

@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from backend.app.agent import AgentRunner
 from backend.app.agent.checkpoint import SQLiteCheckpointSaver
@@ -17,7 +18,7 @@ from backend.app.command_approval import CommandSettings, save_command_settings
 from backend.app.core.config import AppSettings
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
-from backend.app.services import ChatRequest, ChatService
+from backend.app.services import ChatCancellationToken, ChatRequest, ChatService
 from backend.app.storage import (
     MODEL_DEFAULT_CHAT,
     ModelProviderRecord,
@@ -99,6 +100,52 @@ class ToolLimitFailingAgent:
 class ToolLimitFailingRunner:
     def create_agent(self, **_kwargs) -> ToolLimitFailingAgent:
         return ToolLimitFailingAgent()
+
+
+class CancellableStreamingAgent:
+    def __init__(self, user_message: str) -> None:
+        self.stream_started = asyncio.Event()
+        self.state_messages: list[Any] = [HumanMessage(content=user_message)]
+        self.updated_messages: list[Any] = []
+
+    async def astream_events(self, *_args: Any, **_kwargs: Any):
+        self.stream_started.set()
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "run_cancel",
+            "data": {"chunk": AIMessageChunk(content="半截")},
+        }
+        await asyncio.Event().wait()
+
+    async def aget_state(self, _config: dict[str, Any]) -> Any:
+        return SimpleNamespace(values={"messages": list(self.state_messages)})
+
+    async def aupdate_state(self, _config: dict[str, Any], update: dict[str, Any]) -> None:
+        self.updated_messages = [
+            message
+            for message in update.get("messages", [])
+            if getattr(message, "type", "") != "remove"
+        ]
+        self.state_messages = list(self.updated_messages)
+
+
+class CancellableStreamingRunner:
+    def __init__(self, agent: CancellableStreamingAgent) -> None:
+        self.agent = agent
+
+    def create_agent(self, **_kwargs: Any) -> CancellableStreamingAgent:
+        return self.agent
+
+    async def get_latest_checkpoint_config(
+        self,
+        *,
+        thread_id: str,
+        checkpoint_ns: str = "",
+    ) -> dict[str, str | None]:
+        return {
+            "checkpoint_id": "ckpt_cancelled" if self.agent.updated_messages else None,
+            "checkpoint_ns": checkpoint_ns,
+        }
 
 
 def _service(
@@ -196,12 +243,6 @@ async def test_chat_service_uses_langchain_agent_and_persists_history(tmp_path) 
     trace = repositories.trace_records.get(result.trace_id)
     assert trace.status == "completed"
     assert trace.output_checkpoint_id
-    llm_logs, total = repositories.llm_request_logs.list()
-    assert total == 1
-    assert llm_logs[0].trace_id == result.trace_id
-    assert llm_logs[0].session_id == result.session_id
-    assert llm_logs[0].model == "qwen-coder"
-    assert llm_logs[0].status == "completed"
     session = repositories.sessions.get(result.session_id)
     assert session.current_model_provider_id == "provider-1"
     assert session.current_model == "qwen-coder"
@@ -772,3 +813,46 @@ async def test_chat_service_converts_task_cancel_to_cancelled_turn(tmp_path, mon
     assert chat_adapter.sent[-1]["action"] == "cancelled"
     assert repositories.trace_records.get(result.trace_id).status == "cancelled"
     assert repositories.sessions.get(result.session_id).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_patches_cancelled_partial_output_into_checkpoint(tmp_path) -> None:
+    model = ToolFriendlyFakeModel(responses=[AIMessage(content="不应调用")])
+    service, repositories, _checkpointer, _factory = _service(tmp_path, model)
+    agent = CancellableStreamingAgent("取消这轮")
+    service.agent_runner = CancellableStreamingRunner(agent)  # type: ignore[assignment]
+    chat_adapter = RecordingChatAdapter()
+    cancellation = ChatCancellationToken()
+
+    task = asyncio.create_task(
+        service.handle_chat(
+            ChatRequest(
+                message="取消这轮",
+                provider_id="provider-1",
+                model="qwen-coder",
+            ),
+            chat_adapter=chat_adapter,
+            cancellation=cancellation,
+        )
+    )
+    await asyncio.wait_for(agent.stream_started.wait(), timeout=1)
+    for _ in range(50):
+        if any(item["action"] == "stream" for item in chat_adapter.sent):
+            break
+        await asyncio.sleep(0.01)
+
+    cancellation.cancel()
+    task.cancel()
+    result = await asyncio.wait_for(task, timeout=1)
+
+    assert result.status == "cancelled"
+    assert [item["action"] for item in chat_adapter.sent] == ["stream", "cancelled"]
+    assert chat_adapter.sent[0]["data"]["content"] == "半截"
+    assert [message.type for message in agent.updated_messages] == ["human", "ai"]
+    assert [message.content for message in agent.updated_messages] == [
+        "取消这轮",
+        "半截\n\n[用户在此处取消]",
+    ]
+    trace = repositories.trace_records.get(result.trace_id)
+    assert trace.status == "cancelled"
+    assert trace.output_checkpoint_id == "ckpt_cancelled"

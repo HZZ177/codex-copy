@@ -157,6 +157,39 @@ def test_llm_request_logs_fail_list_summary_and_trend(tmp_path) -> None:
     ]
 
 
+def test_llm_request_logs_cancel_marks_cancelled(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    repositories.llm_request_logs.start(
+        request_id="llm_req_cancelled",
+        trace_id="trace_usage",
+        trace_record_id="trace_usage",
+        session_id="ses_usage",
+        model="model-c",
+        start_time="2026-06-20T12:00:00Z",
+    )
+
+    cancelled = repositories.llm_request_logs.cancel(
+        "llm_req_cancelled",
+        error_message="GeneratorExit",
+        response_preview="partial",
+        duration_ms=33,
+        end_time="2026-06-20T12:00:01Z",
+    )
+    cancelled_rows, cancelled_total = repositories.llm_request_logs.list(status="cancelled")
+    summary = repositories.llm_request_logs.summary()
+
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_message == "GeneratorExit"
+    assert cancelled.response_preview == "partial"
+    assert cancelled.duration_ms == 33
+    assert cancelled_total == 1
+    assert cancelled_rows[0].id == "llm_req_cancelled"
+    assert summary["request_count"] == 1
+    assert summary["success_count"] == 0
+    assert summary["failed_count"] == 0
+
+
 def test_llm_request_logs_validates_trend_bucket(tmp_path) -> None:
     repositories = _repositories(tmp_path)
 

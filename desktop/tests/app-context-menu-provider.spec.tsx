@@ -236,6 +236,55 @@ describe("AppContextMenuProvider", () => {
     }
   });
 
+  it("dispatches add-to-chat requests from workspace document context areas", async () => {
+    const listener = vi.fn();
+    const handleEvent = (event: Event) => listener((event as CustomEvent).detail);
+    document.addEventListener(APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT, handleEvent);
+
+    try {
+      render(
+        <AppContextMenuProvider>
+          <article
+            aria-label="文档区域"
+            data-workspace-document-context="true"
+            data-workspace-document-name="guide.md"
+            data-workspace-document-path="docs/guide.md"
+            data-workspace-id="ws-1"
+            data-workspace-session-id="ses-1"
+          >
+            <p>文档内容</p>
+          </article>
+        </AppContextMenuProvider>,
+      );
+
+      fireEvent.contextMenu(screen.getByText("文档内容"), { clientX: 12, clientY: 18 });
+
+      const menu = screen.getByRole("menu", { name: "页面右键菜单" });
+      expect(menu.dataset.contextKind).toBe("workspace-document");
+      expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+        "对该文档对话",
+        "刷新",
+      ]);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "对该文档对话" }));
+
+      await waitFor(() => expect(listener).toHaveBeenCalledWith({
+        absolutePath: "docs/guide.md",
+        file: {
+          path: "docs/guide.md",
+          name: "guide.md",
+          type: "file",
+          source: "workspace",
+        },
+        sessionId: "ses-1",
+        workspaceId: "ws-1",
+        workspaceRoot: null,
+      }));
+    } finally {
+      document.removeEventListener(APP_ADD_WORKSPACE_FILE_TO_CHAT_EVENT, handleEvent);
+    }
+  });
+
   it("shows directory actions for workspace directories", async () => {
     const listener = vi.fn();
     const handleEvent = (event: Event) => listener((event as CustomEvent).detail);

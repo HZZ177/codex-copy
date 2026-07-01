@@ -2658,6 +2658,38 @@ class LLMRequestLogsRepository:
             gateway_trace_id=gateway_trace_id,
         )
 
+    def cancel(
+        self,
+        request_id: str,
+        *,
+        error_message: str | None = None,
+        input_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        output_tokens: int = 0,
+        total_tokens: int | None = None,
+        response_preview: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        duration_ms: int | None = None,
+        end_time: str | None = None,
+        gateway_thread_id: str | None = None,
+        gateway_trace_id: str | None = None,
+    ) -> LLMRequestLogRecord | None:
+        return self._complete(
+            request_id,
+            status="cancelled",
+            input_tokens=input_tokens,
+            cache_read_tokens=cache_read_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            response_preview=response_preview,
+            error_message=error_message,
+            metadata=metadata,
+            duration_ms=duration_ms,
+            end_time=end_time,
+            gateway_thread_id=gateway_thread_id,
+            gateway_trace_id=gateway_trace_id,
+        )
+
     def get(self, request_id: str, *, include_deleted: bool = False) -> LLMRequestLogRecord | None:
         query = "select * from llm_request_logs where id = ?"
         params: list[Any] = [request_id]

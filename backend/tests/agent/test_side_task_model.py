@@ -77,6 +77,9 @@ def test_create_side_task_llm_uses_fast_default_without_streaming(tmp_path) -> N
     assert factory.calls[0]["temperature"] == 0.1
     assert factory.calls[0]["max_tokens"] == 128
     assert factory.calls[0]["streaming"] is False
+    assert factory.calls[0]["kwargs"]["llm_request_logs"] is repositories.llm_request_logs
+    assert factory.calls[0]["kwargs"]["provider_id"] == provider.id
+    assert factory.calls[0]["kwargs"]["provider_name"] == provider.name
 
 
 def test_create_side_task_llm_fails_when_fast_default_is_missing(tmp_path) -> None:

@@ -572,6 +572,11 @@ describe("WorkspacePanel", () => {
     expect(screen.getByTestId("workspace-file-browser-pathbar").textContent).toContain("/README.md");
     expect(screen.queryByTitle("repo / README.md")).toBeNull();
     expect(screen.getByTestId("workspace-file-browser-preview")).not.toBeNull();
+    const previewBody = screen.getByLabelText("预览内容");
+    expect(previewBody.getAttribute("data-workspace-document-context")).toBe("true");
+    expect(previewBody.getAttribute("data-workspace-document-path")).toBe("README.md");
+    expect(previewBody.getAttribute("data-workspace-document-name")).toBe("README.md");
+    expect(previewBody.getAttribute("data-workspace-session-id")).toBe("ses-1");
     expect(screen.getByRole("separator", { name: "调整文件树宽度" })).not.toBeNull();
     expect(screen.getByRole("tree", { name: "工作区目录" })).not.toBeNull();
     expect(runtime.workspace.readFile).toHaveBeenCalledWith({ sessionId: "ses-1" }, "README.md");
