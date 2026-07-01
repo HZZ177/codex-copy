@@ -5,7 +5,9 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #ffffff;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(255 255 255 / 96%) 0 30%, rgb(247 241 231 / 92%) 68%, #f5efe4 100%),
+    #ffffff;
   color: #111111;
   font-family: var(--font-sans);
   isolation: isolate;
@@ -30,12 +32,12 @@
   position: absolute;
   inset: -12%;
   background-image:
-    linear-gradient(rgb(17 24 39 / 5%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(17 24 39 / 5%) 1px, transparent 1px);
+    linear-gradient(rgb(26 29 31 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(26 29 31 / 5%) 1px, transparent 1px);
   background-size: 64px 64px;
-  mask-image: radial-gradient(circle at center, #000000 0 36%, transparent 72%);
-  opacity: 0.72;
-  animation: showcaseGridDrift 9s linear infinite;
+  mask-image: radial-gradient(circle at center, #000000 0 42%, transparent 74%);
+  opacity: 0.7;
+  animation: showcaseGridDrift 10s linear infinite;
 }
 
 .topRail {
@@ -45,60 +47,70 @@
   width: 100%;
   height: 5px;
   background:
-    linear-gradient(90deg, transparent 0 12%, rgb(22 119 255 / 36%) 30%, rgb(17 17 17 / 22%) 50%, transparent 74%),
-    #f7f7f7;
-  animation: showcaseRailSweep 2.8s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
+    linear-gradient(90deg, transparent 0 10%, rgb(178 62 45 / 34%) 28%, rgb(26 29 31 / 22%) 50%, transparent 72%),
+    #f8f3ea;
+  animation: showcaseRailSweep 3.2s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
 }
 
 .scanBeam {
   position: absolute;
-  top: -28%;
+  top: -30%;
   left: -10%;
   width: 120%;
   height: 34%;
-  background: linear-gradient(180deg, transparent, rgb(22 119 255 / 8%) 44%, transparent);
+  background: linear-gradient(180deg, transparent, rgb(178 62 45 / 8%) 44%, transparent);
+  opacity: 0.86;
   transform: skewY(-8deg);
-  animation: showcaseScan 4.6s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
+  animation: showcaseScan 5s cubic-bezier(0.2, 0.82, 0.22, 1) infinite;
 }
 
-.crosshair {
+.paperField {
   position: absolute;
-  inset: 50% auto auto 50%;
-  width: 520px;
-  height: 520px;
-  border: 1px solid rgb(17 24 39 / 8%);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.crosshair::before,
-.crosshair::after {
-  position: absolute;
-  background: rgb(17 24 39 / 8%);
-  content: "";
-}
-
-.crosshair::before {
-  top: 50%;
-  left: -18%;
-  width: 136%;
-  height: 1px;
-}
-
-.crosshair::after {
-  top: -18%;
-  left: 50%;
-  width: 1px;
-  height: 136%;
+  inset: 44px;
+  border: 1px solid rgb(26 29 31 / 6%);
+  background:
+    linear-gradient(115deg, transparent 0 45%, rgb(26 29 31 / 6%) 45% 45.3%, transparent 45.3%),
+    linear-gradient(68deg, transparent 0 58%, rgb(178 62 45 / 8%) 58% 58.3%, transparent 58.3%);
+  opacity: 0.34;
+  transform: perspective(1000px) rotateX(0deg);
 }
 
 .signalFrame {
   position: absolute;
   inset: 54px;
-  border: 1px solid rgb(17 24 39 / 7%);
-  clip-path: polygon(0 0, 31% 0, 31% 1px, 1px 1px, 1px 31%, 0 31%, 0 0, 100% 0, 100% 31%, calc(100% - 1px) 31%, calc(100% - 1px) 1px, 69% 1px, 69% 0, 100% 0, 100% 100%, 69% 100%, 69% calc(100% - 1px), calc(100% - 1px) calc(100% - 1px), calc(100% - 1px) 69%, 100% 69%, 100% 100%, 0 100%, 0 69%, 1px 69%, 1px calc(100% - 1px), 31% calc(100% - 1px), 31% 100%, 0 100%);
-  opacity: 0.72;
-  animation: showcaseFramePulse 2.4s ease-in-out infinite;
+  opacity: 0.78;
+}
+
+.signalFrame span {
+  position: absolute;
+  width: 98px;
+  height: 98px;
+  border-color: rgb(26 29 31 / 14%);
+  border-style: solid;
+}
+
+.signalFrame span:nth-child(1) {
+  top: 0;
+  left: 0;
+  border-width: 1px 0 0 1px;
+}
+
+.signalFrame span:nth-child(2) {
+  top: 0;
+  right: 0;
+  border-width: 1px 1px 0 0;
+}
+
+.signalFrame span:nth-child(3) {
+  right: 0;
+  bottom: 0;
+  border-width: 0 1px 1px 0;
+}
+
+.signalFrame span:nth-child(4) {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 1px 1px;
 }
 
 .streams {
@@ -114,59 +126,255 @@
   left: var(--stream-left);
   width: 1px;
   height: 78%;
-  background: linear-gradient(180deg, transparent 0, rgb(22 119 255 / 18%) 38%, transparent 78%);
+  background: linear-gradient(180deg, transparent 0, rgb(26 29 31 / 12%) 34%, rgb(178 62 45 / 16%) 56%, transparent 82%);
   opacity: 0;
   transform: translateY(-18%);
-  animation: showcaseStreamFall 3.2s ease-in-out infinite;
-  animation-delay: calc(var(--stream-index) * 140ms);
+  animation: showcaseStreamFall 3.6s ease-in-out infinite;
+  animation-delay: calc(var(--stream-index) * 150ms);
 }
 
-.brandLockup {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  min-width: 160px;
-  min-height: 160px;
-}
+.artboard {
+  --parallax-x: 0;
+  --parallax-y: 0;
 
-.logoTile {
   position: relative;
   display: grid;
-  width: 128px;
-  height: 128px;
+  width: min(84vw, 900px);
+  height: min(76vh, 760px);
+  min-height: 430px;
   place-items: center;
+  perspective: 1200px;
+  transform-style: preserve-3d;
 }
 
-.logoTile img {
+.artboard::after {
+  position: absolute;
+  left: 50%;
+  bottom: 9%;
+  width: min(500px, 58vw);
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgb(26 29 31 / 16%) 0 18%, rgb(26 29 31 / 7%) 45%, transparent 72%);
+  content: "";
+  filter: blur(8px);
+  transform:
+    translateX(calc(-50% + (var(--parallax-x) * -10px)))
+    translateY(calc(var(--parallax-y) * -5px))
+    scaleX(calc(1 + (var(--parallax-y) * 0.04)));
+  transition: transform 180ms var(--motion-ease-out);
+}
+
+.scenePlane {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  width: min(720px, 78vw);
+  height: min(230px, 26vh);
+  border: 1px solid rgb(26 29 31 / 7%);
+  background:
+    linear-gradient(90deg, rgb(26 29 31 / 5%) 1px, transparent 1px),
+    linear-gradient(rgb(26 29 31 / 4%) 1px, transparent 1px),
+    rgb(255 255 255 / 22%);
+  background-size: 52px 52px;
+  transform:
+    translateX(calc(-50% + (var(--parallax-x) * -18px)))
+    translateY(calc(var(--parallax-y) * -8px))
+    rotateX(64deg);
+  transform-origin: center bottom;
+  transition: transform 180ms var(--motion-ease-out);
+}
+
+.planeLine {
+  position: absolute;
+  height: 1px;
+  background: rgb(178 62 45 / 22%);
+  transform-origin: left center;
+}
+
+.planeLine[data-line="one"] {
+  top: 28%;
+  left: 12%;
+  width: 72%;
+  transform: rotate(8deg);
+}
+
+.planeLine[data-line="two"] {
+  top: 56%;
+  left: 18%;
+  width: 58%;
+  background: rgb(26 29 31 / 16%);
+  transform: rotate(-5deg);
+}
+
+.planeLine[data-line="three"] {
+  top: 76%;
+  left: 26%;
+  width: 46%;
+  transform: rotate(4deg);
+}
+
+.colorShards {
+  position: absolute;
+  inset: 0;
+  opacity: 0.82;
+  pointer-events: none;
+  transform:
+    translateX(calc(var(--parallax-x) * -18px))
+    translateY(calc(var(--parallax-y) * -12px));
+  transition: transform 180ms var(--motion-ease-out);
+}
+
+.colorShard {
+  --shard-float-x: 0px;
+  --shard-float-y: -9px;
+
+  position: absolute;
+  top: var(--shard-top);
+  left: var(--shard-left);
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: #b23e2d;
+  opacity: 0.42;
+  transform: rotate(calc(var(--shard-index) * 18deg));
+  animation: shardFloat 3.8s ease-in-out infinite;
+  animation-delay: calc(var(--shard-index) * 120ms);
+}
+
+.colorShard:nth-child(1) {
+  --shard-top: 18%;
+  --shard-left: 28%;
+  --shard-float-x: -4px;
+}
+
+.colorShard:nth-child(2) {
+  --shard-top: 15%;
+  --shard-left: 49%;
+}
+
+.colorShard:nth-child(3) {
+  --shard-top: 19%;
+  --shard-left: 72%;
+  --shard-float-x: 5px;
+}
+
+.colorShard:nth-child(4) {
+  --shard-top: 31%;
+  --shard-left: 84%;
+  --shard-float-y: -6px;
+}
+
+.colorShard:nth-child(5) {
+  --shard-top: 49%;
+  --shard-left: 87%;
+  --shard-float-x: 6px;
+}
+
+.colorShard:nth-child(6) {
+  --shard-top: 67%;
+  --shard-left: 82%;
+  --shard-float-y: 8px;
+}
+
+.colorShard:nth-child(7) {
+  --shard-top: 79%;
+  --shard-left: 69%;
+  --shard-float-x: 4px;
+  --shard-float-y: 7px;
+}
+
+.colorShard:nth-child(8) {
+  --shard-top: 83%;
+  --shard-left: 50%;
+  --shard-float-y: 9px;
+}
+
+.colorShard:nth-child(9) {
+  --shard-top: 78%;
+  --shard-left: 29%;
+  --shard-float-x: -5px;
+  --shard-float-y: 7px;
+}
+
+.colorShard:nth-child(10) {
+  --shard-top: 63%;
+  --shard-left: 17%;
+  --shard-float-y: 6px;
+}
+
+.colorShard:nth-child(11) {
+  --shard-top: 45%;
+  --shard-left: 13%;
+  --shard-float-x: -6px;
+}
+
+.colorShard:nth-child(12) {
+  --shard-top: 28%;
+  --shard-left: 18%;
+  --shard-float-y: -6px;
+}
+
+.colorShard:nth-child(3n + 1) {
+  background: #1b1e20;
+}
+
+.colorShard:nth-child(3n + 2) {
+  background: #f4e8d3;
+  border: 1px solid rgb(26 29 31 / 10%);
+}
+
+.mascotStage {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: min(62vw, 620px);
+  max-height: min(66vh, 650px);
+  aspect-ratio: 1;
+  place-items: center;
+  transform:
+    rotateY(calc(var(--parallax-x) * -6deg))
+    rotateX(calc(var(--parallax-y) * 4deg))
+    translateX(calc(var(--parallax-x) * 18px))
+    translateY(calc(-8px + (var(--parallax-y) * 10px)));
+  transform-style: preserve-3d;
+  transition: transform 180ms var(--motion-ease-out);
+}
+
+.mascotRender {
   display: block;
-  width: 118px;
-  height: 118px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  filter:
+    saturate(1.04)
+    contrast(1.02)
+    drop-shadow(0 30px 70px rgb(26 29 31 / 16%));
+  mask-image: radial-gradient(ellipse at center, #000000 0 58%, rgb(0 0 0 / 92%) 68%, transparent 84%);
   user-select: none;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000000 0 58%, rgb(0 0 0 / 92%) 68%, transparent 84%);
   -webkit-user-drag: none;
-  filter: drop-shadow(0 24px 56px rgb(17 24 39 / 12%));
 }
 
 .returnButton {
   position: absolute;
   left: 50%;
   bottom: 42px;
+  z-index: 3;
   display: inline-flex;
   min-width: 132px;
   height: 38px;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid rgb(17 24 39 / 12%);
+  border: 1px solid rgb(26 29 31 / 12%);
   border-radius: var(--radius-pill);
-  background: rgb(255 255 255 / 92%);
+  background: rgb(255 255 255 / 88%);
   color: #111111;
   font-size: 13px;
   font-weight: 600;
   line-height: var(--ui-line-height-compact);
   box-shadow:
-    0 12px 34px rgb(17 24 39 / 10%),
+    0 12px 34px rgb(26 29 31 / 10%),
     inset 0 1px 0 rgb(255 255 255 / 90%);
   transform: translateX(-50%);
   transition:
@@ -178,11 +386,11 @@
 
 .returnButton:hover,
 .returnButton:focus-visible {
-  border-color: rgb(17 24 39 / 18%);
+  border-color: rgb(26 29 31 / 18%);
   background: #ffffff;
   box-shadow:
-    0 16px 44px rgb(17 24 39 / 13%),
-    0 0 0 3px rgb(17 24 39 / 6%),
+    0 16px 44px rgb(26 29 31 / 13%),
+    0 0 0 3px rgb(26 29 31 / 6%),
     inset 0 1px 0 rgb(255 255 255 / 90%);
 }
 
@@ -264,17 +472,6 @@
   }
 }
 
-@keyframes showcaseFramePulse {
-  0%,
-  100% {
-    opacity: 0.42;
-  }
-
-  50% {
-    opacity: 0.9;
-  }
-}
-
 @keyframes showcaseStreamFall {
   0% {
     opacity: 0;
@@ -282,11 +479,11 @@
   }
 
   22% {
-    opacity: 0.75;
+    opacity: 0.76;
   }
 
   74% {
-    opacity: 0.32;
+    opacity: 0.28;
   }
 
   100% {
@@ -295,24 +492,41 @@
   }
 }
 
-@media (max-width: 640px) {
+@keyframes shardFloat {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: var(--shard-float-x) var(--shard-float-y);
+  }
+}
+
+@media (max-width: 700px) {
+  .paperField,
   .signalFrame {
-    inset: 26px;
+    inset: 24px;
   }
 
-  .crosshair {
-    width: 360px;
-    height: 360px;
+  .signalFrame span {
+    width: 62px;
+    height: 62px;
   }
 
-  .logoTile {
-    width: 104px;
-    height: 104px;
+  .artboard {
+    width: 100vw;
+    height: 78vh;
+    min-height: 390px;
   }
 
-  .logoTile img {
-    width: 96px;
-    height: 96px;
+  .mascotStage {
+    width: min(92vw, 520px);
+  }
+
+  .scenePlane {
+    width: 94vw;
+    height: 160px;
   }
 
   .returnButton {
@@ -326,8 +540,8 @@
   .gridLayer,
   .topRail,
   .scanBeam,
-  .signalFrame,
-  .stream {
+  .stream,
+  .colorShard {
     animation: none;
   }
 
@@ -335,6 +549,10 @@
     opacity: 0;
   }
 
+  .artboard::after,
+  .scenePlane,
+  .colorShards,
+  .mascotStage,
   .returnButton {
     transition: none;
   }

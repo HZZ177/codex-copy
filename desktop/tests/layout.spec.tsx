@@ -59,6 +59,7 @@ describe("Layout", () => {
     const overlay = screen.getByTestId("product-showcase-overlay");
     expect(overlay.getAttribute("data-phase")).toBe("open");
     expect(screen.getByRole("dialog", { name: "Keydex" })).not.toBeNull();
+    expect(screen.getByAltText("Keydex 3D 小人偶")).not.toBeNull();
     expect(screen.getByRole("button", { name: "回到应用" })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "回到应用" }));
