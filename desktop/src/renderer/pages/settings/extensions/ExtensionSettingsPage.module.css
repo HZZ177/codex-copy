@@ -66,7 +66,18 @@
   padding: 12px 14px;
 }
 
-.settingRow:first-child {
+.featureRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, max-content);
+  align-items: center;
+  gap: 28px;
+  min-height: 64px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+  padding: 12px 14px;
+}
+
+.settingRow:first-child,
+.featureRow:first-child {
   border-top: 0;
 }
 
@@ -97,68 +108,89 @@
   justify-content: flex-end;
 }
 
-.toggle {
-  position: relative;
-  display: inline-flex;
-  width: 40px;
-  height: 24px;
+.featureControls {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  cursor: pointer;
+  justify-content: flex-end;
+  gap: 14px;
 }
 
-.toggle input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
+.inlineNumberControl {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.toggle {
+  display: inline-flex;
+  width: 42px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  padding: 0;
   cursor: pointer;
-  opacity: 0;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
 }
 
 .toggleTrack {
-  position: relative;
-  display: block;
-  width: 40px;
-  height: 24px;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  align-items: center;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-border-default) 72%, var(--surface-muted));
+  background: var(--color-border-3);
+  padding: 2px;
   transition:
-    background var(--motion-fast) var(--motion-ease-standard),
-    box-shadow var(--motion-fast) var(--motion-ease-standard);
+    background-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out);
 }
 
-.toggle:hover .toggleTrack,
-.toggle input:focus-visible + .toggleTrack {
-  box-shadow: 0 0 0 3px color-mix(in srgb, #3399ff 16%, transparent);
-}
-
-.toggle:hover .toggleTrack {
-  background: color-mix(in srgb, var(--color-border-default) 52%, var(--surface-hover));
+.toggle:hover:not(:disabled),
+.toggle:focus-visible {
+  outline: 0;
+  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
 }
 
 .toggleThumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--color-bg-elevated);
-  box-shadow: 0 1px 3px rgb(15 23 42 / 18%);
-  transition: transform var(--motion-fast) var(--motion-ease-standard);
+  box-shadow: 0 1px 4px rgb(15 23 42 / 18%);
+  transition: transform 140ms ease;
 }
 
-.toggle input:checked + .toggleTrack {
-  background: #3399ff;
+.toggleTrack[data-checked="true"] {
+  background: var(--color-accent);
 }
 
-.toggle:hover input:checked + .toggleTrack {
-  background: color-mix(in srgb, #3399ff 88%, #fff);
+.toggleTrack[data-checked="true"] .toggleThumb {
+  transform: translateX(14px);
 }
 
-.toggle input:checked + .toggleTrack .toggleThumb {
-  transform: translateX(16px);
+.toggle:hover:not(:disabled) .toggleTrack,
+.toggle:focus-visible .toggleTrack {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--surface-hover) 72%, transparent);
+}
+
+.toggle:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.toggle:disabled {
+  cursor: default;
+  opacity: 0.58;
 }
 
 .numberInput {
@@ -166,6 +198,8 @@
   height: 34px;
   border: 1px solid transparent;
   border-radius: 10px;
+  -moz-appearance: textfield;
+  appearance: textfield;
   background: var(--surface-muted);
   color: var(--color-text-primary);
   font: inherit;
@@ -177,6 +211,13 @@
     box-shadow var(--motion-fast) var(--motion-ease-out);
 }
 
+.numberInput::-webkit-inner-spin-button,
+.numberInput::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .numberInput:hover {
   border-color: color-mix(in srgb, var(--color-border-default) 62%, transparent);
   background: color-mix(in srgb, var(--surface-hover) 68%, var(--color-bg-elevated));
@@ -185,6 +226,216 @@
 .numberInput:focus {
   outline: none;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 72%, transparent);
+}
+
+.compressionConfigurator {
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+  padding: 15px 14px 14px;
+}
+
+.contextWindowRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  align-items: center;
+  gap: 18px;
+}
+
+.contextWindowText,
+.thresholdHeader {
+  min-width: 0;
+}
+
+.contextWindowText h3,
+.thresholdHeader h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.25;
+}
+
+.contextWindowText p,
+.thresholdHeader p {
+  margin: 5px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.contextWindowRow .numberInput {
+  width: 180px;
+}
+
+.thresholdControl {
+  display: grid;
+  gap: 12px;
+}
+
+.thresholdHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.thresholdHeader strong {
+  flex: none;
+  color: var(--color-text-primary);
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.thresholdSlider {
+  --threshold-slider-percent: 0%;
+
+  position: relative;
+  width: 100%;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.thresholdSlider:focus-visible {
+  outline: 0;
+}
+
+.sliderTrack {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-bg-elevated) 44%, transparent),
+      color-mix(in srgb, var(--surface-muted) 86%, var(--color-bg-elevated))
+    );
+  box-shadow:
+    inset 0 1px 2px rgb(15 23 42 / 8%),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-bg-elevated) 58%, transparent);
+  transform: translateY(-50%);
+  transition:
+    border-color 140ms var(--motion-ease-out),
+    background-color 140ms var(--motion-ease-out),
+    box-shadow 140ms var(--motion-ease-out);
+}
+
+.sliderRange {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--threshold-slider-percent);
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-border-3) 36%, var(--surface-hover)),
+      color-mix(in srgb, var(--color-border-default) 70%, var(--surface-muted))
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 56%, transparent),
+    inset -1px 0 0 color-mix(in srgb, var(--color-bg-elevated) 34%, transparent);
+  transition: width 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sliderThumb {
+  position: absolute;
+  top: 50%;
+  left: var(--threshold-slider-percent);
+  display: inline-flex;
+  width: 30px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-border-3) 52%, var(--color-border-default));
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-bg-elevated) 96%, white),
+      color-mix(in srgb, var(--surface-muted) 78%, var(--color-bg-elevated))
+    );
+  box-shadow:
+    0 6px 14px rgb(15 23 42 / 12%),
+    0 1px 2px rgb(15 23 42 / 14%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 92%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-border-default) 34%, transparent);
+  transform: translate(-50%, -50%);
+  transition:
+    left 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 140ms var(--motion-ease-out),
+    background-color 140ms var(--motion-ease-out),
+    box-shadow 140ms var(--motion-ease-out),
+    transform 140ms var(--motion-ease-out);
+}
+
+.sliderThumb::before {
+  width: 10px;
+  height: 9px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-text-tertiary) 34%, transparent) 0 1px,
+      transparent 1px 4px,
+      color-mix(in srgb, var(--color-text-tertiary) 34%, transparent) 4px 5px,
+      transparent 5px 9px,
+      color-mix(in srgb, var(--color-text-tertiary) 34%, transparent) 9px 10px
+    );
+  border-radius: var(--radius-pill);
+  content: "";
+}
+
+.thresholdSlider:hover .sliderTrack,
+.thresholdSlider:focus-visible .sliderTrack {
+  border-color: color-mix(in srgb, var(--color-border-3) 54%, var(--color-border-default));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--surface-hover) 42%, transparent),
+    inset 0 1px 2px rgb(15 23 42 / 8%),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-bg-elevated) 58%, transparent);
+}
+
+.thresholdSlider:hover .sliderThumb,
+.thresholdSlider:focus-visible .sliderThumb {
+  border-color: color-mix(in srgb, var(--color-border-3) 66%, var(--color-border-default));
+  box-shadow:
+    0 8px 18px rgb(15 23 42 / 14%),
+    0 1px 3px rgb(15 23 42 / 16%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 96%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-border-default) 36%, transparent);
+}
+
+.thresholdSlider:active .sliderThumb,
+.thresholdSlider[data-dragging="true"] .sliderThumb {
+  transform: translate(-50%, -50%) scale(0.97);
+}
+
+.thresholdSlider[data-dragging="true"] .sliderRange,
+.thresholdSlider[data-dragging="true"] .sliderThumb {
+  transition:
+    border-color 140ms var(--motion-ease-out),
+    background-color 140ms var(--motion-ease-out),
+    box-shadow 140ms var(--motion-ease-out),
+    transform 140ms var(--motion-ease-out);
+}
+
+.thresholdMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .warning {
@@ -225,7 +476,10 @@
 
 .warning button:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .fieldError {
@@ -242,34 +496,47 @@
 
 .actions button {
   display: inline-flex;
-  height: 40px;
-  min-width: 68px;
+  height: 32px;
+  min-width: 60px;
   align-items: center;
   justify-content: center;
-  border: 0;
+  border: 1px solid var(--settings-button-border-strong, color-mix(in srgb, var(--color-border-3) 66%, var(--color-border-default)));
   border-radius: var(--radius-pill);
-  background: var(--color-text-primary);
-  color: var(--color-bg-elevated);
-  font-size: 13px;
+  background: var(--settings-button-primary-bg, color-mix(in srgb, var(--surface-muted) 70%, var(--color-bg-elevated)));
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 560;
   line-height: var(--ui-line-height-tight);
-  padding: 0 18px;
+  padding: 0 13px;
+  box-shadow: var(--settings-button-shadow, inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 72%, transparent));
   cursor: pointer;
   transition:
     background-color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
     box-shadow var(--motion-fast) var(--motion-ease-out),
     transform var(--motion-fast) var(--motion-ease-out);
 }
 
 .actions button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-text-primary) 88%, #fff);
-  color: var(--color-bg-elevated);
+  border-color: color-mix(in srgb, var(--color-border-3) 72%, var(--color-border-default));
+  background: var(--settings-button-hover-bg, color-mix(in srgb, var(--surface-hover) 78%, var(--color-bg-elevated)));
+  color: var(--color-text-primary);
+  box-shadow: var(
+    --settings-button-hover-shadow,
+    0 1px 4px rgb(15 23 42 / 7%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 88%, transparent)
+  );
   transform: translateY(-1px);
 }
 
 .actions button:focus-visible {
   outline: 0;
-  color: var(--color-bg-elevated);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow:
+    var(
+      --settings-focus-ring,
+      0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+    ),
+    var(--settings-button-shadow, inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 72%, transparent));
 }
 
 .actions button:disabled {
@@ -292,16 +559,46 @@
     gap: 10px;
   }
 
+  .featureRow {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
   .settingControl {
     justify-content: flex-start;
+  }
+
+  .featureControls {
+    justify-content: space-between;
+  }
+
+  .inlineNumberControl {
+    flex: 1;
+    justify-content: space-between;
   }
 
   .numberInput {
     width: min(220px, 100%);
   }
 
+  .contextWindowRow {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .contextWindowRow .numberInput {
+    width: min(220px, 100%);
+  }
+
   .warning,
   .fieldError {
     padding-left: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sliderRange,
+  .sliderThumb {
+    transition: none;
   }
 }

@@ -1195,6 +1195,9 @@ function DefaultMessage({
   if (message.kind === "context_compression") {
     return <ContextCompressionNotice message={message} />;
   }
+  if (message.kind === "llm_retry") {
+    return <LLMRetryNotice message={message} />;
+  }
   if (message.kind === "cancelled") {
     return <ConversationCancelledNotice />;
   }
@@ -1233,6 +1236,24 @@ function ContextCompressionNotice({ message }: { message: ConversationMessage })
       className={styles.contextCompressionNotice}
       data-state={state}
       data-testid="context-compression-notice"
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.contextCompressionNoticeLabel}>
+        <span>{normalizeMessageContent(message.content)}</span>
+      </span>
+    </div>
+  );
+}
+
+function LLMRetryNotice({ message }: { message: ConversationMessage }) {
+  const state = message.status === "running" ? "running" : message.status === "failed" ? "failed" : "completed";
+  return (
+    <div
+      className={styles.contextCompressionNotice}
+      data-notice-kind="llm_retry"
+      data-state={state}
+      data-testid="llm-retry-notice"
       role="status"
       aria-live="polite"
     >

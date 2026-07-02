@@ -732,6 +732,7 @@ class ChatService:
             chat_adapter=chat_adapter,
             aggregator=aggregator,
         )
+        dispatcher_context_token = set_request_context(event_dispatcher=dispatcher)
 
         try:
             image_attachments, attachment_payloads = self._resolve_image_attachments(
@@ -967,6 +968,7 @@ class ChatService:
                 error=error_message,
             )
         finally:
+            reset_request_context(dispatcher_context_token)
             reset_request_context(context_token)
 
     def _resolve_turn_model(

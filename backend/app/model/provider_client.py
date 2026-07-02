@@ -135,14 +135,14 @@ class OpenAICompatibleProviderClient:
                     f"model={request_model} | status_code={exc.response.status_code}"
                 )
                 raise ModelProviderError(
-                    self._format_http_error("模型健康检查失败", exc.response)
+                    self._format_http_error("模型测试失败", exc.response)
                 ) from exc
             except httpx.HTTPError as exc:
                 logger.warning(
                     f"[ModelProvider] 健康检查请求失败 | base_url={self.settings.base_url} | "
                     f"model={request_model} | error={exc}"
                 )
-                raise ModelProviderError(f"模型健康检查失败：{exc}") from exc
+                raise ModelProviderError(f"模型测试失败：{exc}") from exc
         duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
         logger.info(
             f"[ModelProvider] 健康检查成功 | base_url={self.settings.base_url} | "

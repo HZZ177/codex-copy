@@ -134,7 +134,10 @@
 .iconButton:focus-visible,
 .rowActions button:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .table {
@@ -403,7 +406,10 @@
 
 .pagination button:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .pagination button:disabled {

@@ -39,8 +39,11 @@
 }
 
 .field input:focus {
-  border-color: color-mix(in srgb, var(--color-border-default) 92%, var(--color-text-primary));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-border-3) 58%, var(--color-border-default));
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .field small,
@@ -157,7 +160,10 @@
 
 .confirmBox button:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .confirmBox button:disabled {

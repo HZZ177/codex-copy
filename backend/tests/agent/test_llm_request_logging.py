@@ -8,8 +8,10 @@ import pytest
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
+import backend.app.agent.factory as factory_module
 from backend.app.agent.factory import AgentFactory
 from backend.app.core.request_context import reset_request_context, set_request_context
+from backend.app.events import DomainEvent, EventDispatcher
 from backend.app.model import ModelSettings
 from backend.app.model.e2e_transport import E2E_MODEL_ID, create_e2e_model_transport
 from backend.app.storage import StorageRepositories, init_database
@@ -253,6 +255,71 @@ async def test_patched_chat_openai_logs_streaming_completion_usage(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_patched_chat_openai_retries_streaming_before_first_chunk(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repositories = _repositories(tmp_path)
+    attempts = 0
+    captured_events: list[DomainEvent] = []
+
+    async def capture(event: DomainEvent) -> None:
+        captured_events.append(event)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(500, json={"error": {"message": "upstream unavailable"}})
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        chunks = [
+            _openai_stream_chunk(payload, delta={"content": "重试后成功"}),
+            _openai_stream_chunk(
+                payload,
+                delta={},
+                finish_reason="stop",
+                usage={"prompt_tokens": 4, "completion_tokens": 3},
+            ),
+            "data: [DONE]\n\n",
+        ]
+        return httpx.Response(
+            200,
+            stream=_DelayedReasoningStream(chunks),
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+        )
+
+    monkeypatch.setattr(factory_module, "_LLM_RETRY_DELAYS_SECONDS", (0, 0, 0))
+    dispatcher = EventDispatcher([capture])
+    llm = _llm(
+        repositories,
+        http_transport=httpx.MockTransport(handler),
+        streaming=True,
+        model="retry-stream-model",
+    )
+    token = _request_context(dispatcher=dispatcher)
+    text = ""
+    try:
+        async for chunk in llm.astream([HumanMessage(content="触发一次可重试失败")]):
+            if isinstance(chunk.content, str):
+                text += chunk.content
+    finally:
+        reset_request_context(token)
+
+    records, total = repositories.llm_request_logs.list()
+    progress_events = [
+        event for event in captured_events if event.event_type == "middleware.progress"
+    ]
+    assert attempts == 2
+    assert text == "重试后成功"
+    assert total == 2
+    assert sorted(record.status for record in records) == ["completed", "failed"]
+    assert [event.payload["stage"] for event in progress_events] == ["retrying", "recovered"]
+    assert progress_events[0].payload["retry_index"] == 1
+    assert progress_events[0].payload["max_retries"] == 3
+    assert progress_events[0].payload["retry_after_ms"] == 0
+    assert progress_events[1].payload["stage"] == "recovered"
+
+@pytest.mark.asyncio
 async def test_patched_chat_openai_uses_reasoning_chunk_for_time_to_first_token(
     tmp_path,
 ) -> None:
@@ -451,7 +518,10 @@ def _repositories(tmp_path) -> StorageRepositories:
     return repositories
 
 
-def _request_context(user_message: str = "这一轮用户消息"):
+def _request_context(
+    user_message: str = "这一轮用户消息",
+    dispatcher: EventDispatcher | None = None,
+):
     return set_request_context(
         trace_id="trace_llm",
         session_id="ses_llm",
@@ -459,6 +529,7 @@ def _request_context(user_message: str = "这一轮用户消息"):
         user_id="local-user",
         turn_index=3,
         user_message=user_message,
+        event_dispatcher=dispatcher,
     )
 
 

@@ -164,8 +164,12 @@
 }
 
 .locateButton:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-border-strong) 58%, transparent);
-  outline-offset: 2px;
+  outline: 0;
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .searchHint {
@@ -350,8 +354,12 @@
 }
 
 .subtreeToggleButton:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-border-strong) 58%, transparent);
-  outline-offset: 1px;
+  outline: 0;
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .panel[data-chrome="panel"] .nodeButton {

@@ -31,6 +31,7 @@ export type ConversationMessageKind =
   | "error"
   | "cancelled"
   | "context_compression"
+  | "llm_retry"
   | "status";
 
 export interface ConversationMessage {

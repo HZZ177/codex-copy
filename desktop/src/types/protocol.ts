@@ -839,7 +839,16 @@ export interface AgentMiddlewareProgressData {
   session_id?: string;
   active_session_id?: string;
   middleware?: string;
+  kind?: string;
   stage?: string;
+  attempt?: number;
+  retry_index?: number;
+  max_retries?: number;
+  max_attempts?: number;
+  retry_after_ms?: number | null;
+  gateway_trace_id?: string;
+  error?: string;
+  error_type?: string;
   compression_mode?: "background" | "emergency" | string;
   notice_id?: string;
   reason?: string | null;

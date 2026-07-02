@@ -111,6 +111,7 @@ describe("MessageList", () => {
     };
     const compressionNotice = message("m1", "context_compression", "上下文已自动压缩");
     const cancelledNotice = message("m2", "cancelled", "对话已取消");
+    const retryNotice = message("m4", "llm_retry", "LLM 请求正在重试 1/3");
     const forkedAssistant = {
       ...message("m3", "assistant", "派生后的回答"),
       payload: {
@@ -121,7 +122,7 @@ describe("MessageList", () => {
 
     render(
       <MessageList
-        messages={[compressionNotice, cancelledNotice, forkedAssistant]}
+        messages={[compressionNotice, retryNotice, cancelledNotice, forkedAssistant]}
         topNotice={{
           content: "该会话前置1轮历史消息已加载",
           tone: "success",
@@ -132,6 +133,8 @@ describe("MessageList", () => {
 
     expect(screen.getByTestId("btw-conversation-history-notice").querySelector("svg")).toBeNull();
     expect(screen.getByTestId("context-compression-notice").querySelector("svg")).toBeNull();
+    expect(screen.getByTestId("llm-retry-notice").querySelector("svg")).toBeNull();
+    expect(screen.getByTestId("llm-retry-notice").getAttribute("data-notice-kind")).toBe("llm_retry");
     expect(screen.getByTestId("conversation-cancelled-notice").querySelector("svg")).toBeNull();
     expect(screen.getByTestId("message-fork-marker").querySelector("svg")).toBeNull();
   });

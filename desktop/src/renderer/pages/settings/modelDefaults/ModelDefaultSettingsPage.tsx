@@ -94,34 +94,34 @@ export function ModelDefaultSettingsPage({
   };
 
   return (
-    <main className={styles.page} data-testid="model-default-settings-page">
-      <header className={styles.header}>
+    <main className={styles.page} data-settings-page data-testid="model-default-settings-page">
+      <header className={styles.header} data-settings-header>
         <div>
           <h1>模型配置</h1>
           <p>配置新会话默认模型，以及轻量辅助任务使用的快速模型</p>
         </div>
       </header>
 
-      {loading ? <div className={styles.muted}>正在读取供应商</div> : null}
+      {loading ? <div className={styles.muted} data-settings-muted>正在读取供应商</div> : null}
 
       {!loading && !error && providers.length === 0 ? (
-        <section className={styles.empty}>
+        <section className={styles.empty} data-settings-empty>
           <span>暂无供应商配置</span>
-          <button type="button" onClick={onOpenProviderSettings}>
+          <button data-settings-secondary type="button" onClick={onOpenProviderSettings}>
             配置供应商
           </button>
         </section>
       ) : null}
 
       {!loading && !error && providers.length > 0 ? (
-        <section className={styles.settingsGroup} aria-labelledby="model-default-title">
-          <div className={styles.groupHeader}>
+        <section className={styles.settingsGroup} data-settings-group aria-labelledby="model-default-title">
+          <div className={styles.groupHeader} data-settings-group-header>
             <h2 id="model-default-title">默认值</h2>
             <span>
               {enabledProviderCount} 个供应商 · {enabledModelCount} 个可用模型
             </span>
           </div>
-          <div className={styles.defaultList}>
+          <div className={styles.defaultList} data-settings-panel>
             <DefaultCard
               providerId={draft.default_chat.providerId}
               model={draft.default_chat.model}
@@ -155,7 +155,7 @@ export function ModelDefaultSettingsPage({
             />
           </div>
           <div className={styles.actions}>
-            <button type="button" disabled={!canSave} onClick={() => void saveDefaults()}>
+            <button data-settings-primary type="button" disabled={!canSave} onClick={() => void saveDefaults()}>
               {saving ? "保存中" : "保存"}
             </button>
           </div>
@@ -189,8 +189,8 @@ function DefaultCard({
   const selected = providerId && model ? { providerId, model } : null;
 
   return (
-    <article className={styles.defaultCard}>
-      <div className={styles.defaultText}>
+    <article className={styles.defaultCard} data-settings-row>
+      <div className={styles.defaultText} data-settings-row-text>
         <h3>{title}</h3>
         <p>{description}</p>
       </div>

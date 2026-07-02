@@ -91,6 +91,29 @@ describe("ModelList", () => {
     expect(onProviderChange).toHaveBeenCalledWith(updated);
   });
 
+  it("does not restore previous model test result from provider health on render", () => {
+    renderWithNotifications(
+      <ModelList
+        onProviderChange={vi.fn()}
+        provider={provider({
+          models: ["qwen3-coder"],
+          health: {
+            "qwen3-coder": {
+              status: "healthy",
+              latency_ms: 42,
+              error: null,
+              checked_at: "2026-06-17T12:00:00Z",
+            },
+          },
+        })}
+        runtime={fakeRuntime()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "测试 qwen3-coder 连接状态" }).textContent).toContain("测试");
+    expect(screen.queryByText("可用 42ms")).toBeNull();
+  });
+
   it("shows refresh errors without changing local data", async () => {
     const runtime = fakeRuntime({
       refreshProviderModels: vi.fn().mockRejectedValue(new Error("模型刷新失败：HTTP 401")),

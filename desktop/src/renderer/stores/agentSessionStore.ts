@@ -618,6 +618,9 @@ function handleMiddlewareProgress(
   state: AgentConversationState,
   data: AgentMiddlewareProgressData,
 ): AgentConversationState {
+  if (isLLMRetryProgress(data)) {
+    return handleLLMRetryProgress(state, data);
+  }
   if (data.middleware !== "ContextCompressionMiddleware") {
     return state;
   }
@@ -672,6 +675,69 @@ function handleMiddlewareProgress(
     });
   }
   view.isStreaming = hasStreamingMessage(view);
+  return next;
+}
+
+function handleLLMRetryProgress(
+  state: AgentConversationState,
+  data: AgentMiddlewareProgressData,
+): AgentConversationState {
+  const sessionId = stringValue(data.session_id) || stringValue(data.active_session_id) || state.selectedSessionId || "";
+  if (!sessionId) {
+    return state;
+  }
+  const stage = stringValue(data.stage) || "retrying";
+  const noticeId = llmRetryNoticeId(data, sessionId);
+  const metadata = {
+    retry: {
+      kind: "llm_retry",
+      stage,
+      notice_id: noticeId,
+      attempt: numberValue(data.attempt),
+      retry_index: llmRetryIndex(data),
+      max_retries: llmMaxRetries(data),
+      max_attempts: numberValue(data.max_attempts),
+      retry_after_ms: numberValue(data.retry_after_ms),
+      gateway_trace_id: stringValue(data.gateway_trace_id),
+      error: stringValue(data.error),
+      error_type: stringValue(data.error_type),
+    },
+  };
+  const patch: Partial<AgentChatMessage> = {
+    role: "system",
+    content: llmRetryContent(data, stage),
+    timestamp: timestampFromData(data),
+    metadata,
+    streaming: false,
+    status: llmRetryStatus(stage),
+  };
+
+  const next = cloneState(state);
+  const view = ensureSessionState(next, sessionId);
+  const existing = view.messages.find((message) => {
+    const retry = asRecord(message.metadata?.retry);
+    return stringValue(retry?.notice_id) === noticeId;
+  });
+  if (existing) {
+    Object.assign(existing, patch);
+  } else {
+    view.messages.push({
+      id: `llm-retry:${sessionId}:${noticeId}`,
+      sessionId,
+      role: "system",
+      content: patch.content ?? "",
+      timestamp: patch.timestamp ?? Date.now(),
+      metadata,
+      streaming: false,
+      status: patch.status,
+    });
+  }
+  if (stage === "retrying") {
+    view.isStreaming = true;
+    markTurnInProgress(view);
+  } else {
+    view.isStreaming = hasStreamingMessage(view);
+  }
   return next;
 }
 
@@ -2098,6 +2164,47 @@ function isVisibleCompressionProgressStage(stage: string): boolean {
     "emergency_replacement_failed",
     "emergency_completed",
   ].includes(stage);
+}
+
+function isLLMRetryProgress(data: AgentMiddlewareProgressData): boolean {
+  return data.middleware === "LLMRetry" || data.kind === "llm_retry";
+}
+
+function llmRetryNoticeId(data: AgentMiddlewareProgressData, sessionId: string): string {
+  return (
+    stringValue(data.notice_id) ||
+    `llm-retry:${stringValue(data.trace_id) || sessionId}`
+  );
+}
+
+function llmRetryContent(data: AgentMiddlewareProgressData, stage: string): string {
+  const retryIndex = llmRetryIndex(data);
+  const maxRetries = llmMaxRetries(data);
+  if (stage === "recovered" || stage === "completed") {
+    return "LLM 请求重试成功";
+  }
+  if (stage === "failed") {
+    return `LLM 请求重试失败 ${retryIndex}/${maxRetries}`;
+  }
+  return `LLM 请求正在重试 ${retryIndex}/${maxRetries}`;
+}
+
+function llmRetryStatus(stage: string): AgentChatMessage["status"] {
+  if (stage === "failed") {
+    return "failed";
+  }
+  if (stage === "recovered" || stage === "completed") {
+    return "completed";
+  }
+  return "running";
+}
+
+function llmRetryIndex(data: AgentMiddlewareProgressData): number {
+  return numberValue(data.retry_index) ?? 1;
+}
+
+function llmMaxRetries(data: AgentMiddlewareProgressData): number {
+  return numberValue(data.max_retries) ?? 3;
 }
 
 function contextCompressionContent(stage: string): string {

@@ -21,10 +21,16 @@ describe("ExtensionSettingsPage", () => {
     expect(await screen.findByRole("heading", { name: "扩展功能" })).not.toBeNull();
     expect(screen.getByText("功能模块")).not.toBeNull();
     expect(screen.getByText("标题生成")).not.toBeNull();
-    expect(screen.getByRole("switch", { name: "启用标题生成" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("switch", { name: "启用标题生成" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByRole("switch", { name: "仅默认标题时生成" })).toBeNull();
     expect(screen.getByText("期望标题最大长度")).not.toBeNull();
     expect(screen.getByLabelText("期望标题最大长度")).toHaveProperty("value", "48");
+    expect(screen.getByText("模型上下文窗口")).not.toBeNull();
+    expect(screen.queryByText("固定策略")).toBeNull();
+    expect(screen.queryByText("保留最近 2 轮")).toBeNull();
+    expect(screen.queryByText("紧急压缩 90%")).toBeNull();
+    expect(screen.queryByLabelText("紧急阈值")).toBeNull();
+    expect(screen.queryByLabelText("保留轮数")).toBeNull();
     expect(screen.queryByText("快速模型未配置，标题生成不可用")).toBeNull();
     expect(screen.getAllByRole("button", { name: "保存" })).toHaveLength(1);
   });
@@ -41,10 +47,12 @@ describe("ExtensionSettingsPage", () => {
     fireEvent.change(screen.getByLabelText("单轮最多工具调用"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("连续重复阈值"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("switch", { name: "启用上下文压缩" }));
-    fireEvent.change(screen.getByLabelText("上下文窗口"), { target: { value: "64000" } });
-    fireEvent.change(screen.getByLabelText("触发阈值"), { target: { value: "0.6" } });
-    fireEvent.change(screen.getByLabelText("紧急阈值"), { target: { value: "0.92" } });
-    fireEvent.change(screen.getByLabelText("保留轮数"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("模型上下文窗口"), { target: { value: "64000" } });
+    const triggerSlider = screen.getByRole("slider", { name: "触发阈值" });
+    fireEvent.keyDown(triggerSlider, { key: "PageDown" });
+    for (let index = 0; index < 5; index += 1) {
+      fireEvent.keyDown(triggerSlider, { key: "ArrowLeft" });
+    }
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -68,8 +76,8 @@ describe("ExtensionSettingsPage", () => {
           enabled: true,
           context_window_tokens: 64000,
           trigger_fraction: 0.6,
-          emergency_fraction: 0.92,
-          retain_rounds: 4,
+          emergency_fraction: 0.9,
+          retain_rounds: 2,
         },
       });
     });
@@ -185,30 +193,26 @@ describe("ExtensionSettingsPage", () => {
     expect(saveExtensionSettings).not.toHaveBeenCalled();
   });
 
-  it("disables page save when context compression threshold order is invalid", async () => {
+  it("disables page save when a saved context compression trigger exceeds the fixed emergency threshold", async () => {
     const saveExtensionSettings = vi.fn();
-    const runtime = fakeRuntime({ saveExtensionSettings });
+    const runtime = fakeRuntime({
+      saveExtensionSettings,
+      settings: {
+        context_compression: {
+          enabled: false,
+          context_window_tokens: 128000,
+          trigger_fraction: 0.95,
+          emergency_fraction: 1,
+          retain_rounds: 2,
+        },
+      },
+    });
 
     renderWithNotifications(<ExtensionSettingsPage runtime={runtime} />);
 
     await screen.findByText("上下文压缩");
-    fireEvent.change(screen.getByLabelText("触发阈值"), { target: { value: "0.95" } });
 
-    expect(screen.getByText("触发阈值必须小于紧急阈值")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);
-    expect(saveExtensionSettings).not.toHaveBeenCalled();
-  });
-
-  it("disables page save when context compression retain rounds are invalid", async () => {
-    const saveExtensionSettings = vi.fn();
-    const runtime = fakeRuntime({ saveExtensionSettings });
-
-    renderWithNotifications(<ExtensionSettingsPage runtime={runtime} />);
-
-    await screen.findByText("上下文压缩");
-    fireEvent.change(screen.getByLabelText("保留轮数"), { target: { value: "21" } });
-
-    expect(screen.getByText("保留轮数必须在 0 到 20 之间")).not.toBeNull();
+    expect(screen.getByText("触发阈值必须在 10% 到 90% 之间")).not.toBeNull();
     expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);
     expect(saveExtensionSettings).not.toHaveBeenCalled();
   });
@@ -220,7 +224,7 @@ describe("ExtensionSettingsPage", () => {
     renderWithNotifications(<ExtensionSettingsPage runtime={runtime} />);
 
     await screen.findByText("上下文压缩");
-    fireEvent.change(screen.getByLabelText("上下文窗口"), { target: { value: "999" } });
+    fireEvent.change(screen.getByLabelText("模型上下文窗口"), { target: { value: "999" } });
 
     expect(screen.getByText("上下文窗口必须在 1000 到 2000000 token 之间")).not.toBeNull();
     expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);

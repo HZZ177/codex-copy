@@ -30,6 +30,14 @@ describe("conversation message adapter", () => {
   });
 
   it("keeps special tool kinds aligned with the Agent transcript renderer", () => {
+    expect(
+      conversationKindFromAgent(
+        agentMessage({
+          role: "system",
+          metadata: { retry: { kind: "llm_retry", stage: "retrying" } },
+        }),
+      ),
+    ).toBe("llm_retry");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "update_plan" }))).toBe("plan");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "load_skill" }))).toBe("skill");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "run_command" }))).toBe("command");

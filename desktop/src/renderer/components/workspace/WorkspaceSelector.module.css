@@ -98,7 +98,7 @@
 
 .root[data-variant="titlebar"] .trigger:hover:not(:disabled),
 .root[data-variant="titlebar"] .trigger[aria-expanded="true"] {
-  border-color: color-mix(in srgb, var(--color-text-1) 14%, var(--color-border-3));
+  border-color: color-mix(in srgb, var(--color-border-3) 66%, var(--color-border-default));
   background: color-mix(in srgb, var(--color-bg-elevated) 74%, var(--surface-hover));
   color: var(--color-text-1);
   box-shadow:
@@ -128,8 +128,12 @@
 }
 
 .root[data-variant="titlebar"] .trigger:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-text-tertiary) 30%, transparent);
-  outline-offset: 2px;
+  outline: 0;
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .root[data-variant="titlebar"] .menu {
@@ -213,8 +217,13 @@
 }
 
 .searchBox:focus-within {
-  border-color: color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+  border-color: color-mix(in srgb, var(--color-border-3) 54%, var(--color-border-default));
   background: var(--color-bg-elevated);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .searchBox input,
@@ -264,11 +273,19 @@
 }
 
 .option:hover,
-.option:focus-visible,
+.option:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+}
+
 .option[data-active="true"],
 .option[aria-selected="true"] {
   outline: none;
-  background: var(--surface-hover);
+  background: var(--settings-selected-bg, color-mix(in srgb, var(--surface-active) 72%, var(--color-bg-elevated)));
+  box-shadow: var(
+    --settings-selected-ring,
+    inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 44%, transparent)
+  );
 }
 
 .option svg {
@@ -417,8 +434,13 @@
 }
 
 .manualPathBox input:focus {
-  border-color: color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+  border-color: color-mix(in srgb, var(--color-border-3) 54%, var(--color-border-default));
   background: var(--color-bg-elevated);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .manualPathBox button {

@@ -114,6 +114,10 @@ describe("MessageText", () => {
     expect(root.textContent).toContain("已经生成的回答");
     expect(root.textContent).toContain("模型响应超时，未收到后续响应数据");
     expect(root.textContent).toContain("llm_read_timeout");
+    expect(screen.queryByText(/httpx.ReadTimeout/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开错误详情" }));
+    expect(screen.getByText(/httpx.ReadTimeout/)).not.toBeNull();
   });
 
   it("renders bracket syntax in user messages as ordinary text", () => {
@@ -892,6 +896,27 @@ describe("MessageText", () => {
       expect(screen.getByTestId("markdown-code-viewport").textContent).toContain("graph TD");
     });
     expect(screen.queryByTestId("mermaid-preview")).toBeNull();
+  });
+
+  it("renders inline Mermaid previews inside a bounded preview region", async () => {
+    vi.mocked(mermaid.render).mockResolvedValueOnce({
+      diagramType: "flowchart-v2",
+      svg: '<svg role="img" aria-label="oversized inline chart" viewBox="0 0 2400 1800"></svg>',
+    });
+
+    render(
+      <MessageText
+        message={message("assistant", "```mermaid\ngraph TD\nA[开始] --> B[结束]\n```", "completed")}
+      />,
+    );
+
+    const preview = await screen.findByTestId("mermaid-preview");
+    const chart = within(preview).getByLabelText("Mermaid 图表");
+
+    expect(preview.getAttribute("data-size")).toBe("inline");
+    expect(preview.getAttribute("data-interactive")).toBe("false");
+    expect(chart.getAttribute("data-interactive")).toBe("false");
+    expect(within(preview).getByLabelText("oversized inline chart")).not.toBeNull();
   });
 
   it("opens Mermaid code fullscreen with zoom and reset controls", async () => {

@@ -34,7 +34,10 @@
 }
 
 .search:focus-within {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .search input {
@@ -85,7 +88,10 @@
 .toolbar button:focus-visible,
 .switchButton:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .toolbar button:disabled,
@@ -163,7 +169,7 @@
 
 .switchButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-border-default) 52%, var(--surface-hover));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--surface-hover) 72%, transparent);
 }
 
 .switchButton span {

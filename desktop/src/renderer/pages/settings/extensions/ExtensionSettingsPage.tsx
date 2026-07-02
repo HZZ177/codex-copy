@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
 import { runtimeBridge, type RuntimeBridge } from "@/runtime";
@@ -25,6 +25,12 @@ type ExtensionDrafts = {
   duplicateGuard: DuplicateToolCallGuardRuntimeSettings;
   compression: ContextCompressionRuntimeSettings;
 };
+
+const FIXED_COMPRESSION_EMERGENCY_FRACTION = 0.9;
+const FIXED_COMPRESSION_RETAIN_ROUNDS = 2;
+const MIN_COMPRESSION_TRIGGER_FRACTION = 0.1;
+const MAX_COMPRESSION_TRIGGER_FRACTION = 0.89;
+const COMPRESSION_TRIGGER_STEP = 0.01;
 
 export function ExtensionSettingsPage({
   runtime = runtimeBridge,
@@ -75,16 +81,8 @@ export function ExtensionSettingsPage({
     ? duplicateGuardDraft.max_repeats < 1 || duplicateGuardDraft.max_repeats > 20
     : false;
   const compressionTriggerInvalid = compressionDraft
-    ? compressionDraft.trigger_fraction <= 0 || compressionDraft.trigger_fraction >= 1
-    : false;
-  const compressionEmergencyInvalid = compressionDraft
-    ? compressionDraft.emergency_fraction <= 0 || compressionDraft.emergency_fraction > 1
-    : false;
-  const compressionOrderInvalid = compressionDraft
-    ? compressionDraft.trigger_fraction >= compressionDraft.emergency_fraction
-    : false;
-  const compressionRetainInvalid = compressionDraft
-    ? compressionDraft.retain_rounds < 0 || compressionDraft.retain_rounds > 20
+    ? compressionDraft.trigger_fraction < MIN_COMPRESSION_TRIGGER_FRACTION ||
+      compressionDraft.trigger_fraction >= FIXED_COMPRESSION_EMERGENCY_FRACTION
     : false;
   const compressionWindowInvalid = compressionDraft
     ? compressionDraft.context_window_tokens < 1000 || compressionDraft.context_window_tokens > 2_000_000
@@ -98,9 +96,6 @@ export function ExtensionSettingsPage({
     !toolLimitInvalid &&
     !duplicateGuardInvalid &&
     !compressionTriggerInvalid &&
-    !compressionEmergencyInvalid &&
-    !compressionOrderInvalid &&
-    !compressionRetainInvalid &&
     !compressionWindowInvalid;
 
   const updateDrafts = (updater: (current: ExtensionDrafts) => ExtensionDrafts) => {
@@ -143,25 +138,38 @@ export function ExtensionSettingsPage({
   };
 
   return (
-    <main className={styles.page} data-testid="extension-settings-page">
-      <header className={styles.header}>
-        <h1>扩展功能</h1>
-        <p>配置基础增强能力</p>
+    <main className={styles.page} data-settings-page data-testid="extension-settings-page">
+      <header className={styles.header} data-settings-header>
+        <div>
+          <h1>扩展功能</h1>
+          <p>配置基础增强能力</p>
+        </div>
       </header>
 
-      {loading ? <div className={styles.muted}>正在读取扩展功能配置</div> : null}
+      {loading ? <div className={styles.muted} data-settings-muted>正在读取扩展功能配置</div> : null}
 
       {!loading && drafts && titleDraft && toolDraft && duplicateGuardDraft && compressionDraft ? (
-        <section className={styles.settingsGroup} aria-labelledby="extension-feature-title">
-          <div className={styles.groupHeader}>
+        <section className={styles.settingsGroup} data-settings-group aria-labelledby="extension-feature-title">
+          <div className={styles.groupHeader} data-settings-group-header>
             <h2 id="extension-feature-title">功能模块</h2>
           </div>
 
-          <div className={styles.settingsPanel}>
-            <SettingRow
+          <div className={styles.settingsPanel} data-settings-panel>
+            <FeatureSettingRow
               title="标题生成"
               description="自动为新会话生成标题"
-              control={
+              controls={
+                <InlineNumberControl label="期望标题最大长度">
+                  <NumberInput
+                    label="期望标题最大长度"
+                    max={50}
+                    min={4}
+                    onChange={(max_title_length) => updateTitleDraft({ max_title_length })}
+                    value={titleDraft.max_title_length}
+                  />
+                </InlineNumberControl>
+              }
+              switchControl={
                 <ToggleSwitch
                   checked={titleDraft.enabled}
                   label="启用标题生成"
@@ -172,46 +180,31 @@ export function ExtensionSettingsPage({
             {titleDependencyMissing ? (
               <DependencyWarning message="快速模型未配置，标题生成不可用" onOpenModelConfig={onOpenModelConfig} />
             ) : null}
-            <SettingRow
-              title="期望标题最大长度"
-              description="传给标题生成模型的期望字符数，最终标题仍会做 50 字兜底保护"
-              control={
-                <NumberInput
-                  label="期望标题最大长度"
-                  max={50}
-                  min={4}
-                  onChange={(max_title_length) => updateTitleDraft({ max_title_length })}
-                  value={titleDraft.max_title_length}
-                />
-              }
-            />
             {titleLengthInvalid ? (
               <div className={styles.fieldError}>期望标题最大长度必须在 4 到 50 之间</div>
             ) : null}
           </div>
 
-          <div className={styles.settingsPanel}>
-            <SettingRow
+          <div className={styles.settingsPanel} data-settings-panel>
+            <FeatureSettingRow
               title="单轮工具调用上限"
               description="限制单轮对话中的真实工具调用次数"
-              control={
+              controls={
+                <InlineNumberControl label="单轮最多工具调用">
+                  <NumberInput
+                    label="单轮最多工具调用"
+                    max={500}
+                    min={1}
+                    onChange={(max_tool_calls) => updateToolDraft({ max_tool_calls })}
+                    value={toolDraft.max_tool_calls}
+                  />
+                </InlineNumberControl>
+              }
+              switchControl={
                 <ToggleSwitch
                   checked={toolDraft.enabled}
                   label="启用工具上限"
                   onChange={(enabled) => updateToolDraft({ enabled })}
-                />
-              }
-            />
-            <SettingRow
-              title="最多工具调用"
-              description="超过阈值后终止当前轮次"
-              control={
-                <NumberInput
-                  label="单轮最多工具调用"
-                  max={500}
-                  min={1}
-                  onChange={(max_tool_calls) => updateToolDraft({ max_tool_calls })}
-                  value={toolDraft.max_tool_calls}
                 />
               }
             />
@@ -220,28 +213,26 @@ export function ExtensionSettingsPage({
             ) : null}
           </div>
 
-          <div className={styles.settingsPanel}>
-            <SettingRow
+          <div className={styles.settingsPanel} data-settings-panel>
+            <FeatureSettingRow
               title="重复工具调用保护"
               description="连续相同工具和参数超过阈值后终止本轮对话"
-              control={
+              controls={
+                <InlineNumberControl label="连续重复阈值">
+                  <NumberInput
+                    label="连续重复阈值"
+                    max={20}
+                    min={1}
+                    onChange={(max_repeats) => updateDuplicateGuardDraft({ max_repeats })}
+                    value={duplicateGuardDraft.max_repeats}
+                  />
+                </InlineNumberControl>
+              }
+              switchControl={
                 <ToggleSwitch
                   checked={duplicateGuardDraft.enabled}
                   label="启用重复保护"
                   onChange={(enabled) => updateDuplicateGuardDraft({ enabled })}
-                />
-              }
-            />
-            <SettingRow
-              title="连续重复阈值"
-              description="允许连续重复相同工具调用的次数"
-              control={
-                <NumberInput
-                  label="连续重复阈值"
-                  max={20}
-                  min={1}
-                  onChange={(max_repeats) => updateDuplicateGuardDraft({ max_repeats })}
-                  value={duplicateGuardDraft.max_repeats}
                 />
               }
             />
@@ -250,7 +241,7 @@ export function ExtensionSettingsPage({
             ) : null}
           </div>
 
-          <div className={styles.settingsPanel}>
+          <div className={styles.settingsPanel} data-settings-panel>
             <SettingRow
               title="上下文压缩"
               description="在上下文接近窗口上限时压缩历史内容"
@@ -265,72 +256,14 @@ export function ExtensionSettingsPage({
             {compressionDependencyMissing ? (
               <DependencyWarning message="快速模型未配置，上下文压缩不可用" onOpenModelConfig={onOpenModelConfig} />
             ) : null}
-            <SettingRow
-              title="上下文窗口"
-              description="用于估算压缩触发点的上下文窗口大小"
-              control={
-                <NumberInput
-                  label="上下文窗口"
-                  max={2000000}
-                  min={1000}
-                  onChange={(context_window_tokens) => updateCompressionDraft({ context_window_tokens })}
-                  step={1000}
-                  value={compressionDraft.context_window_tokens}
-                />
-              }
-            />
-            <SettingRow
-              title="触发阈值"
-              description="达到该窗口比例后触发压缩"
-              control={
-                <NumberInput
-                  label="触发阈值"
-                  max={0.99}
-                  min={0.01}
-                  onChange={(trigger_fraction) => updateCompressionDraft({ trigger_fraction })}
-                  step={0.01}
-                  value={compressionDraft.trigger_fraction}
-                />
-              }
-            />
-            <SettingRow
-              title="紧急阈值"
-              description="达到该窗口比例后优先压缩"
-              control={
-                <NumberInput
-                  label="紧急阈值"
-                  max={1}
-                  min={0.01}
-                  onChange={(emergency_fraction) => updateCompressionDraft({ emergency_fraction })}
-                  step={0.01}
-                  value={compressionDraft.emergency_fraction}
-                />
-              }
-            />
-            <SettingRow
-              title="保留轮数"
-              description="压缩时保留最近完整轮次"
-              control={
-                <NumberInput
-                  label="保留轮数"
-                  max={20}
-                  min={0}
-                  onChange={(retain_rounds) => updateCompressionDraft({ retain_rounds })}
-                  value={compressionDraft.retain_rounds}
-                />
-              }
+            <CompressionConfigurator
+              contextWindowTokens={compressionDraft.context_window_tokens}
+              onContextWindowChange={(context_window_tokens) => updateCompressionDraft({ context_window_tokens })}
+              onTriggerFractionChange={(trigger_fraction) => updateCompressionDraft({ trigger_fraction })}
+              triggerFraction={compressionDraft.trigger_fraction}
             />
             {compressionTriggerInvalid ? (
-              <div className={styles.fieldError}>触发阈值必须大于 0 且小于 1</div>
-            ) : null}
-            {compressionEmergencyInvalid ? (
-              <div className={styles.fieldError}>紧急阈值必须大于 0 且小于等于 1</div>
-            ) : null}
-            {compressionOrderInvalid ? (
-              <div className={styles.fieldError}>触发阈值必须小于紧急阈值</div>
-            ) : null}
-            {compressionRetainInvalid ? (
-              <div className={styles.fieldError}>保留轮数必须在 0 到 20 之间</div>
+              <div className={styles.fieldError}>触发阈值必须在 10% 到 90% 之间</div>
             ) : null}
             {compressionWindowInvalid ? (
               <div className={styles.fieldError}>上下文窗口必须在 1000 到 2000000 token 之间</div>
@@ -338,13 +271,40 @@ export function ExtensionSettingsPage({
           </div>
 
           <div className={styles.actions}>
-            <button disabled={!canSave} onClick={() => void saveExtensionPage()} type="button">
+            <button data-settings-primary disabled={!canSave} onClick={() => void saveExtensionPage()} type="button">
               {saving ? "保存中" : "保存"}
             </button>
           </div>
         </section>
       ) : null}
     </main>
+  );
+}
+
+function FeatureSettingRow({
+  controls,
+  description,
+  switchControl,
+  title,
+}: {
+  controls: ReactNode;
+  description: string;
+  switchControl: ReactNode;
+  title: string;
+}) {
+  return (
+    <div className={styles.featureRow} data-settings-row>
+      <div className={styles.settingText} data-settings-row-text>
+        <div>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </div>
+      <div className={styles.featureControls}>
+        {controls}
+        {switchControl}
+      </div>
+    </div>
   );
 }
 
@@ -358,8 +318,8 @@ function SettingRow({
   title: string;
 }) {
   return (
-    <div className={styles.settingRow}>
-      <div className={styles.settingText}>
+    <div className={styles.settingRow} data-settings-row>
+      <div className={styles.settingText} data-settings-row-text>
         <div>
           <h3>{title}</h3>
           <p>{description}</p>
@@ -367,6 +327,21 @@ function SettingRow({
       </div>
       <div className={styles.settingControl}>{control}</div>
     </div>
+  );
+}
+
+function InlineNumberControl({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
+  return (
+    <label className={styles.inlineNumberControl}>
+      <span>{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -380,18 +355,202 @@ function ToggleSwitch({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className={styles.toggle}>
-      <input
-        aria-label={label}
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        role="switch"
-        type="checkbox"
-      />
-      <span aria-hidden="true" className={styles.toggleTrack}>
+    <button
+      aria-checked={checked}
+      aria-label={label}
+      className={styles.toggle}
+      onClick={() => onChange(!checked)}
+      role="switch"
+      type="button"
+    >
+      <span aria-hidden="true" className={styles.toggleTrack} data-checked={checked ? "true" : "false"}>
         <span className={styles.toggleThumb} />
       </span>
-    </label>
+    </button>
+  );
+}
+
+function CompressionConfigurator({
+  contextWindowTokens,
+  onContextWindowChange,
+  onTriggerFractionChange,
+  triggerFraction,
+}: {
+  contextWindowTokens: number;
+  onContextWindowChange: (value: number) => void;
+  onTriggerFractionChange: (value: number) => void;
+  triggerFraction: number;
+}) {
+  const triggerTokenCount = Math.max(0, Math.round(contextWindowTokens * triggerFraction));
+
+  return (
+    <div className={styles.compressionConfigurator}>
+      <div className={styles.contextWindowRow}>
+        <div className={styles.contextWindowText}>
+          <h3>模型上下文窗口</h3>
+          <p>用于估算压缩触发点，按当前模型的上下文窗口填写</p>
+        </div>
+        <NumberInput
+          label="模型上下文窗口"
+          max={2000000}
+          min={1000}
+          onChange={onContextWindowChange}
+          step={1000}
+          value={contextWindowTokens}
+        />
+      </div>
+
+      <div className={styles.thresholdControl}>
+        <div className={styles.thresholdHeader}>
+          <div>
+            <h3>压缩触发阈值</h3>
+            <p>达到窗口占用比例后自动压缩历史</p>
+          </div>
+          <strong>{formatPercent(triggerFraction)}</strong>
+        </div>
+        <CompressionThresholdSlider
+          ariaValueText={`${formatPercent(triggerFraction)}，约 ${formatTokenCount(triggerTokenCount)} token`}
+          label="触发阈值"
+          max={MAX_COMPRESSION_TRIGGER_FRACTION}
+          min={MIN_COMPRESSION_TRIGGER_FRACTION}
+          onChange={onTriggerFractionChange}
+          step={COMPRESSION_TRIGGER_STEP}
+          value={triggerFraction}
+        />
+      <div className={styles.thresholdMeta}>
+        <span>约 {formatTokenCount(triggerTokenCount)} token 时触发</span>
+      </div>
+      </div>
+    </div>
+  );
+}
+
+function CompressionThresholdSlider({
+  ariaValueText,
+  label,
+  max,
+  min,
+  onChange,
+  step,
+  value,
+}: {
+  ariaValueText: string;
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: number) => void;
+  step: number;
+  value: number;
+}) {
+  const sliderRef = useRef<HTMLDivElement | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const pointerStartXRef = useRef<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const sliderValue = clampSliderValue(value, min, max);
+  const sliderPercent = valueToPercent(sliderValue, min, max);
+  const sliderStyle = { "--threshold-slider-percent": `${sliderPercent}%` } as CSSProperties;
+
+  const updateFromClientX = (clientX: number) => {
+    const bounds = sliderRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 0) {
+      return;
+    }
+    const ratio = clampNumber((clientX - bounds.left) / bounds.width, 0, 1);
+    onChange(snapSliderValue(min + ratio * (max - min), min, max, step));
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+    pointerIdRef.current = event.pointerId;
+    pointerStartXRef.current = event.clientX;
+    setDragging(false);
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateFromClientX(event.clientX);
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    if (pointerStartXRef.current !== null && Math.abs(event.clientX - pointerStartXRef.current) > 2) {
+      setDragging(true);
+    }
+    updateFromClientX(event.clientX);
+  };
+
+  const finishPointerInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    pointerIdRef.current = null;
+    pointerStartXRef.current = null;
+    setDragging(false);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = clampSliderValue(value, min, max);
+    const largeStep = step * 10;
+    let nextValue: number | null = null;
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowDown":
+        nextValue = current - step;
+        break;
+      case "ArrowRight":
+      case "ArrowUp":
+        nextValue = current + step;
+        break;
+      case "PageDown":
+        nextValue = current - largeStep;
+        break;
+      case "PageUp":
+        nextValue = current + largeStep;
+        break;
+      case "Home":
+        nextValue = min;
+        break;
+      case "End":
+        nextValue = max;
+        break;
+      default:
+        break;
+    }
+    if (nextValue === null) {
+      return;
+    }
+    event.preventDefault();
+    onChange(snapSliderValue(nextValue, min, max, step));
+  };
+
+  return (
+    <div
+      aria-label={label}
+      aria-valuemax={max}
+      aria-valuemin={min}
+      aria-valuenow={sliderValue}
+      aria-valuetext={ariaValueText}
+      className={styles.thresholdSlider}
+      data-dragging={dragging ? "true" : "false"}
+      onKeyDown={handleKeyDown}
+      onPointerCancel={finishPointerInteraction}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishPointerInteraction}
+      ref={sliderRef}
+      role="slider"
+      style={sliderStyle}
+      tabIndex={0}
+    >
+      <span aria-hidden="true" className={styles.sliderTrack}>
+        <span className={styles.sliderRange} />
+      </span>
+      <span aria-hidden="true" className={styles.sliderThumb} />
+    </div>
   );
 }
 
@@ -435,7 +594,7 @@ function DependencyWarning({
     <div className={styles.warning} role="alert">
       <span>{message}</span>
       {onOpenModelConfig ? (
-        <button type="button" onClick={onOpenModelConfig}>
+        <button data-settings-secondary type="button" onClick={onOpenModelConfig}>
           配置模型
         </button>
       ) : null}
@@ -448,7 +607,7 @@ function draftsFromSettings(settings: AgentRuntimeSettings): ExtensionDrafts {
     autoTitle: { ...settings.auto_title, only_when_default_title: true },
     toolLimit: settings.tool_call_limit,
     duplicateGuard: settings.duplicate_tool_call_guard,
-    compression: settings.context_compression,
+    compression: withFixedCompressionPolicy(settings.context_compression),
   };
 }
 
@@ -457,8 +616,51 @@ function settingsFromDrafts(drafts: ExtensionDrafts): AgentRuntimeSettings {
     auto_title: { ...drafts.autoTitle, only_when_default_title: true },
     tool_call_limit: drafts.toolLimit,
     duplicate_tool_call_guard: drafts.duplicateGuard,
-    context_compression: drafts.compression,
+    context_compression: withFixedCompressionPolicy(drafts.compression),
   };
+}
+
+function withFixedCompressionPolicy(
+  settings: ContextCompressionRuntimeSettings,
+): ContextCompressionRuntimeSettings {
+  return {
+    ...settings,
+    emergency_fraction: FIXED_COMPRESSION_EMERGENCY_FRACTION,
+    retain_rounds: FIXED_COMPRESSION_RETAIN_ROUNDS,
+  };
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampSliderValue(value: number, min: number, max: number): number {
+  return clampNumber(value, min, max);
+}
+
+function snapSliderValue(value: number, min: number, max: number, step: number): number {
+  const steppedValue = min + Math.round((value - min) / step) * step;
+  return Number(clampSliderValue(steppedValue, min, max).toFixed(decimalPlaces(step)));
+}
+
+function valueToPercent(value: number, min: number, max: number): number {
+  if (max <= min) {
+    return 0;
+  }
+  return clampNumber(((value - min) / (max - min)) * 100, 0, 100);
+}
+
+function decimalPlaces(value: number): number {
+  const [, decimals = ""] = String(value).split(".");
+  return decimals.length;
 }
 
 function errorMessage(reason: unknown): string {

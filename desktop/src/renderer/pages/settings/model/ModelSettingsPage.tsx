@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { runtimeBridge, type ModelProvider, type RuntimeBridge } from "@/runtime";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
@@ -22,6 +22,8 @@ export function ModelSettingsPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ mode: ProviderModalMode; provider?: ModelProvider } | null>(null);
+  const [autoRefreshRequest, setAutoRefreshRequest] = useState<AutoRefreshRequest | null>(null);
+  const autoRefreshRequestSeqRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -53,34 +55,47 @@ export function ModelSettingsPage({
   }, [notifications, runtime]);
 
   return (
-    <main className={styles.page} data-testid="model-settings-page">
-      <header className={styles.header}>
+    <main className={styles.page} data-settings-page data-testid="model-settings-page">
+      <header className={styles.header} data-settings-header>
         <div>
           <h1>供应商配置</h1>
           <p>配置本地智能体可调用的 OpenAI 兼容模型服务</p>
         </div>
-        <button className={styles.primaryButton} type="button" onClick={() => openCreate(onCreateProvider, setModal)}>
+        <button
+          className={styles.primaryButton}
+          data-settings-primary
+          type="button"
+          onClick={() => openCreate(onCreateProvider, setModal)}
+        >
           <span>新增供应商</span>
         </button>
       </header>
 
-      {loading ? <div className={styles.muted}>正在读取供应商</div> : null}
+      {loading ? <div className={styles.muted} data-settings-muted>正在读取供应商</div> : null}
       {!loading && !error && !providers.length ? (
-        <section className={styles.empty}>
+        <section className={styles.empty} data-settings-empty>
           <span>暂无供应商</span>
-          <button type="button" onClick={() => openCreate(onCreateProvider, setModal)}>新增供应商</button>
+          <button data-settings-secondary type="button" onClick={() => openCreate(onCreateProvider, setModal)}>
+            新增供应商
+          </button>
         </section>
       ) : null}
 
       {providers.length ? (
-        <section className={styles.settingsGroup} aria-labelledby="model-provider-title">
-          <div className={styles.groupHeader}>
+        <section className={styles.settingsGroup} data-settings-group aria-labelledby="model-provider-title">
+          <div className={styles.groupHeader} data-settings-group-header>
             <h2 id="model-provider-title">模型供应商</h2>
             <span>{providers.length} 个来源</span>
           </div>
-          <div className={styles.providerList} aria-label="供应商列表">
+          <div className={styles.providerList} data-settings-panel aria-label="供应商列表">
             {providers.map((provider) => (
               <ProviderCard
+                autoRefreshRequestId={autoRefreshRequest?.providerId === provider.id ? autoRefreshRequest.requestId : 0}
+                onAutoRefreshHandled={(requestId) => {
+                  setAutoRefreshRequest((request) =>
+                    request?.requestId === requestId ? null : request,
+                  );
+                }}
                 onEdit={(item) => setModal({ mode: "edit", provider: item })}
                 onProviderChange={(item) => setProviders((items) => upsertProvider(items, item))}
                 provider={provider}
@@ -102,6 +117,13 @@ export function ModelSettingsPage({
           }}
           onSaved={(provider) => {
             setProviders((items) => upsertProvider(items, provider));
+            if (modal.mode === "edit") {
+              autoRefreshRequestSeqRef.current += 1;
+              setAutoRefreshRequest({
+                providerId: provider.id,
+                requestId: autoRefreshRequestSeqRef.current,
+              });
+            }
             setModal(null);
           }}
           provider={modal.provider}
@@ -113,11 +135,15 @@ export function ModelSettingsPage({
 }
 
 function ProviderCard({
+  autoRefreshRequestId,
+  onAutoRefreshHandled,
   onEdit,
   onProviderChange,
   provider,
   runtime,
 }: {
+  autoRefreshRequestId: number;
+  onAutoRefreshHandled: (requestId: number) => void;
   onEdit: (provider: ModelProvider) => void;
   onProviderChange: (provider: ModelProvider) => void;
   provider: ModelProvider;
@@ -127,6 +153,12 @@ function ProviderCard({
   const [expanded, setExpanded] = useState(false);
   const [updatingEnabled, setUpdatingEnabled] = useState(false);
   const enabledModels = provider.models.filter((model) => provider.model_enabled[model] !== false);
+
+  useEffect(() => {
+    if (autoRefreshRequestId > 0) {
+      setExpanded(true);
+    }
+  }, [autoRefreshRequestId]);
 
   async function toggleProviderEnabled() {
     if (updatingEnabled) {
@@ -201,11 +233,22 @@ function ProviderCard({
             </div>
           </dl>
 
-          <ModelList onProviderChange={onProviderChange} provider={provider} runtime={runtime} />
+          <ModelList
+            autoRefreshRequestId={autoRefreshRequestId}
+            onAutoRefreshHandled={onAutoRefreshHandled}
+            onProviderChange={onProviderChange}
+            provider={provider}
+            runtime={runtime}
+          />
         </div>
       ) : null}
     </article>
   );
+}
+
+interface AutoRefreshRequest {
+  providerId: string;
+  requestId: number;
 }
 
 function openCreate(

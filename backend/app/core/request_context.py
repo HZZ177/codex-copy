@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from backend.app.agent.tool_call_preset import ToolCallPreset
+    from backend.app.events import EventDispatcher
     from backend.app.keydex.runtime import KeydexWorkspaceRuntimeSnapshot
     from backend.app.keydex.skills import SkillCatalog
 
@@ -18,6 +19,7 @@ user_message_var: ContextVar[str | None] = ContextVar("user_message", default=No
 tool_call_preset_var: ContextVar[Any | None] = ContextVar("tool_call_preset", default=None)
 skill_catalog_var: ContextVar[Any | None] = ContextVar("skill_catalog", default=None)
 keydex_snapshot_var: ContextVar[Any | None] = ContextVar("keydex_snapshot", default=None)
+event_dispatcher_var: ContextVar[Any | None] = ContextVar("event_dispatcher", default=None)
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class RequestContextToken:
     tool_call_preset: Token[Any | None] | None = None
     skill_catalog: Token[Any | None] | None = None
     keydex_snapshot: Token[Any | None] | None = None
+    event_dispatcher: Token[Any | None] | None = None
 
 
 @dataclass
@@ -50,6 +53,7 @@ def set_request_context(
     tool_call_preset: ToolCallPreset | None = None,
     skill_catalog: SkillCatalog | None = None,
     keydex_snapshot: KeydexWorkspaceRuntimeSnapshot | None = None,
+    event_dispatcher: EventDispatcher | None = None,
 ) -> RequestContextToken:
     return RequestContextToken(
         trace_id=trace_id_var.set(trace_id) if trace_id is not None else None,
@@ -69,10 +73,15 @@ def set_request_context(
         keydex_snapshot=keydex_snapshot_var.set(keydex_snapshot)
         if keydex_snapshot is not None
         else None,
+        event_dispatcher=event_dispatcher_var.set(event_dispatcher)
+        if event_dispatcher is not None
+        else None,
     )
 
 
 def reset_request_context(token: RequestContextToken) -> None:
+    if token.event_dispatcher is not None:
+        event_dispatcher_var.reset(token.event_dispatcher)
     if token.keydex_snapshot is not None:
         keydex_snapshot_var.reset(token.keydex_snapshot)
     if token.skill_catalog is not None:
@@ -147,3 +156,7 @@ def get_skill_catalog() -> SkillCatalog | None:
 
 def get_keydex_snapshot() -> KeydexWorkspaceRuntimeSnapshot | None:
     return keydex_snapshot_var.get()
+
+
+def get_event_dispatcher() -> EventDispatcher | None:
+    return event_dispatcher_var.get()

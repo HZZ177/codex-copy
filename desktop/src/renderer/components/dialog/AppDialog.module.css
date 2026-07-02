@@ -246,7 +246,11 @@
 .secondaryAction:focus-visible,
 .primaryAction:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent)
+  );
 }
 
 .header[data-size="form"] .closeButton,

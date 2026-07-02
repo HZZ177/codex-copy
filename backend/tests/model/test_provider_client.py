@@ -109,4 +109,4 @@ async def test_check_chat_completion_maps_http_error() -> None:
     with pytest.raises(ModelProviderError) as exc_info:
         await provider_client.check_chat_completion(model="qwen3-coder")
 
-    assert str(exc_info.value) == "模型健康检查失败：HTTP 400：model unavailable"
+    assert str(exc_info.value) == "模型测试失败：HTTP 400：model unavailable"

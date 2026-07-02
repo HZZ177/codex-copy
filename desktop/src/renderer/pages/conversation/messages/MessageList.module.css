@@ -172,6 +172,7 @@
 }
 
 .item[data-kind="context_compression"],
+.item[data-kind="llm_retry"],
 .item[data-kind="cancelled"] {
   padding-bottom: 18px;
 }
@@ -295,6 +296,23 @@
 
 .contextCompressionNotice[data-state="cancelled"] {
   color: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
+}
+
+.contextCompressionNotice[data-notice-kind="llm_retry"][data-state="running"] {
+  color: color-mix(in srgb, var(--color-warning) 88%, var(--color-text-secondary));
+}
+
+.contextCompressionNotice[data-notice-kind="llm_retry"][data-state="completed"] {
+  color: var(--color-text-tertiary);
+}
+
+.contextCompressionNotice[data-notice-kind="llm_retry"][data-state="failed"] {
+  color: color-mix(in srgb, var(--color-danger) 86%, var(--color-text-secondary));
+}
+
+.contextCompressionNotice[data-notice-kind="llm_retry"][data-state="failed"]::before,
+.contextCompressionNotice[data-notice-kind="llm_retry"][data-state="failed"]::after {
+  background: color-mix(in srgb, var(--color-danger) 36%, var(--color-border-default));
 }
 
 .topNotice {

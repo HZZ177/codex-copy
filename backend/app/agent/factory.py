@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import openai
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -19,12 +20,14 @@ from backend.app.core.ids import new_id
 from backend.app.core.logger import logger
 from backend.app.core.request_context import (
     get_active_session_id,
+    get_event_dispatcher,
     get_session_id,
     get_trace_id,
     get_turn_index,
     get_user_id,
     get_user_message,
 )
+from backend.app.events import DomainEventType
 from backend.app.model import ModelSettings
 
 _llm_gateway_trace_registry: dict[str, str] = {}
@@ -39,6 +42,8 @@ _KEYDEX_REASONING_KEYS = "__keydex_reasoning_keys__"
 _KEYDEX_REASONING_TEXT = "__keydex_reasoning_text__"
 _TOOL_CALL_PREVIEW_ARGS_LIMIT = 800
 _TOOL_CALL_PREVIEW_MAX_CALLS = 5
+_LLM_BUSINESS_MAX_RETRIES = 3
+_LLM_RETRY_DELAYS_SECONDS = (0.8, 1.6, 3.2)
 
 
 def register_llm_gateway_trace_id(run_id: str, gateway_trace_id: str) -> None:
@@ -176,6 +181,8 @@ class PatchedChatOpenAI(ChatOpenAI):
         gateway_trace_id: str,
         messages: list[Any],
         call_kind: str,
+        attempt: int = 1,
+        max_retries: int = 0,
     ) -> _LLMRequestLogContext | None:
         if self._llm_request_logs is None:
             return None
@@ -184,7 +191,8 @@ class PatchedChatOpenAI(ChatOpenAI):
         if not trace_id or not session_id:
             return None
         gateway_thread_id = trace_id or None
-        request_id = run_id or gateway_trace_id or new_id()
+        base_request_id = run_id or gateway_trace_id or new_id()
+        request_id = base_request_id if attempt <= 1 else f"{base_request_id}:attempt-{attempt}"
         context = _LLMRequestLogContext(
             request_id=request_id,
             run_id=run_id,
@@ -212,6 +220,8 @@ class PatchedChatOpenAI(ChatOpenAI):
                     "call_kind": call_kind,
                     "logging_source": "patched_chat_openai",
                     "user_id": get_user_id() or None,
+                    "attempt": attempt,
+                    "max_retries": max_retries,
                 },
             )
         except Exception as exc:
@@ -307,6 +317,63 @@ class PatchedChatOpenAI(ChatOpenAI):
                 f"request_id={context.request_id} | 错误={exc}"
             )
 
+    async def _emit_retry_progress(
+        self,
+        *,
+        stage: str,
+        run_id: str,
+        gateway_trace_id: str,
+        attempt: int,
+        max_retries: int,
+        error: BaseException | None = None,
+    ) -> None:
+        dispatcher = get_event_dispatcher()
+        trace_id = get_trace_id()
+        session_id = get_session_id()
+        if dispatcher is None or not trace_id or not session_id or max_retries <= 0:
+            return
+        retry_index = min(max(attempt, 1), max_retries)
+        retry_after_ms = (
+            int(_llm_retry_delay_seconds(attempt) * 1000)
+            if stage == "retrying"
+            else None
+        )
+        payload: dict[str, Any] = {
+            "middleware": "LLMRetry",
+            "kind": "llm_retry",
+            "stage": stage,
+            "notice_id": f"llm-retry:{trace_id}:{run_id or gateway_trace_id or 'model'}",
+            "session_id": session_id,
+            "active_session_id": get_active_session_id() or session_id,
+            "trace_id": trace_id,
+            "gateway_trace_id": gateway_trace_id,
+            "attempt": attempt + 1 if stage == "retrying" else attempt,
+            "retry_index": retry_index,
+            "max_retries": max_retries,
+            "max_attempts": max_retries + 1,
+            "retry_after_ms": retry_after_ms,
+        }
+        if error is not None:
+            payload["error"] = str(error) or type(error).__name__
+            payload["error_type"] = _exception_type_name(error)
+        try:
+            await dispatcher.emit_event(
+                event_type=DomainEventType.MIDDLEWARE_PROGRESS.value,
+                source="llm_retry",
+                payload=payload,
+                trace_id=trace_id,
+                user_id=get_user_id() or None,
+                original_session_id=session_id,
+                active_session_id=get_active_session_id() or session_id,
+                run_id=run_id,
+                turn_index=get_turn_index(),
+            )
+        except Exception as exc:
+            logger.debug(
+                f"[LLMRetry] 进度事件发送失败 | stage={stage} | "
+                f"run_id={run_id} | gateway_trace_id={gateway_trace_id} | error={exc}"
+            )
+
     async def _agenerate_with_cache(
         self,
         messages: list[Any],
@@ -351,35 +418,71 @@ class PatchedChatOpenAI(ChatOpenAI):
         resolved_kwargs = dict(kwargs)
         gateway_trace_id = self._resolve_gateway_trace_id(run_id, resolved_kwargs)
         kwargs = self._inject_gateway_headers(resolved_kwargs, gateway_trace_id)
-        request_log = self._start_request_log(
-            run_id=run_id,
-            gateway_trace_id=gateway_trace_id,
-            messages=messages,
-            call_kind="agenerate",
-        )
+        max_retries = _llm_business_max_retries()
+        attempt = 1
         try:
-            result = await super()._agenerate(
-                messages,
-                stop=stop,
-                run_manager=run_manager,
-                **kwargs,
-            )
-        except (asyncio.CancelledError, GeneratorExit) as exc:
-            self._cancel_request_log(request_log, error=exc)
-            logger.info(
-                f"[LLM] agenerate 已取消 | run_id={run_id} | "
-                f"gateway_trace_id={gateway_trace_id} | error={type(exc).__name__}"
-            )
-            raise
-        except BaseException as exc:
-            self._fail_request_log(request_log, error=exc)
-            logger.opt(exception=True).error(
-                f"[LLM] agenerate 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
-            )
-            raise
-        else:
-            self._finish_request_log(request_log, response=result)
-            return result
+            while True:
+                request_log = self._start_request_log(
+                    run_id=run_id,
+                    gateway_trace_id=gateway_trace_id,
+                    messages=messages,
+                    call_kind="agenerate",
+                    attempt=attempt,
+                    max_retries=max_retries,
+                )
+                try:
+                    result = await super()._agenerate(
+                        messages,
+                        stop=stop,
+                        run_manager=run_manager,
+                        **kwargs,
+                    )
+                except (asyncio.CancelledError, GeneratorExit) as exc:
+                    self._cancel_request_log(request_log, error=exc)
+                    logger.info(
+                        f"[LLM] agenerate 已取消 | run_id={run_id} | "
+                        f"gateway_trace_id={gateway_trace_id} | error={type(exc).__name__}"
+                    )
+                    raise
+                except BaseException as exc:
+                    self._fail_request_log(request_log, error=exc)
+                    if _should_retry_llm_error(exc) and attempt <= max_retries:
+                        await self._emit_retry_progress(
+                            stage="retrying",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            error=exc,
+                        )
+                        await _sleep_before_llm_retry(attempt)
+                        attempt += 1
+                        continue
+                    if attempt > 1:
+                        await self._emit_retry_progress(
+                            stage="failed",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            error=exc,
+                        )
+                    logger.opt(exception=True).error(
+                        f"[LLM] agenerate 失败 | run_id={run_id} | "
+                        f"gateway_trace_id={gateway_trace_id}"
+                    )
+                    raise
+                else:
+                    self._finish_request_log(request_log, response=result)
+                    if attempt > 1:
+                        await self._emit_retry_progress(
+                            stage="recovered",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                        )
+                    return result
         finally:
             pop_llm_gateway_trace_id(run_id)
 
@@ -394,89 +497,135 @@ class PatchedChatOpenAI(ChatOpenAI):
         resolved_kwargs = dict(kwargs)
         gateway_trace_id = self._resolve_gateway_trace_id(run_id, resolved_kwargs)
         kwargs = self._inject_gateway_headers(resolved_kwargs, gateway_trace_id)
-        request_log = self._start_request_log(
-            run_id=run_id,
-            gateway_trace_id=gateway_trace_id,
-            messages=messages,
-            call_kind="astream",
-        )
-
-        seen_input_tokens: int | None = None
-        seen_output_tokens: int | None = None
-        seen_total_tokens: int | None = None
-        seen_cache_read_tokens: int | None = None
-        stream_usage = _empty_token_usage()
-        response_preview = _ResponsePreviewCollector()
-        time_to_first_token: int | None = None
+        max_retries = _llm_business_max_retries()
+        attempt = 1
         try:
-            async for chunk in super()._astream(
-                messages,
-                stop=stop,
-                run_manager=run_manager,
-                **kwargs,
-            ):
-                chunk_msg = getattr(chunk, "message", None)
-                usage = getattr(chunk_msg, "usage_metadata", None) if chunk_msg else None
-                if usage:
-                    seen_input_tokens = _zero_repeated_usage_field(
-                        usage,
-                        "input_tokens",
-                        seen_input_tokens,
+            while True:
+                request_log = self._start_request_log(
+                    run_id=run_id,
+                    gateway_trace_id=gateway_trace_id,
+                    messages=messages,
+                    call_kind="astream",
+                    attempt=attempt,
+                    max_retries=max_retries,
+                )
+                seen_input_tokens: int | None = None
+                seen_output_tokens: int | None = None
+                seen_total_tokens: int | None = None
+                seen_cache_read_tokens: int | None = None
+                stream_usage = _empty_token_usage()
+                response_preview = _ResponsePreviewCollector()
+                time_to_first_token: int | None = None
+                yielded_chunk = False
+                try:
+                    async for chunk in super()._astream(
+                        messages,
+                        stop=stop,
+                        run_manager=run_manager,
+                        **kwargs,
+                    ):
+                        yielded_chunk = True
+                        chunk_msg = getattr(chunk, "message", None)
+                        usage = getattr(chunk_msg, "usage_metadata", None) if chunk_msg else None
+                        if usage:
+                            seen_input_tokens = _zero_repeated_usage_field(
+                                usage,
+                                "input_tokens",
+                                seen_input_tokens,
+                            )
+                            seen_output_tokens = _zero_repeated_usage_field(
+                                usage,
+                                "output_tokens",
+                                seen_output_tokens,
+                            )
+                            seen_total_tokens = _zero_repeated_usage_field(
+                                usage,
+                                "total_tokens",
+                                seen_total_tokens,
+                            )
+                            seen_cache_read_tokens = _zero_repeated_cache_read(
+                                usage,
+                                seen_cache_read_tokens,
+                            )
+                            _merge_token_usage(
+                                stream_usage,
+                                _extract_token_usage_from_metadata(usage),
+                            )
+                        if (
+                            time_to_first_token is None
+                            and request_log is not None
+                            and _stream_first_output_text(chunk_msg)
+                        ):
+                            time_to_first_token = _duration_ms(request_log.started_at)
+                        response_preview.append(chunk_msg)
+                        yield chunk
+                except (asyncio.CancelledError, GeneratorExit) as exc:
+                    self._cancel_request_log(
+                        request_log,
+                        error=exc,
+                        response_preview=response_preview.preview(),
+                        time_to_first_token=time_to_first_token,
                     )
-                    seen_output_tokens = _zero_repeated_usage_field(
-                        usage,
-                        "output_tokens",
-                        seen_output_tokens,
+                    logger.info(
+                        f"[LLM] astream 已取消 | run_id={run_id} | "
+                        f"gateway_trace_id={gateway_trace_id} | error={type(exc).__name__}"
                     )
-                    seen_total_tokens = _zero_repeated_usage_field(
-                        usage,
-                        "total_tokens",
-                        seen_total_tokens,
+                    raise
+                except BaseException as exc:
+                    self._fail_request_log(
+                        request_log,
+                        error=exc,
+                        response_preview=response_preview.preview(),
+                        time_to_first_token=time_to_first_token,
                     )
-                    seen_cache_read_tokens = _zero_repeated_cache_read(
-                        usage,
-                        seen_cache_read_tokens,
+                    can_retry = (
+                        not yielded_chunk
+                        and _should_retry_llm_error(exc)
+                        and attempt <= max_retries
                     )
-                    _merge_token_usage(stream_usage, _extract_token_usage_from_metadata(usage))
-                if (
-                    time_to_first_token is None
-                    and request_log is not None
-                    and _stream_first_output_text(chunk_msg)
-                ):
-                    time_to_first_token = _duration_ms(request_log.started_at)
-                response_preview.append(chunk_msg)
-                yield chunk
-        except (asyncio.CancelledError, GeneratorExit) as exc:
-            self._cancel_request_log(
-                request_log,
-                error=exc,
-                response_preview=response_preview.preview(),
-                time_to_first_token=time_to_first_token,
-            )
-            logger.info(
-                f"[LLM] astream 已取消 | run_id={run_id} | "
-                f"gateway_trace_id={gateway_trace_id} | error={type(exc).__name__}"
-            )
-            raise
-        except BaseException as exc:
-            self._fail_request_log(
-                request_log,
-                error=exc,
-                response_preview=response_preview.preview(),
-                time_to_first_token=time_to_first_token,
-            )
-            logger.opt(exception=True).error(
-                f"[LLM] astream 失败 | run_id={run_id} | gateway_trace_id={gateway_trace_id}"
-            )
-            raise
-        else:
-            self._finish_request_log(
-                request_log,
-                response=None,
-                response_preview=response_preview.preview(),
-                usage=stream_usage,
-                time_to_first_token=time_to_first_token,
-            )
+                    if can_retry:
+                        await self._emit_retry_progress(
+                            stage="retrying",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            error=exc,
+                        )
+                        await _sleep_before_llm_retry(attempt)
+                        attempt += 1
+                        continue
+                    if attempt > 1:
+                        await self._emit_retry_progress(
+                            stage="failed",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            error=exc,
+                        )
+                    logger.opt(exception=True).error(
+                        f"[LLM] astream 失败 | run_id={run_id} | "
+                        f"gateway_trace_id={gateway_trace_id}"
+                    )
+                    raise
+                else:
+                    self._finish_request_log(
+                        request_log,
+                        response=None,
+                        response_preview=response_preview.preview(),
+                        usage=stream_usage,
+                        time_to_first_token=time_to_first_token,
+                    )
+                    if attempt > 1:
+                        await self._emit_retry_progress(
+                            stage="recovered",
+                            run_id=run_id,
+                            gateway_trace_id=gateway_trace_id,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                        )
+                    return
         finally:
             pop_llm_gateway_trace_id(run_id)
 
@@ -620,6 +769,54 @@ def _duration_ms(started_at: float) -> int:
     if elapsed_ms <= 0:
         return 0
     return max(1, int(elapsed_ms + 0.999))
+
+
+def _llm_business_max_retries() -> int:
+    return max(0, int(_LLM_BUSINESS_MAX_RETRIES))
+
+
+async def _sleep_before_llm_retry(attempt: int) -> None:
+    delay = _llm_retry_delay_seconds(attempt)
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+def _llm_retry_delay_seconds(attempt: int) -> float:
+    if not _LLM_RETRY_DELAYS_SECONDS:
+        return 0
+    index = min(max(attempt - 1, 0), len(_LLM_RETRY_DELAYS_SECONDS) - 1)
+    return max(0.0, float(_LLM_RETRY_DELAYS_SECONDS[index]))
+
+
+def _should_retry_llm_error(error: BaseException) -> bool:
+    for exc in _exception_chain(error):
+        if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+            return False
+        if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
+            return True
+        if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+            return True
+        if isinstance(exc, openai.APIStatusError):
+            status_code = getattr(exc, "status_code", None)
+            return status_code in {408, 409, 429, 500, 502, 503, 504}
+        if isinstance(exc, httpx.HTTPStatusError):
+            status_code = exc.response.status_code
+            return status_code in {408, 409, 429, 500, 502, 503, 504}
+    return False
+
+
+def _exception_chain(error: BaseException) -> Iterator[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _exception_type_name(error: BaseException) -> str:
+    cls = type(error)
+    return f"{cls.__module__}.{cls.__name__}"
 
 
 class _ResponsePreviewCollector:
@@ -1304,6 +1501,7 @@ class AgentFactory:
                 temperature=temperature,
                 max_completion_tokens=max_tokens,
                 timeout=timeout,
+                max_retries=0,
                 streaming=streaming,
                 stream_usage=True,
                 use_responses_api=False,

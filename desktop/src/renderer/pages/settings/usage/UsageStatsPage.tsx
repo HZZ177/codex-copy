@@ -253,22 +253,22 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
   }
 
   return (
-    <main className={styles.page} data-testid="usage-stats-page" data-usage-tooltips="true">
+    <main className={styles.page} data-settings-page data-testid="usage-stats-page" data-usage-tooltips="true">
       <AppTooltipLayer scopeSelector="[data-usage-tooltips='true']" defaultPlacement="top" />
-      <header className={styles.header}>
+      <header className={styles.header} data-settings-header>
         <div>
           <h1>用量统计</h1>
           <p>查看本地智能体的模型请求与 Token 使用情况</p>
         </div>
       </header>
 
-      <section className={styles.settingsGroup} aria-labelledby="usage-year-title">
-        <div className={styles.groupHeader}>
+      <section className={styles.settingsGroup} data-settings-group aria-labelledby="usage-year-title">
+        <div className={styles.groupHeader} data-settings-group-header>
           <h2 id="usage-year-title">年度概览</h2>
           <span>最近 1 年{selectedModel ? ` · ${selectedModel}` : ""}</span>
         </div>
         <section className={styles.overviewGrid} aria-label="用量总览">
-          <section className={styles.chartPanel}>
+          <section className={styles.chartPanel} data-settings-panel>
             <div className={styles.chartToolbar}>
               <span className={styles.chartRange}>
                 最近 1 年
@@ -299,8 +299,8 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
         </section>
       </section>
 
-      <section className={styles.settingsGroup} aria-labelledby="usage-current-title">
-        <div className={styles.groupHeader}>
+      <section className={styles.settingsGroup} data-settings-group aria-labelledby="usage-current-title">
+        <div className={styles.groupHeader} data-settings-group-header>
           <h2 id="usage-current-title">数据统计</h2>
           <span>
             {formatRange(range.startTime, range.endTime)}
@@ -347,6 +347,7 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
           </section>
           <button
             className={styles.iconButton}
+            data-settings-secondary
             type="button"
             onClick={() => setRefreshNonce((value) => value + 1)}
           >
@@ -356,9 +357,9 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
         </div>
         <section className={styles.scopedStats} aria-label="时间范围统计">
         {error ? (
-          <section className={styles.error} role="alert">
+          <section className={styles.error} data-settings-error role="alert">
             <span>{error}</span>
-            <button type="button" onClick={() => setRefreshNonce((value) => value + 1)}>
+            <button data-settings-secondary type="button" onClick={() => setRefreshNonce((value) => value + 1)}>
               重试
             </button>
           </section>
@@ -392,7 +393,7 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
           />
         </section>
 
-        <section className={styles.chartPanel}>
+        <section className={styles.chartPanel} data-settings-panel>
           <div className={styles.chartToolbar}>
             <span className={styles.chartRange}>
               {formatRange(range.startTime, range.endTime)}
@@ -421,7 +422,7 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
           <UsageTrendChart points={trend} />
         </section>
 
-        <section className={styles.tablePanel}>
+        <section className={styles.tablePanel} data-settings-panel>
           <div className={styles.panelHeader}>
             <div>
               <h2>请求日志</h2>
@@ -430,13 +431,19 @@ export function UsageStatsPage({ runtime = runtimeBridge, onNavigateToConversati
           </div>
           <UsageRequestTable rows={requests.list} loading={requestsLoading} onOpen={(id) => setDetailId(id)} />
           <footer className={styles.pagination}>
-            <button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
+            <button
+              data-settings-secondary
+              disabled={page <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+              type="button"
+            >
               上一页
             </button>
             <span>
               第 {requests.page} / {totalPages} 页
             </span>
             <button
+              data-settings-secondary
               disabled={page >= totalPages}
               onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
               type="button"

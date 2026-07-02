@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -96,6 +96,46 @@ describe("ModelSettingsPage", () => {
     );
   });
 
+  it("expands and refreshes models after editing a provider successfully", async () => {
+    const saved = provider({ name: "默认模型服务更新", models: ["stale-model"] });
+    const refreshed = provider({ name: "默认模型服务更新", models: ["qwen3-coder", "deepseek-coder"] });
+    const refreshDeferred = createDeferred<ModelProvider>();
+    const runtime = fakeRuntime([provider({ models: ["stale-model"] })], {
+      updateProvider: vi.fn().mockResolvedValue(saved),
+      refreshProviderModels: vi.fn(() => refreshDeferred.promise),
+    });
+
+    renderWithNotifications(<ModelSettingsPage runtime={runtime} />);
+
+    const providerName = await screen.findByText("默认模型服务");
+    const cardHeader = providerName.closest("button") as HTMLButtonElement;
+    expect(cardHeader.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑 默认模型服务" }));
+    fireEvent.change(screen.getByDisplayValue("默认模型服务"), { target: { value: "默认模型服务更新" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(runtime.models.updateProvider).toHaveBeenCalledWith("provider-1", {
+        name: "默认模型服务更新",
+        base_url: "https://api.example.com/v1",
+        enabled: true,
+      });
+    });
+    expect(await screen.findByRole("status", { name: "正在刷新模型列表" })).not.toBeNull();
+    expect(screen.getByText("默认模型服务更新").closest("button")?.getAttribute("aria-expanded")).toBe("true");
+
+    await waitFor(() => {
+      expect(runtime.models.refreshProviderModels).toHaveBeenCalledWith("provider-1");
+    });
+
+    await act(async () => {
+      refreshDeferred.resolve(refreshed);
+      await refreshDeferred.promise;
+    });
+    expect(await screen.findByText("deepseek-coder")).not.toBeNull();
+  });
+
   it("renders empty state and create action", async () => {
     const onCreateProvider = vi.fn();
     const runtime = fakeRuntime([]);
@@ -190,4 +230,14 @@ function fakeRuntime(
       ...overrides,
     },
   } as unknown as RuntimeBridge;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }

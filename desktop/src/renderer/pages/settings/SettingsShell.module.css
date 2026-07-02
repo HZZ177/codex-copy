@@ -1,5 +1,10 @@
 .shell {
   --active-sidebar-width: var(--sidebar-width);
+  --settings-focus-ring:
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--surface-hover) 50%, transparent);
+  --settings-selected-bg: color-mix(in srgb, var(--surface-active) 72%, var(--color-bg-elevated));
+  --settings-selected-ring: inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 44%, transparent);
 
   width: 100%;
   height: 100%;
@@ -192,8 +197,8 @@
 }
 
 .menuItem[data-active="true"] {
-  background: color-mix(in srgb, var(--surface-active) 86%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 46%, transparent);
+  background: var(--settings-selected-bg);
+  box-shadow: var(--settings-selected-ring);
   color: var(--color-text-1);
 }
 
@@ -234,6 +239,16 @@
 }
 
 .content {
+  --settings-button-border: color-mix(in srgb, var(--color-border-default) 72%, transparent);
+  --settings-button-border-strong: color-mix(in srgb, var(--color-border-3) 66%, var(--color-border-default));
+  --settings-button-bg: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--surface-muted));
+  --settings-button-primary-bg: color-mix(in srgb, var(--surface-muted) 70%, var(--color-bg-elevated));
+  --settings-button-hover-bg: color-mix(in srgb, var(--surface-hover) 78%, var(--color-bg-elevated));
+  --settings-button-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+  --settings-button-hover-shadow:
+    0 1px 4px rgb(15 23 42 / 7%),
+    inset 0 1px 0 color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
+
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -266,11 +281,256 @@
 
 .content :global(:where(button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [aria-haspopup="listbox"]:not(:disabled)):focus-visible) {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .content :global(:where(input:not(:disabled), textarea:not(:disabled)):hover) {
-  border-color: color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+  border-color: color-mix(in srgb, var(--color-border-3) 54%, var(--color-border-default));
+}
+
+.content :global([data-settings-page]) {
+  width: min(860px, calc(100% - 96px));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 76px 0 116px;
+  color: var(--color-text-primary);
+}
+
+.content :global([data-settings-header]) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.content :global([data-settings-header] h1) {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.content :global([data-settings-header] p) {
+  margin: 7px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.content :global([data-settings-muted]) {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.content :global([data-settings-group]) {
+  position: relative;
+  z-index: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.content :global([data-settings-group] + [data-settings-group]) {
+  margin-top: 18px;
+}
+
+.content :global([data-settings-group-header]) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.content :global([data-settings-group-header] h2),
+.content :global([data-settings-group-title]) {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.content :global([data-settings-group-header] > span) {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+.content :global([data-settings-panel]) {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
+  box-shadow: none;
+  backdrop-filter: blur(18px);
+}
+
+.content :global([data-settings-row]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: center;
+  gap: 22px;
+  min-height: 64px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 86%, transparent);
+  padding: 12px 14px;
+}
+
+.content :global([data-settings-row]:first-child) {
+  border-top: 0;
+}
+
+.content :global([data-settings-row-text]) {
+  display: grid;
+  min-width: 0;
+}
+
+.content :global([data-settings-row-text] h3) {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.25;
+}
+
+.content :global([data-settings-row-text] p) {
+  margin: 5px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.content :global([data-settings-primary]),
+.content :global([data-settings-secondary]),
+.content :global([data-settings-icon-button]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+  cursor: pointer;
+}
+
+.content :global([data-settings-primary]) {
+  height: 32px;
+  min-width: 60px;
+  border: 1px solid var(--settings-button-border-strong);
+  background: var(--settings-button-primary-bg);
+  color: var(--color-text-primary);
+  padding: 0 13px;
+  box-shadow: var(--settings-button-shadow);
+  font-weight: 560;
+}
+
+.content :global([data-settings-secondary]),
+.content :global([data-settings-icon-button]) {
+  min-height: 32px;
+  border: 1px solid var(--settings-button-border);
+  background: var(--settings-button-bg);
+  color: var(--color-text-secondary);
+  padding: 0 10px;
+  box-shadow: var(--settings-button-shadow);
+}
+
+.content :global([data-settings-icon-button]) {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.content :global([data-settings-primary]:hover:not(:disabled)) {
+  border-color: color-mix(in srgb, var(--color-border-3) 72%, var(--color-border-default));
+  background: var(--settings-button-hover-bg);
+  color: var(--color-text-primary);
+  box-shadow: var(--settings-button-hover-shadow);
+  transform: translateY(-1px);
+}
+
+.content :global([data-settings-secondary]:hover:not(:disabled)),
+.content :global([data-settings-icon-button]:hover:not(:disabled)) {
+  border-color: color-mix(in srgb, var(--color-border-3) 58%, var(--color-border-default));
+  background: var(--settings-button-hover-bg);
+  color: var(--color-text-primary);
+  box-shadow: var(--settings-button-hover-shadow);
+  transform: translateY(-1px);
+}
+
+.content :global([data-settings-primary]:focus-visible),
+.content :global([data-settings-secondary]:focus-visible),
+.content :global([data-settings-icon-button]:focus-visible) {
+  outline: 0;
+  box-shadow:
+    var(--settings-focus-ring),
+    var(--settings-button-shadow);
+}
+
+.content :global([data-settings-primary]:active:not(:disabled)),
+.content :global([data-settings-secondary]:active:not(:disabled)),
+.content :global([data-settings-icon-button]:active:not(:disabled)) {
+  border-color: var(--settings-button-border);
+  background: var(--settings-selected-bg);
+  box-shadow: var(--settings-selected-ring);
+  transform: translateY(0);
+}
+
+.content :global([data-settings-primary]:disabled),
+.content :global([data-settings-secondary]:disabled),
+.content :global([data-settings-icon-button]:disabled) {
+  cursor: default;
+  opacity: 0.48;
+  transform: none;
+}
+
+.content :global([data-settings-empty]) {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
+  color: var(--color-text-tertiary);
+  padding: 13px 14px;
+  backdrop-filter: blur(18px);
+}
+
+.content :global([data-settings-empty] > span) {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.content :global([data-settings-error]) {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--surface-bg));
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+@media (max-width: 760px) {
+  .content :global([data-settings-page]) {
+    width: calc(100% - 28px);
+    padding: 42px 0 118px;
+  }
+
+  .content :global([data-settings-header]),
+  .content :global([data-settings-group-header]) {
+    flex-direction: column;
+  }
+
+  .content :global([data-settings-row]) {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 .content::-webkit-scrollbar {
@@ -319,7 +579,7 @@
 .themeButton:focus-visible,
 .searchBox:focus-within {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .shell[data-sidebar="collapsed"] .searchBox {

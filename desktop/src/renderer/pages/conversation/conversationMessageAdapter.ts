@@ -23,6 +23,9 @@ export function agentMessageToConversationMessage(message: AgentChatMessage, ind
 }
 
 export function conversationKindFromAgent(message: AgentChatMessage): ConversationMessage["kind"] {
+  if (message.role === "system" && isLLMRetryMessage(message)) {
+    return "llm_retry";
+  }
   if (message.role === "system" && isContextCompressionMessage(message)) {
     return "context_compression";
   }
@@ -170,6 +173,11 @@ function isContextCompressionMessage(message: AgentChatMessage): boolean {
   const compression = objectValue(message.metadata?.compression);
   const kind = stringValue(compression?.kind);
   return kind === "context_compression" || kind === "context_compressed";
+}
+
+function isLLMRetryMessage(message: AgentChatMessage): boolean {
+  const retry = objectValue(message.metadata?.retry);
+  return stringValue(retry?.kind) === "llm_retry";
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {

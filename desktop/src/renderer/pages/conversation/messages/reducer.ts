@@ -96,7 +96,7 @@ function reduceTurn(
 
 function reduceTurnFailed(state: ConversationState, event: RuntimeEvent): ConversationState {
   let next = reduceTurn(state, event, "failed");
-  const error = normalizeError(event.payload.error, "turn_error", "对话执行失败");
+  const error = normalizeTurnFailedError(event.payload);
   next = upsertErrorMessage(next, event, error, `turn-error:${event.turn_id ?? event.event_id}`);
   return next;
 }
@@ -422,6 +422,25 @@ function normalizeError(value: unknown, fallbackCode: string, fallbackMessage: s
     message: typeof value === "string" && value ? value : fallbackMessage,
     details: {},
   };
+}
+
+function normalizeTurnFailedError(payload: Record<string, unknown>): TurnError {
+  const nested = normalizeError(payload.error, "", "");
+  const topLevel = normalizeError(payload, "", "");
+  const turn = normalizeError((payload.turn as Record<string, unknown> | undefined)?.error, "", "");
+  return {
+    code: firstNonEmpty(topLevel.code, nested.code, turn.code, "turn_error"),
+    message: firstNonEmpty(topLevel.message, nested.message, turn.message, "对话执行失败"),
+    details: firstNonEmptyRecord(topLevel.details, nested.details, turn.details),
+  };
+}
+
+function firstNonEmpty(...values: string[]): string {
+  return values.find((value) => value.trim()) ?? "";
+}
+
+function firstNonEmptyRecord(...values: Record<string, unknown>[]): Record<string, unknown> {
+  return values.find((value) => Object.keys(value).length > 0) ?? {};
 }
 
 function formatUserInput(input: unknown): string {

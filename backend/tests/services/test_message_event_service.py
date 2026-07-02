@@ -85,6 +85,61 @@ def test_message_event_service_aggregates_user_stream_tool_and_completed(tmp_pat
     assert isinstance(messages[2]["timestamp"], int)
 
 
+def test_message_event_service_restores_llm_retry_notice(tmp_path) -> None:
+    repositories = _repositories(tmp_path)
+    service = MessageEventService(repositories.message_events)
+
+    _append(
+        repositories,
+        "evt_retrying",
+        "middleware_progress",
+        {
+            "middleware": "LLMRetry",
+            "kind": "llm_retry",
+            "stage": "retrying",
+            "notice_id": "llm-retry:trace-1:run-1",
+            "retry_index": 1,
+            "max_retries": 3,
+            "attempt": 2,
+        },
+    )
+    _append(
+        repositories,
+        "evt_recovered",
+        "middleware_progress",
+        {
+            "middleware": "LLMRetry",
+            "kind": "llm_retry",
+            "stage": "recovered",
+            "notice_id": "llm-retry:trace-1:run-1",
+            "retry_index": 1,
+            "max_retries": 3,
+            "attempt": 2,
+        },
+    )
+
+    messages = service.get_display_messages("ses_history")
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "LLM 请求重试成功"
+    assert messages[0]["messageEventId"] == "evt_recovered"
+    assert messages[0]["metadata"]["retry"] == {
+        "kind": "llm_retry",
+        "stage": "recovered",
+        "notice_id": "llm-retry:trace-1:run-1",
+        "attempt": 2,
+        "retry_index": 1,
+        "max_retries": 3,
+        "max_attempts": None,
+        "retry_after_ms": None,
+        "gateway_trace_id": None,
+        "error": None,
+        "error_type": None,
+    }
+    assert messages[0]["status"] == "completed"
+
+
 def test_message_event_service_can_defer_tool_payloads_for_history(tmp_path) -> None:
     repositories = _repositories(tmp_path)
     service = MessageEventService(repositories.message_events)

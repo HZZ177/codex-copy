@@ -218,14 +218,15 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
   };
 
   return (
-    <div className={styles.page} data-testid="config-settings-page">
-      <header className={styles.header}>
+    <div className={styles.page} data-settings-page data-testid="config-settings-page">
+      <header className={styles.header} data-settings-header>
         <div>
           <h1>策略配置</h1>
           <p>管理审批策略和命令执行权限</p>
         </div>
         <button
           className={styles.iconButton}
+          data-settings-icon-button
           type="button"
           aria-label="刷新策略配置"
           onClick={() => void load(history.page)}
@@ -234,14 +235,14 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
         </button>
       </header>
 
-      {error ? <div className={styles.error}>{error}</div> : null}
-      {loading ? <div className={styles.loading}>正在加载策略配置</div> : null}
+      {error ? <div className={styles.error} data-settings-error>{error}</div> : null}
+      {loading ? <div className={styles.loading} data-settings-muted>正在加载策略配置</div> : null}
 
-      <section className={styles.settingsGroup} aria-labelledby="command-tools-title">
-        <h2 id="command-tools-title">命令行工具</h2>
-        <div className={styles.settingsPanel}>
-          <div className={styles.policyBlock}>
-            <div className={styles.policyText}>
+      <section className={styles.settingsGroup} data-settings-group aria-labelledby="command-tools-title">
+        <h2 data-settings-group-title id="command-tools-title">命令行工具</h2>
+        <div className={styles.settingsPanel} data-settings-panel>
+          <div className={styles.policyBlock} data-settings-row>
+            <div className={styles.policyText} data-settings-row-text>
               <h3>批准策略</h3>
               <p>{savingPolicy ? "正在保存策略" : currentPolicyOption.preview}</p>
               <p className={styles.policyHint}>{currentPolicyOption.description}</p>
@@ -258,8 +259,8 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
               value={currentPolicy}
             />
           </div>
-          <div className={styles.policyBlock}>
-            <div className={styles.policyText}>
+          <div className={styles.policyBlock} data-settings-row>
+            <div className={styles.policyText} data-settings-row-text>
               <h3>文件访问权限</h3>
               <p>{savingFileAccess ? "正在保存权限" : currentFileAccessOption.preview}</p>
               <p className={styles.policyHint}>{currentFileAccessOption.description}</p>
@@ -279,12 +280,12 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
         </div>
       </section>
 
-      <section className={styles.settingsGroup} aria-labelledby="trusted-command-title">
-        <div className={styles.groupHeader}>
+      <section className={styles.settingsGroup} data-settings-group aria-labelledby="trusted-command-title">
+        <div className={styles.groupHeader} data-settings-group-header>
           <h2 id="trusted-command-title">已信任命令</h2>
           <span>{sortedRules.length} 条</span>
         </div>
-        <div className={styles.settingsPanel}>
+        <div className={styles.settingsPanel} data-settings-panel>
           <div className={styles.sectionHeader}>
             <span>命令</span>
             <span>匹配方式与状态</span>
@@ -305,6 +306,7 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
                   <div className={styles.rowActions}>
                     <button
                       aria-label={`${rule.enabled ? "禁用" : "启用"} ${rule.command_pattern}`}
+                      data-settings-secondary
                       type="button"
                       onClick={() => void toggleRule(rule)}
                     >
@@ -312,6 +314,7 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
                     </button>
                     <button
                       aria-label={`删除 ${rule.command_pattern}`}
+                      data-settings-secondary
                       type="button"
                       onClick={() => void deleteRule(rule)}
                     >
@@ -327,12 +330,12 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
         </div>
       </section>
 
-      <section className={styles.settingsGroup} aria-labelledby="approval-history-title">
-        <div className={styles.groupHeader}>
+      <section className={styles.settingsGroup} data-settings-group aria-labelledby="approval-history-title">
+        <div className={styles.groupHeader} data-settings-group-header>
           <h2 id="approval-history-title">审批记录</h2>
           <span>{historyLoading ? "正在加载" : `${history.total} 条`}</span>
         </div>
-        <div className={styles.settingsPanel}>
+        <div className={styles.settingsPanel} data-settings-panel>
           <div className={styles.sectionHeader}>
             <span>结果</span>
             <span>命令与目录</span>
@@ -372,6 +375,7 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
               <div>
                 <button
                   aria-label="上一页审批记录"
+                  data-settings-secondary
                   disabled={!canGoPrevHistory}
                   type="button"
                   onClick={() => void loadHistoryPage(history.page - 1)}
@@ -380,6 +384,7 @@ export function ConfigSettingsPage({ runtime }: { runtime: RuntimeBridge }) {
                 </button>
                 <button
                   aria-label="下一页审批记录"
+                  data-settings-secondary
                   disabled={!canGoNextHistory}
                   type="button"
                   onClick={() => void loadHistoryPage(history.page + 1)}

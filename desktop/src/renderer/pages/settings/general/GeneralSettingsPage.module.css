@@ -46,13 +46,11 @@
 
 .settingsPanel {
   display: grid;
-  gap: 8px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
   box-shadow: none;
-  padding: 8px;
   backdrop-filter: blur(18px);
 }
 
@@ -128,8 +126,11 @@
 }
 
 .option[data-selected="true"] {
-  background: color-mix(in srgb, var(--surface-active) 82%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 68%, transparent);
+  background: var(--settings-selected-bg, color-mix(in srgb, var(--surface-active) 72%, var(--color-bg-elevated)));
+  box-shadow: var(
+    --settings-selected-ring,
+    inset 0 0 0 1px color-mix(in srgb, var(--color-border-default) 44%, transparent)
+  );
 }
 
 .option:disabled {
@@ -139,7 +140,10 @@
 
 .option:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .optionIcon,

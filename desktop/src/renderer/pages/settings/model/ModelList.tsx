@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ModelProvider, RuntimeBridge } from "@/runtime";
 import { useNotifications } from "@/renderer/providers/NotificationProvider";
@@ -11,13 +11,22 @@ export interface ModelListProps {
   provider: ModelProvider;
   runtime: RuntimeBridge;
   onProviderChange: (provider: ModelProvider) => void;
+  autoRefreshRequestId?: number;
+  onAutoRefreshHandled?: (requestId: number) => void;
 }
 
-export function ModelList({ provider, runtime, onProviderChange }: ModelListProps) {
+export function ModelList({
+  autoRefreshRequestId = 0,
+  onAutoRefreshHandled,
+  provider,
+  runtime,
+  onProviderChange,
+}: ModelListProps) {
   const notifications = useNotifications();
   const [query, setQuery] = useState("");
   const [busyModel, setBusyModel] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const handledAutoRefreshRequestIdRef = useRef(0);
 
   const visibleModels = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -27,7 +36,7 @@ export function ModelList({ provider, runtime, onProviderChange }: ModelListProp
     return provider.models.filter((model) => model.toLowerCase().includes(keyword));
   }, [provider.models, query]);
 
-  async function refreshModels() {
+  const refreshModels = useCallback(async (requestId = 0) => {
     setRefreshing(true);
     try {
       const updated = await runtime.models.refreshProviderModels(provider.id);
@@ -36,8 +45,19 @@ export function ModelList({ provider, runtime, onProviderChange }: ModelListProp
       notifications.error(errorMessage(reason, "刷新模型失败"));
     } finally {
       setRefreshing(false);
+      if (requestId > 0) {
+        onAutoRefreshHandled?.(requestId);
+      }
     }
-  }
+  }, [notifications, onAutoRefreshHandled, onProviderChange, provider.id, runtime]);
+
+  useEffect(() => {
+    if (!autoRefreshRequestId || handledAutoRefreshRequestIdRef.current === autoRefreshRequestId) {
+      return;
+    }
+    handledAutoRefreshRequestIdRef.current = autoRefreshRequestId;
+    void refreshModels(autoRefreshRequestId);
+  }, [autoRefreshRequestId, refreshModels]);
 
   async function toggleModel(model: string) {
     const currentlyEnabled = provider.model_enabled[model] !== false;
@@ -98,9 +118,7 @@ export function ModelList({ provider, runtime, onProviderChange }: ModelListProp
                 </button>
                 <span className={styles.healthCell}>
                   <HealthCheckButton
-                    health={provider.health[model]}
                     model={model}
-                    onProviderChange={onProviderChange}
                     providerId={provider.id}
                     runtime={runtime}
                   />

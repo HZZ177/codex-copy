@@ -766,6 +766,55 @@ describe("agentSessionStore reducer", () => {
     ]);
   });
 
+  it("updates one LLM retry notice through retrying and recovered states", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "middleware_progress",
+      data: {
+        session_id: "ses-1",
+        middleware: "LLMRetry",
+        kind: "llm_retry",
+        stage: "retrying",
+        notice_id: "llm-retry:trace-1:run-1",
+        retry_index: 1,
+        max_retries: 3,
+        attempt: 2,
+        trace_id: "trace-1",
+      },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "middleware_progress",
+      data: {
+        session_id: "ses-1",
+        middleware: "LLMRetry",
+        kind: "llm_retry",
+        stage: "recovered",
+        notice_id: "llm-retry:trace-1:run-1",
+        retry_index: 1,
+        max_retries: 3,
+        attempt: 2,
+        trace_id: "trace-1",
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")).toMatchObject([
+      {
+        role: "system",
+        content: "LLM 请求重试成功",
+        status: "completed",
+        metadata: {
+          retry: {
+            kind: "llm_retry",
+            stage: "recovered",
+            notice_id: "llm-retry:trace-1:run-1",
+            retry_index: 1,
+            max_retries: 3,
+          },
+        },
+      },
+    ]);
+  });
+
   it("updates one emergency compression notice through running and terminal states", () => {
     let state = createInitialAgentConversationState();
     state = reduceAgentWsEvent(state, {

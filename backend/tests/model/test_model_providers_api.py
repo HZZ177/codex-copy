@@ -158,7 +158,7 @@ def test_model_provider_refresh_returns_structured_provider_error(tmp_path) -> N
     assert "不是合法 JSON" in response.json()["detail"]["message"]
 
 
-def test_model_provider_health_check_persists_result(tmp_path) -> None:
+def test_model_provider_health_check_returns_transient_result(tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/chat/completions"
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
@@ -174,13 +174,15 @@ def test_model_provider_health_check_persists_result(tmp_path) -> None:
         ).json()
 
         response = client.post(f"/api/model-providers/{provider['id']}/models/qwen-coder/health")
+        providers_after_check = client.get("/api/model-providers").json()["providers"]
 
     assert response.status_code == 200
     assert response.json()["health"]["status"] == "healthy"
-    assert response.json()["provider"]["health"]["qwen-coder"]["status"] == "healthy"
+    assert response.json()["provider"]["health"] == {}
+    assert providers_after_check[0]["health"] == {}
 
 
-def test_model_provider_health_check_persists_unhealthy_result(tmp_path) -> None:
+def test_model_provider_health_check_returns_transient_unhealthy_result(tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/chat/completions"
         return httpx.Response(
@@ -199,9 +201,11 @@ def test_model_provider_health_check_persists_unhealthy_result(tmp_path) -> None
         ).json()
 
         response = client.post(f"/api/model-providers/{provider['id']}/models/qwen-coder/health")
+        providers_after_check = client.get("/api/model-providers").json()["providers"]
 
     assert response.status_code == 200
     body = response.json()
     assert body["health"]["status"] == "unhealthy"
     assert "invalid api key" in body["health"]["error"]
-    assert body["provider"]["health"]["qwen-coder"]["status"] == "unhealthy"
+    assert body["provider"]["health"] == {}
+    assert providers_after_check[0]["health"] == {}

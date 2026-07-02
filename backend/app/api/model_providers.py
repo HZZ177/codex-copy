@@ -240,21 +240,13 @@ async def check_model_health(
             "error": str(exc),
             "checked_at": to_iso_z(utc_now()),
         }
-    updated = ModelProviderRecord(
-        **{
-            **provider.__dict__,
-            "health": {**provider.health, model: health},
-            "updated_at": to_iso_z(utc_now()),
-        }
-    )
-    repositories.model_providers.upsert(updated)
     logger.info(
         "[ModelProviderAPI] 模型健康检查完成 | "
         f"provider_id={provider.id} | model={model} | "
         f"status={health.get('status')} | latency_ms={health.get('latency_ms')}"
     )
     return HealthResponse(
-        provider=_public_provider(updated),
+        provider=_public_provider(provider),
         health=health,
     )
 

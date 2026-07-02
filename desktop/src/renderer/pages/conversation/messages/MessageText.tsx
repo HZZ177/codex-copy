@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Copy, GitBranchPlus, Undo2 } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Copy, GitBranchPlus, Undo2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -312,11 +312,29 @@ export function StreamingCursor() {
 }
 
 function TurnErrorNotice({ error }: { error: TurnError }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsText = useMemo(() => stringifyTurnErrorDetails(error.details), [error.details]);
+  const hasDetails = detailsText !== "{}";
   return (
     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
-      <CircleAlert size={13} />
-      <span className={styles.turnErrorMessage}>{error.message}</span>
-      <span className={styles.turnErrorCode}>{error.code}</span>
+      <div className={styles.turnErrorSummary}>
+        <CircleAlert size={13} />
+        <span className={styles.turnErrorMessage}>{error.message}</span>
+        <span className={styles.turnErrorCode}>{error.code}</span>
+        {hasDetails ? (
+          <button
+            className={styles.turnErrorDetailsToggle}
+            type="button"
+            aria-expanded={detailsOpen}
+            aria-label={detailsOpen ? "收起错误详情" : "展开错误详情"}
+            onClick={() => setDetailsOpen((value) => !value)}
+          >
+            <ChevronDown size={13} data-expanded={detailsOpen ? "true" : "false"} />
+            <span>错误详情</span>
+          </button>
+        ) : null}
+      </div>
+      {hasDetails && detailsOpen ? <pre className={styles.turnErrorDetails}>{detailsText}</pre> : null}
     </div>
   );
 }
@@ -1151,6 +1169,14 @@ function turnErrorFromPayload(payload: Record<string, unknown>): TurnError | nul
     message: normalizeMessageContent(stringValue(source.message)).trim() || "对话执行失败",
     details: objectValue(source.details) ?? {},
   };
+}
+
+function stringifyTurnErrorDetails(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function formatDuration(value: unknown): string | undefined {

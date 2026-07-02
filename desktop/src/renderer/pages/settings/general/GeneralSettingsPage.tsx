@@ -130,19 +130,19 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
   };
 
   return (
-    <main className={styles.page} data-testid="general-settings-page">
-      <header className={styles.header}>
+    <main className={styles.page} data-settings-page data-testid="general-settings-page">
+      <header className={styles.header} data-settings-header>
         <div>
           <h1>常规</h1>
           <p>管理本地应用偏好</p>
         </div>
       </header>
 
-      <section className={styles.section} aria-labelledby="behavior-settings-title">
-        <h2 className={styles.groupTitle} id="behavior-settings-title">应用行为</h2>
-        <div className={styles.settingsPanel}>
-          <div className={styles.settingRow}>
-            <header className={styles.sectionHeader}>
+      <section className={styles.section} data-settings-group aria-labelledby="behavior-settings-title">
+        <h2 className={styles.groupTitle} data-settings-group-title id="behavior-settings-title">应用行为</h2>
+        <div className={styles.settingsPanel} data-settings-panel>
+          <div className={styles.settingRow} data-settings-row>
+            <header className={styles.sectionHeader} data-settings-row-text>
               <span className={styles.settingIcon} aria-hidden="true">
                 <Power size={17} />
               </span>
@@ -163,18 +163,18 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
           </div>
 
           {generalError ? (
-            <p className={styles.error} role="alert">
+            <p className={styles.error} data-settings-error role="alert">
               {generalError}
             </p>
           ) : null}
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="display-settings-title">
-        <h2 className={styles.groupTitle} id="display-settings-title">应用显示</h2>
-        <div className={styles.settingsPanel}>
-          <div className={styles.settingRow}>
-          <header className={styles.sectionHeader}>
+      <section className={styles.section} data-settings-group aria-labelledby="display-settings-title">
+        <h2 className={styles.groupTitle} data-settings-group-title id="display-settings-title">应用显示</h2>
+        <div className={styles.settingsPanel} data-settings-panel>
+          <div className={styles.settingRow} data-settings-row>
+          <header className={styles.sectionHeader} data-settings-row-text>
             <span className={styles.settingIcon} aria-hidden="true">
               <Type size={17} />
             </span>
@@ -248,7 +248,7 @@ export function GeneralSettingsPage({ runtime = runtimeBridge }: GeneralSettings
           ) : null}
 
           {font.error ? (
-            <p className={styles.error} role="alert">
+            <p className={styles.error} data-settings-error role="alert">
               {font.error}
             </p>
           ) : null}

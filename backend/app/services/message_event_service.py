@@ -231,6 +231,25 @@ class MessageEventService:
                 continue
 
             if action == ReplayAction.MIDDLEWARE_PROGRESS.value:
+                if _is_visible_llm_retry_progress(data):
+                    notice_id = _llm_retry_notice_id_from_data(data)
+                    message = {
+                        "role": "system",
+                        "content": _llm_retry_progress_content(data),
+                        "timestamp": self._event_timestamp_ms(event),
+                        "messageEventId": event.id,
+                        "turnIndex": event.turn_index,
+                        "metadata": {
+                            "retry": _llm_retry_metadata(data),
+                        },
+                        "status": _llm_retry_status(data),
+                    }
+                    if notice_id in compression_message_map:
+                        messages[compression_message_map[notice_id]].update(message)
+                    else:
+                        compression_message_map[notice_id] = len(messages)
+                        messages.append(message)
+                    continue
                 if _is_visible_context_compression_progress(data):
                     notice_id = _context_compression_notice_id_from_data(data)
                     message = {
@@ -1115,6 +1134,73 @@ def _role_from_replay_action(action: str) -> str:
     if action == ReplayAction.AI_MESSAGE.value:
         return "AIMessage"
     return "HumanMessage"
+
+
+def _is_visible_llm_retry_progress(data: dict[str, Any]) -> bool:
+    if data.get("middleware") != "LLMRetry" and data.get("kind") != "llm_retry":
+        return False
+    return str(data.get("stage") or "") in {"retrying", "recovered", "completed", "failed"}
+
+
+def _llm_retry_progress_content(data: dict[str, Any]) -> str:
+    stage = str(data.get("stage") or "")
+    retry_index = _positive_int(data.get("retry_index"), default=1)
+    max_retries = _positive_int(data.get("max_retries"), default=3)
+    if stage in {"recovered", "completed"}:
+        return "LLM 请求重试成功"
+    if stage == "failed":
+        return f"LLM 请求重试失败 {retry_index}/{max_retries}"
+    return f"LLM 请求正在重试 {retry_index}/{max_retries}"
+
+
+def _llm_retry_status(data: dict[str, Any]) -> str:
+    stage = str(data.get("stage") or "")
+    if stage == "failed":
+        return "failed"
+    if stage in {"recovered", "completed"}:
+        return "completed"
+    return "running"
+
+
+def _llm_retry_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "llm_retry",
+        "stage": str(data.get("stage") or ""),
+        "notice_id": _llm_retry_notice_id_from_data(data),
+        "attempt": data.get("attempt"),
+        "retry_index": _positive_int(data.get("retry_index"), default=1),
+        "max_retries": _positive_int(data.get("max_retries"), default=3),
+        "max_attempts": data.get("max_attempts"),
+        "retry_after_ms": data.get("retry_after_ms"),
+        "gateway_trace_id": data.get("gateway_trace_id"),
+        "error": data.get("error"),
+        "error_type": data.get("error_type"),
+    }
+
+
+def _llm_retry_notice_id_from_data(data: dict[str, Any]) -> str:
+    notice_id = str(data.get("notice_id") or "").strip()
+    if notice_id:
+        return notice_id
+    fallback_id = (
+        data.get("trace_id")
+        or data.get("session_id")
+        or data.get("active_session_id")
+        or ""
+    )
+    return f"llm-retry:{fallback_id}"
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int) and value > 0:
+        return value
+    try:
+        parsed = int(str(value))
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _is_visible_context_compression_progress(data: dict[str, Any]) -> bool:

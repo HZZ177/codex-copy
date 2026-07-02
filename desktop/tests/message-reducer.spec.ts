@@ -93,15 +93,13 @@ describe("message reducer", () => {
         1,
         "turn.failed",
         {
-          turn: turn("failed", {
-            code: "turn_error",
-            message: "模型请求失败",
-            details: { provider: "openai-compatible" },
-          }),
-          error: {
-            code: "turn_error",
-            message: "模型请求失败",
-            details: { provider: "openai-compatible" },
+          turn: turn("failed"),
+          code: "llm_request_failed",
+          message: "模型请求失败",
+          error: "模型请求失败",
+          details: {
+            raw_message: "Error code: 402 - Insufficient Balance",
+            status_code: 402,
           },
         },
         { turnId: "turn-1" },
@@ -123,6 +121,12 @@ describe("message reducer", () => {
       "模型请求失败",
       "WebSocket 断开",
     ]);
+    expect(messages[0].payload.error).toMatchObject({
+      code: "llm_request_failed",
+      details: {
+        status_code: 402,
+      },
+    });
   });
 
   it("projects update_plan tool calls into plan messages", () => {

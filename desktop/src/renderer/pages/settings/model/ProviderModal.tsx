@@ -157,7 +157,7 @@ export function ProviderModal({
 
         {confirmDelete ? (
           <div className={styles.confirmBox}>
-            <span>确认删除该供应商？已刷新模型和健康检查状态会一并移除。</span>
+            <span>确认删除该供应商？已刷新模型列表会一并移除。</span>
             <div>
               <button disabled={deleting} onClick={() => void deleteProvider()} type="button">
                 {deleting ? "删除中" : "确认删除"}
