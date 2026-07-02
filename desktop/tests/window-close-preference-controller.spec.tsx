@@ -298,13 +298,19 @@ function fakeRuntime(
       font_family: "system" as const,
     },
     command: {
-      command_enabled: true,
+      selected_shell: "cmd" as const,
+      shell_path: "C:/Windows/System32/cmd.exe",
+      shell_label: "CMD",
+      shell_edition: null,
       require_approval_for_untrusted: true,
       allow_persistent_trust: true,
       file_access_mode: "workspace_trusted" as const,
       default_timeout_seconds: 60,
       max_timeout_seconds: 600,
-      max_output_chars: 20000,
+      inline_output_max_chars: 20000,
+      tail_max_chars: 20000,
+      output_file_max_bytes: 8388608,
+      progress_interval_ms: 500,
     },
   };
   const getSettings = options.rejectGetSettings

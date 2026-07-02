@@ -29,6 +29,15 @@ export function conversationKindFromAgent(message: AgentChatMessage): Conversati
   if (message.role === "system" && isContextCompressionMessage(message)) {
     return "context_compression";
   }
+  if (message.role === "tool") {
+    if (message.toolName === "update_plan") {
+      return "plan";
+    }
+    if (message.toolName === "load_skill") {
+      return "skill";
+    }
+    return isCommandToolName(message.toolName) ? "command" : "tool";
+  }
   if (message.cancelled || message.status === "cancelled") {
     return "cancelled";
   }
@@ -41,15 +50,6 @@ export function conversationKindFromAgent(message: AgentChatMessage): Conversati
   if (message.role === "reasoning" || message.role === "subagent") {
     return "thinking";
   }
-  if (message.role === "tool") {
-    if (message.toolName === "update_plan") {
-      return "plan";
-    }
-    if (message.toolName === "load_skill") {
-      return "skill";
-    }
-    return message.toolName === "run_command" ? "command" : "tool";
-  }
   if (message.role === "approval") {
     return "approval";
   }
@@ -57,6 +57,10 @@ export function conversationKindFromAgent(message: AgentChatMessage): Conversati
     return "error";
   }
   return "status";
+}
+
+function isCommandToolName(value: string | undefined): boolean {
+  return value === "run_git_bash" || value === "run_cmd" || value === "run_powershell";
 }
 
 export function conversationStatusFromAgent(message: AgentChatMessage): ConversationMessage["status"] {
@@ -122,6 +126,8 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
             ? "error"
             : message.status === "running" || message.streaming
               ? "running"
+              : message.status === "cancelled"
+                ? "cancelled"
               : "success",
         model_content: message.toolResult ?? "",
         duration_ms: message.toolDurationMs,

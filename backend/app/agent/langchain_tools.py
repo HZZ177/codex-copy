@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 
 from backend.app.tools import LocalTool, ToolExecutionContext, ToolRegistry
@@ -23,8 +24,8 @@ def local_tool_to_langchain_tool(
     *,
     context_factory: Callable[[], ToolExecutionContext],
 ) -> StructuredTool:
-    async def _run(**kwargs: Any) -> str:
-        result = await tool.run(dict(kwargs), context_factory())
+    async def _run(config: RunnableConfig, **kwargs: Any) -> str:
+        result = await tool.run(dict(kwargs), _context_for_tool(tool, context_factory(), config))
         if result.ok:
             return _json_result(result.result)
         return _json_result(_failed_tool_payload(tool.name, result.error))
@@ -36,6 +37,42 @@ def local_tool_to_langchain_tool(
         name=tool.name,
         description=tool.description or tool.name,
         args_schema=tool.parameters,
+    )
+
+
+def _context_for_tool(
+    tool: LocalTool,
+    context: ToolExecutionContext,
+    config: RunnableConfig | None,
+) -> ToolExecutionContext:
+    metadata = dict(context.metadata)
+    metadata["tool_name"] = tool.name
+    if config:
+        run_id = str(config.get("run_id") or "").strip()
+        if run_id:
+            metadata["run_id"] = run_id
+        tool_call_id = str(config.get("tool_call_id") or "").strip()
+        if tool_call_id:
+            metadata["tool_call_id"] = tool_call_id
+        configurable = config.get("configurable")
+        if isinstance(configurable, dict):
+            for key in ("run_id", "tool_call_id"):
+                value = str(configurable.get(key) or "").strip()
+                if value:
+                    metadata[key] = value
+        config_metadata = config.get("metadata")
+        if isinstance(config_metadata, dict):
+            for key in ("run_id", "tool_call_id", "langgraph_node"):
+                value = str(config_metadata.get(key) or "").strip()
+                if value:
+                    metadata[key] = value
+    return ToolExecutionContext(
+        session_id=context.session_id,
+        user_id=context.user_id,
+        workspace_root=context.workspace_root,
+        turn_index=context.turn_index,
+        trace_id=context.trace_id,
+        metadata=metadata,
     )
 
 

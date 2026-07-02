@@ -232,7 +232,7 @@ create table if not exists command_approval_requests (
   trace_id text,
   turn_index integer,
   run_id text,
-  tool_name text not null default 'run_command',
+  tool_name text not null default 'command',
   kind text not null default 'exec',
   title text not null,
   description text not null default '',
@@ -264,7 +264,9 @@ create table if not exists trusted_command_rules (
   command_pattern text not null,
   normalized_command text not null,
   match_type text not null,
+  tool_name text not null default '',
   shell text not null default 'shell',
+  shell_path text not null default '',
   workspace_root text not null default '',
   cwd_pattern text not null default '.',
   enabled integer not null default 1,
@@ -277,7 +279,7 @@ create table if not exists trusted_command_rules (
 );
 
 create index if not exists idx_trusted_command_rules_lookup
-  on trusted_command_rules(workspace_root, cwd_pattern, shell, match_type, enabled, is_deleted);
+  on trusted_command_rules(workspace_root, cwd_pattern, tool_name, shell, shell_path, match_type, enabled, is_deleted);
 create index if not exists idx_trusted_command_rules_created
   on trusted_command_rules(created_at desc);
 
@@ -471,7 +473,7 @@ create index if not exists idx_command_approval_requests_session_status
 create index if not exists idx_command_approval_requests_status_created
   on command_approval_requests(status, created_at desc);
 create index if not exists idx_trusted_command_rules_lookup
-  on trusted_command_rules(workspace_root, cwd_pattern, shell, match_type, enabled, is_deleted);
+  on trusted_command_rules(workspace_root, cwd_pattern, tool_name, shell, shell_path, match_type, enabled, is_deleted);
 create index if not exists idx_trusted_command_rules_created
   on trusted_command_rules(created_at desc);
 create index if not exists idx_command_approval_audit_created
@@ -551,6 +553,18 @@ class Database:
             self._ensure_column(conn, "workspace_file_annotations", "anchor_json", "text")
             self._ensure_column(conn, "trace_record", "input_checkpoint_id", "text")
             self._ensure_column(conn, "trace_record", "input_checkpoint_ns", "text")
+            self._ensure_column(
+                conn,
+                "trusted_command_rules",
+                "tool_name",
+                "text not null default ''",
+            )
+            self._ensure_column(
+                conn,
+                "trusted_command_rules",
+                "shell_path",
+                "text not null default ''",
+            )
             conn.executescript(SCHEMA_UPGRADE_SQL)
             if should_migrate_legacy_sessions:
                 self._migrate_legacy_sessions_to_default_workspace(

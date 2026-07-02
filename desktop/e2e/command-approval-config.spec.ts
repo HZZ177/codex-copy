@@ -8,40 +8,52 @@ const APP_BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EVIDENCE_ROOT =
   process.env.E2E_COMMAND_APPROVAL_EVIDENCE_DIR ??
-  path.resolve(__dirname, "../../.dev/e2e/evidence/2026-06-24_14-41-50-command-approval-config");
+  path.resolve(__dirname, "../../.dev/e2e/evidence/2026-07-02_16-14-02-command-runtime-refactor");
+
+test.beforeEach(({ page }) => {
+  page.on("pageerror", (error) => {
+    console.error(`[pageerror] ${error.message}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      console.error(`[console:${message.type()}] ${message.text()}`);
+    }
+  });
+});
 
 test("command configuration page saves settings and manages trusted rules", async ({ page }) => {
   const backend = createMockBackend();
   await installWebSocketMock(page);
   await mockBackend(page, backend);
 
-  await page.goto(`${APP_BASE}/#/settings/config`);
+  await page.goto(`${APP_BASE}/#/settings/policy-config`);
 
   await expect(page.getByTestId("config-settings-page")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "批准策略" })).toBeVisible();
   await expect(page.getByRole("button", { name: "批准策略：按请求" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "CMD" })).toBeVisible();
+  await expect(page.getByLabel("命令 executable 路径")).toHaveValue("C:/Windows/System32/cmd.exe");
   await expect(page.getByText("未信任命令执行前需要确认，可在审批时保存信任规则。")).toBeVisible();
   await expect(page.getByText("pnpm test").first()).toBeVisible();
   await expect(page.getByText("已允许")).toBeVisible();
-  await expect(page.getByText("第 1 / 2 页，共 31 条")).toBeVisible();
+  await expect(page.getByText("第 1 / 4 页，共 31 条")).toBeVisible();
 
   await page.getByRole("button", { name: "下一页审批记录" }).click();
   await expect(page.getByText("npm run build")).toBeVisible();
-  await expect(page.getByText("第 2 / 2 页，共 31 条")).toBeVisible();
+  await expect(page.getByText("第 2 / 4 页，共 31 条")).toBeVisible();
   await page.getByRole("button", { name: "上一页审批记录" }).click();
   await expect(page.getByText("pnpm test").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "批准策略：按请求" }).click();
-  await expect(page.getByRole("option", { name: /按请求/ })).toBeVisible();
-  await expect(page.getByRole("option", { name: /无条件信任/ })).toBeVisible();
-  await expect(page.getByRole("option", { name: /关闭命令行工具/ })).toBeVisible();
-  await page.getByRole("option", { name: /关闭命令行工具/ }).click();
-
-  await expect(page.getByText("批准策略已保存")).toBeVisible();
+  await page.getByRole("button", { name: "检测" }).click();
+  await expect(page.getByText("CMD · C:/Windows/System32/cmd.exe").first()).toBeVisible();
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("命令执行环境已保存")).toBeVisible();
   expect(backend.lastCommandSettings).toMatchObject({
-    command_enabled: false,
+    selected_shell: "cmd",
+    shell_path: "C:/Windows/System32/cmd.exe",
+    shell_label: "CMD",
     require_approval_for_untrusted: true,
-    allow_persistent_trust: false,
+    allow_persistent_trust: true,
   });
 
   await page.getByRole("button", { name: "禁用" }).click();
@@ -66,8 +78,8 @@ test("approval card submits allow once, exact trust, prefix trust and reject dec
 
   await dispatchApproval(page, approval("approval-once"));
   await expect(page.getByTestId("composer-approval-card")).toBeVisible();
-  await expect(sessionRow(page).getByText("等待批准")).toBeVisible();
-  await page.getByRole("button", { name: "是，仅允许本次" }).click();
+  await expect(page.getByText("等待批准").first()).toBeVisible();
+  await submitApprovalChoice(page, "是");
   await expect(page.getByLabel("继续输入")).toBeVisible();
   expect(backend.decisions.at(-1)).toMatchObject({
     approvalId: "approval-once",
@@ -75,7 +87,7 @@ test("approval card submits allow once, exact trust, prefix trust and reject dec
   });
 
   await dispatchApproval(page, approval("approval-exact"));
-  await page.getByRole("button", { name: "是，且以后相同命令不再询问" }).click();
+  await submitApprovalChoice(page, "是，且以后相同命令不再询问");
   await expect(page.getByLabel("继续输入")).toBeVisible();
   expect(backend.decisions.at(-1)).toMatchObject({
     approvalId: "approval-exact",
@@ -83,7 +95,7 @@ test("approval card submits allow once, exact trust, prefix trust and reject dec
   });
 
   await dispatchApproval(page, approval("approval-prefix"));
-  await page.getByRole("button", { name: "是，且以后以该前缀开头的命令不再询问" }).click();
+  await submitApprovalChoice(page, "是，且以后以该前缀开头的命令不再询问");
   await expect(page.getByLabel("继续输入")).toBeVisible();
   expect(backend.decisions.at(-1)).toMatchObject({
     approvalId: "approval-prefix",
@@ -91,8 +103,7 @@ test("approval card submits allow once, exact trust, prefix trust and reject dec
   });
 
   await dispatchApproval(page, approval("approval-reject"));
-  await page.getByPlaceholder("告诉 agent 如何调整").fill("请改成只读命令");
-  await page.getByRole("button", { name: "否，请告知 agent 如何调整" }).click();
+  await submitApprovalChoice(page, "否，请告知 agent 如何调整", "请改成只读命令");
   await expect(page.getByLabel("继续输入")).toBeVisible();
   expect(backend.decisions.at(-1)).toMatchObject({
     approvalId: "approval-reject",
@@ -107,7 +118,7 @@ test("command configuration page previews and saves unconditional trust policy",
   await installWebSocketMock(page);
   await mockBackend(page, backend);
 
-  await page.goto(`${APP_BASE}/#/settings/config`);
+  await page.goto(`${APP_BASE}/#/settings/policy-config`);
   await expect(page.getByTestId("config-settings-page")).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "批准策略：按请求" }).click();
   await expect(page.getByRole("option", { name: /无条件信任/ })).toBeVisible();
@@ -118,7 +129,7 @@ test("command configuration page previews and saves unconditional trust policy",
   await expect(page.getByRole("button", { name: "批准策略：无条件信任" })).toBeVisible();
   await expect(page.getByText("智能体调用命令行工具时会直接执行命令。当前没有沙盒隔离，只适合你完全信任当前任务时使用。")).toBeVisible();
   expect(backend.lastCommandSettings).toMatchObject({
-    command_enabled: true,
+    selected_shell: "cmd",
     require_approval_for_untrusted: false,
     allow_persistent_trust: false,
   });
@@ -134,6 +145,14 @@ async function waitForConversationReady(page: Page) {
   await expect(page.getByLabel("继续输入")).toBeVisible();
 }
 
+async function submitApprovalChoice(page: Page, choice: string, rejectMessage?: string) {
+  await page.getByRole("radio", { name: choice, exact: true }).click();
+  if (rejectMessage !== undefined) {
+    await page.getByPlaceholder("告诉 agent 如何调整").fill(rejectMessage);
+  }
+  await page.getByRole("button", { name: "提交" }).click();
+}
+
 interface MockBackendState {
   commandSettings: Record<string, unknown>;
   lastCommandSettings: Record<string, unknown> | null;
@@ -144,12 +163,19 @@ interface MockBackendState {
 function createMockBackend(): MockBackendState {
   return {
     commandSettings: {
-      command_enabled: true,
+      selected_shell: "cmd",
+      shell_path: "C:/Windows/System32/cmd.exe",
+      shell_label: "CMD",
+      shell_edition: null,
       require_approval_for_untrusted: true,
       allow_persistent_trust: true,
+      file_access_mode: "workspace_trusted",
       default_timeout_seconds: 120,
       max_timeout_seconds: 600,
-      max_output_chars: 65536,
+      inline_output_max_chars: 12000,
+      tail_max_chars: 12000,
+      output_file_max_bytes: 8388608,
+      progress_interval_ms: 500,
     },
     lastCommandSettings: null,
     rules: [trustedRule()],
@@ -175,6 +201,14 @@ async function mockBackend(page: Page, state: MockBackendState) {
       return fulfillJson(route, settingsResponse(state.commandSettings));
     }
 
+    if (url.pathname === "/api/settings/model-defaults" && method === "GET") {
+      return fulfillJson(route, modelDefaultsResponse());
+    }
+
+    if (url.pathname === "/api/model-providers" && method === "GET") {
+      return fulfillJson(route, modelProvidersResponse());
+    }
+
     if (url.pathname === "/api/settings" && method === "PUT") {
       const body = request.postDataJSON() as { command?: Record<string, unknown> };
       if (body.command) {
@@ -182,6 +216,14 @@ async function mockBackend(page: Page, state: MockBackendState) {
         state.lastCommandSettings = state.commandSettings;
       }
       return fulfillJson(route, settingsResponse(state.commandSettings));
+    }
+
+    if (url.pathname === "/api/settings/command/runtime/discover" && method === "POST") {
+      return fulfillJson(route, commandRuntimeProbe());
+    }
+
+    if (url.pathname === "/api/settings/command/runtime/validate" && method === "POST") {
+      return fulfillJson(route, commandRuntimeProbe());
     }
 
     if (url.pathname === "/api/settings/command/trusted-rules" && method === "GET") {
@@ -344,8 +386,67 @@ function settingsResponse(command: Record<string, unknown>) {
       api_key_set: true,
       api_key_preview: "sk-***",
     },
+    general: { close_window_behavior: null },
     appearance: { font_family: "system" },
     command,
+  };
+}
+
+function modelDefaultsResponse() {
+  return {
+    defaults: {
+      default_chat: {
+        scope: "default_chat",
+        configured: true,
+        provider_id: "provider-1",
+        provider_name: "默认模型服务",
+        model: "qwen-coder-e2e",
+        provider_enabled: true,
+        model_enabled: true,
+        missing_reason: null,
+      },
+      fast: {
+        scope: "fast",
+        configured: false,
+        provider_id: null,
+        provider_name: null,
+        model: null,
+        provider_enabled: null,
+        model_enabled: null,
+        missing_reason: "not_configured",
+      },
+    },
+  };
+}
+
+function modelProvidersResponse() {
+  return {
+    providers: [
+      {
+        id: "provider-1",
+        name: "默认模型服务",
+        base_url: "https://api.example/v1",
+        enabled: true,
+        api_key_set: true,
+        api_key_preview: "sk-***",
+        models: ["qwen-coder-e2e"],
+        model_enabled: { "qwen-coder-e2e": true },
+        health: {},
+      },
+    ],
+  };
+}
+
+function commandRuntimeProbe() {
+  return {
+    shell: "cmd",
+    found: true,
+    path: "C:/Windows/System32/cmd.exe",
+    label: "CMD",
+    edition: null,
+    version: "10.0",
+    diagnostics: [],
+    error: null,
   };
 }
 
@@ -397,13 +498,17 @@ function approval(id: string) {
     item_id: "item-command",
     call_id: "call-command",
     run_id: "run-command",
-    tool_name: "run_command",
+    tool_name: "run_cmd",
     kind: "exec",
     title: "是否允许执行命令？",
     description: "请求执行命令。",
     details: {
       command: "pnpm test",
       cwd: "D:/repo",
+      tool_name: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
       suggested_exact_rule: "pnpm test",
       suggested_prefix_rule: "pnpm --dir desktop",
     },
@@ -419,7 +524,9 @@ function trustedRule() {
     command_pattern: "pnpm test",
     normalized_command: "pnpm test",
     match_type: "exact",
-    shell: "powershell",
+    tool_name: "run_cmd",
+    shell: "cmd",
+    shell_path: "C:/Windows/System32/cmd.exe",
     workspace_root: "D:/repo",
     cwd_pattern: "D:/repo",
     enabled: true,

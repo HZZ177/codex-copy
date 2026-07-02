@@ -39,6 +39,7 @@ export interface AgentSessionRuntimeContextValue {
   subscribeEvent: (listener: (event: AgentActionEnvelope) => void) => () => void;
   chat: (payload: ChatPayload) => void;
   cancel: (sessionId?: string) => void;
+  terminateCommand: (sessionId: string, commandId: string) => void;
   ping: () => void;
 }
 
@@ -156,6 +157,14 @@ export function AgentSessionProvider({
     channel.cancel(sessionId);
   }, []);
 
+  const terminateCommand = useCallback((sessionId: string, commandId: string) => {
+    const channel = channelRef.current;
+    if (!channel || channel.getStatus() !== "open") {
+      throw new Error("对话连接尚未就绪");
+    }
+    channel.terminateCommand(sessionId, commandId);
+  }, []);
+
   const ping = useCallback(() => {
     const channel = channelRef.current;
     if (!channel || channel.getStatus() !== "open") {
@@ -176,9 +185,10 @@ export function AgentSessionProvider({
       subscribeEvent,
       chat,
       cancel,
+      terminateCommand,
       ping,
     }),
-    [bindSession, cancel, chat, ping, runtime, runtimeDetail, state, subscribeEvent, wsStatus],
+    [bindSession, cancel, chat, ping, runtime, runtimeDetail, state, subscribeEvent, terminateCommand, wsStatus],
   );
 
   return (

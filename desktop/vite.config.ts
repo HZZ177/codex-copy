@@ -19,7 +19,10 @@ const CODEMIRROR_DEDUPE = [
   "@codemirror/view",
 ];
 
+const e2eCacheDir = process.env.KEYDEX_E2E_VITE_CACHE_DIR?.trim();
+
 export default defineConfig({
+  cacheDir: e2eCacheDir || undefined,
   plugins: [react(), UnoCSS()],
   resolve: {
     alias: {

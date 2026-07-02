@@ -97,12 +97,19 @@ async function mockBackend(page: Page, options: MockBackendOptions) {
           font_family: "system",
         },
         command: {
-          command_enabled: true,
+          selected_shell: "cmd",
+          shell_path: "C:/Windows/System32/cmd.exe",
+          shell_label: "CMD",
+          shell_edition: null,
           require_approval_for_untrusted: true,
           allow_persistent_trust: true,
+          file_access_mode: "workspace_trusted",
           default_timeout_seconds: 120,
           max_timeout_seconds: 600,
-          max_output_chars: 65536,
+          inline_output_max_chars: 12000,
+          tail_max_chars: 12000,
+          output_file_max_bytes: 8388608,
+          progress_interval_ms: 500,
         },
       });
     }

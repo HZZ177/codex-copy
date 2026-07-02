@@ -30,6 +30,7 @@ from backend.app.services.session_service import (
 from backend.app.services.workspace_service import (
     WorkspaceServiceError,
 )
+from backend.app.tools.command_runtime import command_process_manager
 
 router = APIRouter(prefix="/agent-base/ws", tags=["websocket"])
 
@@ -203,6 +204,36 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     logger.info(
                         f"[WebSocket] 收到取消请求 | trace_id={connection_trace_id} | "
                         f"session_id={session_id or '-'} | cancelled={cancelled}"
+                    )
+                    continue
+
+                if action == "terminate_command":
+                    session_id = str(payload.get("session_id") or bound_session_id or "").strip()
+                    command_id = str(payload.get("command_id") or "").strip()
+                    if not session_id:
+                        await send_error("missing_session", "session_id 必填")
+                        continue
+                    if not command_id:
+                        await send_error("missing_command", "command_id 必填")
+                        continue
+                    terminated = command_process_manager.terminate_command(
+                        command_id,
+                        reason="user",
+                    )
+                    cancelled = await stream_manager.cancel(session_id)
+                    await send(
+                        "command_terminated",
+                        {
+                            "session_id": session_id,
+                            "command_id": command_id,
+                            "terminated": terminated,
+                            "cancelled": cancelled,
+                        },
+                    )
+                    logger.info(
+                        "[WebSocket] 收到 command 终止请求 | "
+                        f"trace_id={connection_trace_id} | session_id={session_id} | "
+                        f"command_id={command_id} | terminated={terminated} | cancelled={cancelled}"
                     )
                     continue
 

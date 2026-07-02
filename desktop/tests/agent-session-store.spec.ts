@@ -30,6 +30,7 @@ describe("agentSessionStore reducer", () => {
       "system_message",
       "completed",
       "cancelled",
+      "command_terminated",
       "tool_start",
       "tool_progress",
       "tool_end",
@@ -518,6 +519,80 @@ describe("agentSessionStore reducer", () => {
         content: "已允许执行命令: pnpm test",
       },
     ]);
+  });
+
+  it("marks matching command placeholders as waiting approval before execution starts", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "tool_start",
+      data: {
+        session_id: "ses-1",
+        run_id: "run-command",
+        tool_name: "run_cmd",
+        params: { command: "pnpm test", cwd: "D:/repo" },
+      },
+    });
+
+    state = reduceAgentWsEvent(state, approvalRequested("ses-1", commandApproval("approval-1")));
+
+    let messages = selectAgentMessages(state, "ses-1");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: "tool",
+      runId: "run-command",
+      toolName: "run_cmd",
+      status: "running",
+      uiPayload: {
+        status: "approval_pending",
+        approval: {
+          approval_id: "approval-1",
+          status: "pending",
+        },
+      },
+    });
+    expect(messages[1]).toMatchObject({ role: "approval", status: "pending" });
+
+    state = reduceAgentWsEvent(state, approvalResolved("ses-1", { ...commandApproval("approval-1"), status: "approved" }));
+
+    messages = selectAgentMessages(state, "ses-1");
+    expect(messages[0]).toMatchObject({
+      role: "tool",
+      uiPayload: {
+        status: "running",
+        approval: {
+          approval_id: "approval-1",
+          status: "approved",
+        },
+      },
+    });
+  });
+
+  it("marks matching command placeholders as rejected when command approval is rejected", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "tool_start",
+      data: {
+        session_id: "ses-1",
+        run_id: "run-command",
+        tool_name: "run_cmd",
+        params: { command: "pnpm test", cwd: "D:/repo" },
+      },
+    });
+    state = reduceAgentWsEvent(state, approvalRequested("ses-1", commandApproval("approval-1")));
+    state = reduceAgentWsEvent(state, approvalResolved("ses-1", { ...commandApproval("approval-1"), status: "rejected" }));
+
+    const messages = selectAgentMessages(state, "ses-1");
+    expect(messages[0]).toMatchObject({
+      role: "tool",
+      status: "error",
+      uiPayload: {
+        status: "rejected",
+        approval: {
+          approval_id: "approval-1",
+          status: "rejected",
+        },
+      },
+    });
   });
 
   it("keeps concurrent command approvals queued in arrival order", () => {
@@ -1036,7 +1111,7 @@ describe("agentSessionStore reducer", () => {
 
   it("keeps structured tool output for command rendering", () => {
     let state = createInitialAgentConversationState();
-    state = reduceAgentWsEvent(state, toolStart("ses-1", "run-command", "run_command"));
+    state = reduceAgentWsEvent(state, toolStart("ses-1", "run-command", "run_cmd"));
     state = reduceAgentWsEvent(state, {
       action: "tool_end",
       data: {
@@ -1045,8 +1120,15 @@ describe("agentSessionStore reducer", () => {
         result: "{\"command\":\"echo ok\"}",
         output_data: {
           result: {
+            kind: "command_result",
+            command_id: "cmd-1",
+            tool: "run_cmd",
+            shell: "cmd",
+            shell_label: "CMD",
+            shell_path: "C:/Windows/System32/cmd.exe",
             command: "echo ok",
             cwd: ".",
+            status: "completed",
             stdout: "ok\n",
             stderr: "",
             exit_code: 0,
@@ -1059,13 +1141,166 @@ describe("agentSessionStore reducer", () => {
 
     expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
       role: "tool",
-      toolName: "run_command",
+      toolName: "run_cmd",
       uiPayload: {
+        kind: "command_result",
+        command_id: "cmd-1",
+        tool: "run_cmd",
+        shell: "cmd",
         command: "echo ok",
+        status: "completed",
         stdout: "ok\n",
         exit_code: 0,
       },
       status: "completed",
+    });
+  });
+
+  it("merges approved concurrent command progress into existing command placeholders", () => {
+    const commands = [
+      { callId: "call-command-1", runId: "run-command-1", commandId: "cmd-1", command: "echo one" },
+      { callId: "call-command-2", runId: "run-command-2", commandId: "cmd-2", command: "echo two" },
+      { callId: "call-command-3", runId: "run-command-3", commandId: "cmd-3", command: "echo three" },
+    ];
+    let state = createInitialAgentConversationState();
+
+    for (const item of commands) {
+      state = reduceAgentWsEvent(state, {
+        action: "tool_progress",
+        data: {
+          session_id: "ses-1",
+          run_id: item.callId,
+          tool_call_id: item.callId,
+          tool_name: "run_cmd",
+          params: { command: item.command, cwd: "." },
+          status: "running",
+        },
+      });
+    }
+
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(3);
+
+    for (const item of commands) {
+      state = reduceAgentWsEvent(state, {
+        action: "tool_start",
+        data: {
+          session_id: "ses-1",
+          run_id: item.runId,
+          tool_name: "run_cmd",
+          params: { command: item.command, cwd: "." },
+          status: "running",
+        },
+      });
+    }
+
+    expect(selectAgentMessages(state, "ses-1")).toHaveLength(3);
+
+    for (const item of commands) {
+      state = reduceAgentWsEvent(state, {
+        action: "tool_progress",
+        data: {
+          session_id: "ses-1",
+          run_id: item.runId,
+          tool_name: "run_cmd",
+          kind: "command_progress",
+          command_id: item.commandId,
+          tool: "run_cmd",
+          shell: "cmd",
+          shell_label: "CMD",
+          shell_path: "C:/Windows/System32/cmd.exe",
+          command: item.command,
+          cwd: ".",
+          status: "running",
+          combined_tail: `${item.command}\n`,
+        },
+      });
+    }
+
+    const messages = selectAgentMessages(state, "ses-1");
+    expect(messages).toHaveLength(3);
+    expect(messages.map((message) => message.runId)).toEqual(commands.map((item) => item.runId));
+    expect(messages.map((message) => message.uiPayload?.command_id)).toEqual(commands.map((item) => item.commandId));
+  });
+
+  it("marks command tools cancelled when the command termination event arrives", () => {
+    let state = createInitialAgentConversationState();
+    state = reduceAgentWsEvent(state, {
+      action: "tool_progress",
+      data: {
+        session_id: "ses-1",
+        run_id: "run-command",
+        tool_call_id: "call-command",
+        tool_name: "run_cmd",
+        kind: "command_progress",
+        command_id: "cmd-1",
+        tool: "run_cmd",
+        shell: "cmd",
+        shell_label: "CMD",
+        shell_path: "C:/Windows/System32/cmd.exe",
+        command: "ping 127.0.0.1",
+        cwd: "D:/repo",
+        status: "running",
+        combined_tail: "Pinging 127.0.0.1 ...",
+      },
+    });
+
+    expect(selectAgentRuntimeState(state, "ses-1")).toBe("running");
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      role: "tool",
+      runId: "run-command",
+      toolCallId: "call-command",
+      toolName: "run_cmd",
+      toolParams: {
+        command: "ping 127.0.0.1",
+        cwd: "D:/repo",
+      },
+      status: "running",
+      uiPayload: {
+        command_id: "cmd-1",
+        status: "running",
+      },
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "command_terminated",
+      data: {
+        session_id: "ses-1",
+        command_id: "cmd-1",
+        terminated: true,
+        cancelled: true,
+      },
+    });
+
+    expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      role: "tool",
+      status: "cancelled",
+      uiPayload: {
+        command_id: "cmd-1",
+        status: "cancelled",
+      },
+    });
+
+    state = reduceAgentWsEvent(state, {
+      action: "tool_progress",
+      data: {
+        session_id: "ses-1",
+        run_id: "run-command",
+        tool_call_id: "call-command",
+        tool_name: "run_cmd",
+        kind: "command_progress",
+        command_id: "cmd-1",
+        status: "running",
+        combined_tail: "late output",
+      },
+    });
+
+    expect(selectAgentMessages(state, "ses-1")[0]).toMatchObject({
+      status: "cancelled",
+      uiPayload: {
+        command_id: "cmd-1",
+        status: "cancelled",
+      },
     });
   });
 
@@ -1394,11 +1629,18 @@ function commandApproval(id: string, status: CommandApprovalRequest["status"] = 
     item_id: "item-command",
     call_id: "call-command",
     run_id: "run-command",
-    tool_name: "run_command",
+    tool_name: "run_cmd",
     kind: "exec",
     title: "是否允许执行命令？",
     description: "请求执行命令。",
-    details: { command: "pnpm test", cwd: "D:/repo" },
+    details: {
+      command: "pnpm test",
+      cwd: "D:/repo",
+      tool_name: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
+    },
     status,
     created_at: "2026-06-18T08:00:01Z",
     resolved_at: status === "pending" ? null : "2026-06-18T08:00:02Z",

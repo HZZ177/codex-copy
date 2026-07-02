@@ -69,6 +69,7 @@ export function ConversationPanel({
         workspaceScope={model.messageWorkspaceScope}
         onFilePreview={model.openFileChangePreview}
         onLoadToolDetails={model.loadToolDetails}
+        onTerminateCommand={model.terminateCommand}
         onQuoteSelection={model.quoteSelection}
         onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
         onForkFromMessage={showForkActions ? model.forkFromMessage : undefined}

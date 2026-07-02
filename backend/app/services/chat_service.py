@@ -43,6 +43,7 @@ from backend.app.services.message_event_service import MessageEventService
 from backend.app.services.workspace_service import WorkspaceService
 from backend.app.storage import AttachmentRecord, SessionRecord, StorageRepositories
 from backend.app.tools import ToolExecutionContext
+from backend.app.tools.command_runtime import command_process_manager
 
 
 class NullChatProjectionAdapter:
@@ -799,6 +800,12 @@ class ChatService:
 
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
             if token.is_cancelled():
+                command_process_manager.terminate_turn(
+                    session_id=session.id,
+                    turn_index=turn_index,
+                    trace_id=trace_id,
+                    reason="turn_cancelled",
+                )
                 logger.info(
                     f"[ChatTurn] 用户取消本轮 | session_id={session.id} | "
                     f"turn_index={turn_index} | trace_id={trace_id} | duration_ms={duration_ms}"
@@ -893,6 +900,12 @@ class ChatService:
         except asyncio.CancelledError:
             duration_ms = max(0, int((time.perf_counter() - started_at) * 1000))
             token.cancel()
+            command_process_manager.terminate_turn(
+                session_id=session.id,
+                turn_index=turn_index,
+                trace_id=trace_id,
+                reason="turn_cancelled",
+            )
             logger.info(
                 f"[ChatTurn] 对话任务被强制取消 | session_id={session.id} | "
                 f"turn_index={turn_index} | trace_id={trace_id} | duration_ms={duration_ms}"
@@ -1054,6 +1067,7 @@ class ChatService:
         )
         tool_context.metadata["repositories"] = self.repositories
         tool_context.metadata["dispatcher"] = dispatcher
+        tool_context.metadata["data_dir"] = str(self.settings.data_dir)
         tool_context.metadata["file_access_mode"] = load_command_settings(
             self.repositories
         ).file_access_mode

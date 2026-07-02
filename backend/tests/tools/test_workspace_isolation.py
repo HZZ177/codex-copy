@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from backend.app.tools import ToolExecutionContext
@@ -27,10 +26,6 @@ async def _run(tool_name: str, args: dict, root: Path, session_id: str):
     )
 
 
-def _python_command(source: str) -> str:
-    return f'"{sys.executable}" -c "{source}"'
-
-
 async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
@@ -47,17 +42,6 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     search_b = await _run("search_text", {"query": "A_ONLY"}, project_b, "ses_b")
     grep_a = await _run("grep_files", {"query": "A_ONLY", "regex": False}, project_a, "ses_a")
     grep_b = await _run("grep_files", {"query": "A_ONLY", "regex": False}, project_b, "ses_b")
-    shell_a = await _run(
-        "run_command",
-        {
-            "command": _python_command(
-                "from pathlib import Path; "
-                "print(Path('shared.txt').read_text(encoding='utf-8').strip())"
-            )
-        },
-        project_a,
-        "ses_a",
-    )
     patch_a = await _run(
         "edit_file",
         {
@@ -80,7 +64,6 @@ async def test_workspace_tools_are_isolated_by_session_cwd(tmp_path) -> None:
     assert search_b.result["results"] == []
     assert grep_a.result["paths"] == ["shared.txt"]
     assert grep_b.result["paths"] == []
-    assert shell_a.result["stdout"].strip() == "A_ONLY"
     assert patch_a.ok is True
     assert (project_a / "shared.txt").read_text(encoding="utf-8") == "A_PATCHED\n"
     assert (project_b / "shared.txt").read_text(encoding="utf-8") == "B_ONLY\n"

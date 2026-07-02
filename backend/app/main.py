@@ -37,6 +37,7 @@ from backend.app.services.agent_runtime import AgentRuntimeProvider, LazyChatSer
 from backend.app.services.chat_stream_manager import ChatStreamManager
 from backend.app.storage import StorageRepositories, init_database
 from backend.app.tools import create_default_tool_registry
+from backend.app.tools.command_runtime import command_process_manager
 
 
 def create_app(settings: AppSettings | None = None) -> FastAPI:
@@ -58,6 +59,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         finally:
             if not warmup_task.done():
                 warmup_task.cancel()
+            killed = command_process_manager.shutdown()
+            if killed:
+                logger.info(f"[App] 已清理运行中 command 进程 | count={killed}")
 
     app = FastAPI(
         title=resolved_settings.app_name,

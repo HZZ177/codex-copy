@@ -8,6 +8,7 @@ from typing import Any
 from backend.app.core.logger import logger
 from backend.app.events import ChatProjectionAdapter
 from backend.app.services.chat_types import ChatCancellationToken, ChatRequest
+from backend.app.tools.command_runtime import command_process_manager
 
 
 class ChatStreamError(Exception):
@@ -115,9 +116,13 @@ class ChatStreamManager:
             run = self._runs.get(cleaned)
             if run is None or run.task.done():
                 return False
+            killed = command_process_manager.terminate_session(cleaned, reason="turn_cancelled")
             run.cancellation.cancel()
             run.task.cancel()
-        logger.info(f"[ChatStreamManager] 已请求强制取消后台对话 | session_id={cleaned}")
+        logger.info(
+            "[ChatStreamManager] 已请求强制取消后台对话 | "
+            f"session_id={cleaned} | killed_commands={killed}"
+        )
         return True
 
     async def broadcast(self, *, session_id: str, action: str, data: dict[str, Any]) -> bool:

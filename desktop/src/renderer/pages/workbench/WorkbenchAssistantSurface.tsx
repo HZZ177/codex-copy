@@ -2313,7 +2313,9 @@ function toolExecutionLabel(toolName: string): string {
 
 function knownToolLabel(toolName: string): string {
   switch (toolName) {
-    case "run_command":
+    case "run_cmd":
+    case "run_powershell":
+    case "run_git_bash":
       return "命令";
     case "read_file":
     case "read_text_file":

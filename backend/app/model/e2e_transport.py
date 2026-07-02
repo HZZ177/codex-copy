@@ -86,6 +86,8 @@ class DelayedSSEStream(httpx.AsyncByteStream):
 
 def _chat_chunks(payload: dict[str, Any]) -> list[str]:
     user_message = _last_user_message(payload)
+    if "CommandRuntime" in user_message:
+        return _command_runtime_chunks(payload, user_message)
     if "命令审批" in user_message:
         return _command_approval_chunks(payload, user_message)
     if "编辑进度" in user_message:
@@ -163,6 +165,76 @@ def _chat_chunks(payload: dict[str, Any]) -> list[str]:
     return _content_chunks(payload, markdown, usage={"prompt_tokens": 11, "completion_tokens": 38})
 
 
+def _command_runtime_chunks(payload: dict[str, Any], user_message: str) -> list[str]:
+    if _has_tool_message(payload):
+        return _content_chunks(
+            payload,
+            "CommandRuntime 场景已经完成，命令工具结果已返回给模型。",
+            usage={"prompt_tokens": 18, "completion_tokens": 12},
+        )
+    scenario = user_message.lower()
+    tool_name = "run_cmd"
+    command = "echo e2e-command-runtime-ok"
+    timeout_seconds = 5
+    description = "E2E command runtime"
+    if "long" in scenario or "cancel" in scenario:
+        command = "ping -n 30 127.0.0.1 > nul"
+        timeout_seconds = 30
+        description = "E2E long running command"
+    elif "big-output" in scenario:
+        command = "for /L %i in (1,1,420) do @echo e2e-big-output-%i-abcdefghijklmnopqrstuvwxyz"
+        timeout_seconds = 10
+        description = "E2E big output command"
+    elif "powershell" in scenario:
+        tool_name = "run_powershell"
+        command = "Write-Output e2e-powershell-ok"
+        description = "E2E PowerShell command"
+    elif "git-bash" in scenario or "bash" in scenario:
+        tool_name = "run_git_bash"
+        command = "echo e2e-git-bash-ok"
+        description = "E2E Git Bash command"
+    elif "switch-cmd" in scenario:
+        command = "echo e2e-switch-cmd-ok"
+        description = "E2E switched CMD command"
+    elif "trust-path" in scenario:
+        command = "echo e2e-trust-path"
+        description = "E2E trust path command"
+
+    return [
+        _chat_sse(
+            payload,
+            delta={"reasoning_content": f"准备执行 {description}。"},
+        ),
+        _chat_sse(
+            payload,
+            delta={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": f"call_e2e_{tool_name}_runtime",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(
+                                {
+                                    "command": command,
+                                    "description": description,
+                                    "cwd": ".",
+                                    "timeout_seconds": timeout_seconds,
+                                },
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                        },
+                    }
+                ]
+            },
+            finish_reason="tool_calls",
+        ),
+        _sse_done(),
+    ]
+
+
 def _command_approval_chunks(payload: dict[str, Any], user_message: str) -> list[str]:
     if _has_tool_message(payload):
         return _content_chunks(
@@ -185,7 +257,7 @@ def _command_approval_chunks(payload: dict[str, Any], user_message: str) -> list
                         "id": "call_e2e_command_approval",
                         "type": "function",
                         "function": {
-                            "name": "run_command",
+                            "name": "run_cmd",
                             "arguments": json.dumps(
                                 {
                                     "command": command,
@@ -263,10 +335,10 @@ def _tool_sequence_chunks(payload: dict[str, Any]) -> list[str]:
                     },
                     {
                         "index": 1,
-                        "id": "call_e2e_run_command",
+                        "id": "call_e2e_run_cmd",
                         "type": "function",
                         "function": {
-                            "name": "run_command",
+                            "name": "run_cmd",
                             "arguments": json.dumps(
                                 {
                                     "command": "echo e2e-tool-ok",

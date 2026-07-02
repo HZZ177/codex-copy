@@ -581,7 +581,7 @@ class MessageEventService:
             target["uiPayload"] = MessageEventService._tool_plan_summary(ui_payload)
         elif tool_name == "load_skill" and ui_payload:
             target["uiPayload"] = MessageEventService._tool_skill_summary(ui_payload)
-        elif tool_name == "run_command" and ui_payload:
+        elif tool_name in {"run_git_bash", "run_cmd", "run_powershell"} and ui_payload:
             command_summary = MessageEventService._tool_command_summary(ui_payload)
             if command_summary:
                 target["uiPayload"] = command_summary
@@ -823,6 +823,9 @@ class MessageEventService:
             "timed_out",
             "timedOut",
             "truncated",
+            "output_truncated",
+            "output_bytes",
+            "output_path",
             "timeout_seconds",
             "timeoutSeconds",
         ):
@@ -864,7 +867,16 @@ class MessageEventService:
     def _command_preview_error(ui_payload: dict[str, Any]) -> str:
         status = str(ui_payload.get("status") or "").strip()
         exit_code = ui_payload.get("exit_code", ui_payload.get("exitCode"))
-        failed_status = status in {"failed", "error", "timed_out", "disabled", "rejected"}
+        failed_status = status in {
+            "failed",
+            "error",
+            "timed_out",
+            "disabled",
+            "rejected",
+            "shell_not_available",
+            "failed_to_start",
+            "output_limit_exceeded",
+        }
         failed_exit = (
             isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0
         )
@@ -896,6 +908,10 @@ class MessageEventService:
                 if reject_message:
                     return _preview_text(reject_message)
             return "命令审批已拒绝"
+        if status == "shell_not_available":
+            return "命令执行环境不可用"
+        if status == "output_limit_exceeded":
+            return "命令输出超过上限"
         return "命令执行失败"
 
     def _load_tool_event(

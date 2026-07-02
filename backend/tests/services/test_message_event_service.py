@@ -216,7 +216,7 @@ def test_message_event_service_keeps_deferred_command_error_preview(tmp_path) ->
         "evt_cmd_start",
         "tool_start",
         {
-            "tool": "run_command",
+            "tool": "run_cmd",
             "params": {"command": "pytest backend/tests", "cwd": "D:/repo"},
             "run_id": "tool_cmd",
             "tool_call_id": "call_cmd",
@@ -239,7 +239,7 @@ def test_message_event_service_keeps_deferred_command_error_preview(tmp_path) ->
                 "stderr": "ModuleNotFoundError: No module named app\n" + "y" * 5000,
                 "exit_code": 1,
                 "duration_ms": 18,
-                "truncated": True,
+                "output_truncated": True,
             },
         },
     )
@@ -247,7 +247,7 @@ def test_message_event_service_keeps_deferred_command_error_preview(tmp_path) ->
     messages = service.get_display_messages("ses_history", include_tool_details=False)
 
     assert messages[0]["role"] == "tool"
-    assert messages[0]["toolName"] == "run_command"
+    assert messages[0]["toolName"] == "run_cmd"
     assert messages[0]["toolDetailsDeferred"] is True
     assert messages[0]["toolParams"] == {
         "command": "pytest backend/tests",
@@ -255,7 +255,7 @@ def test_message_event_service_keeps_deferred_command_error_preview(tmp_path) ->
     }
     assert "toolResult" not in messages[0]
     assert messages[0]["uiPayload"]["exit_code"] == 1
-    assert messages[0]["uiPayload"]["truncated"] is True
+    assert messages[0]["uiPayload"]["output_truncated"] is True
     assert messages[0]["uiPayload"]["stderr"].startswith("ModuleNotFoundError")
     assert len(messages[0]["uiPayload"]["stderr"]) <= 1000
     assert "stdout" not in messages[0]["uiPayload"]

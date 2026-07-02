@@ -86,6 +86,7 @@ function fakeRuntime({
     chat,
     approvalDecision: vi.fn(),
     cancel: vi.fn(),
+    terminateCommand: vi.fn(),
     requestStatus: vi.fn(),
     ping: vi.fn(),
   };

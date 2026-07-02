@@ -53,12 +53,16 @@ def test_trusted_command_rules_crud_and_last_used(tmp_path) -> None:
         command_pattern="pnpm test",
         normalized_command="pnpm test",
         match_type="exact",
-        shell="shell",
+        tool_name="run_powershell",
+        shell="powershell",
+        shell_path=r"C:\Program Files\PowerShell\7\pwsh.exe",
         workspace_root="d:/project",
         cwd_pattern=".",
     )
 
     assert rule.enabled is True
+    assert rule.tool_name == "run_powershell"
+    assert rule.shell_path.endswith("pwsh.exe")
     assert repositories.trusted_command_rules.list() == [rule]
 
     disabled = repositories.trusted_command_rules.set_enabled("rule-1", False)

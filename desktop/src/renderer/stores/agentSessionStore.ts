@@ -171,6 +171,9 @@ export function reduceAgentWsEvent(
     case "cancelled":
       next = handleCancelled(state, event.data);
       break;
+    case "command_terminated":
+      next = handleCommandTerminated(state, event.data);
+      break;
     case "error":
       next = handleError(state, event.data as AgentErrorData);
       break;
@@ -246,6 +249,7 @@ function selectSession(state: AgentConversationState, sessionId: string | null):
 const TERMINAL_UNREAD_SESSION_ACTIONS = new Set([
   "completed",
   "cancelled",
+  "command_terminated",
   "error",
   "task_result",
 ]);
@@ -753,6 +757,7 @@ function handleApprovalRequested(
   const next = cloneState(state);
   const view = ensureSessionState(next, sessionId);
   upsertApprovalMessage(next, view, approval);
+  applyApprovalStateToCommandMessage(view, approval);
   view.pendingApproval = firstPendingApproval(view.messages);
   view.runtimeState = view.pendingApproval ? "waiting_approval" : "running";
   view.isStreaming = !view.pendingApproval;
@@ -779,6 +784,7 @@ function handleApprovalResolved(
   const next = cloneState(state);
   const view = ensureSessionState(next, sessionId);
   upsertApprovalMessage(next, view, approval);
+  applyApprovalStateToCommandMessage(view, approval);
   view.pendingApproval = firstPendingApproval(view.messages);
   view.runtimeState = view.pendingApproval ? "waiting_approval" : "running";
   view.isStreaming = !view.pendingApproval;
@@ -1127,6 +1133,35 @@ function handleCancelled(state: AgentConversationState, data: Record<string, unk
   return next;
 }
 
+function handleCommandTerminated(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
+  const sessionId = sessionIdFromData(data);
+  const commandId = stringValue(data.command_id);
+  if (!sessionId) {
+    return state;
+  }
+  const next = handleCancelled(state, data);
+  if (!commandId) {
+    return next;
+  }
+  const view = next.sessionStateById[sessionId];
+  if (!view) {
+    return next;
+  }
+  const command = view.messages.find(
+    (message) => message.role === "tool" && commandIdFromMessage(message) === commandId,
+  );
+  if (!command || command.status === "completed" || command.status === "error") {
+    return next;
+  }
+  command.status = "cancelled";
+  command.uiPayload = {
+    ...(asRecord(command.uiPayload) ?? {}),
+    command_id: commandId,
+    status: "cancelled",
+  };
+  return next;
+}
+
 function handleError(state: AgentConversationState, data: AgentErrorData): AgentConversationState {
   const sessionId = data.session_id ?? state.selectedSessionId ?? "";
   if (!sessionId) {
@@ -1241,7 +1276,8 @@ function handleStatus(state: AgentConversationState, data: Record<string, unknow
 
 function handleToolProgress(state: AgentConversationState, data: AgentToolProgressData): AgentConversationState {
   const sessionId = data.session_id ?? state.selectedSessionId ?? "";
-  const progressRunId = data.run_id || data.tool_call_id || "";
+  const commandPayload = commandPayloadFromToolData(data);
+  const progressRunId = data.run_id || data.tool_call_id || stringValue(commandPayload?.command_id);
   if (!sessionId || !progressRunId) {
     return state;
   }
@@ -1253,9 +1289,13 @@ function handleToolProgress(state: AgentConversationState, data: AgentToolProgre
       (message) =>
         message.role === "tool" &&
         (message.runId === progressRunId ||
+          commandIdFromMessage(message) === progressRunId ||
           Boolean(data.tool_call_id && message.toolCallId === data.tool_call_id)),
     ) ?? findMatchingProgressTool(view, data, toolName);
   if (existing) {
+    if (shouldIgnoreLateCommandProgress(existing, data)) {
+      return state;
+    }
     applyToolProgress(existing, data, toolName);
   } else {
     const created: AgentChatMessage = {
@@ -1267,10 +1307,10 @@ function handleToolProgress(state: AgentConversationState, data: AgentToolProgre
       runId: progressRunId,
       toolCallId: data.tool_call_id,
       toolName,
-      toolParams: data.params ?? data.input_data,
-      status: "running",
+      toolParams: data.params ?? data.input_data ?? commandToolParams(commandPayload),
+      status: toolStatusFromCommandPayload(commandPayload, data.status),
       fileChanges: normalizedFileChanges(data.files),
-      uiPayload: mergeToolFilesIntoUiPayload(data.ui_payload, data.files),
+      uiPayload: mergeToolFilesIntoUiPayload(commandPayload ?? data.ui_payload, data.files),
       metadata: data.metadata,
     };
     view.messages.push(created);
@@ -1500,7 +1540,7 @@ function approvalFromData(data: Record<string, unknown>): CommandApprovalRequest
     item_id: stringValue(approval.item_id),
     call_id: stringValue(approval.call_id),
     run_id: nullableString(approval.run_id),
-    tool_name: stringValue(approval.tool_name) || "run_command",
+    tool_name: stringValue(approval.tool_name) || "command",
     kind: stringValue(approval.kind) || "exec",
     title: stringValue(approval.title) || "是否允许执行命令？",
     description: stringValue(approval.description),
@@ -1584,6 +1624,127 @@ function approvalContent(approval: CommandApprovalRequest): string {
     return command ? `已拒绝执行命令: ${command}` : "已拒绝执行命令";
   }
   return command ? `等待批准执行命令: ${command}` : approval.title;
+}
+
+function applyApprovalStateToCommandMessage(
+  view: AgentSessionViewState,
+  approval: CommandApprovalRequest,
+): void {
+  const target = findCommandMessageForApproval(view, approval);
+  if (!target) {
+    return;
+  }
+  const commandStatus = commandStatusFromApproval(approval);
+  const existingUiPayload = asRecord(target.uiPayload) ?? {};
+  const nextUiPayload: Record<string, unknown> = {
+    ...existingUiPayload,
+    approval: commandApprovalPayload(approval),
+  };
+  if (!shouldPreserveTerminalCommandUiStatus(existingUiPayload, commandStatus)) {
+    nextUiPayload.status = commandStatus;
+  }
+  const params = commandParamsFromApproval(approval);
+  if (params && !target.toolParams) {
+    target.toolParams = params;
+  }
+  target.uiPayload = nextUiPayload;
+  if (commandStatus === "rejected") {
+    target.status = "error";
+  } else if (!isTerminalToolStatus(target.status)) {
+    target.status = "running";
+  }
+}
+
+function findCommandMessageForApproval(
+  view: AgentSessionViewState,
+  approval: CommandApprovalRequest,
+): AgentChatMessage | undefined {
+  const toolName = commandToolNameFromApproval(approval);
+  if (!toolName) {
+    return undefined;
+  }
+  const ids = [approval.run_id, approval.call_id, approval.item_id].map((value) => stringValue(value)).filter(Boolean);
+  if (ids.length) {
+    const idMatch = [...view.messages].reverse().find((message) => {
+      if (message.role !== "tool" || message.toolName !== toolName) {
+        return false;
+      }
+      return ids.some((id) => message.runId === id || message.toolCallId === id || commandIdFromMessage(message) === id);
+    });
+    if (idMatch) {
+      return idMatch;
+    }
+  }
+  const params = commandParamsFromApproval(approval);
+  if (!params) {
+    return undefined;
+  }
+  return [...view.messages].reverse().find((message) => {
+    if (message.role !== "tool" || message.toolName !== toolName || isTerminalToolStatus(message.status)) {
+      return false;
+    }
+    return commandParamsMatch(asRecord(message.toolParams), params);
+  });
+}
+
+function commandToolNameFromApproval(approval: CommandApprovalRequest): string {
+  const toolName = stringValue(approval.tool_name);
+  if (isCommandToolName(toolName)) {
+    return toolName;
+  }
+  const detailToolName = stringValue(approval.details.tool_name) || stringValue(approval.details.tool);
+  return isCommandToolName(detailToolName) ? detailToolName : "";
+}
+
+function commandParamsFromApproval(approval: CommandApprovalRequest): Record<string, unknown> | undefined {
+  const details = approval.details;
+  const params: Record<string, unknown> = {};
+  const command = stringValue(details.command);
+  const description = stringValue(details.description) || approval.description;
+  const cwd = stringValue(details.cwd);
+  const timeoutSeconds = details.timeout_seconds ?? details.timeoutSeconds;
+  if (command) {
+    params.command = command;
+  }
+  if (description) {
+    params.description = description;
+  }
+  if (cwd) {
+    params.cwd = cwd;
+  }
+  if (timeoutSeconds !== undefined) {
+    params.timeout_seconds = timeoutSeconds;
+  }
+  return Object.keys(params).length ? params : undefined;
+}
+
+function commandStatusFromApproval(approval: CommandApprovalRequest): string {
+  if (approval.status === "pending") {
+    return "approval_pending";
+  }
+  if (approval.status === "rejected") {
+    return "rejected";
+  }
+  return "running";
+}
+
+function commandApprovalPayload(approval: CommandApprovalRequest): Record<string, unknown> {
+  return {
+    required: true,
+    approval_id: approval.id,
+    status: approval.status,
+    decision: approval.decision,
+    trust_scope: approval.trust_scope,
+    trusted_rule_id: approval.trusted_rule_id,
+    reject_message: approval.reject_message,
+  };
+}
+
+function shouldPreserveTerminalCommandUiStatus(
+  existingUiPayload: Record<string, unknown>,
+  nextStatus: string,
+): boolean {
+  return nextStatus === "running" && isTerminalCommandUiStatus(stringValue(existingUiPayload.status));
 }
 
 function ensureSubagentMessage(
@@ -1761,19 +1922,23 @@ function applyToolProgress(
   data: AgentToolProgressData,
   toolName: string,
 ) {
+  const commandPayload = commandPayloadFromToolData(data);
   if (data.run_id && shouldAcceptProgressRunId(target, data)) {
     target.runId = data.run_id;
   }
   target.toolCallId = data.tool_call_id ?? target.toolCallId;
   target.toolName = toolName || target.toolName;
-  target.toolParams = data.params ?? data.input_data ?? target.toolParams;
-  target.status = "running";
+  target.toolParams = data.params ?? data.input_data ?? commandToolParams(commandPayload) ?? target.toolParams;
+  target.status = toolStatusFromCommandPayload(commandPayload, data.status);
   const fileChanges = normalizedFileChanges(data.files);
   if (fileChanges.length) {
     target.fileChanges = fileChanges;
-    target.uiPayload = mergeToolFilesIntoUiPayload(data.ui_payload ?? target.uiPayload, fileChanges);
+    target.uiPayload = mergeToolFilesIntoUiPayload(
+      commandPayload ? { ...(target.uiPayload ?? {}), ...commandPayload } : data.ui_payload ?? target.uiPayload,
+      fileChanges,
+    );
   } else {
-    target.uiPayload = data.ui_payload ?? target.uiPayload;
+    target.uiPayload = commandPayload ? { ...(target.uiPayload ?? {}), ...commandPayload } : data.ui_payload ?? target.uiPayload;
   }
   target.metadata = data.metadata ?? target.metadata;
 }
@@ -1821,6 +1986,107 @@ function toolNameFromData(data: AgentToolEventData): string {
   return stringValue(data.tool_name) || stringValue(data.tool) || data.run_id;
 }
 
+function commandPayloadFromToolData(data: AgentToolEventData | AgentToolProgressData): Record<string, unknown> | undefined {
+  const direct = asRecord(data);
+  const uiPayload = asRecord(data.ui_payload);
+  if (uiPayload && isCommandPayload(uiPayload)) {
+    return uiPayload;
+  }
+  if (direct && isCommandPayload(direct)) {
+    return direct;
+  }
+  return undefined;
+}
+
+function isCommandPayload(value: Record<string, unknown>): boolean {
+  const kind = stringValue(value.kind);
+  return kind === "command_progress" || kind === "command_result" || Boolean(stringValue(value.command_id));
+}
+
+function commandToolParams(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  const command = stringValue(payload.command);
+  const cwd = stringValue(payload.cwd);
+  const timeoutSeconds = payload.timeout_seconds;
+  const description = stringValue(payload.description);
+  const params: Record<string, unknown> = {};
+  if (command) {
+    params.command = command;
+  }
+  if (description) {
+    params.description = description;
+  }
+  if (cwd) {
+    params.cwd = cwd;
+  }
+  if (timeoutSeconds !== undefined) {
+    params.timeout_seconds = timeoutSeconds;
+  }
+  return Object.keys(params).length ? params : undefined;
+}
+
+function toolStatusFromCommandPayload(
+  payload: Record<string, unknown> | undefined,
+  fallback: AgentToolEventData["status"],
+): AgentToolStatus {
+  const commandStatus = stringValue(payload?.status);
+  if (commandStatus === "running") {
+    return "running";
+  }
+  if (commandStatus === "cancelled") {
+    return "cancelled";
+  }
+  if (commandStatus === "completed") {
+    return "completed";
+  }
+  if (commandStatus) {
+    return "error";
+  }
+  if (fallback === "cancelled") {
+    return "cancelled";
+  }
+  if (fallback === "completed" || fallback === "success") {
+    return "completed";
+  }
+  if (fallback === "failed" || fallback === "error") {
+    return "error";
+  }
+  return "running";
+}
+
+function shouldIgnoreLateCommandProgress(
+  target: AgentToolCall | AgentChatMessage,
+  data: AgentToolProgressData,
+): boolean {
+  const payload = commandPayloadFromToolData(data);
+  if (!payload || stringValue(payload.status) !== "running") {
+    return false;
+  }
+  return isTerminalToolStatus(target.status);
+}
+
+function commandIdFromMessage(message: AgentChatMessage): string {
+  return stringValue(asRecord(message.uiPayload)?.command_id);
+}
+
+function isTerminalToolStatus(status: AgentToolStatus | AgentChatMessage["status"] | undefined): boolean {
+  return status === "completed" || status === "cancelled" || status === "error";
+}
+
+function isTerminalCommandUiStatus(status: string): boolean {
+  return [
+    "completed",
+    "timed_out",
+    "cancelled",
+    "failed_to_start",
+    "shell_not_available",
+    "output_limit_exceeded",
+    "rejected",
+  ].includes(status);
+}
+
 function toolResultFromData(data: AgentToolEventData): string {
   if (typeof data.result === "string") {
     return data.result;
@@ -1852,6 +2118,35 @@ function findMatchingProgressTool(
   data: AgentToolEventData | AgentToolProgressData,
   toolName: string,
 ): AgentChatMessage | undefined {
+  const commandPayload = commandPayloadFromToolData(data);
+  const commandId = stringValue(commandPayload?.command_id);
+  if (commandId && isCommandToolName(toolName)) {
+    const commandMatch = [...view.messages].reverse().find((message) => {
+      if (message.role !== "tool" || message.toolName !== toolName) {
+        return false;
+      }
+      return commandIdFromMessage(message) === commandId;
+    });
+    if (commandMatch) {
+      return commandMatch;
+    }
+  }
+  const commandParams = commandParamsFromToolData(data, toolName);
+  if (commandParams) {
+    const commandMatch = [...view.messages].reverse().find((message) => {
+      if (message.role !== "tool" || message.toolName !== toolName || isTerminalToolStatus(message.status)) {
+        return false;
+      }
+      const existingCommandId = commandIdFromMessage(message);
+      if (existingCommandId && commandId && existingCommandId !== commandId) {
+        return false;
+      }
+      return commandParamsMatch(asRecord(message.toolParams), commandParams);
+    });
+    if (commandMatch) {
+      return commandMatch;
+    }
+  }
   const targetPaths = fileChangePaths(normalizedFileChanges(data.files));
   const params = asRecord(data.params) ?? asRecord(data.input_data);
   const paramsPath = stringValue(params?.path);
@@ -1883,6 +2178,84 @@ function findMatchingProgressTool(
       }
       return [...targetPaths].some((path) => messagePaths.has(path));
     });
+}
+
+function isCommandToolName(value: string): boolean {
+  return value === "run_git_bash" || value === "run_cmd" || value === "run_powershell";
+}
+
+function commandParamsFromToolData(
+  data: AgentToolEventData | AgentToolProgressData,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  if (!isCommandToolName(toolName)) {
+    return undefined;
+  }
+  const payloadParams = commandToolParams(commandPayloadFromToolData(data));
+  if (payloadParams) {
+    return payloadParams;
+  }
+  return commandParamsFromRaw(asRecord(data.params) ?? asRecord(data.input_data));
+}
+
+function commandParamsFromRaw(value: Record<string, unknown> | null): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const params: Record<string, unknown> = {};
+  const command = stringValue(value.command);
+  const description = stringValue(value.description);
+  const cwd = stringValue(value.cwd);
+  const timeoutSeconds = value.timeout_seconds ?? value.timeoutSeconds;
+  if (command) {
+    params.command = command;
+  }
+  if (description) {
+    params.description = description;
+  }
+  if (cwd) {
+    params.cwd = cwd;
+  }
+  if (timeoutSeconds !== undefined) {
+    params.timeout_seconds = timeoutSeconds;
+  }
+  return Object.keys(params).length ? params : undefined;
+}
+
+function commandParamsMatch(
+  existing: Record<string, unknown> | null,
+  incoming: Record<string, unknown>,
+): boolean {
+  const existingCommand = stringValue(existing?.command).trim();
+  const incomingCommand = stringValue(incoming.command).trim();
+  if (!existingCommand || !incomingCommand || existingCommand !== incomingCommand) {
+    return false;
+  }
+  return (
+    commandOptionalParamCompatible(existing, incoming, "cwd") &&
+    commandOptionalParamCompatible(existing, incoming, "description") &&
+    commandOptionalParamCompatible(existing, incoming, "timeout_seconds")
+  );
+}
+
+function commandOptionalParamCompatible(
+  existing: Record<string, unknown> | null,
+  incoming: Record<string, unknown>,
+  key: string,
+): boolean {
+  const left = commandScalarValue(existing?.[key]).trim();
+  const right = commandScalarValue(incoming[key]).trim();
+  return !left || !right || left === right;
+}
+
+function commandScalarValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function fileChangePathsFromPatch(patch: string): Set<string> {

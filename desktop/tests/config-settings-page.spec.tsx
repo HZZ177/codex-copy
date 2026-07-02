@@ -7,6 +7,7 @@ import { NotificationProvider } from "@/renderer/providers/NotificationProvider"
 import type {
   CommandApprovalAuditRecord,
   CommandSettings,
+  CommandShell,
   SettingsResponse,
   TrustedCommandRule,
 } from "@/types/protocol";
@@ -21,6 +22,12 @@ describe("ConfigSettingsPage", () => {
     expect(await screen.findByText("批准策略")).not.toBeNull();
     expect(screen.getByRole("button", { name: "批准策略：按请求" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "文件访问权限：工作区内信任" })).not.toBeNull();
+    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual([
+      "Git Bash",
+      "CMD",
+      "PowerShell",
+    ]);
+    expect(screen.getByRole("radio", { name: "CMD" })).not.toBeNull();
     expect(screen.getByText("未信任命令执行前需要确认，可在审批时保存信任规则。")).not.toBeNull();
     expect(screen.getByText("Agent 可以读写当前工作区。")).not.toBeNull();
     expect(screen.getByText("已信任命令")).not.toBeNull();
@@ -36,6 +43,61 @@ describe("ConfigSettingsPage", () => {
     expect(runtime.settings.listCommandApprovalHistory).toHaveBeenCalledWith({ page: 1, pageSize: 10 });
   });
 
+  it("hides command runtime details when the command tool is disabled", async () => {
+    const disabledCommand = commandSettings({ command_enabled: false });
+    const runtime = fakeRuntime({
+      getSettings: vi.fn().mockResolvedValue(settingsResponse(disabledCommand)),
+    });
+
+    renderConfigSettingsPage(runtime);
+
+    expect(await screen.findByRole("button", { name: "开启命令行工具" })).not.toBeNull();
+    expect(screen.queryByRole("radio", { name: "Git Bash" })).toBeNull();
+    expect(screen.queryByText("批准策略")).toBeNull();
+    expect(screen.queryByText("已信任命令")).toBeNull();
+    expect(screen.getByText("文件访问权限")).not.toBeNull();
+  });
+
+  it("opens manual locator dialog when selecting a missing runtime", async () => {
+    const runtime = fakeRuntime({
+      discoverCommandRuntime: vi.fn((shell: CommandShell) =>
+        Promise.resolve(
+          shell === "cmd"
+            ? {
+                shell,
+                found: true,
+                path: "C:/Windows/System32/cmd.exe",
+                label: "CMD",
+                diagnostics: [],
+              }
+            : {
+                shell,
+                found: false,
+                diagnostics: [],
+                error: shell === "git_bash" ? "未找到 Git Bash" : "未找到 PowerShell",
+              },
+        ),
+      ),
+    });
+
+    renderConfigSettingsPage(runtime);
+
+    await screen.findAllByText("pnpm test");
+    fireEvent.click(screen.getByRole("radio", { name: "Git Bash" }));
+
+    expect(await screen.findByRole("dialog", { name: "定位 Git Bash executable" })).not.toBeNull();
+    expect(screen.getByText(/如果尚未安装，请先安装/)).not.toBeNull();
+    await waitFor(() => {
+      expect(runtime.settings.saveCommandSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command_enabled: true,
+          selected_shell: "git_bash",
+          shell_path: "",
+        }),
+      );
+    });
+  });
+
   it("saves command settings from approval policy selection", async () => {
     const runtime = fakeRuntime();
 
@@ -43,20 +105,19 @@ describe("ConfigSettingsPage", () => {
 
     await screen.findAllByText("pnpm test");
     fireEvent.click(screen.getByRole("button", { name: "批准策略：按请求" }));
-    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getAllByRole("option")).toHaveLength(2);
     expect(screen.getByRole("option", { name: /按请求/ })).not.toBeNull();
     expect(screen.getByRole("option", { name: /无条件信任/ })).not.toBeNull();
-    expect(screen.getByRole("option", { name: /关闭命令行工具/ })).not.toBeNull();
     fireEvent.click(screen.getByRole("option", { name: /无条件信任/ }));
 
     await waitFor(() => {
       expect(runtime.settings.saveCommandSettings).toHaveBeenCalledWith(
         expect.objectContaining({
-          command_enabled: true,
+          selected_shell: "cmd",
           require_approval_for_untrusted: false,
           allow_persistent_trust: false,
           default_timeout_seconds: 120,
-          max_output_chars: 65536,
+          inline_output_max_chars: 12000,
         }),
       );
     });
@@ -83,7 +144,7 @@ describe("ConfigSettingsPage", () => {
       expect(runtime.settings.saveCommandSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           file_access_mode: "workspace_read_only",
-          command_enabled: true,
+          selected_shell: "cmd",
           require_approval_for_untrusted: true,
         }),
       );
@@ -169,6 +230,20 @@ function fakeRuntime(options: Partial<RuntimeBridge["settings"]> = {}): RuntimeB
       listTrustedCommandRules: vi.fn().mockResolvedValue([rule]),
       updateTrustedCommandRule: vi.fn().mockResolvedValue({ ...rule, enabled: false }),
       deleteTrustedCommandRule: vi.fn().mockResolvedValue(undefined),
+      discoverCommandRuntime: vi.fn().mockResolvedValue({
+        shell: "cmd",
+        found: true,
+        path: "C:/Windows/System32/cmd.exe",
+        label: "CMD",
+        diagnostics: [],
+      }),
+      validateCommandRuntime: vi.fn().mockResolvedValue({
+        shell: "cmd",
+        found: true,
+        path: "C:/Windows/System32/cmd.exe",
+        label: "CMD",
+        diagnostics: [],
+      }),
       listCommandApprovalHistory: vi.fn().mockResolvedValue({
         list: [approvalHistory()],
         total: 1,
@@ -180,15 +255,32 @@ function fakeRuntime(options: Partial<RuntimeBridge["settings"]> = {}): RuntimeB
   } as unknown as RuntimeBridge;
 }
 
-function commandSettings(): CommandSettings {
+function commandSettings(overrides: Partial<CommandSettings> = {}): CommandSettings {
   return {
     command_enabled: true,
+    selected_shell: "cmd",
+    shell_path: "C:/Windows/System32/cmd.exe",
+    shell_label: "CMD",
+    shell_edition: null,
+    shell_version: null,
+    shells: {
+      cmd: {
+        shell_path: "C:/Windows/System32/cmd.exe",
+        shell_label: "CMD",
+        shell_edition: null,
+        shell_version: null,
+      },
+    },
     require_approval_for_untrusted: true,
     allow_persistent_trust: true,
     file_access_mode: "workspace_trusted",
     default_timeout_seconds: 120,
     max_timeout_seconds: 600,
-    max_output_chars: 65536,
+    inline_output_max_chars: 12000,
+    tail_max_chars: 12000,
+    output_file_max_bytes: 8388608,
+    progress_interval_ms: 500,
+    ...overrides,
   };
 }
 
@@ -213,7 +305,9 @@ function trustedRule(): TrustedCommandRule {
     command_pattern: "pnpm test",
     normalized_command: "pnpm test",
     match_type: "exact",
+    tool_name: "run_powershell",
     shell: "powershell",
+    shell_path: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
     workspace_root: "D:/repo",
     cwd_pattern: "D:/repo",
     enabled: true,

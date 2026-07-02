@@ -72,7 +72,8 @@
   backdrop-filter: blur(18px);
 }
 
-.policyBlock {
+.policyBlock,
+.commandToggleBlock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(230px, 310px);
   align-items: center;
@@ -81,6 +82,17 @@
   padding: 13px 14px;
 }
 
+.runtimeBlock {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(420px, 1.35fr);
+  align-items: start;
+  gap: 22px;
+  min-height: 146px;
+  padding: 14px;
+}
+
+.commandToggleBlock + .runtimeBlock,
+.runtimeBlock + .policyBlock,
 .policyBlock + .policyBlock {
   border-top: 1px solid color-mix(in srgb, var(--color-border-default) 48%, transparent);
 }
@@ -106,6 +118,117 @@
 
 .policyHint {
   margin-top: 5px;
+}
+
+.shellCards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.shellCard {
+  display: grid;
+  min-width: 0;
+  min-height: 118px;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 58%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 74%, transparent);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shellCard[data-active="true"] {
+  border-color: color-mix(in srgb, var(--color-text-secondary) 30%, var(--color-border-default));
+  background: color-mix(in srgb, var(--surface-hover) 82%, var(--color-bg-elevated));
+  color: var(--color-text-primary);
+}
+
+.shellCard:not(:disabled):hover {
+  background: color-mix(in srgb, var(--surface-hover) 74%, var(--color-bg-elevated));
+  color: var(--color-text-primary);
+}
+
+.shellCard[data-state="missing"] {
+  color: var(--color-text-tertiary);
+}
+
+.shellCardTitle,
+.shellCardStatus {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.shellCardTitle {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.shellCardStatus {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.shellCard[data-state="found"] .shellCardStatus {
+  color: var(--color-success-6);
+}
+
+.shellCard[data-state="missing"] .shellCardStatus {
+  color: var(--color-danger);
+}
+
+.shellCardPath {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.toggleButton {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 0;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+  padding: 0 12px;
+  justify-self: end;
+  cursor: pointer;
+}
+
+.toggleButton:not(:disabled):hover,
+.shellCard:focus-visible,
+.toggleButton:focus-visible {
+  outline: 0;
+  background: color-mix(in srgb, var(--surface-hover) 82%, var(--color-bg-elevated));
+  box-shadow: var(
+    --settings-focus-ring,
+    0 0 0 1px color-mix(in srgb, var(--color-border-3) 54%, transparent)
+  );
 }
 
 .iconButton,
@@ -450,15 +573,131 @@
   color: var(--color-danger);
 }
 
+.modalBackdrop {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--color-bg-overlay, #000) 28%, transparent);
+  padding: 24px;
+}
+
+.manualRuntimeDialog {
+  display: grid;
+  width: min(480px, 100%);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-default) 62%, transparent);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg, 0 18px 48px rgb(0 0 0 / 18%));
+}
+
+.manualRuntimeDialog header,
+.manualRuntimeDialog footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+}
+
+.manualRuntimeDialog header {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 48%, transparent);
+}
+
+.manualRuntimeDialog h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.manualRuntimeDialog p {
+  margin: 6px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.manualRuntimeDialog header button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.manualRuntimeDialog header button:not(:disabled):hover {
+  background: var(--surface-hover);
+  color: var(--color-text-primary);
+}
+
+.manualRuntimeBody {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.manualRuntimeBody p {
+  margin: 0;
+}
+
+.manualRuntimeError {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 9px 10px;
+}
+
+.manualRuntimeDialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-default) 48%, transparent);
+}
+
+.manualRuntimeDialog footer button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  line-height: var(--ui-line-height-tight);
+}
+
 @media (max-width: 680px) {
   .page {
     width: min(100% - 32px, 760px);
     padding: 42px 0 84px;
   }
 
-  .policyBlock {
+  .policyBlock,
+  .commandToggleBlock {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .runtimeBlock {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .shellCards {
+    grid-template-columns: 1fr;
+  }
+
+  .toggleButton {
+    justify-self: start;
   }
 
   .sectionHeader {

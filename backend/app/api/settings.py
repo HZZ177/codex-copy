@@ -26,6 +26,8 @@ from backend.app.storage import (
     ModelDefaultRecord,
     StorageRepositories,
 )
+from backend.app.tools.command_runtime.discovery import discover_shell
+from backend.app.tools.command_runtime.models import CommandShell, CommandShellConfig
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 RepositoriesDep = Depends(get_repositories)
@@ -88,6 +90,22 @@ class UpdateSettingsRequest(BaseModel):
     general: GeneralSettings | None = None
     appearance: AppearanceSettings | None = None
     command: CommandSettings | None = None
+
+
+class CommandRuntimeProbeRequest(BaseModel):
+    selected_shell: CommandShell
+    shell_path: str | None = None
+
+
+class CommandRuntimeProbeResponse(BaseModel):
+    shell: CommandShell
+    found: bool
+    path: str | None = None
+    label: str | None = None
+    edition: str | None = None
+    version: str | None = None
+    diagnostics: list[str] = []
+    error: str | None = None
 
 
 class TrustedRuleListResponse(BaseModel):
@@ -298,11 +316,13 @@ async def put_settings(
             f"close_window_behavior={request.general.close_window_behavior}"
         )
     if request.command is not None:
-        save_command_settings(repositories, request.command)
+        validated_command = _validated_command_settings(request.command)
+        save_command_settings(repositories, validated_command)
         logger.info(
             "[SettingsAPI] 更新命令配置 | "
-            f"command_enabled={request.command.command_enabled} | "
-            f"allow_persistent_trust={request.command.allow_persistent_trust}"
+            f"selected_shell={validated_command.selected_shell} | "
+            f"shell_path={validated_command.shell_path} | "
+            f"allow_persistent_trust={validated_command.allow_persistent_trust}"
         )
     settings = load_model_settings(repositories).public_dict()
     general = load_general_settings(repositories)
@@ -373,6 +393,22 @@ async def put_extension_settings(
     return saved
 
 
+@router.post("/command/runtime/discover", response_model=CommandRuntimeProbeResponse)
+async def discover_command_runtime(
+    request: CommandRuntimeProbeRequest,
+) -> CommandRuntimeProbeResponse:
+    result = discover_shell(request.selected_shell)
+    return CommandRuntimeProbeResponse(**result.to_payload())
+
+
+@router.post("/command/runtime/validate", response_model=CommandRuntimeProbeResponse)
+async def validate_command_runtime(
+    request: CommandRuntimeProbeRequest,
+) -> CommandRuntimeProbeResponse:
+    result = discover_shell(request.selected_shell, manual_path=request.shell_path)
+    return CommandRuntimeProbeResponse(**result.to_payload())
+
+
 @router.get("/command/trusted-rules", response_model=TrustedRuleListResponse)
 async def list_trusted_command_rules(
     repositories: StorageRepositories = RepositoriesDep,
@@ -429,6 +465,46 @@ async def list_command_approval_history(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+def _validated_command_settings(settings: CommandSettings) -> CommandSettings:
+    if not settings.command_enabled:
+        return settings
+    selected_config = settings.config_for_shell(settings.selected_shell)
+    manual_path = selected_config.shell_path or settings.shell_path
+    if not str(manual_path or "").strip():
+        return settings.model_copy(
+            update={"shell_path": "", "shell_label": "", "shell_edition": None, "shell_version": None}
+        )
+    result = discover_shell(
+        settings.selected_shell,
+        manual_path=manual_path,
+    )
+    if not result.found or not result.path or not result.label:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "command_runtime_unavailable",
+                "message": result.error or "命令执行环境不可用",
+                "details": result.to_payload(),
+            },
+        )
+    shells = dict(settings.shells)
+    shells[settings.selected_shell] = CommandShellConfig(
+        shell_path=result.path,
+        shell_label=result.label,
+        shell_edition=result.edition,
+        shell_version=result.version,
+    )
+    return settings.model_copy(
+        update={
+            "shell_path": result.path,
+            "shell_label": result.label,
+            "shell_edition": result.edition,
+            "shell_version": result.version,
+            "shells": shells,
+        }
     )
 
 

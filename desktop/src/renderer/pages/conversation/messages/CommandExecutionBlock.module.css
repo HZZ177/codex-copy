@@ -58,8 +58,7 @@
   line-height: 0;
 }
 
-.block[data-status="running"] .icon,
-.block[data-status="pending"] .icon {
+.block[data-status="running"] .icon {
   animation: spin 900ms linear infinite;
 }
 
@@ -114,6 +113,10 @@
 
 .statusDot[data-state="done"] {
   background: var(--color-success-6);
+}
+
+.statusDot[data-state="pending"] {
+  background: var(--color-text-tertiary);
 }
 
 .command {
@@ -226,9 +229,25 @@
 .toolNameRow {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 7px;
   padding-bottom: 6px;
+}
+
+.toolNameMain {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.toolHeaderActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 .toolNameLabel {
@@ -327,6 +346,30 @@
   opacity: 0.38;
 }
 
+.terminateIconButton {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--color-danger) 76%, var(--color-text-tertiary));
+  padding: 0;
+  cursor: pointer;
+}
+
+.terminateIconButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  color: var(--color-danger);
+}
+
+.terminateIconButton:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
 .copyButton:disabled:hover {
   background: transparent;
   color: var(--color-text-tertiary);
@@ -380,7 +423,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .block[data-status="running"] .icon,
-  .block[data-status="pending"] .icon,
   .statusDot[data-state="running"] {
     animation: none;
   }

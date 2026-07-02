@@ -114,6 +114,7 @@ export interface ChatChannel {
   chat(payload: ChatPayload): void;
   approvalDecision(approvalId: string, decision: CommandApprovalDecisionPayload): void;
   cancel(sessionId?: string): void;
+  terminateCommand(sessionId: string, commandId: string): void;
   requestStatus(sessionId?: string): void;
   ping(): void;
 }
@@ -227,6 +228,11 @@ export function createConversationRuntime(
             ...decision,
           }),
         cancel: (sessionId) => client.cancel(sessionId),
+        terminateCommand: (sessionId, commandId) =>
+          client.sendAction("terminate_command", {
+            session_id: sessionId,
+            command_id: commandId,
+          }),
         requestStatus: (sessionId) => client.requestStatus(sessionId),
         ping: () => client.ping(),
       };

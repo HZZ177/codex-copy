@@ -340,7 +340,9 @@ class TrustedCommandRuleRecord:
     command_pattern: str
     normalized_command: str
     match_type: str
+    tool_name: str
     shell: str
+    shell_path: str
     workspace_root: str
     cwd_pattern: str
     enabled: bool
@@ -3036,7 +3038,7 @@ class CommandApprovalRequestsRepository:
         trace_id: str | None = None,
         turn_index: int | None = None,
         run_id: str | None = None,
-        tool_name: str = "run_command",
+        tool_name: str = "command",
         kind: str = "exec",
         shell: str = "shell",
         workspace_root: str = "",
@@ -3251,9 +3253,11 @@ class TrustedCommandRulesRepository:
         command_pattern: str,
         normalized_command: str,
         match_type: str,
-        shell: str,
-        workspace_root: str,
-        cwd_pattern: str,
+        tool_name: str = "",
+        shell: str = "",
+        shell_path: str = "",
+        workspace_root: str = "",
+        cwd_pattern: str = ".",
         created_from_approval_id: str | None = None,
         enabled: bool = True,
     ) -> TrustedCommandRuleRecord:
@@ -3263,17 +3267,19 @@ class TrustedCommandRulesRepository:
             conn.execute(
                 """
                 insert into trusted_command_rules (
-                  id, command_pattern, normalized_command, match_type, shell,
-                  workspace_root, cwd_pattern, enabled, created_from_approval_id,
+                  id, command_pattern, normalized_command, match_type, tool_name, shell,
+                  shell_path, workspace_root, cwd_pattern, enabled, created_from_approval_id,
                   created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule_id,
                     command_pattern,
                     normalized_command,
                     match_type,
+                    tool_name,
                     shell,
+                    shell_path,
                     workspace_root,
                     cwd_pattern,
                     int(enabled),
@@ -3381,7 +3387,9 @@ class TrustedCommandRulesRepository:
             command_pattern=row["command_pattern"],
             normalized_command=row["normalized_command"],
             match_type=row["match_type"],
+            tool_name=row["tool_name"],
             shell=row["shell"],
+            shell_path=row["shell_path"],
             workspace_root=row["workspace_root"],
             cwd_pattern=row["cwd_pattern"],
             enabled=bool(row["enabled"]),

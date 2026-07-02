@@ -66,6 +66,19 @@ export function ApprovalPrompt({ message, onDecision }: ApprovalPromptProps) {
 
       {approval.description ? <p className={styles.description}>{approval.description}</p> : null}
 
+      {approval.facts.length ? (
+        <dl className={styles.factGrid}>
+          {approval.facts.map((fact) => (
+            <div className={styles.factItem} key={fact.label}>
+              <dt>{fact.label}</dt>
+              <dd data-mono={fact.mono ? "true" : "false"} title={fact.value}>
+                {fact.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
       <div className={styles.riskLine}>
         <span>风险</span>
         <strong>{riskLabel(approval.riskLevel)}</strong>
@@ -114,9 +127,16 @@ interface ParsedApproval {
   title: string;
   description: string;
   target: string;
+  facts: ApprovalFact[];
   detailsText: string;
   riskLevel: "low" | "medium" | "high";
   status: ApprovalStatus;
+}
+
+interface ApprovalFact {
+  label: string;
+  value: string;
+  mono?: boolean;
 }
 
 function parseApproval(message: ConversationMessage): ParsedApproval {
@@ -128,6 +148,7 @@ function parseApproval(message: ConversationMessage): ParsedApproval {
     title: approval?.title || message.content || "需要确认操作",
     description: approval?.description ?? "",
     target: targetFromDetails(details),
+    facts: factsFromDetails(details),
     detailsText: stringify(details),
     riskLevel: riskFromDetails(details),
     status: (approval?.status ?? message.status ?? "pending") as ApprovalStatus,
@@ -153,6 +174,46 @@ function targetFromDetails(details: Record<string, unknown>): string {
     return first ?? "";
   }
   return "";
+}
+
+function factsFromDetails(details: Record<string, unknown>): ApprovalFact[] {
+  const facts: ApprovalFact[] = [];
+  addFact(facts, "命令", details.command, true);
+  addFact(facts, "工具", details.tool_name ?? details.tool);
+  addFact(facts, "Shell", details.shell_label ?? details.shell);
+  addFact(facts, "Shell 路径", details.shell_path, true);
+  addFact(facts, "工作目录", details.cwd, true);
+  addFact(facts, "超时", formatTimeout(details.timeout_seconds));
+  addFact(facts, "工作区", details.workspace_root, true);
+  return facts;
+}
+
+function addFact(facts: ApprovalFact[], label: string, value: unknown, mono = false): void {
+  const text = scalarText(value);
+  if (!text) {
+    return;
+  }
+  facts.push({ label, value: text, mono });
+}
+
+function scalarText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  return "";
+}
+
+function formatTimeout(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "";
+  }
+  return `${value}s`;
 }
 
 function riskFromDetails(details: Record<string, unknown>): ParsedApproval["riskLevel"] {

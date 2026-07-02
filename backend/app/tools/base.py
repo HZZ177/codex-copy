@@ -113,11 +113,12 @@ def _summarize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]
     if tool_name in {"edit_file", "apply_patch"}:
         patch = args.get("patch")
         return {"patch_chars": len(patch) if isinstance(patch, str) else 0}
-    if tool_name == "run_command":
+    if tool_name in {"run_git_bash", "run_cmd", "run_powershell"}:
         command = args.get("command")
         summary: dict[str, Any] = {
             "cwd": safe_args.get("cwd"),
             "timeout_seconds": safe_args.get("timeout_seconds"),
+            "description": safe_args.get("description"),
         }
         if isinstance(command, str):
             summary["command_preview"] = _preview_text(command)

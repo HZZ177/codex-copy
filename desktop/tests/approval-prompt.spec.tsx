@@ -12,7 +12,10 @@ describe("ApprovalPrompt", () => {
     expect(screen.getByText("允许执行命令")).not.toBeNull();
     expect(screen.getByText("执行命令")).not.toBeNull();
     expect(screen.getByText("等待确认")).not.toBeNull();
-    expect(screen.getByText("echo ok")).not.toBeNull();
+    expect(screen.getAllByText("echo ok")).toHaveLength(2);
+    expect(screen.getByText("run_cmd")).not.toBeNull();
+    expect(screen.getByText("CMD")).not.toBeNull();
+    expect(screen.getByText("C:/Windows/System32/cmd.exe")).not.toBeNull();
     expect(screen.getByText("中")).not.toBeNull();
     expect(screen.queryByText(/workspace_write/)).toBeNull();
 
@@ -72,6 +75,9 @@ function approvalMessage(status: ApprovalRequest["status"] = "pending", id = "ap
     details: {
       command: "echo ok",
       cwd: "D:/repo",
+      tool_name: "run_cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
       permission_mode: "workspace_write",
     },
     status,

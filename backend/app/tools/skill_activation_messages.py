@@ -24,7 +24,7 @@ def build_skill_activation_content(
             "mode": "workspace_tools",
             "path_rule": "使用 skill_root + resources 中的相对路径组成工作区相对路径。",
             "read_text": ["read_file", "list_dir", "search_text", "search_files", "grep_files"],
-            "execute_or_inspect": ["run_command"],
+            "execute_or_inspect": ["当前已配置的命令工具"],
             "compatibility_fallback": (
                 f'{load_skill_tool_name}(skill_name="{skill.name}", resource_path="<相对路径>")'
             ),
@@ -45,7 +45,7 @@ def build_skill_activation_content(
         "- 读取文本资源时，使用 `read_file` / `list_dir` / `search_text` / "
         "`search_files` / `grep_files`，路径写成 "
         f"`{skill_root}/<resources 中的相对路径>`。\n"
-        "- 执行或检查脚本资源时，使用 `run_command`，优先把 `cwd` 设置为 "
+        "- 执行或检查脚本资源时，使用当前已配置的命令工具，优先把 `cwd` 设置为 "
         f"`{skill_root}`，命令中使用资源相对路径。\n"
         "- 不要自行拼接工作区外的绝对路径；不要把 `load_skill(resource_path=...)` "
         "作为默认资源访问方式。\n"

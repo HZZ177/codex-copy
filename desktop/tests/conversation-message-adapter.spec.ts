@@ -40,7 +40,7 @@ describe("conversation message adapter", () => {
     ).toBe("llm_retry");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "update_plan" }))).toBe("plan");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "load_skill" }))).toBe("skill");
-    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "run_command" }))).toBe("command");
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "run_cmd" }))).toBe("command");
     expect(
       conversationKindFromAgent(
         agentMessage({
@@ -54,6 +54,9 @@ describe("conversation message adapter", () => {
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "search_files" }))).toBe("tool");
     expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "create_file", status: "error" }))).toBe(
       "tool",
+    );
+    expect(conversationKindFromAgent(agentMessage({ role: "tool", toolName: "run_cmd", status: "cancelled" }))).toBe(
+      "command",
     );
   });
 
@@ -83,6 +86,25 @@ describe("conversation message adapter", () => {
       files: [{ path: "README.md" }],
       runId: "run-1",
       toolCallId: "call-1",
+    });
+  });
+
+  it("preserves cancelled command tool payloads for replay", () => {
+    const payload = payloadFromAgentMessage(
+      agentMessage({
+        role: "tool",
+        status: "cancelled",
+        toolName: "run_cmd",
+        uiPayload: { command_id: "cmd-1", status: "cancelled", command: "ping" },
+      }),
+    );
+
+    expect(payload).toMatchObject({
+      call: { name: "run_cmd" },
+      result: {
+        status: "cancelled",
+        ui_payload: { command_id: "cmd-1", status: "cancelled", command: "ping" },
+      },
     });
   });
 

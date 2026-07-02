@@ -130,6 +130,7 @@ export interface AgentSessionController {
     model?: RuntimeSelectedModel | null,
   ) => Promise<boolean>;
   stop: () => void;
+  terminateCommand: (commandId: string) => Promise<void>;
   submitApproval: (decision: CommandApprovalDecisionPayload) => Promise<void>;
   approvalSubmitting: boolean;
   approvalError: string | null;
@@ -686,6 +687,42 @@ export function useAgentSessionController({
     }
   }, [canStop, dispatch, onNotice, sessionId, setRuntimeDetail, sharedRuntimeContext, wsStatus]);
 
+  const terminateCommand = useCallback(
+    async (commandId: string) => {
+      if (!sessionId || !commandId.trim()) {
+        return;
+      }
+      if (wsStatus !== "open") {
+        const message = "对话连接尚未就绪";
+        setRuntimeDetail(message);
+        onNotice?.(message, "warning");
+        return;
+      }
+
+      setRequestState("cancelling");
+      setRuntimeDetail(null);
+      try {
+        dispatch({ type: "runtime/setState", sessionId, runtimeState: "cancelling" });
+        if (sharedRuntimeContext) {
+          sharedRuntimeContext.terminateCommand(sessionId, commandId);
+        } else {
+          const channel = channelRef.current;
+          if (!channel) {
+            throw new Error("对话连接尚未就绪");
+          }
+          channel.terminateCommand(sessionId, commandId);
+        }
+      } catch (reason) {
+        const message = errorMessage(reason);
+        setRuntimeDetail(publicRuntimeDetail(message));
+        appendLocalError(dispatch, sessionId, message);
+      } finally {
+        setRequestState(null);
+      }
+    },
+    [dispatch, onNotice, sessionId, setRuntimeDetail, sharedRuntimeContext, wsStatus],
+  );
+
   const submitApproval = useCallback(
     async (decision: CommandApprovalDecisionPayload) => {
       if (!pendingApproval) {
@@ -747,6 +784,7 @@ export function useAgentSessionController({
       sendText,
       send,
       stop,
+      terminateCommand,
       submitApproval,
       approvalSubmitting,
       approvalError,
@@ -780,6 +818,7 @@ export function useAgentSessionController({
       state,
       stop,
       submitApproval,
+      terminateCommand,
       usingSharedRuntime,
       wsStatus,
     ],

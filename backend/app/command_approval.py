@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 from backend.app.core.ids import new_id
 from backend.app.events import DomainEventType, EventDispatcher
@@ -17,34 +17,11 @@ from backend.app.storage import (
     StorageRepositories,
     TrustedCommandRuleRecord,
 )
+from backend.app.tools.command_runtime.models import CommandSettings, FileAccessMode
 
 COMMAND_SETTINGS_KEY = "command_settings"
 DEFAULT_APPROVAL_WAIT_SECONDS = 24 * 60 * 60
 BROAD_PREFIX_COMMANDS = {"powershell", "pwsh", "cmd", "python", "node", "npm", "pnpm", "git"}
-FileAccessMode = Literal[
-    "no_file_access",
-    "workspace_read_only",
-    "workspace_trusted",
-    "full_access",
-]
-
-
-class CommandSettings(BaseModel):
-    command_enabled: bool = True
-    require_approval_for_untrusted: bool = True
-    allow_persistent_trust: bool = True
-    file_access_mode: FileAccessMode = "workspace_trusted"
-    default_timeout_seconds: float = Field(default=120, ge=0.1, le=600)
-    max_timeout_seconds: float = Field(default=600, ge=0.1, le=3600)
-    max_output_chars: int = Field(default=65536, ge=1, le=1024 * 1024)
-
-    @field_validator("max_timeout_seconds")
-    @classmethod
-    def _max_timeout_must_cover_default(cls, value: float, info: Any) -> float:
-        default_timeout = float(info.data.get("default_timeout_seconds") or 0)
-        if default_timeout and value < default_timeout:
-            raise ValueError("最大超时时间不能小于默认超时时间")
-        return value
 
 
 class CommandApprovalDecision(BaseModel):
@@ -118,13 +95,20 @@ def find_trusted_command_rule(
     command: str,
     cwd: str,
     shell: str,
+    shell_path: str,
+    tool_name: str,
     workspace_root: str,
 ) -> TrustedCommandMatch | None:
     normalized = normalize_command(command)
     normalized_cwd = normalize_cwd(cwd)
     normalized_root = normalized_workspace_root(workspace_root)
+    normalized_shell_path = str(Path(shell_path).expanduser().resolve()) if shell_path else ""
     for rule in repositories.trusted_command_rules.list(include_disabled=False):
+        if rule.tool_name != tool_name:
+            continue
         if rule.shell != shell:
+            continue
+        if rule.shell_path != normalized_shell_path:
             continue
         if rule.workspace_root and rule.workspace_root != normalized_root:
             continue
@@ -176,7 +160,9 @@ def rule_to_payload(record: TrustedCommandRuleRecord) -> dict[str, Any]:
         "command_pattern": record.command_pattern,
         "normalized_command": record.normalized_command,
         "match_type": record.match_type,
+        "tool_name": record.tool_name,
         "shell": record.shell,
+        "shell_path": record.shell_path,
         "workspace_root": record.workspace_root,
         "cwd_pattern": record.cwd_pattern,
         "enabled": record.enabled,
@@ -225,6 +211,8 @@ class ApprovalService:
         workspace_root: str,
         trace_id: str | None,
         turn_index: int,
+        shell_path: str = "",
+        tool_name: str = "",
         run_id: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> CommandApprovalRequestRecord:
@@ -241,12 +229,16 @@ class ApprovalService:
             cwd=normalized_current_dir,
             shell=shell,
             workspace_root=normalized_root,
+            tool_name=tool_name or "command",
             title="是否允许执行命令？",
-            description="命令将在当前工作区执行。",
+            description="命令将在当前工作区的已配置命令环境中执行。",
             details={
                 "command": command,
                 "cwd": normalized_current_dir,
                 "shell": shell,
+                "shell_path": shell_path,
+                "tool": tool_name,
+                "tool_name": tool_name,
                 "workspace_root": str(workspace_root),
                 "suggested_exact_rule": normalize_command(command),
                 "suggested_prefix_rule": normalize_command(command),
@@ -332,7 +324,13 @@ class ApprovalService:
                 command_pattern=normalize_command(record.command),
                 normalized_command=normalize_command(record.command),
                 match_type=resolved_match_type,
+                tool_name=record.tool_name,
                 shell=record.shell,
+                shell_path=str(
+                    Path(str(record.details.get("shell_path") or "")).expanduser().resolve()
+                )
+                if str(record.details.get("shell_path") or "").strip()
+                else "",
                 workspace_root=record.workspace_root,
                 cwd_pattern=record.cwd,
                 created_from_approval_id=record.id,

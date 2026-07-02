@@ -760,6 +760,7 @@ describe("Sider", () => {
       chat: vi.fn(),
       approvalDecision: vi.fn(),
       cancel: vi.fn(),
+      terminateCommand: vi.fn(),
       requestStatus,
       ping: vi.fn(),
     };
@@ -819,6 +820,7 @@ describe("Sider", () => {
       chat: vi.fn(),
       approvalDecision: vi.fn(),
       cancel: vi.fn(),
+      terminateCommand: vi.fn(),
       requestStatus: vi.fn(),
       ping: vi.fn(),
     };
@@ -869,6 +871,7 @@ describe("Sider", () => {
       chat: vi.fn(),
       approvalDecision: vi.fn(),
       cancel: vi.fn(),
+      terminateCommand: vi.fn(),
       requestStatus: vi.fn(),
       ping: vi.fn(),
     };
@@ -934,6 +937,7 @@ describe("Sider", () => {
       chat: vi.fn(),
       approvalDecision: vi.fn(),
       cancel: vi.fn(),
+      terminateCommand: vi.fn(),
       requestStatus: vi.fn(),
       ping: vi.fn(),
     };
@@ -1313,11 +1317,18 @@ function commandApproval(sessionId: string, id: string): CommandApprovalRequest 
     item_id: "item-command",
     call_id: "call-command",
     run_id: "run-command",
-    tool_name: "run_command",
+    tool_name: "run_cmd",
     kind: "exec",
     title: "是否允许执行命令？",
     description: "请求执行命令。",
-    details: { command: "pnpm test", cwd: "D:/repo" },
+    details: {
+      command: "pnpm test",
+      cwd: "D:/repo",
+      tool_name: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
+    },
     status: "pending",
     created_at: "2026-06-17T10:00:01Z",
     resolved_at: null,

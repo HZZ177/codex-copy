@@ -23,8 +23,25 @@ describe("CommandExecutionBlock", () => {
     expect(screen.queryByText("line 1")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
-    expect(screen.getByText("run_command")).not.toBeNull();
+    expect(screen.getByText("run_cmd")).not.toBeNull();
     expect(screen.getByText("line 1")).not.toBeNull();
+  });
+
+  it("shows waiting approval instead of executing before command approval is resolved", () => {
+    render(
+      <CommandExecutionBlock
+        message={commandMessage("running", {
+          status: "approval_pending",
+          approval: { required: true, approval_id: "approval-1", status: "pending" },
+        })}
+      />,
+    );
+
+    const blockText = screen.getByTestId("command-execution-block").textContent ?? "";
+    expect(screen.getByText("等待审批 pytest backend/tests")).not.toBeNull();
+    expect(screen.getByText("等待审批")).not.toBeNull();
+    expect(blockText).not.toContain("正在执行 pytest backend/tests");
+    expect(blockText).not.toContain("运行中");
   });
 
   it("copies combined stdout and stderr", async () => {
@@ -36,7 +53,7 @@ describe("CommandExecutionBlock", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "复制入参" }));
     await waitFor(() => {
-      expect(clipboard).toHaveBeenLastCalledWith('{\n  "command": "pytest backend/tests",\n  "cwd": "D:/repo"\n}');
+      expect(clipboard).toHaveBeenLastCalledWith("pytest backend/tests");
     });
     expect(screen.getByRole("button", { name: "已复制入参" })).not.toBeNull();
 
@@ -69,19 +86,19 @@ describe("CommandExecutionBlock", () => {
             error: {
               code: "tool_execution_failed",
               message: "NotImplementedError",
-              details: { tool: "run_command", type: "NotImplementedError" },
+              details: { tool: "run_cmd", type: "NotImplementedError" },
             },
           },
         })}
       />,
     );
 
-    expect(screen.getByText("执行失败 pytest backend/tests")).not.toBeNull();
+    expect(screen.getByText("启动失败 pytest backend/tests")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
     const text = screen.getByTestId("command-execution-block").textContent ?? "";
     expect(text).toContain("NotImplementedError");
     expect(text).toContain("错误码：tool_execution_failed");
-    expect(text).toContain('"tool": "run_command"');
+    expect(text).toContain('"tool": "run_cmd"');
     expect(text).toContain('"type": "NotImplementedError"');
     expect(screen.queryByText("无输出")).toBeNull();
   });
@@ -121,7 +138,7 @@ describe("CommandExecutionBlock", () => {
               code: "tool_execution_failed",
               message: "",
               details: {
-                tool: "run_command",
+                tool: "run_cmd",
                 type: "NotImplementedError",
               },
             },
@@ -133,7 +150,7 @@ describe("CommandExecutionBlock", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
     const text = screen.getByTestId("command-execution-block").textContent ?? "";
     expect(text).toContain("错误码：tool_execution_failed");
-    expect(text).toContain('"tool": "run_command"');
+    expect(text).toContain('"tool": "run_cmd"');
     expect(text).toContain('"type": "NotImplementedError"');
   });
 
@@ -142,8 +159,8 @@ describe("CommandExecutionBlock", () => {
       <CommandExecutionBlock message={commandMessage("completed", { status: "rejected", approval: { reject_message: "不执行" } })} />,
     );
 
-    expect(screen.getByText("已拒绝 pytest backend/tests")).not.toBeNull();
-    expect(screen.getByText("已拒绝")).not.toBeNull();
+    expect(screen.getByText("审批拒绝 pytest backend/tests")).not.toBeNull();
+    expect(screen.getByText("审批拒绝")).not.toBeNull();
     expect(screen.getByText("拒绝说明：不执行")).not.toBeNull();
     expect(screen.getByTestId("command-execution-block").dataset.status).toBe("failed");
 
@@ -151,9 +168,9 @@ describe("CommandExecutionBlock", () => {
     expect(screen.getByText("命令超时 pytest backend/tests")).not.toBeNull();
     expect(screen.getByText("已超时")).not.toBeNull();
 
-    rerender(<CommandExecutionBlock message={commandMessage("completed", { status: "disabled" })} />);
-    expect(screen.getByText("命令已禁用 pytest backend/tests")).not.toBeNull();
-    expect(screen.getByText("已禁用")).not.toBeNull();
+    rerender(<CommandExecutionBlock message={commandMessage("completed", { status: "shell_not_available" })} />);
+    expect(screen.getByText("环境不可用 pytest backend/tests")).not.toBeNull();
+    expect(screen.getByText("环境不可用")).not.toBeNull();
   });
 
   it("shows truncated output and trusted command rule metadata", () => {
@@ -161,21 +178,21 @@ describe("CommandExecutionBlock", () => {
       <CommandExecutionBlock
         message={commandMessage("completed", {
           stdout: "ok\n",
-          truncated: true,
+          output_truncated: true,
           approval: { trusted_rule_id: "rule-1" },
         })}
       />,
     );
 
     expect(screen.getByText("输出已截断")).not.toBeNull();
-    expect(screen.getByText("已信任规则")).not.toBeNull();
+    expect(screen.getByText("已信任")).not.toBeNull();
   });
 
   it("loads deferred command output on expansion", async () => {
     const onLoadDetails = vi.fn().mockResolvedValue({
       payload: {
         call: {
-          name: "run_command",
+          name: "run_cmd",
           arguments: { command: "pytest backend/tests", cwd: "D:/repo" },
         },
         result: {
@@ -199,7 +216,7 @@ describe("CommandExecutionBlock", () => {
             toolSummary: { command: "pytest backend/tests", cwd: "D:/repo" },
           }),
           payload: {
-            call: { name: "run_command", arguments: { command: "pytest backend/tests", cwd: "D:/repo" } },
+            call: { name: "run_cmd", arguments: { command: "pytest backend/tests", cwd: "D:/repo" } },
             toolDetailsDeferred: true,
             toolSummary: { command: "pytest backend/tests", cwd: "D:/repo" },
           },
@@ -226,7 +243,7 @@ describe("CommandExecutionBlock", () => {
           ...commandMessage("completed", {}),
           payload: {
             call: {
-              name: "run_command",
+              name: "run_cmd",
               arguments: { command: "pytest backend/tests", cwd: "D:/repo" },
             },
             result: {
@@ -237,7 +254,7 @@ describe("CommandExecutionBlock", () => {
                 status: "completed",
                 exit_code: 1,
                 stderr: "ModuleNotFoundError: No module named app",
-                truncated: true,
+                output_truncated: true,
               },
             },
             toolDetailsDeferred: true,
@@ -260,11 +277,36 @@ describe("CommandExecutionBlock", () => {
     expect(screen.queryByText("0.1 秒")).toBeNull();
   });
 
-  it("shows command input even when there is no output and truncates the one-line title", () => {
+  it("requests command termination by command id", async () => {
+    const onTerminateCommand = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CommandExecutionBlock
+        message={commandMessage("running", {
+          can_terminate: true,
+          stdout: "still running\n",
+        })}
+        onTerminateCommand={onTerminateCommand}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "终止本轮" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
+    const terminateButton = screen.getByRole("button", { name: "终止本轮" });
+    expect(terminateButton.textContent).toBe("");
+    fireEvent.click(terminateButton);
+
+    await waitFor(() => {
+      expect(onTerminateCommand).toHaveBeenCalledWith("cmd-1");
+    });
+  });
+
+  it("shows simplified command input even when there is no output", () => {
     const longCommand = `python -c "${"print(1);".repeat(24)}"`;
     render(
       <CommandExecutionBlock
         message={commandMessage("running", {
+          description: "运行长命令",
           command: longCommand,
           stdout: "",
           stderr: "",
@@ -273,15 +315,18 @@ describe("CommandExecutionBlock", () => {
       />,
     );
 
-    const title = screen.getByText(/^正在执行 /).textContent ?? "";
-    expect(title).toContain("…");
-    expect(title.length).toBeLessThanOrEqual(101);
+    expect(screen.getByText("正在执行 运行长命令")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "展开命令详情" }));
-    expect(screen.getByLabelText("命令入参").textContent).toContain("print(1);");
-    expect(screen.getByLabelText("命令入参").textContent).toContain("timeout_seconds");
+    const inputText = screen.getByLabelText("命令入参").textContent ?? "";
+    expect(inputText).toContain("运行长命令");
+    expect(inputText).toContain("print(1);");
+    expect(inputText).not.toContain("{");
+    expect(inputText).not.toContain("timeout_seconds");
+    expect(screen.queryByText("环境")).toBeNull();
+    expect(screen.queryByText("目录")).toBeNull();
     expect(screen.getByText("入参")).not.toBeNull();
-    expect(screen.getByText("输出")).not.toBeNull();
+    expect(screen.getByText("实时输出")).not.toBeNull();
     expect(screen.getByText("等待命令输出")).not.toBeNull();
   });
 });
@@ -300,6 +345,11 @@ function commandMessage(
     status,
     content: [payload.stdout, payload.stderr].filter((value) => typeof value === "string").join(""),
     payload: {
+      command_id: "cmd-1",
+      tool: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
       command: "pytest backend/tests",
       cwd: "D:/repo",
       duration_ms: 2300,

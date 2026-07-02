@@ -1,4 +1,4 @@
-﻿import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -2845,6 +2845,7 @@ function fakeRuntime({
     chat,
     approvalDecision: vi.fn(),
     cancel,
+    terminateCommand: vi.fn(),
     requestStatus: vi.fn(),
     ping: vi.fn(),
   };
@@ -2882,13 +2883,19 @@ function fakeRuntime({
         },
         appearance: { font_family: "system" },
         command: {
-          command_enabled: true,
+          selected_shell: "cmd",
+          shell_path: "C:/Windows/System32/cmd.exe",
+          shell_label: "CMD",
+          shell_edition: null,
           require_approval_for_untrusted: true,
           allow_persistent_trust: true,
           file_access_mode: "workspace_trusted",
           default_timeout_seconds: 120,
           max_timeout_seconds: 600,
-          max_output_chars: 65536,
+          inline_output_max_chars: 12000,
+          tail_max_chars: 12000,
+          output_file_max_bytes: 8388608,
+          progress_interval_ms: 500,
         },
       }),
       getModelDefaults: vi.fn().mockResolvedValue({
@@ -3099,13 +3106,17 @@ function commandApproval(id: string): CommandApprovalRequest {
     item_id: "item-command",
     call_id: "call-command",
     run_id: "run-command",
-    tool_name: "run_command",
+    tool_name: "run_cmd",
     kind: "exec",
     title: "是否允许执行命令？",
     description: "请求执行命令。",
     details: {
       command: "pnpm test",
       cwd: "D:/repo",
+      tool_name: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
       suggested_exact_rule: "pnpm test",
       suggested_prefix_rule: "pnpm",
     },

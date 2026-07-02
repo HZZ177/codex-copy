@@ -264,7 +264,7 @@ async def test_e2e_transport_command_approval_ignores_old_tool_messages() -> Non
 
     body = response.text
     assert response.status_code == 200
-    assert "run_command" in body
+    assert "run_cmd" in body
     assert "e2e-approval-exact-different" in body
 
 

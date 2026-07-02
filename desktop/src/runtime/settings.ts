@@ -4,7 +4,9 @@ import type {
   CommandApprovalAuditRecord,
   CommandApprovalDecisionPayload,
   CommandApprovalRequest,
+  CommandRuntimeProbeResponse,
   CommandSettings,
+  CommandShell,
   GeneralSettings,
   ModelDefaultsResponse,
   UpdateModelDefaultsPayload,
@@ -35,6 +37,8 @@ export interface SettingsRuntime {
   saveGeneralSettings(general: GeneralSettings): Promise<SettingsResponse>;
   saveAppearanceSettings(appearance: AppearanceSettings): Promise<SettingsResponse>;
   saveCommandSettings(command: CommandSettings): Promise<SettingsResponse>;
+  discoverCommandRuntime(shell: CommandShell): Promise<CommandRuntimeProbeResponse>;
+  validateCommandRuntime(shell: CommandShell, shellPath: string): Promise<CommandRuntimeProbeResponse>;
   listTrustedCommandRules(): Promise<TrustedCommandRule[]>;
   updateTrustedCommandRule(ruleId: string, enabled: boolean): Promise<TrustedCommandRule>;
   deleteTrustedCommandRule(ruleId: string): Promise<void>;
@@ -95,6 +99,18 @@ export function createSettingsRuntime(http: HttpClient): SettingsRuntime {
       return http.request<SettingsResponse>("/api/settings", {
         method: "PUT",
         body: { command },
+      });
+    },
+    discoverCommandRuntime(shell) {
+      return http.request<CommandRuntimeProbeResponse>("/api/settings/command/runtime/discover", {
+        method: "POST",
+        body: { selected_shell: shell },
+      });
+    },
+    validateCommandRuntime(shell, shellPath) {
+      return http.request<CommandRuntimeProbeResponse>("/api/settings/command/runtime/validate", {
+        method: "POST",
+        body: { selected_shell: shell, shell_path: shellPath },
       });
     },
     listTrustedCommandRules() {

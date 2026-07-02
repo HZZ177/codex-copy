@@ -70,6 +70,7 @@ export interface MessageListProps {
   onApprovalDecision?: ApprovalDecisionHandler;
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
+  onTerminateCommand?: (commandId: string) => Promise<void> | void;
   onQuoteSelection?: (text: string) => void;
   onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
@@ -124,6 +125,7 @@ export function MessageList({
   onApprovalDecision,
   onFilePreview,
   onLoadToolDetails,
+  onTerminateCommand,
   onQuoteSelection,
   onAskSelectionInBtwConversation,
   onForkFromMessage,
@@ -667,6 +669,7 @@ export function MessageList({
               onApprovalDecision,
               onFilePreview,
               onLoadToolDetails,
+              onTerminateCommand,
               onQuoteSelection,
               onAskSelectionInBtwConversation,
               onForkFromMessage,
@@ -713,6 +716,7 @@ export function MessageList({
           onApprovalDecision,
           onFilePreview,
           onLoadToolDetails,
+          onTerminateCommand,
           onQuoteSelection,
           onAskSelectionInBtwConversation,
           onForkFromMessage,
@@ -886,6 +890,7 @@ function renderMessageTurn({
   onApprovalDecision,
   onFilePreview,
   onLoadToolDetails,
+  onTerminateCommand,
   onQuoteSelection,
   onAskSelectionInBtwConversation,
   onForkFromMessage,
@@ -903,6 +908,7 @@ function renderMessageTurn({
   onApprovalDecision?: ApprovalDecisionHandler;
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
+  onTerminateCommand?: (commandId: string) => Promise<void> | void;
   onQuoteSelection?: (text: string) => void;
   onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
@@ -930,6 +936,7 @@ function renderMessageTurn({
         onApprovalDecision,
         onFilePreview,
         onLoadToolDetails,
+        onTerminateCommand,
         onQuoteSelection,
         onAskSelectionInBtwConversation,
         onForkFromMessage,
@@ -952,6 +959,7 @@ function renderMessageItem({
   onApprovalDecision,
   onFilePreview,
   onLoadToolDetails,
+  onTerminateCommand,
   onQuoteSelection,
   onAskSelectionInBtwConversation,
   onForkFromMessage,
@@ -969,6 +977,7 @@ function renderMessageItem({
   onApprovalDecision?: ApprovalDecisionHandler;
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
+  onTerminateCommand?: (commandId: string) => Promise<void> | void;
   onQuoteSelection?: (text: string) => void;
   onAskSelectionInBtwConversation?: (text: string) => void;
   onForkFromMessage?: (message: ConversationMessage) => void;
@@ -988,6 +997,7 @@ function renderMessageItem({
         onApprovalDecision={onApprovalDecision}
         onFilePreview={onFilePreview}
         onLoadToolDetails={onLoadToolDetails}
+        onTerminateCommand={onTerminateCommand}
         onQuoteSelection={onQuoteSelection}
         onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
         onReverseFromMessage={onReverseFromMessage}
@@ -1021,6 +1031,7 @@ function renderMessageItem({
           onApprovalDecision={onApprovalDecision}
           onFilePreview={onFilePreview}
           onLoadToolDetails={onLoadToolDetails}
+          onTerminateCommand={onTerminateCommand}
           onQuoteSelection={onQuoteSelection}
           onAskSelectionInBtwConversation={onAskSelectionInBtwConversation}
           onReverseFromMessage={onReverseFromMessage}
@@ -1149,6 +1160,7 @@ function DefaultMessage({
   onApprovalDecision,
   onFilePreview,
   onLoadToolDetails,
+  onTerminateCommand,
   onQuoteSelection,
   onAskSelectionInBtwConversation,
   onReverseFromMessage,
@@ -1160,6 +1172,7 @@ function DefaultMessage({
   onApprovalDecision?: ApprovalDecisionHandler;
   onFilePreview?: (file: FileChangePreview) => void;
   onLoadToolDetails?: ToolDetailsLoader;
+  onTerminateCommand?: (commandId: string) => Promise<void> | void;
   onQuoteSelection?: (text: string) => void;
   onAskSelectionInBtwConversation?: (text: string) => void;
   onReverseFromMessage?: (message: ConversationMessage) => void;
@@ -1181,7 +1194,13 @@ function DefaultMessage({
     );
   }
   if (message.kind === "command") {
-    return <CommandExecutionBlock message={message} onLoadDetails={onLoadToolDetails} />;
+    return (
+      <CommandExecutionBlock
+        message={message}
+        onLoadDetails={onLoadToolDetails}
+        onTerminateCommand={onTerminateCommand}
+      />
+    );
   }
   if (message.kind === "file_change") {
     return <FileChangeBlock message={message} onPreviewFile={onFilePreview} onLoadDetails={onLoadToolDetails} />;

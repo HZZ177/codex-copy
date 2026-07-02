@@ -218,15 +218,43 @@ export interface GeneralSettings {
 }
 
 export type FileAccessMode = "no_file_access" | "workspace_read_only" | "workspace_trusted" | "full_access";
+export type CommandShell = "git_bash" | "cmd" | "powershell";
+
+export interface CommandShellConfig {
+  shell_path: string;
+  shell_label: string;
+  shell_edition?: string | null;
+  shell_version?: string | null;
+}
 
 export interface CommandSettings {
   command_enabled: boolean;
+  selected_shell: CommandShell;
+  shell_path: string;
+  shell_label: string;
+  shell_edition?: string | null;
+  shell_version?: string | null;
+  shells: Partial<Record<CommandShell, CommandShellConfig>>;
   require_approval_for_untrusted: boolean;
   allow_persistent_trust: boolean;
   file_access_mode: FileAccessMode;
   default_timeout_seconds: number;
   max_timeout_seconds: number;
-  max_output_chars: number;
+  inline_output_max_chars: number;
+  tail_max_chars: number;
+  output_file_max_bytes: number;
+  progress_interval_ms: number;
+}
+
+export interface CommandRuntimeProbeResponse {
+  shell: CommandShell;
+  found: boolean;
+  path?: string | null;
+  label?: string | null;
+  edition?: string | null;
+  version?: string | null;
+  diagnostics: string[];
+  error?: string | null;
 }
 
 export type TrustedCommandRuleMatchType = "exact" | "prefix";
@@ -236,7 +264,9 @@ export interface TrustedCommandRule {
   command_pattern: string;
   normalized_command: string;
   match_type: TrustedCommandRuleMatchType;
+  tool_name: string;
   shell: string;
+  shell_path: string;
   workspace_root: string;
   cwd_pattern: string;
   enabled: boolean;
@@ -436,6 +466,7 @@ export const AGENT_CHAT_ACTIONS = [
   "reasoning",
   "middleware_progress",
   "workspaceSkillsChanged",
+  "command_terminated",
 ] as const;
 
 export type AgentChatAction = (typeof AGENT_CHAT_ACTIONS)[number];
@@ -484,6 +515,7 @@ export const AGENT_INBOUND_ACTIONS = [
   "approval_decision",
   "ping",
   "get_status",
+  "terminate_command",
 ] as const;
 
 export type AgentInboundAction = (typeof AGENT_INBOUND_ACTIONS)[number];

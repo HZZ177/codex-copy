@@ -541,6 +541,7 @@ export function useConversationPanelModel({
     loading: controller.loading,
     loadingOlderHistory: controller.loadingOlderHistory,
     loadOlderHistory: controller.loadOlderHistory,
+    terminateCommand: controller.terminateCommand,
     messageWorkspaceScope,
     workspaceAvailable,
     workspaceUnavailable,

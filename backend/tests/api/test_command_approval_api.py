@@ -4,14 +4,31 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.config import AppSettings
 from backend.app.main import create_app
+from backend.app.tools.command_runtime.discovery import ShellDiscoveryResult
 
 
-def test_settings_api_reads_and_writes_command_settings_without_losing_model(tmp_path) -> None:
+def test_settings_api_validates_and_saves_command_runtime_without_losing_model(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    discovered_path = tmp_path / "cmd.exe"
+    discovered_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "backend.app.api.settings.discover_shell",
+        lambda shell, manual_path=None: ShellDiscoveryResult(
+            shell=shell,
+            found=True,
+            path=str(discovered_path),
+            label="Windows CMD",
+            diagnostics=[],
+        ),
+    )
     app = create_app(AppSettings(data_dir=tmp_path / "data"))
     with TestClient(app) as client:
         response = client.get("/api/settings")
         assert response.status_code == 200
-        assert response.json()["command"]["command_enabled"] is True
+        assert response.json()["command"]["selected_shell"] == "cmd"
         assert response.json()["command"]["file_access_mode"] == "workspace_trusted"
 
         model_response = client.put(
@@ -30,23 +47,155 @@ def test_settings_api_reads_and_writes_command_settings_without_losing_model(tmp
             "/api/settings",
             json={
                 "command": {
-                    "command_enabled": False,
+                    "command_enabled": True,
+                    "selected_shell": "cmd",
+                    "shell_path": str(discovered_path),
                     "require_approval_for_untrusted": True,
                     "allow_persistent_trust": False,
                     "file_access_mode": "workspace_read_only",
                     "default_timeout_seconds": 3,
                     "max_timeout_seconds": 9,
-                    "max_output_chars": 128,
+                    "inline_output_max_chars": 1024,
+                    "tail_max_chars": 1024,
+                    "output_file_max_bytes": 65536,
                 }
             },
         )
 
         assert command_response.status_code == 200
         payload = command_response.json()
-        assert payload["command"]["command_enabled"] is False
+        assert payload["command"]["command_enabled"] is True
+        assert payload["command"]["selected_shell"] == "cmd"
+        assert payload["command"]["shell_path"] == str(discovered_path)
+        assert payload["command"]["shell_label"] == "Windows CMD"
+        assert payload["command"]["shells"]["cmd"]["shell_path"] == str(discovered_path)
         assert payload["command"]["allow_persistent_trust"] is False
         assert payload["command"]["file_access_mode"] == "workspace_read_only"
         assert payload["model"]["model"] == "qwen3-coder"
+
+
+def test_settings_api_rejects_unavailable_runtime_without_overwriting_existing(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    first_path = tmp_path / "cmd.exe"
+    first_path.write_text("", encoding="utf-8")
+    calls = []
+
+    def fake_discover(shell, manual_path=None):
+        calls.append(shell)
+        if len(calls) == 1:
+            return ShellDiscoveryResult(
+                shell=shell,
+                found=True,
+                path=str(first_path),
+                label="Windows CMD",
+            )
+        return ShellDiscoveryResult(shell=shell, found=False, error="missing Git Bash")
+
+    monkeypatch.setattr("backend.app.api.settings.discover_shell", fake_discover)
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        saved = client.put(
+            "/api/settings",
+            json={
+                "command": {
+                    "command_enabled": True,
+                    "selected_shell": "cmd",
+                    "shell_path": str(first_path),
+                }
+            },
+        )
+        assert saved.status_code == 200
+
+        failed = client.put(
+            "/api/settings",
+            json={
+                "command": {
+                    "command_enabled": True,
+                    "selected_shell": "git_bash",
+                    "shell_path": str(tmp_path / "Git" / "bin" / "bash.exe"),
+                }
+            },
+        )
+
+        assert failed.status_code == 400
+        assert failed.json()["detail"]["code"] == "command_runtime_unavailable"
+        current = client.get("/api/settings").json()["command"]
+        assert current["selected_shell"] == "cmd"
+        assert current["shell_path"] == str(first_path)
+
+
+def test_settings_api_saves_disabled_command_without_runtime_validation(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.app.api.settings.discover_shell",
+        lambda shell, manual_path=None: ShellDiscoveryResult(shell=shell, found=False, error="not called"),
+    )
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/settings",
+            json={
+                "command": {
+                    "command_enabled": False,
+                    "selected_shell": "git_bash",
+                    "shell_path": "",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()["command"]
+    assert payload["command_enabled"] is False
+    assert payload["selected_shell"] == "git_bash"
+
+
+def test_settings_api_reads_legacy_bash_command_settings(tmp_path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    app.state.repositories.settings.set(
+        "command_settings",
+        {
+            "selected_shell": "bash",
+            "shell_path": r"C:\Windows\System32\bash.exe",
+            "shell_label": "Bash",
+            "require_approval_for_untrusted": True,
+        },
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/settings")
+
+    assert response.status_code == 200
+    payload = response.json()["command"]
+    assert payload["command_enabled"] is True
+    assert payload["selected_shell"] == "git_bash"
+    assert payload["shell_path"] == ""
+    assert payload["shell_label"] == ""
+
+
+def test_command_runtime_probe_endpoints_return_discovery_payload(tmp_path, monkeypatch) -> None:
+    bash = tmp_path / "Git" / "bin" / "bash.exe"
+    bash.parent.mkdir(parents=True)
+    bash.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "backend.app.api.settings.discover_shell",
+        lambda shell, manual_path=None: ShellDiscoveryResult(
+            shell=shell,
+            found=True,
+            path=str(bash),
+            label="Git Bash",
+            edition="git-bash",
+        ),
+    )
+    app = create_app(AppSettings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/settings/command/runtime/validate",
+            json={"selected_shell": "git_bash", "shell_path": str(bash)},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "Git Bash"
 
 
 def test_trusted_rule_api_lists_disables_and_deletes(tmp_path) -> None:
@@ -57,7 +206,9 @@ def test_trusted_rule_api_lists_disables_and_deletes(tmp_path) -> None:
         command_pattern="pnpm test",
         normalized_command="pnpm test",
         match_type="exact",
-        shell="shell",
+        tool_name="run_cmd",
+        shell="cmd",
+        shell_path=r"C:\Windows\System32\cmd.exe",
         workspace_root="d:/project",
         cwd_pattern=".",
     )
@@ -97,7 +248,9 @@ def test_approval_decision_api_creates_trusted_rule_and_history(tmp_path) -> Non
         cwd=".",
         title="是否允许执行命令？",
         workspace_root="d:/project",
-        details={"command": "pnpm test"},
+        tool_name="run_cmd",
+        shell="cmd",
+        details={"command": "pnpm test", "shell_path": r"C:\Windows\System32\cmd.exe"},
     )
 
     with TestClient(app) as client:
@@ -114,6 +267,10 @@ def test_approval_decision_api_creates_trusted_rule_and_history(tmp_path) -> Non
         payload = response.json()
         assert payload["status"] == "approved"
         assert payload["trusted_rule_id"]
+        rule = repositories.trusted_command_rules.get(payload["trusted_rule_id"])
+        assert rule is not None
+        assert rule.tool_name == "run_cmd"
+        assert rule.shell_path.endswith("cmd.exe")
 
         history = client.get("/api/settings/command/approval-history")
         assert history.status_code == 200

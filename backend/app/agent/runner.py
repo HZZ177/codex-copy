@@ -15,10 +15,14 @@ from backend.app.agent.runtime_settings import (
 )
 from backend.app.agent.state import KeydexAgentState
 from backend.app.agent.system_prompt import DEFAULT_SYSTEM_PROMPT
+from backend.app.command_approval import load_command_settings
 from backend.app.core.logger import logger
 from backend.app.keydex.skills import SkillCatalog, build_skill_index
 from backend.app.model import ModelSettings
 from backend.app.tools import ToolExecutionContext, ToolRegistry
+from backend.app.tools.command_runtime.descriptions import command_system_prompt_section
+from backend.app.tools.command_runtime.models import CommandRuntime
+from backend.app.tools.command_runtime.tools import create_command_tools
 from backend.app.tools.skill import load_skill
 
 ModelHttpTransportProvider = Callable[
@@ -84,14 +88,26 @@ class AgentRunner:
             http_transport=model_http_transport,
             llm_request_logs=getattr(repositories, "llm_request_logs", None),
         )
-        tools = (
-            registry_to_langchain_tools(
+        command_settings = None
+        command_runtime: CommandRuntime | None = None
+        tools = []
+        if enable_tools:
+            tools = registry_to_langchain_tools(
                 self.tool_registry,
                 context_factory=lambda: tool_context,
             )
-            if enable_tools
-            else []
-        )
+            if repositories is not None:
+                command_settings = load_command_settings(repositories)
+                command_runtime = CommandRuntime.from_settings(command_settings)
+                command_registry = ToolRegistry()
+                for tool in create_command_tools(command_settings):
+                    command_registry.register(tool)
+                tools.extend(
+                    registry_to_langchain_tools(
+                        command_registry,
+                        context_factory=lambda: tool_context,
+                    )
+                )
         if enable_tools and isinstance(tool_context.metadata.get("skill_catalog"), SkillCatalog):
             tools.append(load_skill)
         resolved_system_prompt = (
@@ -101,6 +117,11 @@ class AgentRunner:
         skill_index = self._skill_index_from_context(tool_context)
         if skill_index:
             prompt = f"{prompt}\n\n{skill_index}" if prompt else skill_index
+        command_prompt = command_system_prompt_section(
+            command_runtime if enable_tools else None,
+            command_settings if enable_tools else None,
+        )
+        prompt = f"{prompt}\n\n{command_prompt}" if prompt else command_prompt
         logger.info(
             f"[AgentRunner] 组装 agent | model={model} | tools={len(tools)} | "
             f"tools_enabled={enable_tools} | prompt_len={len(prompt)} | "

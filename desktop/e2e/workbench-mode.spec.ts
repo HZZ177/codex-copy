@@ -631,9 +631,19 @@ async function mockWorkbenchBackend(page: Page, backend: MockBackendState) {
           api_key_preview: "sk-***",
         },
         command: {
-          command_enabled: true,
+          selected_shell: "cmd",
+          shell_path: "C:/Windows/System32/cmd.exe",
+          shell_label: "CMD",
+          shell_edition: null,
           require_approval_for_untrusted: true,
           allow_persistent_trust: true,
+          file_access_mode: "workspace_trusted",
+          default_timeout_seconds: 120,
+          max_timeout_seconds: 600,
+          inline_output_max_chars: 12000,
+          tail_max_chars: 12000,
+          output_file_max_bytes: 8388608,
+          progress_interval_ms: 500,
         },
       });
     }
@@ -943,11 +953,18 @@ function approval(id: string) {
   return {
     id,
     session_id: SESSION_A,
-    tool_name: "run_command",
+    tool_name: "run_cmd",
     kind: "exec",
     title: "是否允许执行命令？",
     description: "pnpm test",
-    details: { command: "pnpm test", cwd: "D:/repo/keydex" },
+    details: {
+      command: "pnpm test",
+      cwd: "D:/repo/keydex",
+      tool_name: "run_cmd",
+      shell: "cmd",
+      shell_label: "CMD",
+      shell_path: "C:/Windows/System32/cmd.exe",
+    },
     status: "pending",
     created_at: "2026-06-25T00:00:00Z",
   };
