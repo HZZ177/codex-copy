@@ -1,11 +1,13 @@
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import type { AgentChatMessage } from "@/types/protocol";
+import { normalizeMessageContent } from "@/renderer/utils/messageContent";
+import type { AgentChatMessage, TurnError } from "@/types/protocol";
 
 export function agentMessageToConversationMessage(message: AgentChatMessage, index: number): ConversationMessage {
   const kind = conversationKindFromAgent(message);
   const status = conversationStatusFromAgent(message);
   const payload = payloadFromAgentMessage(message);
   const createdAt = isoFromTimestamp(message.timestamp, index);
+  const content = normalizeMessageContent(message.content);
   return {
     id: `agent:${message.id}`,
     threadId: message.sessionId,
@@ -13,7 +15,7 @@ export function agentMessageToConversationMessage(message: AgentChatMessage, ind
     itemId: message.runId ?? message.id,
     kind,
     status,
-    content: message.content,
+    content,
     payload: { ...payload, _sortSeq: index + 1 },
     createdAt,
     updatedAt: createdAt,
@@ -98,6 +100,10 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
     toolSummary: message.toolSummary,
     metadata: message.metadata,
   };
+  const turnError = turnErrorFromMessage(message);
+  if (turnError) {
+    base.error = turnError;
+  }
 
   if (message.role === "tool") {
     return {
@@ -142,11 +148,7 @@ export function payloadFromAgentMessage(message: AgentChatMessage): Record<strin
   if (message.role === "error") {
     return {
       ...base,
-      error: {
-        code: typeof message.status === "string" ? message.status : "runtime_error",
-        message: message.content,
-        details: {},
-      },
+      error: turnError ?? fallbackErrorFromMessage(message),
     };
   }
 
@@ -176,6 +178,36 @@ function objectValue(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function scalarStringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
+}
+
+function turnErrorFromMessage(message: AgentChatMessage): TurnError | null {
+  const source = objectValue(message.metadata?.turnError);
+  if (!source) {
+    return null;
+  }
+  return {
+    code: scalarStringValue(source.code) || "runtime_error",
+    message: normalizeMessageContent(stringValue(source.message)).trim() || "对话执行失败",
+    details: objectValue(source.details) ?? {},
+  };
+}
+
+function fallbackErrorFromMessage(message: AgentChatMessage): TurnError {
+  return {
+    code: typeof message.status === "string" ? message.status : "runtime_error",
+    message: normalizeMessageContent(message.content).trim() || "对话执行失败",
+    details: {},
+  };
 }
 
 function fileChangesFromUiPayload(uiPayload: Record<string, unknown> | undefined): unknown[] {

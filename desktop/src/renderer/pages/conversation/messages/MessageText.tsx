@@ -1,4 +1,4 @@
-import { Check, Copy, GitBranchPlus, Undo2 } from "lucide-react";
+import { Check, CircleAlert, Copy, GitBranchPlus, Undo2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -29,7 +29,8 @@ import {
 import { ImagePreviewDialog } from "@/renderer/components/workspace/ImagePreviewSurface";
 import { useOptionalPreview } from "@/renderer/providers/PreviewProvider";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
-import type { AgentContextItem, AgentFileAttachment } from "@/types/protocol";
+import { normalizeMessageContent } from "@/renderer/utils/messageContent";
+import type { AgentContextItem, AgentFileAttachment, TurnError } from "@/types/protocol";
 
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
 import { MessageGhostFooter, type MessageGhostFooterData } from "./MessageGhostFooter";
@@ -89,11 +90,12 @@ export function MessageText({
   const selection = useTextSelection(contentRef, Boolean(onQuoteSelection || onAskSelectionInBtwConversation));
   const cancelled = message.status === "cancelled" || message.payload.cancelled === true;
   const fastDrainTyping = !isUser && message.status === "completed" && !cancelled;
+  const normalizedContent = useMemo(() => normalizeMessageContent(message.content), [message.content]);
   const assistantContent = useMemo(
-    () => redactTextualToolProtocol(stripThinkTags(message.content)),
-    [message.content],
+    () => redactTextualToolProtocol(stripThinkTags(normalizedContent)),
+    [normalizedContent],
   );
-  const content = isUser ? message.content : assistantContent.content;
+  const content = isUser ? normalizedContent : assistantContent.content;
   const contextItems = useMemo(
     () => (isUser ? contextItemsFromPayload(message.payload) : []),
     [isUser, message.payload],
@@ -105,6 +107,10 @@ export function MessageText({
   const ghostFooter = useMemo(
     () => (isUser ? null : ghostFooterFromPayload(message.payload)),
     [isUser, message.payload],
+  );
+  const turnError = useMemo(
+    () => (message.kind === "assistant" && message.status === "failed" ? turnErrorFromPayload(message.payload) : null),
+    [message.kind, message.payload, message.status],
   );
   const animationContent = useMemo(() => normalizeMarkdownContent(content), [content]);
   const { displayedContent, isAnimating } = useTypingAnimation({
@@ -273,6 +279,7 @@ export function MessageText({
               </div>
             )
           ) : null}
+          {turnError ? <TurnErrorNotice error={turnError} /> : null}
           {cancelled ? <div className={styles.cancelledBadge}>已取消</div> : null}
           {onQuoteSelection || onAskSelectionInBtwConversation ? (
             <SelectionToolbar
@@ -301,6 +308,16 @@ export function StreamingCursor() {
       <span className={styles.streamingDot} />
       <span className={styles.streamingDot} />
     </span>
+  );
+}
+
+function TurnErrorNotice({ error }: { error: TurnError }) {
+  return (
+    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
+      <CircleAlert size={13} />
+      <span className={styles.turnErrorMessage}>{error.message}</span>
+      <span className={styles.turnErrorCode}>{error.code}</span>
+    </div>
   );
 }
 
@@ -730,7 +747,7 @@ export function MessageActionFooter({
 
   const handleCopy = async () => {
     try {
-      await copyText(message.content);
+      await copyText(normalizeMessageContent(message.content));
       setCopyState("copied");
     } catch {
       setCopyState("failed");
@@ -1124,6 +1141,18 @@ function ghostFooterFromPayload(payload: Record<string, unknown>): MessageGhostF
   return footer.duration ? footer : null;
 }
 
+function turnErrorFromPayload(payload: Record<string, unknown>): TurnError | null {
+  const source = objectValue(payload.error);
+  if (!source) {
+    return null;
+  }
+  return {
+    code: scalarStringValue(source.code) || "runtime_error",
+    message: normalizeMessageContent(stringValue(source.message)).trim() || "对话执行失败",
+    details: objectValue(source.details) ?? {},
+  };
+}
+
 function formatDuration(value: unknown): string | undefined {
   const ms = numberValue(value);
   if (ms === undefined) {
@@ -1139,6 +1168,16 @@ function numberValue(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function scalarStringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

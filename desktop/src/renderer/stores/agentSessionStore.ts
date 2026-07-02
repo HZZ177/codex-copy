@@ -21,8 +21,10 @@ import type {
   AgentToolEventData,
   AgentToolProgressData,
   AgentToolStatus,
+  TurnError,
   Workspace,
 } from "@/types/protocol";
+import { normalizeMessageContent } from "@/renderer/utils/messageContent";
 
 export type AgentSessionRuntimeState = "idle" | "running" | "waiting_approval" | "cancelling" | "failed" | "closed";
 
@@ -1066,15 +1068,23 @@ function handleError(state: AgentConversationState, data: AgentErrorData): Agent
   }
   const next = cloneState(state);
   const view = ensureSessionState(next, sessionId);
-  view.messages.push({
-    id: nextMessageId(next, "error", sessionId),
-    sessionId,
-    role: "error",
-    content: data.message || data.error || data.code || "对话执行失败",
-    timestamp: timestampFromData(data),
-    traceId: data.trace_id,
-    status: "failed",
-  });
+  const error = turnErrorFromData(data);
+  const traceId = stringValue(data.trace_id);
+  const activeTurnFailed = view.isStreaming || view.runtimeState === "running" || hasStreamingMessage(view);
+  const attachedToAssistant =
+    activeTurnFailed && attachTurnErrorToLatestAssistant(view, error, traceId);
+  if (!attachedToAssistant) {
+    view.messages.push({
+      id: nextMessageId(next, "error", sessionId),
+      sessionId,
+      role: "error",
+      content: error.message,
+      timestamp: timestampFromData(data),
+      ...(traceId ? { traceId } : {}),
+      status: "failed",
+      metadata: { turnError: error },
+    });
+  }
   for (const message of view.messages) {
     message.streaming = false;
     if (message.role === "subagent") {
@@ -1086,6 +1096,46 @@ function handleError(state: AgentConversationState, data: AgentErrorData): Agent
   view.pendingApproval = null;
   view.runtimeState = "failed";
   return next;
+}
+
+function turnErrorFromData(data: AgentErrorData): TurnError {
+  const code = scalarStringValue(data.code) || "runtime_error";
+  const message =
+    normalizeMessageContent(stringValue(data.message) || stringValue(data.error)).trim() ||
+    "对话执行失败";
+  return {
+    code,
+    message,
+    details: asRecord(data.details) ?? {},
+  };
+}
+
+function attachTurnErrorToLatestAssistant(
+  view: AgentSessionViewState,
+  error: TurnError,
+  traceId: string,
+): boolean {
+  const message = [...view.messages]
+    .reverse()
+    .find((item) => {
+      if (item.role !== "assistant" || item.cancelled || item.status === "cancelled") {
+        return false;
+      }
+      return normalizeMessageContent(item.content).trim().length > 0;
+    });
+  if (!message) {
+    return false;
+  }
+  message.status = "failed";
+  message.streaming = false;
+  if (traceId) {
+    message.traceId = traceId;
+  }
+  message.metadata = {
+    ...(message.metadata ?? {}),
+    turnError: error,
+  };
+  return true;
 }
 
 function handleStatus(state: AgentConversationState, data: Record<string, unknown>): AgentConversationState {
@@ -1218,6 +1268,7 @@ function historyMessageFromPayload(
   payload: AgentChatMessagePayload,
   index: number,
 ): AgentChatMessage {
+  const content = normalizeMessageContent(payload.content);
   const traceId = payload.traceId || payload.traceQueryContext?.trace_id;
   const ghostStats =
     payload.ghostStats ??
@@ -1232,10 +1283,10 @@ function historyMessageFromPayload(
 
   return {
     ...payload,
-    id: payload.id ?? historyMessageId(sessionId, payload, index),
+    id: payload.id ?? historyMessageId(sessionId, payload, index, content),
     sessionId: payload.sessionId ?? sessionId,
     timestamp: payload.timestamp ?? Date.now() + index,
-    content: payload.content ?? "",
+    content,
     ghostStats,
     streaming: false,
     status: normalizeHistoryStatus(payload),
@@ -1244,14 +1295,19 @@ function historyMessageFromPayload(
   };
 }
 
-function historyMessageId(sessionId: string, payload: AgentChatMessagePayload, index: number): string {
+function historyMessageId(
+  sessionId: string,
+  payload: AgentChatMessagePayload,
+  index: number,
+  content: string,
+): string {
   if (payload.turnIndex === undefined && payload.timestamp === undefined) {
     return `hist:${sessionId}:${index + 1}`;
   }
   const turn = payload.turnIndex ?? "turnless";
   const timestamp = payload.timestamp ?? "notime";
   const run = payload.runId ?? payload.subagentRunId ?? payload.toolName ?? "";
-  const contentHash = hashHistoryText(payload.content ?? "");
+  const contentHash = hashHistoryText(content);
   return `hist:${sessionId}:${turn}:${payload.role}:${timestamp}:${run}:${index}:${contentHash}`;
 }
 
@@ -1284,6 +1340,7 @@ function normalizeSubagentHistoryItem(item: AgentSubagentItem): AgentSubagentIte
   }
   return {
     ...item,
+    content: normalizeMessageContent(item.content),
     streaming: false,
   };
 }
@@ -2111,6 +2168,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function scalarStringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function numberValue(value: unknown): number | null {

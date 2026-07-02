@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
@@ -21,6 +22,7 @@ from backend.app.core.config import AppSettings
 from backend.app.core.time import to_iso_z, utc_now
 from backend.app.model import ModelSettings
 from backend.app.services import ChatCancellationToken, ChatRequest, ChatService
+from backend.app.services.chat_service import _chat_turn_error
 from backend.app.storage import (
     MODEL_DEFAULT_CHAT,
     ModelProviderRecord,
@@ -43,6 +45,22 @@ class RecordingChatAdapter:
 class ToolFriendlyFakeModel(FakeMessagesListChatModel):
     def bind_tools(self, tools: list[Any], *, tool_choice: Any = None, **kwargs: Any) -> Any:
         return self
+
+
+def test_chat_turn_error_classifies_httpx_read_timeout() -> None:
+    code, message, details = _chat_turn_error(httpx.ReadTimeout(""))
+
+    assert code == "llm_read_timeout"
+    assert message == "模型响应超时，未收到后续响应数据"
+    assert details["exception_type"] == "httpx.ReadTimeout"
+
+
+def test_chat_turn_error_keeps_empty_runtime_error_generic() -> None:
+    code, message, details = _chat_turn_error(RuntimeError())
+
+    assert code == "runtime_error"
+    assert message == "运行失败：RuntimeError"
+    assert details["exception_type"] == "builtins.RuntimeError"
 
 
 class FakeAgentFactory(AgentFactory):

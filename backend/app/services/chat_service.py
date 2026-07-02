@@ -9,6 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+import httpx
+import openai
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
@@ -222,7 +224,7 @@ def _build_skill_activation_preset(
     )
 
 
-def _chat_turn_error(exc: Exception) -> tuple[str | int, str, dict[str, Any]]:
+def _chat_turn_error(exc: Exception) -> tuple[str, str, dict[str, Any]]:
     if isinstance(exc, ModelSelectionError):
         return exc.code, str(exc), exc.details
     if isinstance(exc, SkillActivationError):
@@ -245,7 +247,125 @@ def _chat_turn_error(exc: Exception) -> tuple[str | int, str, dict[str, Any]]:
                 "repeat_count": exc.repeat_count,
             },
         )
-    return 500, str(exc), {}
+    if isinstance(exc, openai.APITimeoutError):
+        return (
+            "llm_request_timeout",
+            "模型请求超时，未收到模型服务响应",
+            _exception_details(exc),
+        )
+    if isinstance(exc, httpx.ReadTimeout):
+        return (
+            "llm_read_timeout",
+            "模型响应超时，未收到后续响应数据",
+            _exception_details(exc),
+        )
+    if isinstance(exc, httpx.ConnectTimeout):
+        return (
+            "llm_connect_timeout",
+            "模型服务连接超时",
+            _exception_details(exc),
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return (
+            "llm_request_timeout",
+            "模型请求超时，未收到模型服务响应",
+            _exception_details(exc),
+        )
+    if isinstance(exc, openai.APIConnectionError):
+        return (
+            "llm_connection_error",
+            "模型服务连接失败",
+            _exception_details(exc),
+        )
+    if isinstance(exc, httpx.ConnectError):
+        return (
+            "llm_connection_error",
+            "模型服务连接失败",
+            _exception_details(exc),
+        )
+    if isinstance(exc, openai.RateLimitError):
+        return (
+            "llm_rate_limited",
+            "模型服务请求过于频繁",
+            _exception_details(exc, status_code=_openai_status_code(exc)),
+        )
+    if isinstance(exc, openai.AuthenticationError):
+        return (
+            "llm_authentication_failed",
+            "模型服务认证失败，请检查供应商配置",
+            _exception_details(exc, status_code=_openai_status_code(exc)),
+        )
+    if isinstance(exc, openai.PermissionDeniedError):
+        return (
+            "llm_permission_denied",
+            "模型服务拒绝访问，请检查账号权限或模型权限",
+            _exception_details(exc, status_code=_openai_status_code(exc)),
+        )
+    if isinstance(exc, openai.BadRequestError):
+        return (
+            "llm_bad_request",
+            "模型请求参数无效",
+            _exception_details(exc, status_code=_openai_status_code(exc)),
+        )
+    if isinstance(exc, openai.APIStatusError):
+        status_code = _openai_status_code(exc)
+        if status_code in {502, 503, 504}:
+            return (
+                "llm_upstream_unavailable",
+                "模型服务暂时不可用",
+                _exception_details(exc, status_code=status_code),
+            )
+        if status_code and status_code >= 500:
+            return (
+                "llm_server_error",
+                "模型服务返回内部错误",
+                _exception_details(exc, status_code=status_code),
+            )
+        return (
+            "llm_request_failed",
+            "模型请求失败",
+            _exception_details(exc, status_code=status_code),
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return (
+            "llm_upstream_unavailable" if status_code in {502, 503, 504} else "llm_request_failed",
+            "模型服务暂时不可用" if status_code in {502, 503, 504} else "模型请求失败",
+            _exception_details(exc, status_code=status_code),
+        )
+    message = _exception_message(exc) or f"运行失败：{type(exc).__name__}"
+    return "runtime_error", message, _exception_details(exc)
+
+
+def _exception_message(exc: BaseException) -> str:
+    return str(exc).strip()
+
+
+def _exception_details(exc: BaseException, **extra: Any) -> dict[str, Any]:
+    details: dict[str, Any] = {"exception_type": _exception_type(exc)}
+    message = _exception_message(exc)
+    if message:
+        details["raw_message"] = message
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None:
+        details["cause_type"] = _exception_type(cause)
+        cause_message = _exception_message(cause)
+        if cause_message:
+            details["cause_message"] = cause_message
+    for key, value in extra.items():
+        if value is not None:
+            details[key] = value
+    return details
+
+
+def _exception_type(exc: BaseException) -> str:
+    cls = type(exc)
+    return f"{cls.__module__}.{cls.__name__}"
+
+
+def _openai_status_code(exc: openai.APIStatusError) -> int | None:
+    status_code = getattr(exc, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
 
 
 def _runtime_role_for_injection(role: MessageInjectionRole) -> str:

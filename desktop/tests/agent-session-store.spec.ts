@@ -176,6 +176,33 @@ describe("agentSessionStore reducer", () => {
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
   });
 
+  it("normalizes non-string history message content before it reaches renderers", () => {
+    const state = agentConversationReducer(createInitialAgentConversationState(), {
+      type: "history/loaded",
+      sessionId: "ses-1",
+      history: history([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "第一段" },
+            { type: "text", text: "第二段" },
+          ],
+        } as unknown as AgentChatMessagePayload,
+        {
+          role: "assistant",
+          content: { text: "对象内容" },
+          timestamp: 1_700_000_000_000,
+        } as unknown as AgentChatMessagePayload,
+      ]),
+    });
+
+    expect(selectAgentMessages(state, "ses-1").map((item) => item.content)).toEqual([
+      "第一段\n第二段",
+      "对象内容",
+    ]);
+    expect(selectAgentMessages(state, "ses-1")[1].id).toMatch(/^hist:ses-1:turnless:assistant:/);
+  });
+
   it("keeps an active local runtime state when stale active history is hydrated", () => {
     let state = agentConversationReducer(createInitialAgentConversationState(), {
       type: "sessions/set",
@@ -1116,6 +1143,39 @@ describe("agentSessionStore reducer", () => {
       traceQueryContext: { trace_id: "trace-1", date_prefix: "2026-06-18" },
     });
     expect(selectAgentRuntimeState(state, "ses-1")).toBe("idle");
+
+    state = reduceAgentWsEvent(state, {
+      action: "stream",
+      data: { session_id: "ses-failed", content: "已经生成的回答" },
+    });
+    state = reduceAgentWsEvent(state, {
+      action: "error",
+      data: {
+        session_id: "ses-failed",
+        code: "llm_read_timeout",
+        message: "模型响应超时，未收到后续响应数据",
+        trace_id: "trace-failed",
+        details: { exception_type: "httpx.ReadTimeout" },
+      },
+    });
+    expect(selectAgentMessages(state, "ses-failed")).toMatchObject([
+      {
+        role: "assistant",
+        content: "已经生成的回答",
+        streaming: false,
+        status: "failed",
+        traceId: "trace-failed",
+        metadata: {
+          turnError: {
+            code: "llm_read_timeout",
+            message: "模型响应超时，未收到后续响应数据",
+            details: { exception_type: "httpx.ReadTimeout" },
+          },
+        },
+      },
+    ]);
+    expect(selectAgentMessages(state, "ses-failed").some((message) => message.role === "error")).toBe(false);
+    expect(selectAgentRuntimeState(state, "ses-failed")).toBe("failed");
 
     state = reduceAgentWsEvent(state, { action: "stream", data: { session_id: "ses-2", content: "处理中" } });
     state = reduceAgentWsEvent(state, { action: "cancelled", data: { session_id: "ses-2" } });

@@ -203,6 +203,33 @@ describe("MessageList", () => {
     }
   });
 
+  it("does not crash when turn preview content is not a string", () => {
+    const dirtyMessages = [
+      {
+        ...message("m1", "user", ""),
+        content: [{ type: "text", text: "数组问题" }] as unknown as string,
+      },
+      {
+        ...message("m2", "assistant", ""),
+        content: { text: "对象回答" } as unknown as string,
+      },
+      message("m3", "user", "第二轮问题"),
+      message("m4", "assistant", "第二轮回答"),
+    ];
+
+    render(
+      <MessageList messages={dirtyMessages} />,
+    );
+
+    expect(screen.getByText("数组问题")).not.toBeNull();
+    expect(screen.getByText("对象回答")).not.toBeNull();
+    expect(screen.getByTestId("conversation-turn-navigator")).not.toBeNull();
+    const markers = screen.getAllByRole("button", { name: /跳转到第 \d+ 轮/ });
+    fireEvent.focus(markers[0]);
+    expect(screen.getByTestId("conversation-turn-navigator-card").textContent).toContain("数组问题");
+    expect(screen.getByTestId("conversation-turn-navigator-card").textContent).toContain("对象回答");
+  });
+
   it("only fades turn navigator edges with hidden markers", async () => {
     render(
       <ConversationTurnNavigator

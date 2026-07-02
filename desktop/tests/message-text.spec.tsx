@@ -97,6 +97,25 @@ describe("MessageText", () => {
     expect(document.querySelector("script")).toBeNull();
   });
 
+  it("renders a failed assistant turn error notice without replacing the answer", () => {
+    render(
+      <MessageText
+        message={message("assistant", "已经生成的回答", "failed", {
+          error: {
+            code: "llm_read_timeout",
+            message: "模型响应超时，未收到后续响应数据",
+            details: { exception_type: "httpx.ReadTimeout" },
+          },
+        })}
+      />,
+    );
+
+    const root = screen.getByTestId("message-text");
+    expect(root.textContent).toContain("已经生成的回答");
+    expect(root.textContent).toContain("模型响应超时，未收到后续响应数据");
+    expect(root.textContent).toContain("llm_read_timeout");
+  });
+
   it("renders bracket syntax in user messages as ordinary text", () => {
     render(
       <MessageText

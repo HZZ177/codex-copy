@@ -94,6 +94,37 @@
   content: "";
 }
 
+.turnErrorNotice {
+  display: inline-flex;
+  max-width: min(720px, 100%);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-danger-6, #dc2626) 30%, var(--color-border-default));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-danger-6, #dc2626) 7%, var(--color-bg-elevated));
+  color: color-mix(in srgb, var(--color-danger-6, #dc2626) 78%, var(--color-text-primary));
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 8px;
+  padding: 6px 8px;
+}
+
+.turnErrorNotice svg {
+  flex: 0 0 auto;
+}
+
+.turnErrorMessage {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.turnErrorCode {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .contextItems {
   display: flex;
   flex-wrap: wrap;

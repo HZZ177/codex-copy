@@ -23,6 +23,7 @@ import type { RuntimeBridge, WorkspaceScope } from "@/runtime";
 import { LoadingSkeleton } from "@/renderer/components/loading";
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
 import type { ConversationRuntimeState } from "@/renderer/stores/conversationStore";
+import { normalizeMessageContent } from "@/renderer/utils/messageContent";
 import type { AgentSessionFork } from "@/types/protocol";
 
 import styles from "./MessageList.module.css";
@@ -1236,7 +1237,7 @@ function ContextCompressionNotice({ message }: { message: ConversationMessage })
       aria-live="polite"
     >
       <span className={styles.contextCompressionNoticeLabel}>
-        <span>{message.content}</span>
+        <span>{normalizeMessageContent(message.content)}</span>
       </span>
     </div>
   );
@@ -1471,16 +1472,16 @@ function messageBusinessTurnIndex(message: ConversationMessage): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function previewLine(content: string): string {
+function previewLine(content: unknown): string {
   return normalizePreviewText(content).split("\n").find(Boolean) ?? "";
 }
 
-function previewLines(content: string, limit: number): string[] {
+function previewLines(content: unknown, limit: number): string[] {
   return normalizePreviewText(content).split("\n").filter(Boolean).slice(0, limit);
 }
 
-function normalizePreviewText(content: string): string {
-  return content
+function normalizePreviewText(content: unknown): string {
+  return normalizeMessageContent(content)
     .replace(/```[\s\S]*?```/g, "代码块")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\[[^\]]*]\(([^)]+)\)/g, "$1")

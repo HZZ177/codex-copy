@@ -89,6 +89,28 @@ describe("conversation message adapter", () => {
     expect(
       payloadFromAgentMessage(
         agentMessage({
+          role: "assistant",
+          status: "failed",
+          content: "answer",
+          metadata: {
+            turnError: {
+              code: "llm_read_timeout",
+              message: "模型响应超时，未收到后续响应数据",
+              details: { exception_type: "httpx.ReadTimeout" },
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      error: {
+        code: "llm_read_timeout",
+        message: "模型响应超时，未收到后续响应数据",
+        details: { exception_type: "httpx.ReadTimeout" },
+      },
+    });
+    expect(
+      payloadFromAgentMessage(
+        agentMessage({
           role: "subagent",
           subagentName: "reviewer",
           subagentTask: "check",

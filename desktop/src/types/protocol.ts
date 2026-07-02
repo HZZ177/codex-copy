@@ -897,7 +897,7 @@ export interface AgentCompletedPayload {
 
 export interface AgentErrorData {
   session_id?: string;
-  code?: string;
+  code?: string | number;
   message?: string;
   error?: string;
   details?: Record<string, unknown>;

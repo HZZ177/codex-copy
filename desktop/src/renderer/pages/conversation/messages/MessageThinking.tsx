@@ -2,6 +2,7 @@ import { ChevronDown, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react
 import { useEffect, useMemo, useState } from "react";
 
 import type { ConversationMessage } from "@/renderer/stores/conversationStore";
+import { normalizeMessageContent } from "@/renderer/utils/messageContent";
 
 import styles from "./MessageThinking.module.css";
 import { useDeferredUnmount } from "./useDeferredUnmount";
@@ -19,6 +20,7 @@ export function MessageThinking({ message }: MessageThinkingProps) {
   const [touched, setTouched] = useState(false);
   const duration = useMemo(() => formatDuration(message), [message]);
   const title = useMemo(() => titleFromMessage(message, running, failed), [failed, message, running]);
+  const content = useMemo(() => normalizeMessageContent(message.content), [message.content]);
   const contentMotion = useDeferredUnmount<HTMLDivElement>(expanded, 180, 220);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function MessageThinking({ message }: MessageThinkingProps) {
     setExpanded((value) => !value);
   };
 
-  if (!message.content.trim() && !running) {
+  if (!content.trim() && !running) {
     return null;
   }
 
@@ -56,7 +58,7 @@ export function MessageThinking({ message }: MessageThinkingProps) {
           aria-hidden={!expanded}
           data-testid="message-thinking-content"
         >
-          <div className={styles.content}>{message.content || "等待模型返回思考内容"}</div>
+          <div className={styles.content}>{content || "等待模型返回思考内容"}</div>
         </div>
       ) : null}
     </article>
