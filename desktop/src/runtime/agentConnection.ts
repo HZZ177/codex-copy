@@ -31,6 +31,7 @@ export const DEV_AGENT_CONNECTION: AgentConnection = {
   data_dir: "",
 };
 export const DEV_AGENT_BASE_URL_STORAGE_KEY = "keydex:agent-base-url";
+const DEFAULT_AGENT_HEALTH_TIMEOUT_MS = 60_000;
 
 export async function configureAgentConnection(
   options: AgentConnectionOptions = {},
@@ -68,7 +69,7 @@ export async function resolveAgentConnection(
     await invoke<void>("wait_for_health", {
       host: connection.host,
       port: connection.port,
-      timeoutMs: 10_000,
+      timeoutMs: DEFAULT_AGENT_HEALTH_TIMEOUT_MS,
     });
     return connection;
   } catch (error) {
@@ -109,7 +110,7 @@ export async function waitForAgentHealth(
   runtime: Pick<RuntimeBridge, "health"> | AgentConnectionRuntime,
   options: AgentConnectionOptions = {},
 ): Promise<void> {
-  const timeoutMs = options.healthTimeoutMs ?? 10_000;
+  const timeoutMs = options.healthTimeoutMs ?? DEFAULT_AGENT_HEALTH_TIMEOUT_MS;
   const intervalMs = options.healthIntervalMs ?? 150;
   const sleep = options.sleep ?? defaultSleep;
   const deadline = Date.now() + timeoutMs;

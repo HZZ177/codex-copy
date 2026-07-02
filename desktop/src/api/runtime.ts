@@ -13,6 +13,7 @@ const DEV_CONNECTION: AgentConnection = {
   base_url: "http://127.0.0.1:8765",
   data_dir: "",
 };
+const DEFAULT_AGENT_HEALTH_TIMEOUT_MS = 60_000;
 
 export function toWebSocketBaseUrl(httpBaseUrl: string): string {
   const url = new URL(httpBaseUrl);
@@ -37,7 +38,7 @@ async function resolveAgentConnection(): Promise<AgentConnection> {
   await invoke("wait_for_health", {
     host: connection.host,
     port: connection.port,
-    timeoutMs: 10_000,
+    timeoutMs: DEFAULT_AGENT_HEALTH_TIMEOUT_MS,
   });
   return connection;
 }
@@ -46,7 +47,7 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function waitForAgentHealth(timeoutMs = 10_000): Promise<void> {
+async function waitForAgentHealth(timeoutMs = DEFAULT_AGENT_HEALTH_TIMEOUT_MS): Promise<void> {
   const started = Date.now();
   let lastError: unknown = null;
   while (Date.now() - started < timeoutMs) {

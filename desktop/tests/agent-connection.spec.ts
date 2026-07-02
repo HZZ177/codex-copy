@@ -78,7 +78,7 @@ describe("agentConnection", () => {
     expect(calls).toEqual([
       { command: "allocate_port", args: undefined },
       { command: "start_sidecar", args: { port: 9234 } },
-      { command: "wait_for_health", args: { host: "127.0.0.1", port: 9234, timeoutMs: 10_000 } },
+      { command: "wait_for_health", args: { host: "127.0.0.1", port: 9234, timeoutMs: 60_000 } },
     ]);
     expect(runtime.setBaseUrl).toHaveBeenCalledWith("http://127.0.0.1:9234");
     expect(runtime.health).not.toHaveBeenCalled();
@@ -111,7 +111,7 @@ describe("agentConnection", () => {
     expect(calls).toEqual([
       { command: "allocate_port", args: undefined },
       { command: "start_sidecar", args: { port: 9234 } },
-      { command: "wait_for_health", args: { host: "127.0.0.1", port: 9234, timeoutMs: 10_000 } },
+      { command: "wait_for_health", args: { host: "127.0.0.1", port: 9234, timeoutMs: 60_000 } },
       { command: "stop_sidecar", args: undefined },
     ]);
   });
